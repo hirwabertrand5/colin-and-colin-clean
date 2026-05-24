@@ -1,0 +1,36 @@
+node_modules
+
+# Root dependencies and builds
+node_modules
+dist
+build
+.vercel
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Backend specific
+colin-backend/node_modules
+colin-backend/dist
+colin-backend/uploads
+
+# Logs
+*.log
+
+# Root files
+node_modules/
+dist/
+build/
+.env
+uploads/
+.vercel/
+
+# Backend files
+colin-backend/node_modules/
+colin-backend/dist/
+colin-backend/build/
+colin-backend/.env
+colin-backend/uploads/
+colin-backend/.vercel/

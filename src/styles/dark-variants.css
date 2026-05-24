@@ -1,0 +1,162 @@
+/* Minimal dark: variant support for this project.
+   The app ships with a prebuilt Tailwind CSS bundle, but it does not include
+   generated `dark:` utilities. These rules make existing `dark:*` classNames
+   effective when `.dark` is present on the <html> element. */
+
+.dark {
+  color-scheme: dark;
+}
+
+/* Global readability overrides (common Tailwind grays used across the app) */
+.dark .text-gray-900 {
+  color: var(--color-gray-100);
+}
+.dark .text-gray-800 {
+  color: var(--color-gray-100);
+}
+.dark .text-gray-700 {
+  color: var(--color-gray-200);
+}
+.dark .text-gray-600 {
+  color: var(--color-gray-300);
+}
+.dark .text-gray-500 {
+  color: var(--color-gray-400);
+}
+.dark .text-gray-400 {
+  color: var(--color-gray-400);
+}
+
+.dark .bg-white {
+  background-color: var(--color-gray-800);
+}
+.dark .bg-gray-50 {
+  background-color: var(--color-gray-900);
+}
+.dark .bg-gray-100 {
+  background-color: var(--color-gray-800);
+}
+.dark .bg-gray-200 {
+  background-color: var(--color-gray-700);
+}
+
+.dark .border-gray-200 {
+  border-color: var(--color-gray-700);
+}
+.dark .border-gray-300 {
+  border-color: var(--color-gray-600);
+}
+.dark .border-gray-900 {
+  border-color: var(--color-gray-200);
+}
+.dark :where(.divide-gray-200 > :not(:last-child)) {
+  border-color: var(--color-gray-700);
+}
+
+/* Native form controls */
+.dark select,
+.dark textarea,
+.dark input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']) {
+  background-color: var(--color-gray-800);
+  color: var(--color-gray-100);
+  border-color: var(--color-gray-600);
+}
+
+.dark select option {
+  background-color: var(--color-gray-800);
+  color: var(--color-gray-100);
+}
+
+.dark textarea::placeholder,
+.dark input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file'])::placeholder {
+  color: var(--color-gray-400);
+}
+
+/* Backgrounds */
+.dark .dark\:bg-gray-900 {
+  background-color: var(--color-gray-900);
+}
+.dark .dark\:bg-gray-800 {
+  background-color: var(--color-gray-800);
+}
+.dark .dark\:bg-gray-700 {
+  background-color: var(--color-gray-700);
+}
+
+/* Text */
+.dark .dark\:text-gray-100 {
+  color: var(--color-gray-100);
+}
+.dark .dark\:text-gray-300 {
+  color: var(--color-gray-300);
+}
+.dark .dark\:text-gray-400 {
+  color: var(--color-gray-400);
+}
+.dark .dark\:text-muted-foreground {
+  color: var(--muted-foreground);
+}
+
+/* Borders */
+.dark .dark\:border-gray-700 {
+  border-color: var(--color-gray-700);
+}
+.dark .dark\:border-gray-600 {
+  border-color: var(--color-gray-600);
+}
+.dark .dark\:border-input {
+  border-color: var(--border);
+}
+
+/* Hover (only when hover is supported, matching Tailwind's pattern) */
+@media (hover: hover) {
+  .dark .hover\:bg-gray-50:hover {
+    background-color: var(--color-gray-800);
+  }
+  .dark .hover\:bg-gray-100:hover {
+    background-color: var(--color-gray-700);
+  }
+  .dark .hover\:text-gray-900:hover {
+    color: var(--color-gray-100);
+  }
+
+  .dark .dark\:hover\:bg-gray-700:hover {
+    background-color: var(--color-gray-700);
+  }
+  .dark .dark\:hover\:bg-gray-600:hover {
+    background-color: var(--color-gray-600);
+  }
+  .dark .dark\:hover\:text-gray-100:hover {
+    color: var(--color-gray-100);
+  }
+  .dark .dark\:hover\:bg-accent\/50:hover {
+    background-color: color-mix(in oklab, var(--accent) 50%, transparent);
+  }
+}
+
+/* Focus ring color */
+.dark .dark\:focus\:ring-gray-500:focus {
+  --tw-ring-color: var(--color-gray-500);
+}
+
+/* Input/utility tokens used by Radix-based components (approximation) */
+.dark .dark\:bg-input\/30 {
+  background-color: color-mix(in oklab, var(--input) 30%, transparent);
+}
+
+@media (hover: hover) {
+  .dark .dark\:hover\:bg-input\/50:hover {
+    background-color: color-mix(in oklab, var(--input) 50%, transparent);
+  }
+}
+
+/* Login error styles (approximation; palette does not include red-900/red-400) */
+.dark .dark\:bg-red-900\/20 {
+  background-color: color-mix(in oklab, var(--color-red-700) 20%, transparent);
+}
+.dark .dark\:border-red-800 {
+  border-color: var(--color-red-700);
+}
+.dark .dark\:text-red-400 {
+  color: var(--color-red-500);
+}
