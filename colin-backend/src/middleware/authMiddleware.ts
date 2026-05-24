@@ -34,7 +34,10 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     return res.status(401).json({ message: 'No token provided.' });
   }
   const secret = process.env.JWT_SECRET;
-if (!secret) throw new Error('JWT_SECRET is not set in environment variables');
+  if (!secret) {
+    console.error('JWT_SECRET is not set in environment variables');
+    return res.status(500).json({ message: 'Server misconfiguration: JWT_SECRET not set' });
+  }
 
 
   try {
