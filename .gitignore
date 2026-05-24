@@ -9,7 +9,6 @@ build
 # Environment variables
 .env
 .env.local
-.env.production
 
 # Backend specific
 colin-backend/node_modules
