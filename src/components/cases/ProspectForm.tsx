@@ -27,15 +27,10 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
       name: prospect?.contact.name || '',
       email: prospect?.contact.email || '',
       phone: prospect?.contact.phone || '',
-      position: prospect?.contact.position || '',
     },
     legalServicePath: prospect?.legalServicePath || [],
     inquiryDescription: prospect?.inquiryDescription || '',
     stage: prospect?.stage || 'Inquiry',
-    conflictCheckStatus: prospect?.conflictCheckStatus || 'Pending',
-    conflictCheckNotes: prospect?.conflictCheckNotes || '',
-    estimatedMatterValue: prospect?.estimatedMatterValue || '',
-    quotationAmount: prospect?.quotationAmount || '',
     engagementNotes: prospect?.engagementNotes || '',
     assignedTo: prospect?.assignedTo || '',
   });
@@ -132,11 +127,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     setError('');
 
     try {
-      const data = {
-        ...form,
-        estimatedMatterValue: form.estimatedMatterValue ? Number(form.estimatedMatterValue) : undefined,
-        quotationAmount: form.quotationAmount ? Number(form.quotationAmount) : undefined,
-      };
+      const data = { ...form };
 
       if (prospect) {
         await updateProspect(prospect._id, data);
@@ -211,17 +202,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Position
-                  </label>
-                  <input
-                    type="text"
-                    value={form.contact.position}
-                    onChange={(e) => setForm({ ...form, contact: { ...form.contact, position: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+                {/* Position removed to simplify form */}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -299,7 +280,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Current Stage *
@@ -317,65 +298,11 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Estimated Value
-                  </label>
-                  <input
-                    type="number"
-                    value={form.estimatedMatterValue}
-                    onChange={(e) => setForm({ ...form, estimatedMatterValue: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Quotation Amount
-                  </label>
-                  <input
-                    type="number"
-                    value={form.quotationAmount}
-                    onChange={(e) => setForm({ ...form, quotationAmount: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
               </div>
             </div>
           </div>
 
-          {/* Conflict Check */}
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Conflict Check</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Status
-                </label>
-                <select
-                  value={form.conflictCheckStatus}
-                  onChange={(e) => setForm({ ...form, conflictCheckStatus: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {CONFLICT_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  rows={2}
-                  value={form.conflictCheckNotes}
-                  onChange={(e) => setForm({ ...form, conflictCheckNotes: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-          </div>
+          {/* Conflict Check removed to simplify intake — handled separately in workflow */}
 
           {/* Engagement */}
           <div>
