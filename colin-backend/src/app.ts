@@ -34,6 +34,7 @@ const allowedOrigins = new Set(
     'http://localhost:3000',
     'http://localhost:5173',
     'https://app.colinandcolin.com', // Production frontend
+    'https://colin-and-colin.vercel.app', // Vercel deployment
   ].filter(Boolean) as string[]
 );
 
