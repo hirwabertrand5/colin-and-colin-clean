@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
 import { createProspect, updateProspect, Prospect } from '../../services/prospectService';
 import { LEGAL_SERVICES_TREE } from '../../constants/legalServicesTree';
-import { getAllUsers, User } from '../../services/userService';
+import { getStaffUsers, User } from '../../services/userService';
 
 interface ProspectFormProps {
   prospect?: Prospect | null;
@@ -13,11 +13,17 @@ const STAGES = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engag
 const CONFLICT_STATUSES = ['Pending', 'Cleared', 'Flagged'];
 const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
 
+const getAssignedToId = (assignedTo?: Prospect['assignedTo']) => {
+  if (!assignedTo) return '';
+  return typeof assignedTo === 'string' ? assignedTo : assignedTo._id;
+};
+
 export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   const [users, setUsers] = useState<User[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [services, setServices] = useState<Array<{ id: string; label: string }>>([]);
   const [servicePath, setServicePath] = useState<string[]>(
     prospect?.legalServicePath ? prospect.legalServicePath.map((p) => p.id) : []
   );
@@ -32,20 +38,32 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     inquiryDescription: prospect?.inquiryDescription || '',
     stage: prospect?.stage || 'Inquiry',
     engagementNotes: prospect?.engagementNotes || '',
-    assignedTo: prospect?.assignedTo || '',
+    assignedTo: getAssignedToId(prospect?.assignedTo),
   });
 
   useEffect(() => {
     loadUsers();
-    buildServicePaths();
   }, []);
 
   useEffect(() => {
-    // keep form legalServicePath in sync when editing an existing prospect
+    setForm({
+      clientName: prospect?.clientName || '',
+      contact: {
+        name: prospect?.contact.name || '',
+        email: prospect?.contact.email || '',
+        phone: prospect?.contact.phone || '',
+      },
+      legalServicePath: prospect?.legalServicePath || [],
+      inquiryDescription: prospect?.inquiryDescription || '',
+      stage: prospect?.stage || 'Inquiry',
+      engagementNotes: prospect?.engagementNotes || '',
+      assignedTo: getAssignedToId(prospect?.assignedTo),
+    });
     if (prospect?.legalServicePath) {
       setServicePath(prospect.legalServicePath.map((p) => p.id));
+    } else {
+      setServicePath([]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prospect]);
 
   const findNode = (nodes: any[], id: string) => nodes.find((n) => n.id === id);
@@ -98,33 +116,29 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   }, [selectedServiceNodes]);
 
   const loadUsers = async () => {
+    setUsersLoading(true);
+    setUsersError('');
     try {
-      const data = await getAllUsers();
+      const data = await getStaffUsers();
       setUsers(data);
     } catch (err) {
       console.error('Failed to load users:', err);
+      setUsersError('Failed to load staff members. Please try again.');
+    } finally {
+      setUsersLoading(false);
     }
-  };
-
-  const buildServicePaths = () => {
-    const paths: Array<{ id: string; label: string }> = [];
-    const collectPaths = (node: any, path: string[] = []) => {
-      if (node.label) {
-        path = [...path, node.label];
-        paths.push({ id: node.id, label: path.join(' / ') });
-      }
-      if (node.children) {
-        node.children.forEach((child: any) => collectPaths(child, path));
-      }
-    };
-    LEGAL_SERVICES_TREE.forEach((node) => collectPaths(node));
-    setServices(paths);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
+
+    if (!form.assignedTo) {
+      setError('Please select the staff member assigned to this prospect.');
+      return;
+    }
+
+    setLoading(true);
 
     try {
       const data = { ...form };
@@ -137,7 +151,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
 
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to save prospect');
+      setError(err.response?.data?.message || err.message || 'Failed to save prospect');
     } finally {
       setLoading(false);
     }
@@ -315,15 +329,22 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 required
                 value={form.assignedTo}
                 onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
+                disabled={usersLoading}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">Select staff member...</option>
+                <option value="">{usersLoading ? 'Loading staff...' : 'Select staff member...'}</option>
                 {users.map((u) => (
                   <option key={u._id} value={u._id}>
-                    {u.name}
+                    {u.name} ({u.role.replace(/_/g, ' ')})
                   </option>
                 ))}
               </select>
+              {usersError && <p className="mt-2 text-xs text-red-600 dark:text-red-300">{usersError}</p>}
+              {!usersLoading && !usersError && users.length === 0 && (
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  No active staff users found. Add users first in Administration → Users.
+                </p>
+              )}
             </div>
             <div className="mt-4">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -349,7 +370,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || usersLoading}
               className="flex-1 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 transition-colors"
             >
               {loading ? 'Saving...' : prospect ? 'Update Prospect' : 'Create Prospect'}

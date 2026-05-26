@@ -224,8 +224,8 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     if (!updated) return res.status(404).json({ message: 'Template not found.' });
 
     res.json(updated);
-  } catch {
-    res.status(500).json({ message: 'Failed to update template.' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to update template.' });
   }
 };
 

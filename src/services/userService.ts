@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
   
 export interface User {
   _id: string;
@@ -33,6 +33,15 @@ export const getAllUsers = async (): Promise<User[]> => {
   });
   handleAuthError(res);
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch users');
+  return res.json();
+};
+
+export const getStaffUsers = async (): Promise<User[]> => {
+  const res = await fetch(`${API_URL}/users/staff`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  handleAuthError(res);
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch staff users');
   return res.json();
 };
 

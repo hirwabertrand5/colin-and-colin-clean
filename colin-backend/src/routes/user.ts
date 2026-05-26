@@ -15,12 +15,20 @@ const router = express.Router();
 // ✅ Full access for Managing Director + Executive Assistant (as you requested)
 const USER_ADMIN_ROLES = ['managing_director', 'executive_assistant'];
 
-// ✅ Staff list for case assignment dropdown
-// allow admin + associate to read staff list
+// Staff list for assignment dropdowns.
 router.get(
   '/staff',
   authenticate,
-  authorize(['managing_director', 'executive_assistant', 'associate']),
+  authorize([
+    'managing_director',
+    'managing_partner',
+    'senior_partner',
+    'partner',
+    'associate_partner',
+    'senior_associate',
+    'associate',
+    'executive_assistant',
+  ]),
   getStaffUsers
 );
 

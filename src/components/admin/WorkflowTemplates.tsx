@@ -113,15 +113,15 @@ function formToPayload(form: TemplateForm) {
     .map((s) => ({
       key: (s.key || '').trim(),
       title: (s.title || '').trim(),
-      ...(typeof s.order === 'number' ? { order: s.order } : {}),
+      order: typeof s.order === 'number' ? s.order : 0,
     }))
     .filter((s) => s.key && s.title);
 
   const steps = (form.steps || [])
     .map((s) => {
       const actions = splitLines(s.actionsText);
-      const outputs = splitLines(s.outputsText);
-      const legalBasis = splitLines(s.legalBasisText);
+      const outputsText = splitLines(s.outputsText);
+      const legalBasisText = splitLines(s.legalBasisText);
       const feeText = (s.feeText || '').trim();
       const feeAmount = typeof s.feeAmount === 'number' && Number.isFinite(s.feeAmount) ? s.feeAmount : undefined;
       const feeCurrency = (s.feeCurrency || '').trim();
@@ -130,15 +130,27 @@ function formToPayload(form: TemplateForm) {
       const slaValue = typeof s.slaValue === 'number' && Number.isFinite(s.slaValue) ? s.slaValue : undefined;
       const slaUnit = s.slaUnit;
 
+      // Convert output strings to IOutputRequirement objects
+      const outputs = outputsText.map((text: string, idx: number) => ({
+        key: `output_${idx}`,
+        name: text,
+        required: false,
+      }));
+
+      // Convert legal basis strings to ILegalBasisRef objects
+      const legalBasis = legalBasisText.map((text: string) => ({
+        text,
+      }));
+
       return {
-        ...(s.key ? { key: s.key } : {}),
-        ...(typeof s.order === 'number' ? { order: s.order } : {}),
-        ...(s.stageKey ? { stageKey: s.stageKey } : {}),
-        ...(s.title ? { title: s.title } : {}),
+        key: s.key || `step_${s.order || 0}`,
+        order: typeof s.order === 'number' ? s.order : 0,
+        stageKey: s.stageKey || '',
+        title: s.title || '',
         ...(s.responsibleRole?.trim() ? { responsibleRole: s.responsibleRole.trim() } : {}),
-        ...(actions.length ? { actions } : {}),
-        ...(outputs.length ? { outputs } : {}),
-        ...(legalBasis.length ? { legalBasis } : {}),
+        ...(actions.length ? { actions } : { actions: [] }),
+        ...(outputs.length ? { outputs } : { outputs: [] }),
+        ...(legalBasis.length ? { legalBasis } : { legalBasis: [] }),
         ...(feeAmount != null
           ? { fee: { type: 'fixed', min: feeAmount, currency: feeCurrency || 'RWF', ...(feeText ? { text: feeText } : {}) } }
           : feeText

@@ -3,6 +3,18 @@ import User from '../models/userModel.js';
 import { AuthRequest } from '../middleware/authMiddleware.js';
 
 const ASSOCIATE_ASSIGNABLE_ROLES = ['trainee_associate', 'intern'];
+const STAFF_ASSIGNABLE_ROLES = [
+  'managing_director',
+  'managing_partner',
+  'senior_partner',
+  'partner',
+  'associate_partner',
+  'senior_associate',
+  'associate',
+  'trainee_associate',
+  'executive_assistant',
+  'intern',
+];
 
 // Get all users (excluding passwordHash)
 export const getAllUsers = async (req: AuthRequest, res: Response) => {
@@ -20,18 +32,7 @@ export const getStaffUsers = async (req: AuthRequest, res: Response) => {
     const allowedRoles =
       req.user?.role === 'associate'
         ? ASSOCIATE_ASSIGNABLE_ROLES
-        : [
-            'managing_director',
-            'managing_partner',
-            'senior_partner',
-            'partner',
-            'associate_partner',
-            'senior_associate',
-            'associate',
-            'trainee_associate',
-            'executive_assistant',
-            'intern',
-          ];
+        : STAFF_ASSIGNABLE_ROLES;
 
     const staff = await User.find(
       {

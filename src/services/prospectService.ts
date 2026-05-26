@@ -33,7 +33,7 @@ export interface Prospect {
   engagementDate?: Date;
   engagementNotes?: string;
   conversionReason?: string;
-  assignedTo: string;
+  assignedTo: string | { _id: string; name: string; email?: string };
   createdBy: string;
   isActive: boolean;
   convertedToMatters?: string;

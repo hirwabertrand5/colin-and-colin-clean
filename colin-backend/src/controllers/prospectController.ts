@@ -1,6 +1,8 @@
 import { Response } from 'express';
+import mongoose from 'mongoose';
 import Prospect from '../models/prospectModel';
 import Case from '../models/caseModel';
+import User from '../models/userModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Counter from '../models/counterModel';
 
@@ -16,12 +18,57 @@ const canManageProspects = (role?: string) =>
   role === 'executive_assistant' ||
   role === 'senior_associate';
 
+const validStages = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Non-Converted'];
+
+const cleanString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+const getProspectPayload = (body: any, fallbackUserId?: string) => {
+  const assignedTo = cleanString(body.assignedTo) || fallbackUserId || '';
+  return {
+    clientName: cleanString(body.clientName),
+    contact: {
+      name: cleanString(body.contact?.name),
+      email: cleanString(body.contact?.email),
+      phone: cleanString(body.contact?.phone),
+      ...(cleanString(body.contact?.position) ? { position: cleanString(body.contact.position) } : {}),
+    },
+    legalServicePath: Array.isArray(body.legalServicePath)
+      ? body.legalServicePath
+          .map((item: any) => ({
+            id: cleanString(item?.id),
+            label: cleanString(item?.label),
+          }))
+          .filter((item: any) => item.id && item.label)
+      : [],
+    inquiryDescription: cleanString(body.inquiryDescription),
+    stage: validStages.includes(body.stage) ? body.stage : 'Inquiry',
+    engagementNotes: cleanString(body.engagementNotes),
+    assignedTo,
+  };
+};
+
+const validateProspectPayload = async (payload: ReturnType<typeof getProspectPayload>) => {
+  if (!payload.clientName) return 'Client name is required.';
+  if (!payload.contact.name) return 'Contact name is required.';
+  if (!payload.contact.email) return 'Contact email is required.';
+  if (!payload.contact.phone) return 'Contact phone is required.';
+  if (!payload.inquiryDescription) return 'Inquiry description is required.';
+  if (!payload.assignedTo || !mongoose.Types.ObjectId.isValid(payload.assignedTo)) {
+    return 'A valid assigned staff member is required.';
+  }
+
+  const assigneeExists = await User.exists({ _id: payload.assignedTo, isActive: true });
+  if (!assigneeExists) return 'Assigned staff member was not found or is inactive.';
+
+  return null;
+};
+
 // Generate unique prospect number
 const generateProspectNo = async (): Promise<string> => {
   const counter = await Counter.findByIdAndUpdate(
     { _id: 'prospect' },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   );
   const seq = String(counter.seq).padStart(5, '0');
   return `PROS-${new Date().getFullYear()}-${seq}`;
@@ -80,12 +127,17 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
+    const payload = getProspectPayload(req.body, req.user?.id);
+    const validationMessage = await validateProspectPayload(payload);
+    if (validationMessage) {
+      return res.status(400).json({ message: validationMessage });
+    }
+
     const prospectNo = await generateProspectNo();
     const prospect = new Prospect({
-      ...req.body,
+      ...payload,
       prospectNo,
       createdBy: req.user?.id,
-      stage: 'Inquiry',
       isActive: true,
     });
 
@@ -95,8 +147,11 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
       .populate('createdBy', 'name email');
 
     return res.status(201).json(populated);
-  } catch (error) {
+  } catch (error: any) {
     console.error('createProspect error:', error);
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
     return res.status(500).json({ message: 'Failed to create prospect.' });
   }
 };
@@ -112,14 +167,15 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Prospect not found.' });
     }
 
-    const oldData = prospect.toObject();
-    const updates = req.body;
+    const updates = getProspectPayload(req.body, String(prospect.assignedTo));
+    const validationMessage = await validateProspectPayload(updates);
+    if (validationMessage) {
+      return res.status(400).json({ message: validationMessage });
+    }
 
     // Update fields
-    Object.keys(updates).forEach((key) => {
-      if (key !== '_id' && key !== 'prospectNo' && key !== 'createdBy') {
-        (prospect as any)[key] = updates[key];
-      }
+    (Object.keys(updates) as Array<keyof typeof updates>).forEach((key) => {
+      (prospect as any)[key] = updates[key];
     });
 
     const saved = await prospect.save();
@@ -129,8 +185,11 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
       .populate('convertedToMatters', 'caseNo');
 
     return res.json(populated);
-  } catch (error) {
+  } catch (error: any) {
     console.error('updateProspect error:', error);
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
     return res.status(500).json({ message: 'Failed to update prospect.' });
   }
 };
@@ -216,6 +275,8 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
       return res.status(400).json({ message: 'Prospect already converted to matter.' });
     }
 
+    const assignee = await User.findById(prospect.assignedTo).select('name').lean();
+
     // Create new case from prospect
     const caseNo = await generateCaseNo();
     const newCase = new Case({
@@ -231,7 +292,7 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
           isPrimary: true,
         },
       ],
-      assignedTo: prospect.assignedTo,
+      assignedTo: assignee?.name || req.user?.name || 'Unassigned',
       status: 'Active',
       priority: 'Medium',
       caseType: 'Transactional Cases',
@@ -269,7 +330,7 @@ const generateCaseNo = async (): Promise<string> => {
   const counter = await Counter.findByIdAndUpdate(
     { _id: 'case' },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   );
   const seq = String(counter.seq).padStart(5, '0');
   return `CASE-${new Date().getFullYear()}-${seq}`;

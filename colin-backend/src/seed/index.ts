@@ -8,6 +8,7 @@ import { seedCriminalProcedureTemplate } from './seedCriminalProcedure';
 import { seedTontineRegistrationTemplate } from './seedTontineRegistration';
 import { seedDataProtectionLicensesTemplate } from './seedDataProtectionLicenses';
 import { seedImmigrationTemplate } from './seedImmigration';
+import { seedComprehensiveLegalWorkflows } from './seedComprehensiveLegalWorkflows';
 
 export const seedAllWorkflowTemplates = async () => {
   await seedDueDiligenceTemplate();
@@ -20,4 +21,5 @@ export const seedAllWorkflowTemplates = async () => {
   await seedTontineRegistrationTemplate();
   await seedDataProtectionLicensesTemplate();
   await seedImmigrationTemplate();
+  await seedComprehensiveLegalWorkflows();
 };

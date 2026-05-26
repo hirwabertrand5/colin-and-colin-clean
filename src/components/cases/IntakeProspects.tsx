@@ -5,6 +5,11 @@ import { getAllProspects, getProspectStats, deleteProspect, convertProspectToMat
 import ProspectForm from './ProspectForm';
 import MatterLifecycle from './MatterLifecycle';
 
+const ADMIN_ROLES = ['managing_director', 'managing_partner', 'senior_partner', 'partner', 'associate_partner'];
+
+const getErrorMessage = (error: any, fallback: string) =>
+  error?.response?.data?.message || error?.message || fallback;
+
 export default function IntakeProspects() {
   usePageTitle('Intake & Prospects');
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -14,6 +19,14 @@ export default function IntakeProspects() {
   const [showForm, setShowForm] = useState(false);
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [filterStage, setFilterStage] = useState<string | null>(null);
+  const currentRole = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || '{}')?.role as string | undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  const canUseAdminActions = currentRole ? ADMIN_ROLES.includes(currentRole) : false;
 
   const stageOrder = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Converted', 'Non-Converted'];
 
@@ -31,8 +44,8 @@ export default function IntakeProspects() {
       setProspects(prospectsData);
       setStats(statsData);
       setError('');
-    } catch {
-      setError('Failed to load prospects');
+    } catch (err: any) {
+      setError(getErrorMessage(err, 'Failed to load prospects'));
     } finally {
       setLoading(false);
     }
@@ -43,8 +56,8 @@ export default function IntakeProspects() {
     try {
       await deleteProspect(id);
       await loadData();
-    } catch {
-      setError('Failed to delete prospect');
+    } catch (err: any) {
+      setError(getErrorMessage(err, 'Failed to delete prospect'));
     }
   };
 
@@ -54,8 +67,8 @@ export default function IntakeProspects() {
       await convertProspectToMatter(prospect._id);
       setError('');
       await loadData();
-    } catch {
-      setError('Failed to convert prospect to matter');
+    } catch (err: any) {
+      setError(getErrorMessage(err, 'Failed to convert prospect to matter'));
     }
   };
 
@@ -206,7 +219,7 @@ export default function IntakeProspects() {
                               <Edit className="w-4 h-4" />
                             </button>
                           )}
-                          {prospect.stage === 'Engagement' && (
+                          {canUseAdminActions && prospect.stage === 'Engagement' && (
                             <button
                               onClick={() => handleConvert(prospect)}
                               className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"
@@ -215,7 +228,7 @@ export default function IntakeProspects() {
                               <ArrowRight className="w-4 h-4" />
                             </button>
                           )}
-                          {prospect.stage !== 'Converted' && (
+                          {canUseAdminActions && prospect.stage !== 'Converted' && (
                             <button
                               onClick={() => handleDelete(prospect._id)}
                               className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
