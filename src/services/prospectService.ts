@@ -60,19 +60,45 @@ export const getProspectById = async (id: string): Promise<Prospect> => {
 };
 
 export const createProspect = async (data: Partial<Prospect>): Promise<Prospect> => {
-  const token = getToken();
-  const response = await axios.post(`${API_BASE_URL}/prospects`, data, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  return response.data;
+  try {
+    const token = getToken();
+    if (!token) throw new Error('Not authenticated. Please login again.');
+    
+    const response = await axios.post(`${API_BASE_URL}/prospects`, data, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      timeout: 10000,
+    });
+    return response.data;
+  } catch (error: any) {
+    const message = error?.response?.data?.message || error?.message || 'Failed to create prospect';
+    const err: any = new Error(message);
+    err.statusCode = error?.response?.status;
+    throw err;
+  }
 };
 
 export const updateProspect = async (id: string, data: Partial<Prospect>): Promise<Prospect> => {
-  const token = getToken();
-  const response = await axios.put(`${API_BASE_URL}/prospects/${id}`, data, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  return response.data;
+  try {
+    const token = getToken();
+    if (!token) throw new Error('Not authenticated. Please login again.');
+    
+    const response = await axios.put(`${API_BASE_URL}/prospects/${id}`, data, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      timeout: 10000,
+    });
+    return response.data;
+  } catch (error: any) {
+    const message = error?.response?.data?.message || error?.message || 'Failed to update prospect';
+    const err: any = new Error(message);
+    err.statusCode = error?.response?.status;
+    throw err;
+  }
 };
 
 export const deleteProspect = async (id: string): Promise<void> => {

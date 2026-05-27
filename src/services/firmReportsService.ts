@@ -11,14 +11,19 @@ export type FirmReportResponse = {
     collected: number;
     outstanding: number;
     billableHours: number;
+    clientRelatedExpenses?: number;
   };
   team: Array<{
     name: string;
     role: string;
+    earningRoleLabel?: string;
+    earningSharePercent?: number;
     activeCases: number;
     tasksCompleted: number;
     billableHours: number;
     earnedFees?: number;
+    grossFeesHandled?: number;
+    firmRetainedEarnings?: number;
     earlyTasks?: number;
     onTimeTasks?: number;
     lateTasks?: number;
@@ -37,6 +42,7 @@ export type FirmReportResponse = {
     revenueBilled: number;
   }>;
   months: Array<{ month: string; billed: number; collected: number }>;
+  expenseTypes?: Array<{ type: string; amount: number; count: number; clientRelatedAmount: number }>;
 };
 
 export const getFirmReports = async (params?: { range?: FirmReportRange; from?: string; to?: string }) => {

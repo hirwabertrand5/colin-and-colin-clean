@@ -41,6 +41,13 @@ const toCsv = (rows: Array<Record<string, any>>) => {
 export default function FirmReports({ userRole }: FirmReportsProps) {
   const [selectedReport, setSelectedReport] = useState<'overview' | 'financial' | 'productivity' | 'cases'>('overview');
   const [dateRange, setDateRange] = useState<FirmReportRange>('monthly');
+  const [exportFilters, setExportFilters] = useState({
+    clientExpenses: true,
+    expenseType: true,
+    fees: true,
+    payments: true,
+    outstanding: true,
+  });
   usePageTitle('Firm Reports');
   const [data, setData] = useState<FirmReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -100,46 +107,81 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     lines.push(`To,${data.range.to}`);
     lines.push('');
 
+    const kpiRow: Record<string, any> = { activeCases: data.kpis.activeCases, billableHours: data.kpis.billableHours };
+    if (exportFilters.fees) kpiRow.billed = data.kpis.billed;
+    if (exportFilters.payments) kpiRow.collected = data.kpis.collected;
+    if (exportFilters.outstanding) kpiRow.outstanding = data.kpis.outstanding;
+    if (exportFilters.clientExpenses) kpiRow.clientRelatedExpenses = data.kpis.clientRelatedExpenses || 0;
+
     lines.push('KPIs');
-    lines.push(toCsv([data.kpis as any]));
+    lines.push(toCsv([kpiRow]));
     lines.push('');
 
-    lines.push('Team');
-    lines.push(
-      toCsv(
-        data.team.map((t) => ({
-          name: t.name,
-          role: t.role,
-          activeCases: t.activeCases,
-          tasksCompleted: t.tasksCompleted,
-          billableHours: t.billableHours,
-          earnedFees: t.earnedFees || 0,
-          earlyTasks: t.earlyTasks || 0,
-          onTimeTasks: t.onTimeTasks || 0,
-          lateTasks: t.lateTasks || 0,
-          overdueTasks: t.overdueTasks || 0,
-          excellentTasks: t.excellentTasks || 0,
-          goodTasks: t.goodTasks || 0,
-          delayedTasks: t.delayedTasks || 0,
-          riskTasks: t.riskTasks || 0,
-          averageTimeUsedPercent: t.averageTimeUsedPercent ?? '',
-        }))
-      )
-    );
-    lines.push('');
+    if (exportFilters.fees) {
+      lines.push('Team Earnings');
+      lines.push(
+        toCsv(
+          data.team.map((t) => ({
+            name: t.name,
+            role: t.role,
+            earningRoleLabel: t.earningRoleLabel || '',
+            earningSharePercent: t.earningSharePercent ?? '',
+            activeCases: t.activeCases,
+            tasksCompleted: t.tasksCompleted,
+            billableHours: t.billableHours,
+            grossFeesHandled: t.grossFeesHandled || 0,
+            earnedFees: t.earnedFees || 0,
+            firmRetainedEarnings: t.firmRetainedEarnings || 0,
+            earlyTasks: t.earlyTasks || 0,
+            onTimeTasks: t.onTimeTasks || 0,
+            lateTasks: t.lateTasks || 0,
+            overdueTasks: t.overdueTasks || 0,
+            excellentTasks: t.excellentTasks || 0,
+            goodTasks: t.goodTasks || 0,
+            delayedTasks: t.delayedTasks || 0,
+            riskTasks: t.riskTasks || 0,
+            averageTimeUsedPercent: t.averageTimeUsedPercent ?? '',
+          }))
+        )
+      );
+      lines.push('');
+    }
 
-    lines.push('Practice Paths');
-    lines.push(
-      toCsv(
-        data.caseTypes.map((c) => ({
-          type: c.type,
-          active: c.active,
-          closed: c.closed,
-          avgDurationDays: c.avgDurationDays ?? '',
-          revenueBilled: c.revenueBilled,
-        }))
-      )
-    );
+    if (exportFilters.fees) {
+      lines.push('Practice Paths');
+      lines.push(
+        toCsv(
+          data.caseTypes.map((c) => ({
+            type: c.type,
+            active: c.active,
+            closed: c.closed,
+            avgDurationDays: c.avgDurationDays ?? '',
+            revenueBilled: c.revenueBilled,
+          }))
+        )
+      );
+      lines.push('');
+    }
+
+    if (exportFilters.payments) {
+      lines.push('Payments');
+      lines.push(toCsv(data.months.map((m) => ({ month: m.month, collected: m.collected, billed: m.billed }))));
+      lines.push('');
+    }
+
+    if (exportFilters.expenseType || exportFilters.clientExpenses) {
+      lines.push('Expenses');
+      lines.push(
+        toCsv(
+          (data.expenseTypes || []).map((e) => ({
+            expenseType: e.type,
+            count: e.count,
+            ...(exportFilters.expenseType ? { totalAmount: e.amount } : {}),
+            ...(exportFilters.clientExpenses ? { clientRelatedAmount: e.clientRelatedAmount } : {}),
+          }))
+        )
+      );
+    }
 
     const filename = `firm-reports_${data.range.from}_to_${data.range.to}.csv`;
     downloadTextFile(filename, lines.join('\n'));
@@ -170,7 +212,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             </p>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap items-start gap-3">
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value as FirmReportRange)}
@@ -182,13 +224,38 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               <option value="yearly">Last Year</option>
             </select>
 
+            <div className="rounded border border-gray-200 bg-white px-3 py-2">
+              <div className="mb-2 text-xs font-medium uppercase text-gray-500">Export filters</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1">
+                {[
+                  ['clientExpenses', 'Client-related expenses'],
+                  ['expenseType', 'Expense type'],
+                  ['fees', 'Fees'],
+                  ['payments', 'Payments'],
+                  ['outstanding', 'Outstanding balances'],
+                ].map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(exportFilters[key as keyof typeof exportFilters])}
+                      onChange={(e) =>
+                        setExportFilters((current) => ({ ...current, [key]: e.target.checked }))
+                      }
+                      className="h-3.5 w-3.5 rounded border-gray-300 text-gray-800 focus:ring-gray-400"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <button
               onClick={exportCsv}
               disabled={!data || loading}
               className="inline-flex items-center px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-60"
             >
               <Download className="w-4 h-4 mr-2" />
-              Export CSV
+              Export Excel CSV
             </button>
           </div>
         </div>
@@ -257,7 +324,9 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Role</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Active cases</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tasks completed</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Share</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Fees earned</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Gross handled</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Billable hours</th>
                     </tr>
                   </thead>
@@ -268,7 +337,12 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                         <td className="px-5 py-4 text-sm text-gray-600">{member.role}</td>
                         <td className="px-5 py-4 text-sm text-gray-600">{member.activeCases}</td>
                         <td className="px-5 py-4 text-sm text-gray-600">{member.tasksCompleted}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">
+                          {member.earningSharePercent ?? 0}%
+                          <div className="text-xs text-gray-500">{member.earningRoleLabel || 'Firm share'}</div>
+                        </td>
                         <td className="px-5 py-4 text-sm font-medium text-gray-900">{fmtMoney(member.earnedFees || 0)}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{fmtMoney(member.grossFeesHandled || 0)}</td>
                         <td className="px-5 py-4 text-sm text-gray-600">{member.billableHours}</td>
                       </tr>
                     ))}
@@ -320,7 +394,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             {!data ? (
               <div className="text-gray-500">No data.</div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div>
                   <div className="text-sm text-gray-600 mb-2">Total Billed</div>
                   <div className="text-3xl font-semibold text-gray-900 mb-1">{fmtMoney(data.kpis.billed)}</div>
@@ -333,6 +407,37 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                   <div className="text-sm text-gray-600 mb-2">Outstanding</div>
                   <div className="text-3xl font-semibold text-yellow-700 mb-1">{fmtMoney(data.kpis.outstanding)}</div>
                 </div>
+                <div>
+                  <div className="text-sm text-gray-600 mb-2">Client Expenses</div>
+                  <div className="text-3xl font-semibold text-red-700 mb-1">
+                    {fmtMoney(data.kpis.clientRelatedExpenses || 0)}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <h2 className="font-semibold text-gray-900 mb-4">Expense Types</h2>
+
+            {!data ? (
+              <div className="text-gray-500">No data.</div>
+            ) : (data.expenseTypes || []).length === 0 ? (
+              <div className="text-gray-500">No expenses recorded for this period.</div>
+            ) : (
+              <div className="space-y-3">
+                {(data.expenseTypes || []).map((e) => (
+                  <div key={e.type} className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">{e.type}</div>
+                      <div className="text-xs text-gray-500">{e.count} entries</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold text-gray-900">{fmtMoney(e.amount)}</div>
+                      <div className="text-xs text-red-700">Client: {fmtMoney(e.clientRelatedAmount)}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -406,6 +511,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Team Member</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tasks Completed</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Share</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Fees Earned</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Early</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">On Time</th>
@@ -420,6 +526,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     <tr key={member.name}>
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">{member.name}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{member.tasksCompleted}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{member.earningSharePercent ?? 0}%</td>
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">{fmtMoney(member.earnedFees || 0)}</td>
                       <td className="px-4 py-3 text-sm text-green-700">{member.earlyTasks || 0}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">{member.onTimeTasks || 0}</td>

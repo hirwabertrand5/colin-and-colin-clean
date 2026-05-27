@@ -16,9 +16,12 @@ const isAdminRole = (role?: string) =>
 const canManageProspects = (role?: string) =>
   isAdminRole(role) ||
   role === 'executive_assistant' ||
-  role === 'senior_associate';
+  role === 'senior_associate' ||
+  role === 'associate' ||
+  role === 'trainee_associate' ||
+  role === 'intern';
 
-const validStages = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Non-Converted'];
+const validStages = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Converted', 'Non-Converted'];
 
 const cleanString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
@@ -53,22 +56,27 @@ const validateProspectPayload = async (payload: ReturnType<typeof getProspectPay
   if (!payload.contact.email) return 'Contact email is required.';
   if (!payload.contact.phone) return 'Contact phone is required.';
   if (!payload.inquiryDescription) return 'Inquiry description is required.';
-  if (!payload.assignedTo || !mongoose.Types.ObjectId.isValid(payload.assignedTo)) {
-    return 'A valid assigned staff member is required.';
+  
+  if (!payload.assignedTo) {
+    return 'Please select a staff member to assign this prospect to.';
+  }
+  
+  if (!mongoose.Types.ObjectId.isValid(payload.assignedTo)) {
+    return 'Invalid staff member ID. Please select a valid staff member.';
   }
 
   const assigneeExists = await User.exists({ _id: payload.assignedTo, isActive: true });
-  if (!assigneeExists) return 'Assigned staff member was not found or is inactive.';
+  if (!assigneeExists) return 'The selected staff member was not found or is inactive. Please select another staff member.';
 
   return null;
 };
 
 // Generate unique prospect number
 const generateProspectNo = async (): Promise<string> => {
-  const counter = await Counter.findByIdAndUpdate(
+  const counter = await Counter.findOneAndUpdate(
     { _id: 'prospect' },
     { $inc: { seq: 1 } },
-    { returnDocument: 'after', upsert: true }
+    { new: true, upsert: true }
   );
   const seq = String(counter.seq).padStart(5, '0');
   return `PROS-${new Date().getFullYear()}-${seq}`;
@@ -124,7 +132,7 @@ export const getProspectById = async (req: AuthRequest, res: Response) => {
 export const createProspect = async (req: AuthRequest, res: Response) => {
   try {
     if (!canManageProspects(req.user?.role)) {
-      return res.status(403).json({ message: 'Forbidden.' });
+      return res.status(403).json({ message: 'You do not have permission to create prospects.' });
     }
 
     const payload = getProspectPayload(req.body, req.user?.id);
@@ -138,6 +146,7 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
       ...payload,
       prospectNo,
       createdBy: req.user?.id,
+      dateReceived: new Date(),
       isActive: true,
     });
 
@@ -150,16 +159,22 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('createProspect error:', error);
     if (error?.name === 'ValidationError') {
-      return res.status(400).json({ message: error.message });
+      const messages = Object.values(error.errors)
+        .map((e: any) => e.message)
+        .join('; ');
+      return res.status(400).json({ message: `Validation error: ${messages}` });
     }
-    return res.status(500).json({ message: 'Failed to create prospect.' });
+    if (error?.code === 11000) {
+      return res.status(400).json({ message: 'A prospect with this information already exists.' });
+    }
+    return res.status(500).json({ message: error?.message || 'Failed to create prospect.' });
   }
 };
 
 export const updateProspect = async (req: AuthRequest, res: Response) => {
   try {
     if (!canManageProspects(req.user?.role)) {
-      return res.status(403).json({ message: 'Forbidden.' });
+      return res.status(403).json({ message: 'You do not have permission to update prospects.' });
     }
 
     const prospect = await Prospect.findById(req.params.id);
@@ -188,9 +203,12 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('updateProspect error:', error);
     if (error?.name === 'ValidationError') {
-      return res.status(400).json({ message: error.message });
+      const messages = Object.values(error.errors)
+        .map((e: any) => e.message)
+        .join('; ');
+      return res.status(400).json({ message: `Validation error: ${messages}` });
     }
-    return res.status(500).json({ message: 'Failed to update prospect.' });
+    return res.status(500).json({ message: error?.message || 'Failed to update prospect.' });
   }
 };
 
@@ -327,10 +345,10 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
 
 // Helper function to generate case number
 const generateCaseNo = async (): Promise<string> => {
-  const counter = await Counter.findByIdAndUpdate(
+  const counter = await Counter.findOneAndUpdate(
     { _id: 'case' },
     { $inc: { seq: 1 } },
-    { returnDocument: 'after', upsert: true }
+    { new: true, upsert: true }
   );
   const seq = String(counter.seq).padStart(5, '0');
   return `CASE-${new Date().getFullYear()}-${seq}`;

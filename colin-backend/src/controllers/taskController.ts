@@ -416,9 +416,12 @@ export const submitTaskForApproval = async (req: AuthRequest, res: Response) => 
       detail: task.title || 'Untitled',
     });
 
-    // ✅ Notify Managing Director for approvals (broadcast to MD role)
+    const assignedByUser: any = await findUserByAssigneeString(task.assignedBy);
+    const directReviewerIds = assignedByUser?._id ? [String(assignedByUser._id)] : [];
+
+    // Notify task coordinators for approvals.
     await notifyRoles({
-      roles: ['managing_director'],
+      roles: ['managing_director', 'executive_assistant'],
       category: 'approvals',
       notification: {
         type: 'TASK_APPROVAL_REQUESTED',
@@ -438,13 +441,29 @@ export const submitTaskForApproval = async (req: AuthRequest, res: Response) => 
       },
     });
 
+    if (directReviewerIds.length) {
+      await notifyUsersById({
+        userIds: directReviewerIds,
+        category: 'approvals',
+        notification: {
+          type: 'TASK_APPROVAL_REQUESTED',
+          title: 'Task approval requested',
+          message: `${task.title || 'Task'} is pending approval.`,
+          severity: 'warning',
+          caseId: String(task.caseId),
+          taskId: String(task._id),
+          link: `/tasks/${task._id}`,
+        },
+      });
+    }
+
     res.json(task);
   } catch {
     res.status(500).json({ message: 'Failed to submit task for approval.' });
   }
 };
 
-// Approve (MD only via route middleware)
+// Approve (case coordinators only)
 export const approveTask = async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params as any;
@@ -453,6 +472,10 @@ export const approveTask = async (req: AuthRequest, res: Response) => {
 
     const task: any = await Task.findById(taskId);
     if (!task) return res.status(404).json({ message: 'Task not found.' });
+
+    if (!(await canManageTask(req, task))) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
 
     if (!task.requiresApproval) {
       return res.status(400).json({ message: 'This task does not require approval.' });
@@ -490,7 +513,7 @@ export const approveTask = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Reject (MD only via route middleware)
+// Reject (case coordinators only)
 export const rejectTask = async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params as any;
@@ -499,6 +522,10 @@ export const rejectTask = async (req: AuthRequest, res: Response) => {
 
     const task: any = await Task.findById(taskId);
     if (!task) return res.status(404).json({ message: 'Task not found.' });
+
+    if (!(await canManageTask(req, task))) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
 
     if (!task.requiresApproval) {
       return res.status(400).json({ message: 'This task does not require approval.' });

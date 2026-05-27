@@ -6,6 +6,7 @@ import Task from '../models/taskModel';
 import Invoice from '../models/invoiceModel';
 import TaskTimeLog from '../models/taskTimeLogModel';
 import User from '../models/userModel';
+import PettyCashExpense from '../models/pettyCashExpenseModel';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -43,6 +44,29 @@ const selectedPathLabel = (c: any) => {
 };
 
 type PerformanceZone = 'excellent' | 'good' | 'delayed' | 'risk';
+
+const roleEarningShare = (role?: string) => {
+  const normalized = String(role || '').toLowerCase();
+  const shares: Record<string, { label: string; percent: number }> = {
+    intern: { label: 'Intern', percent: 1 },
+    trainee_associate: { label: 'Trainee Associate', percent: 3 },
+    associate: { label: 'Associate / Executive Assistant', percent: 6 },
+    executive_assistant: { label: 'Associate / Executive Assistant', percent: 6 },
+    senior_associate: { label: 'Senior Associate / Senior Executive Assistant', percent: 10 },
+    senior_executive_assistant: { label: 'Senior Associate / Senior Executive Assistant', percent: 10 },
+    associate_partner: { label: 'Associate Partner / Executive Associate Partner', percent: 12 },
+    executive_associate_partner: { label: 'Associate Partner / Executive Associate Partner', percent: 12 },
+    partner: { label: 'Partner / Executive Partner', percent: 8 },
+    executive_partner: { label: 'Partner / Executive Partner', percent: 8 },
+    managing_partner: { label: 'Managing Partner / Executive Managing Partner', percent: 8 },
+    executive_managing_partner: { label: 'Managing Partner / Executive Managing Partner', percent: 8 },
+    senior_partner: { label: 'Senior Partner / Executive Partner / Originating Attorney', percent: 12 },
+    originating_attorney: { label: 'Senior Partner / Executive Partner / Originating Attorney', percent: 12 },
+  };
+  return shares[normalized] || { label: 'Firm Retained Earnings', percent: 0 };
+};
+
+const FIRM_RETAINED_PERCENT = 40;
 
 const getPerformanceZone = (task: any): { zone: PerformanceZone; usedPercent: number } | null => {
   if (!task?.createdAt || !task?.completedAt || !task?.dueDate) return null;
@@ -132,6 +156,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       User.find({ isActive: { $ne: false } }).select('name role').lean(),
     ]);
 
+    const roleByName = new Map(
+      (users as any[]).map((u) => [String(u.name || '').trim(), String(u.role || '')])
+    );
+
     const activeByName = new Map<string, number>();
     for (const c of casesAll as any[]) {
       const isActive = String(c.status || '').toLowerCase() !== 'closed';
@@ -163,6 +191,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       completedTaskCountByCase.set(caseId, (completedTaskCountByCase.get(caseId) || 0) + 1);
     }
     const earnedByName = new Map<string, number>();
+    const grossHandledByName = new Map<string, number>();
+    const firmRetainedByName = new Map<string, number>();
     for (const t of tasksCompleted as any[]) {
       const name = String(t.assignee || '—').trim();
       completedTasksByName.set(name, (completedTasksByName.get(name) || 0) + 1);
@@ -184,7 +214,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       }
       const caseId = String(t.caseId || '');
       const taskShare = (caseEarnedById.get(caseId) || 0) / Math.max(1, completedTaskCountByCase.get(caseId) || 1);
-      earnedByName.set(name, (earnedByName.get(name) || 0) + taskShare);
+      const roleShare = roleEarningShare(roleByName.get(name));
+      grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + taskShare);
+      earnedByName.set(name, (earnedByName.get(name) || 0) + taskShare * (roleShare.percent / 100));
+      firmRetainedByName.set(name, (firmRetainedByName.get(name) || 0) + taskShare * (FIRM_RETAINED_PERCENT / 100));
     }
 
     const overdueTasks = await Task.find({
@@ -208,13 +241,18 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const team = (users as any[])
       .map((u) => {
         const name = String(u.name || '—').trim();
+        const roleShare = roleEarningShare(u.role);
         return {
           name,
           role: u.role,
+          earningRoleLabel: roleShare.label,
+          earningSharePercent: roleShare.percent,
           activeCases: activeByName.get(name) || 0,
           tasksCompleted: completedTasksByName.get(name) || 0,
           billableHours: Math.round(((hoursByName.get(name) || 0) * 10)) / 10,
           earnedFees: Math.round((earnedByName.get(name) || 0) * 100) / 100,
+          grossFeesHandled: Math.round((grossHandledByName.get(name) || 0) * 100) / 100,
+          firmRetainedEarnings: Math.round((firmRetainedByName.get(name) || 0) * 100) / 100,
           earlyTasks: earlyByName.get(name) || 0,
           onTimeTasks: onTimeByName.get(name) || 0,
           lateTasks: lateByName.get(name) || 0,
@@ -302,12 +340,48 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     }
     const months = Array.from(monthsMap.values()).sort((a, b) => a.month.localeCompare(b.month));
 
+    const expensesInRange = await PettyCashExpense.find({
+      date: { $gte: fromISO, $lte: toISO },
+    })
+      .select('amount category chargeType title date caseNoSnapshot partiesSnapshot')
+      .lean();
+
+    const clientRelatedExpenses = (expensesInRange as any[])
+      .filter((expense) => expense.chargeType === 'client')
+      .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+
+    const expenseTypeMap = new Map<string, { type: string; amount: number; count: number; clientRelatedAmount: number }>();
+    for (const expense of expensesInRange as any[]) {
+      const type = String(expense.category || expense.title || 'Unclassified').trim() || 'Unclassified';
+      const current = expenseTypeMap.get(type) || { type, amount: 0, count: 0, clientRelatedAmount: 0 };
+      current.amount += Number(expense.amount) || 0;
+      current.count += 1;
+      if (expense.chargeType === 'client') current.clientRelatedAmount += Number(expense.amount) || 0;
+      expenseTypeMap.set(type, current);
+    }
+
+    const expenseTypes = Array.from(expenseTypeMap.values())
+      .map((row) => ({
+        ...row,
+        amount: Math.round(row.amount * 100) / 100,
+        clientRelatedAmount: Math.round(row.clientRelatedAmount * 100) / 100,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
     return res.json({
       range: { from: fromISO, to: toISO },
-      kpis: { activeCases, billed, collected, outstanding, billableHours },
+      kpis: {
+        activeCases,
+        billed,
+        collected,
+        outstanding,
+        billableHours,
+        clientRelatedExpenses: Math.round(clientRelatedExpenses * 100) / 100,
+      },
       team,
       caseTypes,
       months,
+      expenseTypes,
     });
   } catch (e: any) {
     return res.status(500).json({ message: e?.message || 'Failed to load firm reports.' });

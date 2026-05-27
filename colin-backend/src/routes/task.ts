@@ -20,6 +20,7 @@ import {
 const router = express.Router();
 
 const TASK_ASSIGN_ROLES = ['managing_director', 'executive_assistant', 'associate'];
+const TASK_APPROVAL_ROLES = ['managing_director', 'executive_assistant', 'associate'];
 
 router.get('/cases/:caseId/tasks', authenticate, getTasksForCase);
 
@@ -42,8 +43,8 @@ router.delete('/tasks/:taskId/checklist/:itemId', authenticate, deleteChecklistI
 
 // approval workflow
 router.post('/tasks/:taskId/submit', authenticate, submitTaskForApproval);
-router.post('/tasks/:taskId/approve', authenticate, authorize(['managing_director']), approveTask);
-router.post('/tasks/:taskId/reject', authenticate, authorize(['managing_director']), rejectTask);
+router.post('/tasks/:taskId/approve', authenticate, authorize(TASK_APPROVAL_ROLES), approveTask);
+router.post('/tasks/:taskId/reject', authenticate, authorize(TASK_APPROVAL_ROLES), rejectTask);
 
 // time logs
 router.get('/tasks/:taskId/time-logs', authenticate, getTimeLogsForTask);

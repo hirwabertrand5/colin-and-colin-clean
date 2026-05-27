@@ -204,6 +204,30 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     requiresApproval: false,
   });
 
+  const currentWorkflowStep = useMemo(() => {
+    if (!workflowInstance?.steps?.length) return null;
+    return (
+      workflowInstance.steps.find((step) => step.stepKey === workflowInstance.currentStepKey) ||
+      workflowInstance.steps.find((step) => step.status !== 'Completed') ||
+      null
+    );
+  }, [workflowInstance]);
+
+  const suggestedTaskDeadline = currentWorkflowStep?.dueAt ? currentWorkflowStep.dueAt.slice(0, 10) : '';
+  const taskTimingSummary = currentWorkflowStep
+    ? `${currentWorkflowStep.title}${currentWorkflowStep.slaText ? ` • ${currentWorkflowStep.slaText}` : ''}${
+        suggestedTaskDeadline ? ` • due ${suggestedTaskDeadline}` : ''
+      }`
+    : 'No active workflow deadline is available yet.';
+
+  const openAddTaskModal = () => {
+    setNewTask((task) => ({
+      ...task,
+      dueDate: task.dueDate || suggestedTaskDeadline,
+    }));
+    setShowAddTask(true);
+  };
+
   const handleSubmitForApproval = async () => {
     if (!editTask?._id) return;
     try {
@@ -522,7 +546,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   }, [selectedEditServiceNodes, workflowTemplates, workflowTemplatesLoading, showEditCase]);
 
   // ----------------------------
-  // Fetch staff list (only needed for MD/Exec actions)
+  // Fetch staff list for task coordination actions.
   // ----------------------------
   useEffect(() => {
     if (!canManageCase && !canAssignTasks) return;
@@ -1386,11 +1410,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
           <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900">Case Tasks</h2>
 
-            {/* ✅ Add Task hidden for associates */}
             {canAssignTasks && (
               <button
                 className="px-3 py-1 text-sm bg-gray-800 text-white rounded hover:bg-gray-700"
-                onClick={() => setShowAddTask(true)}
+                onClick={openAddTaskModal}
               >
                 + Add Task
               </button>
@@ -1410,10 +1433,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">No.</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Title</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Priority</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Assignee</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Due Date</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Workflow Deadline</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>
                   </tr>
                 </thead>
@@ -1423,19 +1445,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     <tr key={task._id}>
                       <td className="px-4 py-3 text-gray-500">{index + 1}</td>
                       <td className="px-4 py-3">{task.title}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={
-                            task.priority === 'High'
-                              ? 'text-red-700 font-semibold'
-                              : task.priority === 'Medium'
-                                ? 'text-yellow-700 font-semibold'
-                                : 'text-green-700 font-semibold'
-                          }
-                        >
-                          {task.priority}
-                        </span>
-                      </td>
 
                       {/* ✅ Associates read-only status */}
                       <td className="px-4 py-3">
@@ -1455,7 +1464,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                       </td>
 
                       <td className="px-4 py-3">{task.assignee}</td>
-                      <td className="px-4 py-3">{task.dueDate}</td>
+                      <td className="px-4 py-3">
+                        <div className="text-sm font-medium text-gray-900">{task.dueDate || '—'}</div>
+                        <div className="text-xs text-gray-500">{taskTimingSummary}</div>
+                      </td>
 
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
@@ -1468,7 +1480,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                             <Eye className="w-4 h-4" />
                           </button>
 
-                          {/* ✅ Only MD/Exec can edit/delete */}
                           {canAssignTasks && (
                             <>
                               <button
@@ -1521,7 +1532,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       {/* ✅ Client Reports (MD/Exec only) */}
       {activeTab === 'reports' && canManageCase && <CaseClientReportsTab caseData={caseData} canManage={canManageCase} />}
 
-      {/* ✅ Add Task Modal (only for MD/Exec) */}
+      {/* Add Task Modal */}
       {showAddTask && canAssignTasks && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-lg w-full flex flex-col" style={{ maxHeight: '90vh' }}>
@@ -1539,19 +1550,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded"
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                <select
-                  value={newTask.priority}
-                  onChange={(e) => setNewTask((t) => ({ ...t, priority: e.target.value as any }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                >
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
-                </select>
               </div>
 
               <div>
@@ -1588,7 +1586,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+                <p className="mb-2 text-xs text-gray-500">{taskTimingSummary}</p>
                 <input
                   type="date"
                   value={newTask.dueDate}
@@ -1607,7 +1606,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 />
               </div>
 
-              {userRole === 'managing_director' && (
+              {canAssignTasks && (
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-700">Requires Approval</span>
                   <input
@@ -1637,7 +1636,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* ✅ Edit Task Modal only for MD/Exec */}
+      {/* Edit Task Modal */}
       {showEditTask && editTask && canAssignTasks && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-lg w-full flex flex-col" style={{ maxHeight: '90vh' }}>
@@ -1654,19 +1653,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   onChange={(e) => setEditTask((t) => (t ? { ...t, title: e.target.value } : t))}
                   className="w-full px-3 py-2 border border-gray-300 rounded"
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                <select
-                  value={editTask.priority}
-                  onChange={(e) => setEditTask((t) => (t ? { ...t, priority: e.target.value as any } : t))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                >
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
-                </select>
               </div>
 
               <div>
@@ -1703,7 +1689,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
+                <p className="mb-2 text-xs text-gray-500">{taskTimingSummary}</p>
                 <input
                   type="date"
                   value={editTask.dueDate}
@@ -1723,7 +1710,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <div className="border-t pt-4 space-y-3">
-                {userRole === 'managing_director' && (
+                {canAssignTasks && (
                   <>
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-gray-700">Requires Approval</span>

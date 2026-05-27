@@ -9,7 +9,7 @@ interface ProspectFormProps {
   onClose: () => void;
 }
 
-const STAGES = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Non-Converted'];
+const STAGES = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Converted', 'Non-Converted'];
 const CONFLICT_STATUSES = ['Pending', 'Cleared', 'Flagged'];
 const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
 
@@ -129,19 +129,46 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     }
   };
 
+  const validateForm = (): string | null => {
+    if (!form.clientName?.trim()) return 'Client name is required.';
+    if (!form.contact.name?.trim()) return 'Contact name is required.';
+    if (!form.contact.email?.trim()) return 'Contact email is required.';
+    if (!form.contact.email.includes('@')) return 'Please enter a valid email address.';
+    if (!form.contact.phone?.trim()) return 'Contact phone is required.';
+    if (!form.inquiryDescription?.trim()) return 'Inquiry description is required.';
+    if (!form.stage) return 'Please select a stage.';
+    if (!form.assignedTo) return 'Please select a staff member to assign this prospect to.';
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!form.assignedTo) {
-      setError('Please select the staff member assigned to this prospect.');
+    // Validate form
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     setLoading(true);
 
     try {
-      const data = { ...form };
+      // Ensure we have clean data
+      const data = {
+        clientName: form.clientName.trim(),
+        contact: {
+          name: form.contact.name.trim(),
+          email: form.contact.email.trim().toLowerCase(),
+          phone: form.contact.phone.trim(),
+        },
+        legalServicePath: form.legalServicePath,
+        inquiryDescription: form.inquiryDescription.trim(),
+        stage: form.stage,
+        engagementNotes: form.engagementNotes.trim(),
+        assignedTo: form.assignedTo,
+      };
 
       if (prospect) {
         await updateProspect(prospect._id, data);
@@ -151,7 +178,9 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
 
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Failed to save prospect');
+      console.error('Form submission error:', err);
+      const errorMessage = err?.message || err?.response?.data?.message || 'Failed to save prospect';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -199,7 +228,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                   required
                   value={form.clientName}
                   onChange={(e) => setForm({ ...form, clientName: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                 />
               </div>
 
@@ -213,7 +242,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                     required
                     value={form.contact.name}
                     onChange={(e) => setForm({ ...form, contact: { ...form.contact, name: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                   />
                 </div>
                 {/* Position removed to simplify form */}
@@ -229,7 +258,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                     required
                     value={form.contact.email}
                     onChange={(e) => setForm({ ...form, contact: { ...form.contact, email: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                   />
                 </div>
                 <div>
@@ -241,7 +270,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                     required
                     value={form.contact.phone}
                     onChange={(e) => setForm({ ...form, contact: { ...form.contact, phone: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                   />
                 </div>
               </div>
@@ -260,7 +289,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                   <select
                     value={level.value}
                     onChange={(e) => updateServicePathAtLevel(idx, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                   >
                     <option value="">Select...</option>
                     {level.options.map((opt: any) => (
@@ -290,7 +319,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                   rows={4}
                   value={form.inquiryDescription}
                   onChange={(e) => setForm({ ...form, inquiryDescription: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                 />
               </div>
 
@@ -303,7 +332,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                     required
                     value={form.stage}
                     onChange={(e) => setForm({ ...form, stage: e.target.value as any })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                   >
                     {STAGES.map((s) => (
                       <option key={s} value={s}>
@@ -330,7 +359,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 value={form.assignedTo}
                 onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
                 disabled={usersLoading}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
               >
                 <option value="">{usersLoading ? 'Loading staff...' : 'Select staff member...'}</option>
                 {users.map((u) => (
@@ -354,7 +383,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 rows={3}
                 value={form.engagementNotes}
                 onChange={(e) => setForm({ ...form, engagementNotes: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
               />
             </div>
           </div>
