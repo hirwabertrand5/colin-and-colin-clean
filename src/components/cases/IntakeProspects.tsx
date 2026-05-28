@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Plus, Edit, Trash2, ArrowRight, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, ArrowRight } from 'lucide-react';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getAllProspects, getProspectStats, deleteProspect, convertProspectToMatter, Prospect } from '../../services/prospectService';
 import ProspectForm from './ProspectForm';
-import MatterLifecycle from './MatterLifecycle';
 
 const ADMIN_ROLES = ['managing_director', 'managing_partner', 'senior_partner', 'partner', 'associate_partner'];
 
@@ -78,9 +77,17 @@ export default function IntakeProspects() {
     loadData();
   };
 
-  const filteredProspects = filterStage 
+  const filteredProspects = (filterStage 
     ? prospects.filter(p => p.stage === filterStage)
-    : prospects;
+    : prospects
+  ).slice().sort((a, b) => {
+    const stageDiff = stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage);
+    if (stageDiff !== 0) return stageDiff;
+    return new Date(b.dateReceived || b.createdAt).getTime() - new Date(a.dateReceived || a.createdAt).getTime();
+  });
+
+  const getAssignedName = (assignedTo: Prospect['assignedTo']) =>
+    typeof assignedTo === 'string' ? assignedTo : assignedTo?.name || '—';
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pt-20 pb-8">
@@ -105,45 +112,6 @@ export default function IntakeProspects() {
           </button>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr] mb-8">
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Focused intake workflow</h2>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Use this board to move prospects from inquiry through engagement. Keep the form lean, prioritize next actions, and convert to a matter when the client is ready.
-            </p>
-          </div>
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Quick tips</h3>
-            <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-400 list-disc list-inside">
-              <li>Filter by stage to focus on the next step.</li>
-              <li>Keep prospect details concise and actionable.</li>
-              <li>Convert to active matter once the client signs.</li>
-            </ul>
-          </div>
-        </div>
-
-        <MatterLifecycle />
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-8">
-          {stageOrder.map((stage) => (
-            <button
-              key={stage}
-              onClick={() => setFilterStage(filterStage === stage ? null : stage)}
-              className={`p-4 rounded-lg border-2 transition-all cursor-pointer ${
-                filterStage === stage
-                  ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-blue-400'
-              }`}
-            >
-              <div className="text-sm font-medium text-gray-600 dark:text-gray-400">{stage}</div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                {stats[stage] || 0}
-              </div>
-            </button>
-          ))}
-        </div>
-
         {/* Error Message */}
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -153,6 +121,26 @@ export default function IntakeProspects() {
 
         {/* Prospects Table */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+          <div className="flex flex-col gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-700 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-900 dark:text-gray-100">Prospects</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {filterStage ? `${stats[filterStage] || filteredProspects.length} ${filterStage} prospects` : `${filteredProspects.length} active prospects`}
+              </p>
+            </div>
+            <select
+              value={filterStage || ''}
+              onChange={(e) => setFilterStage(e.target.value || null)}
+              className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 md:w-64"
+            >
+              <option value="">All stages</option>
+              {stageOrder.map((stage) => (
+                <option key={stage} value={stage}>
+                  {stage} ({stats[stage] || 0})
+                </option>
+              ))}
+            </select>
+          </div>
           {loading ? (
             <div className="p-8 text-center text-gray-500 dark:text-gray-400">Loading prospects...</div>
           ) : filteredProspects.length === 0 ? (
@@ -164,30 +152,40 @@ export default function IntakeProspects() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">No.</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Client</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Contact</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Email</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Phone</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Service</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Inquiry</th>
                     <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Stage</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Amount</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Actions</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Assigned To</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Notes</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Actions</th>
                 </tr>
               </thead>
                 <tbody>
-                  {filteredProspects.map((prospect) => (
+                  {filteredProspects.map((prospect, index) => (
                     <tr
                       key={prospect._id}
                       className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50"
                     >
+                      <td className="px-6 py-4 text-sm font-medium text-gray-700 dark:text-gray-300">{index + 1}</td>
                       <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
                         <div className="font-medium">{prospect.clientName}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">{prospect.prospectNo}</div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        <div>{prospect.contact.name}</div>
-                        <div className="text-xs">{prospect.contact.email}</div>
+                        {prospect.contact.email || '—'}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                        {prospect.contact.phone || '—'}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                         {prospect.legalServicePath?.map((p) => p.label).join(' / ') || 'N/A'}
+                      </td>
+                      <td className="max-w-xs px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                        <div className="line-clamp-2">{prospect.inquiryDescription || '—'}</div>
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <span
@@ -202,8 +200,9 @@ export default function IntakeProspects() {
                           {prospect.stage}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        {prospect.quotationAmount ? `$${prospect.quotationAmount.toLocaleString()}` : '-'}
+                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{getAssignedName(prospect.assignedTo)}</td>
+                      <td className="max-w-xs px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                        <div className="line-clamp-2">{prospect.engagementNotes || '—'}</div>
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <div className="flex gap-2">

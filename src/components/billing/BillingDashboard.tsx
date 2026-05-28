@@ -5,7 +5,7 @@ import { UserRole } from '../../App';
 import { getBillingSummary, BillingSummary } from '../../services/billingService';
 import { getRecentInvoices, InvoiceWithCase } from '../../services/invoiceService';
 import { getAllCases, CaseData } from '../../services/caseService';
-import { getActivePettyCashFund, listExpensesForFund, PettyCashExpense } from '../../services/pettyCashService';
+import { listPettyCashFunds, listExpensesForFund, PettyCashExpense } from '../../services/pettyCashService';
 import usePageTitle from '../../hooks/usePageTitle';
 
 interface BillingDashboardProps {
@@ -40,13 +40,15 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
         setError('');
 
         // Overall summary: do NOT pass from/to; backend defaults to last 6 months
-        const [s, r, allCases, fund] = await Promise.all([
+        const [s, r, allCases, funds] = await Promise.all([
           getBillingSummary(),
           getRecentInvoices(5),
           getAllCases(),
-          getActivePettyCashFund().catch(() => null),
+          listPettyCashFunds().catch(() => []),
         ]);
-        const expenses = fund?._id ? await listExpensesForFund(fund._id).catch(() => []) : [];
+        const expenses = (await Promise.all(
+          funds.map((fund) => listExpensesForFund(fund._id).catch(() => []))
+        )).flat();
 
         if (!mounted) return;
         setSummary(s);
@@ -79,7 +81,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
       { label: 'Total Billed', value: formatRwf(billed), change: '', trend: 'up' as const, icon: DollarSign },
       { label: 'Collected', value: formatRwf(collected), change: '', trend: 'up' as const, icon: TrendingUp },
       { label: 'Outstanding', value: formatRwf(outstanding), change: '', trend: outstanding > 0 ? ('down' as const) : ('up' as const), icon: TrendingDown },
-      { label: 'Collection Rate', value: `${collectionRate}%`, change: '', trend: 'up' as const, icon: DollarSign },
+      { label: 'Billable Hours', value: String(summary?.billableHours ?? 0), change: `${collectionRate}% collected`, trend: 'up' as const, icon: DollarSign },
     ];
   }, [summary]);
 

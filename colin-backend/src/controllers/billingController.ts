@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Invoice from '../models/invoiceModel';
+import TaskTimeLog from '../models/taskTimeLogModel';
 
 const toISODate = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -34,6 +35,11 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
     const collected = invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const outstanding = Math.max(0, billed - collected);
     const collectionRate = billed > 0 ? Math.round((collected / billed) * 100) : 0;
+    const hoursAgg = await TaskTimeLog.aggregate([
+      { $match: { loggedAt: { $gte: fromDate, $lte: toDate } } },
+      { $group: { _id: null, totalHours: { $sum: '$hours' } } },
+    ]);
+    const billableHours = Math.round((((hoursAgg?.[0]?.totalHours as number) || 0) * 10)) / 10;
 
     // monthly trend
     const map = new Map<string, { month: string; billed: number; collected: number }>();
@@ -48,7 +54,7 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
 
     const months = Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
 
-    res.json({ from: fromStr, to: toStr, billed, collected, outstanding, collectionRate, months });
+    res.json({ from: fromStr, to: toStr, billed, collected, outstanding, collectionRate, billableHours, months });
   } catch {
     res.status(500).json({ message: 'Failed to fetch billing summary.' });
   }

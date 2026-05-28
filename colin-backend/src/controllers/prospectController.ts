@@ -28,10 +28,11 @@ const getRouteId = (value: unknown) => (typeof value === 'string' ? value : '');
 
 const getProspectPayload = (body: any, fallbackUserId?: string) => {
   const assignedTo = cleanString(body.assignedTo) || fallbackUserId || '';
+  const clientName = cleanString(body.clientName);
   return {
-    clientName: cleanString(body.clientName),
+    clientName,
     contact: {
-      name: cleanString(body.contact?.name),
+      name: cleanString(body.contact?.name) || clientName,
       email: cleanString(body.contact?.email),
       phone: cleanString(body.contact?.phone),
       ...(cleanString(body.contact?.position) ? { position: cleanString(body.contact.position) } : {}),
@@ -53,7 +54,6 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
 
 const validateProspectPayload = async (payload: ReturnType<typeof getProspectPayload>) => {
   if (!payload.clientName) return 'Client name is required.';
-  if (!payload.contact.name) return 'Contact name is required.';
   if (!payload.contact.email) return 'Contact email is required.';
   if (!payload.contact.phone) return 'Contact phone is required.';
   if (!payload.inquiryDescription) return 'Inquiry description is required.';

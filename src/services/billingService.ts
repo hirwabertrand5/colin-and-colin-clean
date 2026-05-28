@@ -8,6 +8,7 @@ export type BillingSummary = {
   collected: number;
   outstanding: number;
   collectionRate: number;
+  billableHours: number;
   months: { month: string; billed: number; collected: number }[];
 };
 

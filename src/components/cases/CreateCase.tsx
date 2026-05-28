@@ -35,7 +35,7 @@ type PreviewWorkflowStep = {
   actions: string[];
 };
 
-type MatterTiming = 'new' | 'historical';
+type MatterTiming = 'new';
 
 export default function CreateCase() {
   const navigate = useNavigate();
@@ -106,12 +106,17 @@ export default function CreateCase() {
       const raw = localStorage.getItem(CREATE_CASE_DRAFT_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
-      if (parsed?.formData) setFormData((prev) => ({ ...prev, ...parsed.formData }));
+      if (parsed?.formData) {
+        setFormData((prev) => ({
+          ...prev,
+          ...parsed.formData,
+          matterTiming: 'new',
+          workflowAutomation: true,
+        }));
+      }
       if (Array.isArray(parsed?.servicePath)) setServicePath(parsed.servicePath);
       if (typeof parsed?.step === 'number') setStep(parsed.step);
-      if (parsed?.matterTiming === 'historical' || parsed?.formData?.matterTiming === 'historical') {
-        setMatterTiming('historical');
-      }
+      setMatterTiming('new');
       setDraftNotice('Loaded your saved draft.');
       setTimeout(() => setDraftNotice(''), 2500);
     } catch {
@@ -128,7 +133,7 @@ export default function CreateCase() {
           step,
           matterTiming,
           servicePath,
-          formData: { ...formData, matterTiming, workflowAutomation: matterTiming === 'new' },
+          formData: { ...formData, matterTiming: 'new', workflowAutomation: true },
           savedAt: new Date().toISOString(),
         })
       );
@@ -191,31 +196,6 @@ export default function CreateCase() {
 
   const handleInputChange = (field: string, value: any) => {
     setFormData({ ...formData, [field]: value });
-  };
-
-  const selectMatterTiming = (nextTiming: MatterTiming) => {
-    setMatterTiming(nextTiming);
-    setTemplateManuallySelected(false);
-    setFormData((prev) => ({
-      ...prev,
-      matterTiming: nextTiming,
-      workflowAutomation: nextTiming === 'new',
-      ...(nextTiming === 'historical'
-        ? {
-            workflowTemplateId: '',
-            initialWorkflowActions: {},
-            workflowProgress: {
-              ...(prev.workflowProgress || {}),
-              status: 'Not Started',
-              percent: 0,
-              completedValue: {
-                amount: 0,
-                currency: prev.workflowProgress?.plannedValue?.currency || prev.billingSettings?.currency || 'RWF',
-              },
-            },
-          }
-        : {}),
-    }));
   };
 
   // -------------------------
@@ -337,32 +317,32 @@ export default function CreateCase() {
       if (!formData.caseType) {
         throw new Error('Missing case type. Please complete Legal Service classification.');
       }
-      if (matterTiming === 'new' && !formData.workflowTemplateId) {
+      if (!formData.workflowTemplateId) {
         throw new Error('Missing workflow template. Please select a workflow template.');
       }
-      if (matterTiming === 'new' && plannedValueAmount <= 0) {
+      if (plannedValueAmount <= 0) {
         throw new Error('Enter the negotiated planned value before creating the case.');
       }
 
       await createCase({
         ...formData,
         matterTiming,
-        workflowAutomation: matterTiming === 'new',
-        workflowTemplateId: matterTiming === 'new' ? formData.workflowTemplateId : '',
-        initialWorkflowActions: matterTiming === 'new' ? formData.initialWorkflowActions : {},
+        workflowAutomation: true,
+        workflowTemplateId: formData.workflowTemplateId,
+        initialWorkflowActions: formData.initialWorkflowActions || {},
         budget: plannedValueAmount > 0 ? String(plannedValueAmount) : formData.budget,
         workflowProgress: {
           ...(formData.workflowProgress || {}),
-          percent: matterTiming === 'new' ? actionProgressPercent : 0,
+          percent: actionProgressPercent,
           plannedValue: { amount: plannedValueAmount, currency: plannedValueCurrency },
-          completedValue: { amount: matterTiming === 'new' ? previewEarnedValue : 0, currency: plannedValueCurrency },
+          completedValue: { amount: previewEarnedValue, currency: plannedValueCurrency },
         },
         billingSettings: {
           paymentMode: 'postpaid',
           currency: plannedValueCurrency,
           prepaidTotal: 0,
           prepaidRemaining: 0,
-          accruedUnbilled: matterTiming === 'new' ? previewEarnedValue : 0,
+          accruedUnbilled: previewEarnedValue,
         },
       });
       setSuccess('Case created successfully!');
@@ -379,7 +359,6 @@ export default function CreateCase() {
       return Boolean(formData.caseNo && formData.parties && formData.assignedTo && isServiceSelectionValid());
     }
     if (step === 2) {
-      if (matterTiming === 'historical') return true;
       return Boolean(formData.workflowTemplateId && formData.workflowStartDate && plannedValueAmount > 0);
     }
     return true;
@@ -419,7 +398,6 @@ export default function CreateCase() {
 
   // Auto-select a workflow template when the service-line decision tree suggests a matter type.
   useEffect(() => {
-    if (matterTiming === 'historical') return;
     if (templatesLoading) return;
     if (templateManuallySelected) return;
 
@@ -437,7 +415,7 @@ export default function CreateCase() {
       workflow: match.matterType,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServiceNodes, templates, templatesLoading, templateManuallySelected, matterTiming]);
+  }, [selectedServiceNodes, templates, templatesLoading, templateManuallySelected]);
 
   const toMinutesFromSla = (sla: any): number => {
     if (!sla) return 0;
@@ -715,7 +693,7 @@ export default function CreateCase() {
                 <div className="ml-3">
                   <p className="text-sm font-medium text-gray-900">
                     {stepNumber === 1 && 'Case Basics'}
-                    {stepNumber === 2 && (matterTiming === 'historical' ? 'Record Setup' : 'Workflow Setup')}
+                    {stepNumber === 2 && 'Workflow Setup'}
                     {stepNumber === 3 && 'Review & Confirm'}
                   </p>
                 </div>
@@ -744,40 +722,6 @@ export default function CreateCase() {
         {/* Step 1: Case Basics */}
         {step === 1 && (
           <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Matter setup *</label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => selectMatterTiming('new')}
-                  className={`text-left rounded-lg border p-4 transition ${
-                    matterTiming === 'new'
-                      ? 'border-gray-900 bg-gray-50 ring-2 ring-gray-900/10'
-                      : 'border-gray-200 bg-white hover:border-gray-400'
-                  }`}
-                >
-                  <div className="text-sm font-semibold text-gray-900">New active matter</div>
-                  <div className="mt-1 text-sm text-gray-600">
-                    Start from a workflow template and generate live deadlines, progress, and earned-fee tracking.
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectMatterTiming('historical')}
-                  className={`text-left rounded-lg border p-4 transition ${
-                    matterTiming === 'historical'
-                      ? 'border-gray-900 bg-gray-50 ring-2 ring-gray-900/10'
-                      : 'border-gray-200 bg-white hover:border-gray-400'
-                  }`}
-                >
-                  <div className="text-sm font-semibold text-gray-900">Historical matter</div>
-                  <div className="mt-1 text-sm text-gray-600">
-                    Add an older case to the system without creating workflow tasks or deadline automation.
-                  </div>
-                </button>
-              </div>
-            </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Case No. *</label>
               <input
@@ -895,90 +839,7 @@ export default function CreateCase() {
         )}
 
         {/* Step 2: Workflow Setup */}
-        {step === 2 && matterTiming === 'historical' && (
-          <div className="space-y-6">
-            <div className="rounded-lg border border-gray-200 bg-white p-5">
-              <div className="text-sm font-semibold text-gray-900">Historical matter record</div>
-              <p className="mt-2 text-sm text-gray-600">
-                This matter will be saved for firm visibility without creating workflow tasks, deadline countdowns, or automated progress tracking.
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-gray-200 bg-white p-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Original Start Date</label>
-                  <input
-                    type="date"
-                    value={formData.workflowStartDate || ''}
-                    onChange={(e) => handleInputChange('workflowStartDate', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Matter Value</label>
-                  <input
-                    value={formData.workflowProgress?.plannedValue?.amount ?? ''}
-                    onChange={(e) => {
-                      const amount = parseMoneyInput(e.target.value);
-                      setFormData((prev) => ({
-                        ...prev,
-                        budget: amount ? String(amount) : '',
-                        workflowProgress: {
-                          ...(prev.workflowProgress || {}),
-                          percent: 0,
-                          plannedValue: {
-                            amount: amount || undefined,
-                            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
-                          },
-                          completedValue: {
-                            amount: 0,
-                            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
-                          },
-                        },
-                      }));
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                    placeholder="Optional"
-                    inputMode="numeric"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency</label>
-                  <input
-                    value={plannedValueCurrency}
-                    onChange={(e) => {
-                      const currency = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'RWF';
-                      setFormData((prev) => ({
-                        ...prev,
-                        workflowProgress: {
-                          ...(prev.workflowProgress || {}),
-                          plannedValue: {
-                            ...(prev.workflowProgress?.plannedValue || {}),
-                            currency,
-                          },
-                          completedValue: { amount: 0, currency },
-                        },
-                        billingSettings: {
-                          ...(prev.billingSettings || {}),
-                          paymentMode: 'postpaid',
-                          currency,
-                          prepaidTotal: 0,
-                          prepaidRemaining: 0,
-                          accruedUnbilled: 0,
-                        },
-                      }));
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                    placeholder="RWF"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {step === 2 && matterTiming === 'new' && (
+        {step === 2 && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1140,7 +1001,7 @@ export default function CreateCase() {
                         <div className="space-y-3">
                           {steps.map((step) => (
                             <div key={step.key} className="rounded-xl border border-gray-200 bg-white p-4">
-                              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
                                 <div className="min-w-0">
                                   <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Step {step.stepIndex}</div>
                                   <div className="text-base font-semibold text-gray-900 mt-1">{step.title}</div>
@@ -1179,17 +1040,24 @@ export default function CreateCase() {
                                   )}
                                 </div>
 
-                                <div className="flex min-w-[180px] flex-col items-start gap-2 text-left md:items-end md:text-right">
-                                  <span className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getUrgencyStyle(step.dueAt)}`}>
-                                    {formatRelativeDue(step.dueAt)}
-                                  </span>
-                                  <div className="text-xs text-gray-500">Due {step.dueAt.toLocaleDateString()}</div>
-                                  <div className="text-sm font-semibold text-gray-900">
-                                    {step.feeLabel}
+                                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Fees & deadlines</div>
+                                  <div className="mt-3 space-y-3">
+                                    <div>
+                                      <div className="text-xs text-gray-500">Deadline</div>
+                                      <span className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-medium ${getUrgencyStyle(step.dueAt)}`}>
+                                        {formatRelativeDue(step.dueAt)}
+                                      </span>
+                                      <div className="mt-1 text-xs text-gray-500">Due {step.dueAt.toLocaleDateString()}</div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-gray-500">Fee</div>
+                                      <div className="mt-1 text-sm font-semibold text-gray-900">{step.feeLabel}</div>
+                                      {typeof step.feeRangeMin === 'number' && typeof step.feeRangeMax === 'number' ? (
+                                        <div className="mt-1 text-xs text-gray-500">Template range</div>
+                                      ) : null}
+                                    </div>
                                   </div>
-                                  {typeof step.feeRangeMin === 'number' && typeof step.feeRangeMax === 'number' ? (
-                                    <div className="text-xs text-gray-500">Template range</div>
-                                  ) : null}
                                 </div>
                               </div>
                             </div>
@@ -1220,25 +1088,16 @@ export default function CreateCase() {
                 {[
                   ['Case No.', formData.caseNo],
                   ['Parties', formData.parties],
-                  ['Matter setup', matterTiming === 'historical' ? 'Historical matter, no automation' : 'New active matter with workflow automation'],
                   ['Legal Service Path', formData.legalServicePath?.map((item) => item.label).join(' -> ') || 'Not selected'],
                   ['Case Type (computed)', formData.caseType],
                   ['Assigned To', formData.assignedTo],
-                  ...(matterTiming === 'new'
-                    ? [
-                        ['Workflow Template', selectedWorkflowTemplate?.name || selectedWorkflowTemplate?.matterType || 'Not selected'],
-                        ['Workflow Start Date', formData.workflowStartDate || 'Not set'],
-                        ['Next expected deadline', workflowSummary?.nextDueAt ? workflowSummary.nextDueAt.toLocaleDateString() : 'TBD'],
-                        ['Estimated completion', workflowSummary?.completionDate ? workflowSummary.completionDate.toLocaleDateString() : 'TBD'],
-                      ]
-                    : [['Original Start Date', formData.workflowStartDate || 'Not set']]),
+                  ['Workflow Template', selectedWorkflowTemplate?.name || selectedWorkflowTemplate?.matterType || 'Not selected'],
+                  ['Workflow Start Date', formData.workflowStartDate || 'Not set'],
+                  ['Next expected deadline', workflowSummary?.nextDueAt ? workflowSummary.nextDueAt.toLocaleDateString() : 'TBD'],
+                  ['Estimated completion', workflowSummary?.completionDate ? workflowSummary.completionDate.toLocaleDateString() : 'TBD'],
                   ['Negotiated planned value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
-                  ...(matterTiming === 'new'
-                    ? [
-                        ['Key action progress', `${checkedActionCount}/${orderedActionRefs.length} actions checked (${actionProgressPercent}%)`],
-                        ['Earned fees preview', formatCurrency(previewEarnedValue, plannedValueCurrency)],
-                      ]
-                    : []),
+                  ['Key action progress', `${checkedActionCount}/${orderedActionRefs.length} actions checked (${actionProgressPercent}%)`],
+                  ['Earned fees preview', formatCurrency(previewEarnedValue, plannedValueCurrency)],
                 ].map(([k, v]) => (
                   <div key={k} className="grid grid-cols-3 gap-4 py-3 border-b border-gray-200">
                     <span className="text-sm text-gray-600">{k}:</span>

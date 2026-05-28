@@ -10,7 +10,6 @@ interface ProspectFormProps {
 }
 
 const STAGES = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Converted', 'Non-Converted'];
-const CONFLICT_STATUSES = ['Pending', 'Cleared', 'Flagged'];
 const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
 
 const getAssignedToId = (assignedTo?: Prospect['assignedTo']) => {
@@ -30,7 +29,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   const [form, setForm] = useState({
     clientName: prospect?.clientName || '',
     contact: {
-      name: prospect?.contact.name || '',
+      name: prospect?.contact.name || prospect?.clientName || '',
       email: prospect?.contact.email || '',
       phone: prospect?.contact.phone || '',
     },
@@ -49,7 +48,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     setForm({
       clientName: prospect?.clientName || '',
       contact: {
-        name: prospect?.contact.name || '',
+        name: prospect?.contact.name || prospect?.clientName || '',
         email: prospect?.contact.email || '',
         phone: prospect?.contact.phone || '',
       },
@@ -131,7 +130,6 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
 
   const validateForm = (): string | null => {
     if (!form.clientName?.trim()) return 'Client name is required.';
-    if (!form.contact.name?.trim()) return 'Contact name is required.';
     if (!form.contact.email?.trim()) return 'Contact email is required.';
     if (!form.contact.email.includes('@')) return 'Please enter a valid email address.';
     if (!form.contact.phone?.trim()) return 'Contact phone is required.';
@@ -159,7 +157,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
       const data = {
         clientName: form.clientName.trim(),
         contact: {
-          name: form.contact.name.trim(),
+          name: form.clientName.trim(),
           email: form.contact.email.trim().toLowerCase(),
           phone: form.contact.phone.trim(),
         },
@@ -230,22 +228,6 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                   onChange={(e) => setForm({ ...form, clientName: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                 />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Contact Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={form.contact.name}
-                    onChange={(e) => setForm({ ...form, contact: { ...form.contact, name: e.target.value } })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  />
-                </div>
-                {/* Position removed to simplify form */}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -41,13 +41,6 @@ const toCsv = (rows: Array<Record<string, any>>) => {
 export default function FirmReports({ userRole }: FirmReportsProps) {
   const [selectedReport, setSelectedReport] = useState<'overview' | 'financial' | 'productivity' | 'cases'>('overview');
   const [dateRange, setDateRange] = useState<FirmReportRange>('monthly');
-  const [exportFilters, setExportFilters] = useState({
-    clientExpenses: true,
-    expenseType: true,
-    fees: true,
-    payments: true,
-    outstanding: true,
-  });
   usePageTitle('Firm Reports');
   const [data, setData] = useState<FirmReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -107,81 +100,76 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     lines.push(`To,${data.range.to}`);
     lines.push('');
 
-    const kpiRow: Record<string, any> = { activeCases: data.kpis.activeCases, billableHours: data.kpis.billableHours };
-    if (exportFilters.fees) kpiRow.billed = data.kpis.billed;
-    if (exportFilters.payments) kpiRow.collected = data.kpis.collected;
-    if (exportFilters.outstanding) kpiRow.outstanding = data.kpis.outstanding;
-    if (exportFilters.clientExpenses) kpiRow.clientRelatedExpenses = data.kpis.clientRelatedExpenses || 0;
+    const kpiRow: Record<string, any> = {
+      activeCases: data.kpis.activeCases,
+      billableHours: data.kpis.billableHours,
+      billed: data.kpis.billed,
+      collected: data.kpis.collected,
+      outstanding: data.kpis.outstanding,
+      clientRelatedExpenses: data.kpis.clientRelatedExpenses || 0,
+    };
 
     lines.push('KPIs');
     lines.push(toCsv([kpiRow]));
     lines.push('');
 
-    if (exportFilters.fees) {
-      lines.push('Team Earnings');
-      lines.push(
-        toCsv(
-          data.team.map((t) => ({
-            name: t.name,
-            role: t.role,
-            earningRoleLabel: t.earningRoleLabel || '',
-            earningSharePercent: t.earningSharePercent ?? '',
-            activeCases: t.activeCases,
-            tasksCompleted: t.tasksCompleted,
-            billableHours: t.billableHours,
-            grossFeesHandled: t.grossFeesHandled || 0,
-            earnedFees: t.earnedFees || 0,
-            firmRetainedEarnings: t.firmRetainedEarnings || 0,
-            earlyTasks: t.earlyTasks || 0,
-            onTimeTasks: t.onTimeTasks || 0,
-            lateTasks: t.lateTasks || 0,
-            overdueTasks: t.overdueTasks || 0,
-            excellentTasks: t.excellentTasks || 0,
-            goodTasks: t.goodTasks || 0,
-            delayedTasks: t.delayedTasks || 0,
-            riskTasks: t.riskTasks || 0,
-            averageTimeUsedPercent: t.averageTimeUsedPercent ?? '',
-          }))
-        )
-      );
-      lines.push('');
-    }
+    lines.push('Team Earnings');
+    lines.push(
+      toCsv(
+        data.team.map((t) => ({
+          name: t.name,
+          role: t.role,
+          earningRoleLabel: t.earningRoleLabel || '',
+          earningSharePercent: t.earningSharePercent ?? '',
+          activeCases: t.activeCases,
+          tasksCompleted: t.tasksCompleted,
+          billableHours: t.billableHours,
+          grossFeesHandled: t.grossFeesHandled || 0,
+          earnedFees: t.earnedFees || 0,
+          firmRetainedEarnings: t.firmRetainedEarnings || 0,
+          earlyTasks: t.earlyTasks || 0,
+          onTimeTasks: t.onTimeTasks || 0,
+          lateTasks: t.lateTasks || 0,
+          overdueTasks: t.overdueTasks || 0,
+          excellentTasks: t.excellentTasks || 0,
+          goodTasks: t.goodTasks || 0,
+          delayedTasks: t.delayedTasks || 0,
+          riskTasks: t.riskTasks || 0,
+          averageTimeUsedPercent: t.averageTimeUsedPercent ?? '',
+        }))
+      )
+    );
+    lines.push('');
 
-    if (exportFilters.fees) {
-      lines.push('Practice Paths');
-      lines.push(
-        toCsv(
-          data.caseTypes.map((c) => ({
-            type: c.type,
-            active: c.active,
-            closed: c.closed,
-            avgDurationDays: c.avgDurationDays ?? '',
-            revenueBilled: c.revenueBilled,
-          }))
-        )
-      );
-      lines.push('');
-    }
+    lines.push('Practice Paths');
+    lines.push(
+      toCsv(
+        data.caseTypes.map((c) => ({
+          type: c.type,
+          active: c.active,
+          closed: c.closed,
+          avgDurationDays: c.avgDurationDays ?? '',
+          revenueBilled: c.revenueBilled,
+        }))
+      )
+    );
+    lines.push('');
 
-    if (exportFilters.payments) {
-      lines.push('Payments');
-      lines.push(toCsv(data.months.map((m) => ({ month: m.month, collected: m.collected, billed: m.billed }))));
-      lines.push('');
-    }
+    lines.push('Payments');
+    lines.push(toCsv(data.months.map((m) => ({ month: m.month, collected: m.collected, billed: m.billed }))));
+    lines.push('');
 
-    if (exportFilters.expenseType || exportFilters.clientExpenses) {
-      lines.push('Expenses');
-      lines.push(
-        toCsv(
-          (data.expenseTypes || []).map((e) => ({
-            expenseType: e.type,
-            count: e.count,
-            ...(exportFilters.expenseType ? { totalAmount: e.amount } : {}),
-            ...(exportFilters.clientExpenses ? { clientRelatedAmount: e.clientRelatedAmount } : {}),
-          }))
-        )
-      );
-    }
+    lines.push('Expenses');
+    lines.push(
+      toCsv(
+        (data.expenseTypes || []).map((e) => ({
+          expenseType: e.type,
+          count: e.count,
+          totalAmount: e.amount,
+          clientRelatedAmount: e.clientRelatedAmount,
+        }))
+      )
+    );
 
     const filename = `firm-reports_${data.range.from}_to_${data.range.to}.csv`;
     downloadTextFile(filename, lines.join('\n'));
@@ -223,31 +211,6 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               <option value="quarterly">Last Quarter</option>
               <option value="yearly">Last Year</option>
             </select>
-
-            <div className="rounded border border-gray-200 bg-white px-3 py-2">
-              <div className="mb-2 text-xs font-medium uppercase text-gray-500">Export filters</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1">
-                {[
-                  ['clientExpenses', 'Client-related expenses'],
-                  ['expenseType', 'Expense type'],
-                  ['fees', 'Fees'],
-                  ['payments', 'Payments'],
-                  ['outstanding', 'Outstanding balances'],
-                ].map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-2 text-xs text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(exportFilters[key as keyof typeof exportFilters])}
-                      onChange={(e) =>
-                        setExportFilters((current) => ({ ...current, [key]: e.target.checked }))
-                      }
-                      className="h-3.5 w-3.5 rounded border-gray-300 text-gray-800 focus:ring-gray-400"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
 
             <button
               onClick={exportCsv}
@@ -470,8 +433,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
                 {[
-                  ['Excellent', data.team.reduce((s, m) => s + (m.excellentTasks || 0), 0), 'bg-green-600'],
-                  ['Good', data.team.reduce((s, m) => s + (m.goodTasks || 0), 0), 'bg-yellow-500'],
+                  ['Excellent', data.team.reduce((s, m) => s + (m.excellentTasks || 0), 0), 'bg-blue-600'],
+                  ['Good', data.team.reduce((s, m) => s + (m.goodTasks || 0), 0), 'bg-green-600'],
                   ['Delayed', data.team.reduce((s, m) => s + (m.delayedTasks || 0), 0), 'bg-yellow-500'],
                   ['Risk', data.team.reduce((s, m) => s + (m.riskTasks || 0), 0), 'bg-red-600'],
                 ].map(([label, value, color]) => {
@@ -534,8 +497,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                       <td className="px-4 py-3 text-sm text-red-700">{member.overdueTasks || 0}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">
                         <div className="flex gap-1.5 flex-wrap">
-                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">{member.excellentTasks || 0}</span>
-                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">{member.goodTasks || 0}</span>
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">{member.excellentTasks || 0}</span>
+                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">{member.goodTasks || 0}</span>
                           <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">{member.delayedTasks || 0}</span>
                           <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{member.riskTasks || 0}</span>
                         </div>
