@@ -385,6 +385,14 @@ export default function CreateCase() {
     return true;
   };
 
+  const parseMoneyInput = (value: unknown) => {
+    const n = Number(String(value ?? '').replace(/[^\d.]/g, ''));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
+  const plannedValueAmount = parseMoneyInput(formData.workflowProgress?.plannedValue?.amount);
+  const plannedValueCurrency = formData.workflowProgress?.plannedValue?.currency || formData.billingSettings?.currency || 'RWF';
+
   const selectedWorkflowTemplate = useMemo(
     () => templates.find((t) => t._id === formData.workflowTemplateId),
     [formData.workflowTemplateId, templates]
@@ -462,14 +470,6 @@ export default function CreateCase() {
     if (typeof amount !== 'number' || Number.isNaN(amount)) return '—';
     return `${currency || 'RWF'} ${amount.toLocaleString()}`;
   };
-
-  const parseMoneyInput = (value: unknown) => {
-    const n = Number(String(value ?? '').replace(/[^\d.]/g, ''));
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  };
-
-  const plannedValueAmount = parseMoneyInput(formData.workflowProgress?.plannedValue?.amount);
-  const plannedValueCurrency = formData.workflowProgress?.plannedValue?.currency || formData.billingSettings?.currency || 'RWF';
 
   const formatFeeSpec = (fee: any) => {
     const currency = String(fee?.currency || 'RWF').toUpperCase();
