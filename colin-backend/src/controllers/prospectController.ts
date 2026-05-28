@@ -4,7 +4,7 @@ import Prospect from '../models/prospectModel';
 import Case from '../models/caseModel';
 import User from '../models/userModel';
 import { AuthRequest } from '../middleware/authMiddleware';
-import Counter from '../models/counterModel';
+import { buildYearlySequence } from '../utils/counter';
 
 const isAdminRole = (role?: string) =>
   role === 'managing_director' ||
@@ -24,6 +24,7 @@ const canManageProspects = (role?: string) =>
 const validStages = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Converted', 'Non-Converted'];
 
 const cleanString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const getRouteId = (value: unknown) => (typeof value === 'string' ? value : '');
 
 const getProspectPayload = (body: any, fallbackUserId?: string) => {
   const assignedTo = cleanString(body.assignedTo) || fallbackUserId || '';
@@ -71,16 +72,7 @@ const validateProspectPayload = async (payload: ReturnType<typeof getProspectPay
   return null;
 };
 
-// Generate unique prospect number
-const generateProspectNo = async (): Promise<string> => {
-  const counter = await Counter.findOneAndUpdate(
-    { _id: 'prospect' },
-    { $inc: { seq: 1 } },
-    { new: true, upsert: true }
-  );
-  const seq = String(counter.seq).padStart(5, '0');
-  return `PROS-${new Date().getFullYear()}-${seq}`;
-};
+const generateProspectNo = () => buildYearlySequence('prospect', 'PROS');
 
 export const getAllProspects = async (req: AuthRequest, res: Response) => {
   try {
@@ -113,7 +105,12 @@ export const getProspectById = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
-    const prospect = await Prospect.findById(req.params.id)
+    const prospectId = getRouteId(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(prospectId)) {
+      return res.status(400).json({ message: 'Invalid prospect ID.' });
+    }
+
+    const prospect = await Prospect.findById(prospectId)
       .populate('assignedTo', 'name email')
       .populate('createdBy', 'name email')
       .populate('convertedToMatters', 'caseNo');
@@ -177,7 +174,12 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'You do not have permission to update prospects.' });
     }
 
-    const prospect = await Prospect.findById(req.params.id);
+    const prospectId = getRouteId(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(prospectId)) {
+      return res.status(400).json({ message: 'Invalid prospect ID.' });
+    }
+
+    const prospect = await Prospect.findById(prospectId);
     if (!prospect) {
       return res.status(404).json({ message: 'Prospect not found.' });
     }
@@ -218,7 +220,12 @@ export const deleteProspect = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
-    const prospect = await Prospect.findByIdAndDelete(req.params.id);
+    const prospectId = getRouteId(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(prospectId)) {
+      return res.status(400).json({ message: 'Invalid prospect ID.' });
+    }
+
+    const prospect = await Prospect.findByIdAndDelete(prospectId);
     if (!prospect) {
       return res.status(404).json({ message: 'Prospect not found.' });
     }
@@ -284,7 +291,12 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
-    const prospect = await Prospect.findById(req.params.id);
+    const prospectId = getRouteId(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(prospectId)) {
+      return res.status(400).json({ message: 'Invalid prospect ID.' });
+    }
+
+    const prospect = await Prospect.findById(prospectId);
     if (!prospect) {
       return res.status(404).json({ message: 'Prospect not found.' });
     }
@@ -344,12 +356,4 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
 };
 
 // Helper function to generate case number
-const generateCaseNo = async (): Promise<string> => {
-  const counter = await Counter.findOneAndUpdate(
-    { _id: 'case' },
-    { $inc: { seq: 1 } },
-    { new: true, upsert: true }
-  );
-  const seq = String(counter.seq).padStart(5, '0');
-  return `CASE-${new Date().getFullYear()}-${seq}`;
-};
+const generateCaseNo = () => buildYearlySequence('case', 'CASE');

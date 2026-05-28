@@ -13,14 +13,9 @@ export type WorkflowTemplate = {
     key: string;
     name: string;
     order: number;
-    fee?: {
-      amount: number;
-      currency: string;
-    };
-    sla?: {
-      days: number;
-      hours?: number;
-    };
+    title?: string;
+    fee?: WorkflowFeeSpec;
+    sla?: WorkflowSlaSpec;
     steps?: string[];
   }>;
   steps: Array<{
@@ -31,14 +26,8 @@ export type WorkflowTemplate = {
     order: number;
     description?: string;
     actions?: string[];
-    fee?: {
-      amount: number;
-      currency: string;
-    };
-    sla?: {
-      days: number;
-      hours?: number;
-    };
+    fee?: WorkflowFeeSpec;
+    sla?: WorkflowSlaSpec;
     outputs?: Array<{
       key: string;
       name: string;
@@ -46,6 +35,25 @@ export type WorkflowTemplate = {
       category?: string;
     }>;
   }>;
+};
+
+export type WorkflowFeeSpec = {
+  type?: 'fixed' | 'range' | 'percentage' | 'text' | 'included';
+  amount?: number;
+  currency?: string;
+  min?: number;
+  max?: number;
+  percentage?: number;
+  text?: string;
+};
+
+export type WorkflowSlaSpec = {
+  days?: number;
+  hours?: number;
+  unit?: 'hours' | 'days' | 'weeks';
+  min?: number;
+  max?: number;
+  text?: string;
 };
 
 export const listActiveWorkflowTemplates = async (): Promise<WorkflowTemplate[]> => {

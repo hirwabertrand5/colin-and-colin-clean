@@ -12,11 +12,30 @@ type StaffUser = {
   role: string;
 };
 
-const API_URL = import.meta.env.VITE_BACKEND_API_URL || 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const getToken = () => localStorage.getItem('token');
 
 const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
 const CREATE_CASE_DRAFT_KEY = 'createCaseDraft:v1';
+
+type PreviewWorkflowStep = {
+  key: string;
+  title: string;
+  stageLabel: string;
+  responsibleRole?: string;
+  feeAmount?: number;
+  feeCurrency: string;
+  feeText?: string;
+  feeRangeMin?: number;
+  feeRangeMax?: number;
+  feeLabel: string;
+  slaLabel: string;
+  dueAt: Date;
+  stepIndex: number;
+  actions: string[];
+};
+
+type MatterTiming = 'new' | 'historical';
 
 export default function CreateCase() {
   const navigate = useNavigate();
@@ -29,6 +48,7 @@ export default function CreateCase() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [draftNotice, setDraftNotice] = useState<string>('');
+  const [matterTiming, setMatterTiming] = useState<MatterTiming>('new');
 
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
@@ -48,6 +68,8 @@ export default function CreateCase() {
     workflow: '',
     estimatedDuration: '',
     budget: '',
+    matterTiming: 'new',
+    workflowAutomation: true,
     workflowTemplateId: '',
     workflowStartDate: new Date().toISOString().slice(0, 10),
 
@@ -58,6 +80,12 @@ export default function CreateCase() {
       prepaidRemaining: 0,
       accruedUnbilled: 0,
     },
+    workflowProgress: {
+      plannedValue: { amount: undefined, currency: 'RWF' },
+      percent: 0,
+      completedValue: { amount: 0, currency: 'RWF' },
+    },
+    initialWorkflowActions: {},
   });
 
   const statuses = [
@@ -81,6 +109,9 @@ export default function CreateCase() {
       if (parsed?.formData) setFormData((prev) => ({ ...prev, ...parsed.formData }));
       if (Array.isArray(parsed?.servicePath)) setServicePath(parsed.servicePath);
       if (typeof parsed?.step === 'number') setStep(parsed.step);
+      if (parsed?.matterTiming === 'historical' || parsed?.formData?.matterTiming === 'historical') {
+        setMatterTiming('historical');
+      }
       setDraftNotice('Loaded your saved draft.');
       setTimeout(() => setDraftNotice(''), 2500);
     } catch {
@@ -95,8 +126,9 @@ export default function CreateCase() {
         CREATE_CASE_DRAFT_KEY,
         JSON.stringify({
           step,
+          matterTiming,
           servicePath,
-          formData,
+          formData: { ...formData, matterTiming, workflowAutomation: matterTiming === 'new' },
           savedAt: new Date().toISOString(),
         })
       );
@@ -159,6 +191,31 @@ export default function CreateCase() {
 
   const handleInputChange = (field: string, value: any) => {
     setFormData({ ...formData, [field]: value });
+  };
+
+  const selectMatterTiming = (nextTiming: MatterTiming) => {
+    setMatterTiming(nextTiming);
+    setTemplateManuallySelected(false);
+    setFormData((prev) => ({
+      ...prev,
+      matterTiming: nextTiming,
+      workflowAutomation: nextTiming === 'new',
+      ...(nextTiming === 'historical'
+        ? {
+            workflowTemplateId: '',
+            initialWorkflowActions: {},
+            workflowProgress: {
+              ...(prev.workflowProgress || {}),
+              status: 'Not Started',
+              percent: 0,
+              completedValue: {
+                amount: 0,
+                currency: prev.workflowProgress?.plannedValue?.currency || prev.billingSettings?.currency || 'RWF',
+              },
+            },
+          }
+        : {}),
+    }));
   };
 
   // -------------------------
@@ -280,11 +337,34 @@ export default function CreateCase() {
       if (!formData.caseType) {
         throw new Error('Missing case type. Please complete Legal Service classification.');
       }
-      if (!formData.workflowTemplateId) {
+      if (matterTiming === 'new' && !formData.workflowTemplateId) {
         throw new Error('Missing workflow template. Please select a workflow template.');
       }
+      if (matterTiming === 'new' && plannedValueAmount <= 0) {
+        throw new Error('Enter the negotiated planned value before creating the case.');
+      }
 
-      await createCase(formData);
+      await createCase({
+        ...formData,
+        matterTiming,
+        workflowAutomation: matterTiming === 'new',
+        workflowTemplateId: matterTiming === 'new' ? formData.workflowTemplateId : '',
+        initialWorkflowActions: matterTiming === 'new' ? formData.initialWorkflowActions : {},
+        budget: plannedValueAmount > 0 ? String(plannedValueAmount) : formData.budget,
+        workflowProgress: {
+          ...(formData.workflowProgress || {}),
+          percent: matterTiming === 'new' ? actionProgressPercent : 0,
+          plannedValue: { amount: plannedValueAmount, currency: plannedValueCurrency },
+          completedValue: { amount: matterTiming === 'new' ? previewEarnedValue : 0, currency: plannedValueCurrency },
+        },
+        billingSettings: {
+          paymentMode: 'postpaid',
+          currency: plannedValueCurrency,
+          prepaidTotal: 0,
+          prepaidRemaining: 0,
+          accruedUnbilled: matterTiming === 'new' ? previewEarnedValue : 0,
+        },
+      });
       setSuccess('Case created successfully!');
       setTimeout(() => navigate('/cases'), 1000);
     } catch (err: any) {
@@ -299,7 +379,8 @@ export default function CreateCase() {
       return Boolean(formData.caseNo && formData.parties && formData.assignedTo && isServiceSelectionValid());
     }
     if (step === 2) {
-      return Boolean(formData.workflowTemplateId && formData.workflowStartDate);
+      if (matterTiming === 'historical') return true;
+      return Boolean(formData.workflowTemplateId && formData.workflowStartDate && plannedValueAmount > 0);
     }
     return true;
   };
@@ -309,8 +390,28 @@ export default function CreateCase() {
     [formData.workflowTemplateId, templates]
   );
 
+  useEffect(() => {
+    const currency = plannedValueCurrency || 'RWF';
+    setFormData((prev) => ({
+      ...prev,
+      billingSettings: {
+        ...(prev.billingSettings || {}),
+        paymentMode: 'postpaid',
+        currency,
+        prepaidTotal: 0,
+        prepaidRemaining: 0,
+        accruedUnbilled: Math.round((parseMoneyInput(prev.workflowProgress?.plannedValue?.amount) * (prev.workflowProgress?.percent || 0)) / 100),
+      },
+      budget: prev.workflowProgress?.plannedValue?.amount
+        ? String(prev.workflowProgress.plannedValue.amount)
+        : prev.budget,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plannedValueCurrency]);
+
   // Auto-select a workflow template when the service-line decision tree suggests a matter type.
   useEffect(() => {
+    if (matterTiming === 'historical') return;
     if (templatesLoading) return;
     if (templateManuallySelected) return;
 
@@ -328,7 +429,7 @@ export default function CreateCase() {
       workflow: match.matterType,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServiceNodes, templates, templatesLoading, templateManuallySelected]);
+  }, [selectedServiceNodes, templates, templatesLoading, templateManuallySelected, matterTiming]);
 
   const toMinutesFromSla = (sla: any): number => {
     if (!sla) return 0;
@@ -362,6 +463,27 @@ export default function CreateCase() {
     return `${currency || 'RWF'} ${amount.toLocaleString()}`;
   };
 
+  const parseMoneyInput = (value: unknown) => {
+    const n = Number(String(value ?? '').replace(/[^\d.]/g, ''));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
+  const plannedValueAmount = parseMoneyInput(formData.workflowProgress?.plannedValue?.amount);
+  const plannedValueCurrency = formData.workflowProgress?.plannedValue?.currency || formData.billingSettings?.currency || 'RWF';
+
+  const formatFeeSpec = (fee: any) => {
+    const currency = String(fee?.currency || 'RWF').toUpperCase();
+    const min = typeof fee?.min === 'number' ? fee.min : typeof fee?.amount === 'number' ? fee.amount : undefined;
+    const max = typeof fee?.max === 'number' ? fee.max : undefined;
+    if (fee?.type === 'range' && typeof min === 'number' && typeof max === 'number') {
+      return `${currency} ${min.toLocaleString()} - ${max.toLocaleString()}`;
+    }
+    if (typeof min === 'number') return formatCurrency(min, currency);
+    if (fee?.type === 'percentage' && typeof fee?.percentage === 'number') return `${fee.percentage}%`;
+    if (fee?.type === 'included') return fee?.text || 'Included';
+    return fee?.text || 'No fee set';
+  };
+
   const formatRelativeDue = (date?: Date) => {
     if (!date) return 'TBD';
     const now = new Date();
@@ -380,15 +502,15 @@ export default function CreateCase() {
     return 'bg-green-100 text-green-700';
   };
 
-  const selectedWorkflowSteps = useMemo(() => {
+  const selectedWorkflowSteps = useMemo<PreviewWorkflowStep[]>(() => {
     if (!selectedWorkflowTemplate || !formData.workflowStartDate) return [];
 
-    const stages: Array<{ key: string; title: string }> = Array.isArray(
+    const stages: Array<{ key: string; title?: string; name?: string }> = Array.isArray(
       (selectedWorkflowTemplate as any).stages
     )
       ? (selectedWorkflowTemplate as any).stages
       : [];
-    const stageTitleByKey = new Map(stages.map((s) => [s.key, s.title]));
+    const stageTitleByKey = new Map(stages.map((s) => [s.key, s.title || s.name || s.key]));
 
     const steps = Array.isArray((selectedWorkflowTemplate as any).steps)
       ? [...(selectedWorkflowTemplate as any).steps].sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
@@ -403,23 +525,34 @@ export default function CreateCase() {
       const dueAt = new Date(stepStart.getTime() + minutes * 60_000);
       cursor = new Date(dueAt);
 
-      const feeAmount = typeof s?.fee?.min === 'number' ? s.fee.min : undefined;
+      const feeAmount =
+        typeof s?.fee?.amount === 'number'
+          ? s.fee.amount
+          : typeof s?.fee?.min === 'number'
+            ? s.fee.min
+            : undefined;
       const feeCurrency = s?.fee?.currency || 'RWF';
       const slaLabel = typeof s?.sla?.max === 'number' && s?.sla?.unit ? `${s.sla.max} ${s.sla.unit}` : s?.sla?.text || '—';
+      const actions = Array.isArray(s?.actions) ? s.actions.map((a: any) => String(a || '').trim()).filter(Boolean) : [];
 
       return {
         key: s.key,
         title: s.title,
         stageLabel: stageTitleByKey.get(s.stageKey) || s.stageKey || 'Stage',
         responsibleRole: s.responsibleRole,
-        feeAmount: feeAmount,
+        feeAmount,
         feeCurrency,
         feeText: typeof s?.fee?.text === 'string' ? s.fee.text : undefined,
+        feeRangeMin: typeof s?.fee?.min === 'number' ? s.fee.min : undefined,
+        feeRangeMax: typeof s?.fee?.max === 'number' ? s.fee.max : undefined,
+        feeLabel: formatFeeSpec(s?.fee),
         slaLabel,
         dueAt,
         stepIndex: index + 1,
+        actions,
       };
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedWorkflowTemplate, formData.workflowStartDate]);
 
   const workflowSummary = useMemo(() => {
@@ -449,6 +582,100 @@ export default function CreateCase() {
     });
     return Array.from(groups.entries());
   }, [selectedWorkflowSteps]);
+
+  const orderedActionRefs = useMemo(
+    () =>
+      selectedWorkflowSteps.flatMap((workflowStep) =>
+        workflowStep.actions.map((text, actionIndex) => ({
+          stepKey: workflowStep.key,
+          actionIndex,
+          text,
+        }))
+      ),
+    [selectedWorkflowSteps]
+  );
+
+  const isInitialActionChecked = (stepKey: string, actionIndex: number) =>
+    Boolean(formData.initialWorkflowActions?.[stepKey]?.includes(actionIndex));
+
+  const checkedActionCount = orderedActionRefs.filter((action) =>
+    isInitialActionChecked(action.stepKey, action.actionIndex)
+  ).length;
+  const actionProgressPercent =
+    orderedActionRefs.length > 0 ? Math.round((checkedActionCount / orderedActionRefs.length) * 100) : 0;
+  const previewEarnedValue = Math.round((plannedValueAmount * actionProgressPercent) / 100);
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const allowed = new Map<string, Set<number>>();
+      orderedActionRefs.forEach((action) => {
+        if (!allowed.has(action.stepKey)) allowed.set(action.stepKey, new Set());
+        allowed.get(action.stepKey)?.add(action.actionIndex);
+      });
+      const cleaned: Record<string, number[]> = {};
+      Object.entries(prev.initialWorkflowActions || {}).forEach(([stepKey, indexes]) => {
+        const valid = (indexes || []).filter((idx) => allowed.get(stepKey)?.has(idx));
+        if (valid.length) cleaned[stepKey] = valid;
+      });
+      return { ...prev, initialWorkflowActions: cleaned };
+    });
+  }, [orderedActionRefs]);
+
+  const canCheckInitialAction = (stepKey: string, actionIndex: number) => {
+    const flatIndex = orderedActionRefs.findIndex(
+      (action) => action.stepKey === stepKey && action.actionIndex === actionIndex
+    );
+    if (flatIndex <= 0) return true;
+    return orderedActionRefs
+      .slice(0, flatIndex)
+      .every((action) => isInitialActionChecked(action.stepKey, action.actionIndex));
+  };
+
+  const toggleInitialAction = (stepKey: string, actionIndex: number) => {
+    const isChecked = isInitialActionChecked(stepKey, actionIndex);
+    if (!isChecked && !canCheckInitialAction(stepKey, actionIndex)) return;
+
+    setFormData((prev) => {
+      const current = prev.initialWorkflowActions || {};
+      const next: Record<string, number[]> = Object.fromEntries(
+        Object.entries(current).map(([key, indexes]) => [key, [...(indexes || [])]])
+      );
+
+      if (isChecked) {
+        const flatIndex = orderedActionRefs.findIndex(
+          (action) => action.stepKey === stepKey && action.actionIndex === actionIndex
+        );
+        for (const ref of orderedActionRefs.slice(flatIndex)) {
+          next[ref.stepKey] = (next[ref.stepKey] || []).filter((idx) => idx !== ref.actionIndex);
+          if (next[ref.stepKey].length === 0) delete next[ref.stepKey];
+        }
+      } else {
+        next[stepKey] = Array.from(new Set([...(next[stepKey] || []), actionIndex])).sort((a, b) => a - b);
+      }
+
+      const percent =
+        orderedActionRefs.length > 0
+          ? Math.round(
+              (orderedActionRefs.filter((action) => next[action.stepKey]?.includes(action.actionIndex)).length /
+                orderedActionRefs.length) *
+                100
+            )
+          : 0;
+
+      return {
+        ...prev,
+        initialWorkflowActions: next,
+        workflowProgress: {
+          ...(prev.workflowProgress || {}),
+          percent,
+          completedValue: {
+            amount: Math.round((parseMoneyInput(prev.workflowProgress?.plannedValue?.amount) * percent) / 100),
+            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+          },
+        },
+      };
+    });
+  };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -488,7 +715,7 @@ export default function CreateCase() {
                 <div className="ml-3">
                   <p className="text-sm font-medium text-gray-900">
                     {stepNumber === 1 && 'Case Basics'}
-                    {stepNumber === 2 && 'Workflow Setup'}
+                    {stepNumber === 2 && (matterTiming === 'historical' ? 'Record Setup' : 'Workflow Setup')}
                     {stepNumber === 3 && 'Review & Confirm'}
                   </p>
                 </div>
@@ -517,6 +744,40 @@ export default function CreateCase() {
         {/* Step 1: Case Basics */}
         {step === 1 && (
           <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Matter setup *</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => selectMatterTiming('new')}
+                  className={`text-left rounded-lg border p-4 transition ${
+                    matterTiming === 'new'
+                      ? 'border-gray-900 bg-gray-50 ring-2 ring-gray-900/10'
+                      : 'border-gray-200 bg-white hover:border-gray-400'
+                  }`}
+                >
+                  <div className="text-sm font-semibold text-gray-900">New active matter</div>
+                  <div className="mt-1 text-sm text-gray-600">
+                    Start from a workflow template and generate live deadlines, progress, and earned-fee tracking.
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectMatterTiming('historical')}
+                  className={`text-left rounded-lg border p-4 transition ${
+                    matterTiming === 'historical'
+                      ? 'border-gray-900 bg-gray-50 ring-2 ring-gray-900/10'
+                      : 'border-gray-200 bg-white hover:border-gray-400'
+                  }`}
+                >
+                  <div className="text-sm font-semibold text-gray-900">Historical matter</div>
+                  <div className="mt-1 text-sm text-gray-600">
+                    Add an older case to the system without creating workflow tasks or deadline automation.
+                  </div>
+                </button>
+              </div>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Case No. *</label>
               <input
@@ -621,12 +882,12 @@ export default function CreateCase() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Case Description</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Case Summary</label>
               <textarea
                 value={formData.description}
                 onChange={(e) => handleInputChange('description', e.target.value)}
                 rows={4}
-                placeholder="Brief description of the case..."
+                placeholder="Brief summary of the case..."
                 className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
               />
             </div>
@@ -634,7 +895,90 @@ export default function CreateCase() {
         )}
 
         {/* Step 2: Workflow Setup */}
-        {step === 2 && (
+        {step === 2 && matterTiming === 'historical' && (
+          <div className="space-y-6">
+            <div className="rounded-lg border border-gray-200 bg-white p-5">
+              <div className="text-sm font-semibold text-gray-900">Historical matter record</div>
+              <p className="mt-2 text-sm text-gray-600">
+                This matter will be saved for firm visibility without creating workflow tasks, deadline countdowns, or automated progress tracking.
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Original Start Date</label>
+                  <input
+                    type="date"
+                    value={formData.workflowStartDate || ''}
+                    onChange={(e) => handleInputChange('workflowStartDate', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Matter Value</label>
+                  <input
+                    value={formData.workflowProgress?.plannedValue?.amount ?? ''}
+                    onChange={(e) => {
+                      const amount = parseMoneyInput(e.target.value);
+                      setFormData((prev) => ({
+                        ...prev,
+                        budget: amount ? String(amount) : '',
+                        workflowProgress: {
+                          ...(prev.workflowProgress || {}),
+                          percent: 0,
+                          plannedValue: {
+                            amount: amount || undefined,
+                            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+                          },
+                          completedValue: {
+                            amount: 0,
+                            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+                          },
+                        },
+                      }));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    placeholder="Optional"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency</label>
+                  <input
+                    value={plannedValueCurrency}
+                    onChange={(e) => {
+                      const currency = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'RWF';
+                      setFormData((prev) => ({
+                        ...prev,
+                        workflowProgress: {
+                          ...(prev.workflowProgress || {}),
+                          plannedValue: {
+                            ...(prev.workflowProgress?.plannedValue || {}),
+                            currency,
+                          },
+                          completedValue: { amount: 0, currency },
+                        },
+                        billingSettings: {
+                          ...(prev.billingSettings || {}),
+                          paymentMode: 'postpaid',
+                          currency,
+                          prepaidTotal: 0,
+                          prepaidRemaining: 0,
+                          accruedUnbilled: 0,
+                        },
+                      }));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    placeholder="RWF"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && matterTiming === 'new' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -666,6 +1010,81 @@ export default function CreateCase() {
               </div>
             </div>
 
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Negotiated Planned Value *</label>
+                  <input
+                    value={formData.workflowProgress?.plannedValue?.amount ?? ''}
+                    onChange={(e) => {
+                      const amount = parseMoneyInput(e.target.value);
+                      setFormData((prev) => ({
+                        ...prev,
+                        budget: amount ? String(amount) : '',
+                        workflowProgress: {
+                          ...(prev.workflowProgress || {}),
+                          plannedValue: {
+                            amount: amount || undefined,
+                            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+                          },
+                          completedValue: {
+                            amount: Math.round((amount * (prev.workflowProgress?.percent || 0)) / 100),
+                            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+                          },
+                        },
+                        billingSettings: {
+                          ...(prev.billingSettings || {}),
+                          paymentMode: 'postpaid',
+                          currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+                          prepaidTotal: 0,
+                          prepaidRemaining: 0,
+                          accruedUnbilled: Math.round((amount * (prev.workflowProgress?.percent || 0)) / 100),
+                        },
+                      }));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    placeholder="e.g., 790000"
+                    inputMode="numeric"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    This is the negotiated case value. Earned fees are calculated from checked key actions.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency</label>
+                  <input
+                    value={plannedValueCurrency}
+                    onChange={(e) => {
+                      const currency = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'RWF';
+                      setFormData((prev) => ({
+                        ...prev,
+                        workflowProgress: {
+                          ...(prev.workflowProgress || {}),
+                          plannedValue: {
+                            ...(prev.workflowProgress?.plannedValue || {}),
+                            currency,
+                          },
+                          completedValue: {
+                            amount: prev.workflowProgress?.completedValue?.amount || 0,
+                            currency,
+                          },
+                        },
+                        billingSettings: {
+                          ...(prev.billingSettings || {}),
+                          paymentMode: 'postpaid',
+                          currency,
+                          prepaidTotal: 0,
+                          prepaidRemaining: 0,
+                        },
+                      }));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    placeholder="RWF"
+                  />
+                </div>
+              </div>
+            </div>
+
             {selectedWorkflowTemplate ? (
               <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
@@ -691,7 +1110,21 @@ export default function CreateCase() {
                     <div className="rounded-lg border border-gray-200 bg-white p-3">
                       <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Planned value</div>
                       <div className="mt-2 text-sm font-semibold text-gray-900">
-                        {workflowSummary ? formatCurrency(workflowSummary.totalFee, workflowSummary.currency) : 'RWF 0'}
+                        {plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Enter value'}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3 sm:col-span-3">
+                      <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                        <span>Key action progress</span>
+                        <span>
+                          {checkedActionCount}/{orderedActionRefs.length} actions • {actionProgressPercent}%
+                        </span>
+                      </div>
+                      <div className="mt-2 h-2 rounded-full bg-gray-200">
+                        <div className="h-2 rounded-full bg-gray-900" style={{ width: `${actionProgressPercent}%` }} />
+                      </div>
+                      <div className="mt-2 text-xs text-gray-600">
+                        Earned preview: <span className="font-semibold text-gray-900">{formatCurrency(previewEarnedValue, plannedValueCurrency)}</span>
                       </div>
                     </div>
                   </div>
@@ -717,16 +1150,46 @@ export default function CreateCase() {
                                   <div className="mt-2 text-sm text-gray-600">
                                     {step.slaLabel ? `Expected duration: ${step.slaLabel}` : 'Duration not defined'}
                                   </div>
+                                  {step.actions.length > 0 ? (
+                                    <div className="mt-4 space-y-2">
+                                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Key actions</div>
+                                      {step.actions.map((action, actionIndex) => {
+                                        const checked = isInitialActionChecked(step.key, actionIndex);
+                                        const canCheck = canCheckInitialAction(step.key, actionIndex);
+                                        return (
+                                          <label key={`${step.key}-${actionIndex}`} className="flex items-start gap-3 text-sm">
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleInitialAction(step.key, actionIndex)}
+                                              disabled={!checked && !canCheck}
+                                              className={`mt-0.5 h-5 w-5 rounded border flex items-center justify-center ${
+                                                checked ? 'border-green-600 bg-green-600' : 'border-gray-300 bg-white'
+                                              } disabled:cursor-not-allowed disabled:opacity-50`}
+                                              title={!checked && !canCheck ? 'Check the previous key action first' : 'Toggle key action'}
+                                            >
+                                              {checked ? <Check className="h-3.5 w-3.5 text-white" /> : null}
+                                            </button>
+                                            <span className={checked ? 'text-gray-500 line-through' : 'text-gray-700'}>{action}</span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <div className="mt-4 text-xs text-gray-500">No key actions configured for this step.</div>
+                                  )}
                                 </div>
 
-                                <div className="flex flex-col items-start gap-2 text-right">
+                                <div className="flex min-w-[180px] flex-col items-start gap-2 text-left md:items-end md:text-right">
                                   <span className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getUrgencyStyle(step.dueAt)}`}>
                                     {formatRelativeDue(step.dueAt)}
                                   </span>
                                   <div className="text-xs text-gray-500">Due {step.dueAt.toLocaleDateString()}</div>
                                   <div className="text-sm font-semibold text-gray-900">
-                                    {step.feeAmount ? formatCurrency(step.feeAmount, step.feeCurrency) : step.feeText || 'No fee set'}
+                                    {step.feeLabel}
                                   </div>
+                                  {typeof step.feeRangeMin === 'number' && typeof step.feeRangeMax === 'number' ? (
+                                    <div className="text-xs text-gray-500">Template range</div>
+                                  ) : null}
                                 </div>
                               </div>
                             </div>
@@ -742,88 +1205,7 @@ export default function CreateCase() {
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="text-sm font-semibold text-gray-900 mb-3">Workflow settings</div>
               <div className="text-sm text-gray-600">
-                A workflow template will automatically generate deadlines, task handovers, and billing value for this case. You only need to select the start date and template.
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-gray-200 bg-white p-4">
-              <div className="text-sm font-semibold text-gray-900 mb-3">Billing setup</div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Payment mode</label>
-                  <select
-                    value={formData.billingSettings?.paymentMode || 'postpaid'}
-                    onChange={(e) => {
-                      const paymentMode = e.target.value === 'prepaid' ? 'prepaid' : 'postpaid';
-                      setFormData((prev) => {
-                        const currency = prev.billingSettings?.currency || 'RWF';
-                        const prepaidTotal = Number(prev.billingSettings?.prepaidTotal) || 0;
-                        return {
-                          ...prev,
-                          billingSettings: {
-                            ...(prev.billingSettings || {}),
-                            paymentMode,
-                            currency,
-                            prepaidTotal: paymentMode === 'prepaid' ? prepaidTotal : 0,
-                            prepaidRemaining: paymentMode === 'prepaid' ? prepaidTotal : 0,
-                            accruedUnbilled: 0,
-                          },
-                        };
-                      });
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900"
-                  >
-                    <option value="postpaid">Client pays later (postpaid)</option>
-                    <option value="prepaid">Client pays first (prepaid)</option>
-                  </select>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Prepaid will decrement as checklist items are completed. Postpaid will accrue unbilled fees.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Currency</label>
-                  <input
-                    value={formData.billingSettings?.currency || 'RWF'}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        billingSettings: {
-                          ...(prev.billingSettings || {}),
-                          currency: e.target.value.toUpperCase(),
-                        },
-                      }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900"
-                    placeholder="RWF"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Prepaid amount</label>
-                  <input
-                    value={String(formData.billingSettings?.prepaidTotal ?? '')}
-                    onChange={(e) => {
-                      const value = Number(String(e.target.value).replace(/[^\d.]/g, ''));
-                      setFormData((prev) => {
-                        const paymentMode = prev.billingSettings?.paymentMode || 'postpaid';
-                        const prepaidTotal = Number.isFinite(value) && value > 0 ? value : 0;
-                        return {
-                          ...prev,
-                          billingSettings: {
-                            ...(prev.billingSettings || {}),
-                            prepaidTotal,
-                            prepaidRemaining: paymentMode === 'prepaid' ? prepaidTotal : 0,
-                          },
-                        };
-                      });
-                    }}
-                    disabled={(formData.billingSettings?.paymentMode || 'postpaid') !== 'prepaid'}
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 disabled:opacity-60"
-                    placeholder="0"
-                  />
-                  <p className="text-xs text-gray-500 mt-2">Only used for prepaid clients.</p>
-                </div>
+                A workflow template automatically generates deadlines, step fees or ranges, and key actions. Billing uses only the negotiated planned value and the percentage of checked key actions.
               </div>
             </div>
           </div>
@@ -838,21 +1220,25 @@ export default function CreateCase() {
                 {[
                   ['Case No.', formData.caseNo],
                   ['Parties', formData.parties],
+                  ['Matter setup', matterTiming === 'historical' ? 'Historical matter, no automation' : 'New active matter with workflow automation'],
                   ['Legal Service Path', formData.legalServicePath?.map((item) => item.label).join(' -> ') || 'Not selected'],
                   ['Case Type (computed)', formData.caseType],
                   ['Assigned To', formData.assignedTo],
-                  ['Workflow Template', selectedWorkflowTemplate?.name || selectedWorkflowTemplate?.matterType || 'Not selected'],
-                  ['Workflow Start Date', formData.workflowStartDate || 'Not set'],
-                  ['Next expected deadline', workflowSummary?.nextDueAt ? workflowSummary.nextDueAt.toLocaleDateString() : 'TBD'],
-                  ['Estimated completion', workflowSummary?.completionDate ? workflowSummary.completionDate.toLocaleDateString() : 'TBD'],
-                  ['Planned workflow value', workflowSummary ? formatCurrency(workflowSummary.totalFee, workflowSummary.currency) : 'RWF 0'],
-                  ['Payment mode', formData.billingSettings?.paymentMode === 'prepaid' ? 'Prepaid' : 'Postpaid'],
-                  [
-                    'Prepaid amount',
-                    formData.billingSettings?.paymentMode === 'prepaid'
-                      ? formatCurrency(Number(formData.billingSettings?.prepaidTotal) || 0, formData.billingSettings?.currency || 'RWF')
-                      : '—',
-                  ],
+                  ...(matterTiming === 'new'
+                    ? [
+                        ['Workflow Template', selectedWorkflowTemplate?.name || selectedWorkflowTemplate?.matterType || 'Not selected'],
+                        ['Workflow Start Date', formData.workflowStartDate || 'Not set'],
+                        ['Next expected deadline', workflowSummary?.nextDueAt ? workflowSummary.nextDueAt.toLocaleDateString() : 'TBD'],
+                        ['Estimated completion', workflowSummary?.completionDate ? workflowSummary.completionDate.toLocaleDateString() : 'TBD'],
+                      ]
+                    : [['Original Start Date', formData.workflowStartDate || 'Not set']]),
+                  ['Negotiated planned value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
+                  ...(matterTiming === 'new'
+                    ? [
+                        ['Key action progress', `${checkedActionCount}/${orderedActionRefs.length} actions checked (${actionProgressPercent}%)`],
+                        ['Earned fees preview', formatCurrency(previewEarnedValue, plannedValueCurrency)],
+                      ]
+                    : []),
                 ].map(([k, v]) => (
                   <div key={k} className="grid grid-cols-3 gap-4 py-3 border-b border-gray-200">
                     <span className="text-sm text-gray-600">{k}:</span>
@@ -862,7 +1248,7 @@ export default function CreateCase() {
 
                 {formData.description && (
                   <div className="py-3">
-                    <span className="text-sm text-gray-600 block mb-2">Description:</span>
+                    <span className="text-sm text-gray-600 block mb-2">Case Summary:</span>
                     <p className="text-sm text-gray-900">{formData.description}</p>
                   </div>
                 )}

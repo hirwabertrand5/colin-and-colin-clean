@@ -121,13 +121,13 @@ function App() {
                   <Route path="/cases" element={<CaseList userRole={user.role} />} />
                   <Route path="/matters" element={<CaseList userRole={user.role} />} />
                   <Route path="/matters/intake-prospects" element={<IntakeProspects />} />
-                  <Route path="/cases/:id/*" element={<CaseWorkspace userRole={user.role} />} />
-                  <Route path="/matters/:id/*" element={<CaseWorkspace userRole={user.role} />} />
 
                   {(isMD || isExec) && <Route path="/cases/new" element={<CreateCase />} />}
                   {(isMD || isExec) && <Route path="/matters/new" element={<CreateCase />} />}
                   {isAssocLike && <Route path="/cases/new" element={<Navigate to="/cases" replace />} />}
                   {isAssocLike && <Route path="/matters/new" element={<Navigate to="/matters" replace />} />}
+                  <Route path="/cases/:id/*" element={<CaseWorkspace userRole={user.role} />} />
+                  <Route path="/matters/:id/*" element={<CaseWorkspace userRole={user.role} />} />
 
                   {/* Tasks */}
                   <Route path="/tasks" element={<TaskBoard userRole={user.role} />} />

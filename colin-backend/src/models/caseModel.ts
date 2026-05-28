@@ -36,6 +36,8 @@ export interface ICase extends Document {
   workflow?: string;
   estimatedDuration?: string;
   budget?: string;
+  matterTiming?: 'new' | 'historical';
+  workflowAutomation?: boolean;
 
   // ✅ SOP workflow linkage
   matterType?: string;
@@ -122,6 +124,13 @@ const CaseSchema = new Schema<ICase>(
     workflow: { type: String },
     estimatedDuration: { type: String },
     budget: { type: String },
+    matterTiming: {
+      type: String,
+      enum: ['new', 'historical'],
+      default: 'new',
+      index: true,
+    },
+    workflowAutomation: { type: Boolean, default: true, index: true },
 
     // ✅ SOP linkage
     matterType: { type: String, trim: true },

@@ -22,6 +22,17 @@ type Props = {
   onWorkflowChanged?: () => void | Promise<void>;
 };
 
+const formatWorkflowStepFee = (step: WorkflowInstance['steps'][number]) => {
+  const currency = step.feeCurrency || 'RWF';
+  if (typeof step.feeRangeMin === 'number' && typeof step.feeRangeMax === 'number') {
+    return `${currency} ${Math.round(step.feeRangeMin).toLocaleString()} - ${Math.round(step.feeRangeMax).toLocaleString()}`;
+  }
+  if (typeof step.feeAmount === 'number') {
+    return `${currency} ${Math.round(step.feeAmount).toLocaleString()}`;
+  }
+  return step.feeText || 'No fee set';
+};
+
 export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, onWorkflowChanged }: Props) {
   void canUpload;
   const [wf, setWf] = useState<WorkflowInstance | null>(null);
@@ -253,11 +264,9 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                 {s.dueAt ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Due {new Date(s.dueAt).toLocaleDateString()}</span>
                 ) : null}
-                {typeof s.feeAmount === 'number' ? (
-                  <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">Fee: {`${s.feeCurrency || 'RWF'} ${Math.round(s.feeAmount).toLocaleString()}`}</span>
-                ) : s.feeText ? (
-                  <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">Fee: {s.feeText}</span>
-                ) : null}
+                <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">
+                  Fee / range: {formatWorkflowStepFee(s)}
+                </span>
                 {s.slaMinutes ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Duration: {Math.round(s.slaMinutes / 60)}h</span>
                 ) : s.slaText ? (

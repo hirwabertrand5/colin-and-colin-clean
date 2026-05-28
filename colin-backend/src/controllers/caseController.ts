@@ -58,6 +58,29 @@ const calculateActionProgress = (steps: any[], plannedAmount: number) => {
   return { percent, completedAmount: Math.round((plannedAmount * percent) / 100) };
 };
 
+const applySequentialInitialActions = (steps: any[], rawInitialActions: any) => {
+  const allowed = rawInitialActions && typeof rawInitialActions === 'object' ? rawInitialActions : {};
+  const orderedRefs = (steps || [])
+    .slice()
+    .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+    .flatMap((step: any) =>
+      (Array.isArray(step.actions) ? step.actions : []).map((action: any, index: number) => ({
+        step,
+        action,
+        index,
+      }))
+    );
+
+  for (const ref of orderedRefs) {
+    const requestedIndexes = Array.isArray(allowed?.[ref.step.stepKey]) ? allowed[ref.step.stepKey] : [];
+    const requested = requestedIndexes.map((value: any) => Number(value)).includes(ref.index);
+    if (!requested) break;
+    ref.action.done = true;
+    ref.action.doneAt = new Date();
+    if (ref.step.status === 'Not Started') ref.step.status = 'In Progress';
+  }
+};
+
 export const getAllCases = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
@@ -92,7 +115,36 @@ export const createCase = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
-    const newCase = new Case(req.body);
+    const workflowAutomation = (req.body as any)?.workflowAutomation !== false && (req.body as any)?.matterTiming !== 'historical';
+    const newCase = new Case({
+      ...req.body,
+      matterTiming: workflowAutomation ? 'new' : 'historical',
+      workflowAutomation,
+      ...(workflowAutomation
+        ? {}
+        : {
+            workflowTemplateId: undefined,
+            workflowInstanceId: undefined,
+            workflowProgress: {
+              status: 'Not Started',
+              percent: 0,
+              plannedValue: {
+                amount: parseMoney((req.body as any)?.workflowProgress?.plannedValue?.amount) || undefined,
+                currency:
+                  (req.body as any)?.workflowProgress?.plannedValue?.currency ||
+                  (req.body as any)?.billingSettings?.currency ||
+                  'RWF',
+              },
+              completedValue: {
+                amount: 0,
+                currency:
+                  (req.body as any)?.workflowProgress?.plannedValue?.currency ||
+                  (req.body as any)?.billingSettings?.currency ||
+                  'RWF',
+              },
+            },
+          }),
+    });
 
     // Normalize billing settings if provided
     const bs = (req.body as any)?.billingSettings;
@@ -120,24 +172,12 @@ export const createCase = async (req: AuthRequest, res: Response) => {
 
     // ✅ Initialize workflow instance if workflowTemplateId provided
     const workflowTemplateId = (req.body as any)?.workflowTemplateId;
-    if (workflowTemplateId) {
+    if (workflowAutomation && workflowTemplateId) {
       const template: any = await WorkflowTemplate.findById(workflowTemplateId).lean();
       if (template) {
         const wfStart = (newCase as any).workflowStartDate || newCase.createdAt || new Date();
         const steps = buildInstanceSteps(template, wfStart);
-        const initialWorkflowActions = (req.body as any)?.initialWorkflowActions || {};
-        for (const step of steps as any[]) {
-          const indexes = Array.isArray(initialWorkflowActions?.[step.stepKey])
-            ? initialWorkflowActions[step.stepKey]
-            : [];
-          for (const idx of indexes) {
-            const action = Array.isArray(step.actions) ? step.actions[Number(idx)] : undefined;
-            if (action) {
-              action.done = true;
-              action.doneAt = new Date();
-            }
-          }
-        }
+        applySequentialInitialActions(steps as any[], (req.body as any)?.initialWorkflowActions);
 
         const inst = await WorkflowInstance.create({
           caseId: newCase._id,
