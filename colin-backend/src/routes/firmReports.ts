@@ -7,7 +7,7 @@ const router = express.Router();
 router.get(
   '/reports/firm',
   authenticate,
-  authorize(['managing_director']),
+  authorize(['managing_director', 'executive_assistant']),
   getFirmReports
 );
 

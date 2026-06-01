@@ -48,6 +48,7 @@ type PerformanceZone = 'excellent' | 'good' | 'delayed' | 'risk';
 const roleEarningShare = (role?: string) => {
   const normalized = String(role || '').toLowerCase();
   const shares: Record<string, { label: string; percent: number }> = {
+    managing_director: { label: 'Managing Partner / Executive Managing Partner', percent: 8 },
     intern: { label: 'Intern', percent: 1 },
     trainee_associate: { label: 'Trainee Associate', percent: 3 },
     associate: { label: 'Associate / Executive Assistant', percent: 6 },
@@ -63,7 +64,7 @@ const roleEarningShare = (role?: string) => {
     senior_partner: { label: 'Senior Partner / Executive Partner / Originating Attorney', percent: 12 },
     originating_attorney: { label: 'Senior Partner / Executive Partner / Originating Attorney', percent: 12 },
   };
-  return shares[normalized] || { label: 'Firm Retained Earnings', percent: 0 };
+  return shares[normalized] || { label: 'Firm Retained Earnings', percent: FIRM_RETAINED_PERCENT };
 };
 
 const FIRM_RETAINED_PERCENT = 40;
@@ -87,8 +88,8 @@ const getPerformanceZone = (task: any): { zone: PerformanceZone; usedPercent: nu
 // GET /api/reports/firm?range=weekly|monthly|quarterly|yearly&from=YYYY-MM-DD&to=YYYY-MM-DD
 export const getFirmReports = async (req: AuthRequest, res: Response) => {
   try {
-    // Safety (route also has authorize)
-    if (req.user?.role !== 'managing_director') {
+    // Safety (route also has authorize) — allow managing director and executive assistant
+    if (!['managing_director', 'executive_assistant'].includes(String(req.user?.role || ''))) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 

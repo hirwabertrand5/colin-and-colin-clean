@@ -8,10 +8,22 @@ interface FirmReportsProps {
   userRole: UserRole;
 }
 
-const canAccess = (role: UserRole) => role === 'managing_director';
+const canAccess = (role: UserRole) => role === 'managing_director' || role === 'executive_assistant';
 
 const fmtMoney = (n: number) =>
   `RWF ${Math.round((Number(n) || 0) * 100) / 100}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const ROLE_ORDER = [
+  'Intern',
+  'Trainee Associate',
+  'Associate / Executive Assistant',
+  'Senior Associate / Senior Executive Assistant',
+  'Associate Partner / Executive Associate Partner',
+  'Partner / Executive Partner',
+  'Managing Partner / Executive Managing Partner',
+  'Senior Partner / Executive Partner / Originating Attorney',
+  'Firm Retained Earnings',
+];
+
 
 const downloadTextFile = (filename: string, content: string, mime = 'text/csv;charset=utf-8') => {
   const blob = new Blob([content], { type: mime });
@@ -89,6 +101,23 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     ];
   }, [data]);
 
+  const orderedTeam = useMemo(() => {
+    if (!data?.team) return [];
+    const idx = (label?: string) => {
+      if (!label) return ROLE_ORDER.length + 1;
+      const i = ROLE_ORDER.indexOf(label);
+      return i === -1 ? ROLE_ORDER.length + 1 : i;
+    };
+    return [...data.team].sort((a, b) => {
+      const al = a.earningRoleLabel || a.role || '';
+      const bl = b.earningRoleLabel || b.role || '';
+      const ia = idx(al);
+      const ib = idx(bl);
+      if (ia !== ib) return ia - ib;
+      return (b.activeCases || 0) - (a.activeCases || 0);
+    });
+  }, [data]);
+
   const exportCsv = () => {
     if (!data) return;
 
@@ -114,9 +143,24 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     lines.push('');
 
     lines.push('Team Earnings');
+    // order team rows to follow ROLE_ORDER
+    const orderedForCsv = data.team
+      ? [...data.team].sort((a, b) => {
+          const idx = (label?: string) => {
+            if (!label) return ROLE_ORDER.length + 1;
+            const i = ROLE_ORDER.indexOf(label);
+            return i === -1 ? ROLE_ORDER.length + 1 : i;
+          };
+          const ia = idx(a.earningRoleLabel || a.role || '');
+          const ib = idx(b.earningRoleLabel || b.role || '');
+          if (ia !== ib) return ia - ib;
+          return (b.activeCases || 0) - (a.activeCases || 0);
+        })
+      : [];
+
     lines.push(
       toCsv(
-        data.team.map((t) => ({
+        orderedForCsv.map((t) => ({
           name: t.name,
           role: t.role,
           earningRoleLabel: t.earningRoleLabel || '',
@@ -139,6 +183,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
         }))
       )
     );
+    lines.push('');
+
     lines.push('');
 
     lines.push('Practice Paths');
@@ -179,7 +225,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     return (
       <div className="p-6 bg-white border border-gray-200 rounded">
         <h1 className="text-xl font-semibold text-gray-900 mb-2">Access denied</h1>
-        <p className="text-gray-600">Only Managing Director can view firm-wide reports.</p>
+        <p className="text-gray-600">Only Managing Director and Executive Assistant can view firm-wide reports.</p>
       </div>
     );
   }
@@ -294,7 +340,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {data.team.map((member) => (
+                    {orderedTeam.map((member) => (
                       <tr key={member.name} className="hover:bg-gray-50">
                         <td className="px-5 py-4 text-sm font-medium text-gray-900">{member.name}</td>
                         <td className="px-5 py-4 text-sm text-gray-600">{member.role}</td>
@@ -309,6 +355,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                         <td className="px-5 py-4 text-sm text-gray-600">{member.billableHours}</td>
                       </tr>
                     ))}
+                    
                   </tbody>
                 </table>
               </div>
@@ -433,10 +480,10 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
                 {[
-                  ['Excellent', data.team.reduce((s, m) => s + (m.excellentTasks || 0), 0), 'bg-blue-600'],
-                  ['Good', data.team.reduce((s, m) => s + (m.goodTasks || 0), 0), 'bg-green-600'],
-                  ['Delayed', data.team.reduce((s, m) => s + (m.delayedTasks || 0), 0), 'bg-yellow-500'],
-                  ['Risk', data.team.reduce((s, m) => s + (m.riskTasks || 0), 0), 'bg-red-600'],
+                  ['Early', data.team.reduce((s, m) => s + (m.earlyTasks || 0), 0), 'bg-sky-600 bg-blue-600'],
+                  ['On Time', data.team.reduce((s, m) => s + (m.onTimeTasks || 0), 0), 'bg-green-600'],
+                  ['Late', data.team.reduce((s, m) => s + (m.lateTasks || 0), 0), 'bg-yellow-500'],
+                  ['Overdue', data.team.reduce((s, m) => s + (m.overdueTasks || 0), 0), 'bg-red-600'],
                 ].map(([label, value, color]) => {
                   const total = data.team.reduce(
                     (s, m) =>
@@ -447,7 +494,11 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                       (m.riskTasks || 0),
                     0
                   );
-                  const pct = total ? Math.round((Number(value) / total) * 100) : 0;
+                  const totalAlt = data.team.reduce(
+                    (s, m) => s + (m.earlyTasks || 0) + (m.onTimeTasks || 0) + (m.lateTasks || 0) + (m.overdueTasks || 0),
+                    0
+                  );
+                  const pct = totalAlt ? Math.round((Number(value) / totalAlt) * 100) : 0;
                   return (
                     <div key={String(label)} className="border border-gray-200 rounded-lg p-4">
                       <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -491,16 +542,16 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                       <td className="px-4 py-3 text-sm text-gray-600">{member.tasksCompleted}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{member.earningSharePercent ?? 0}%</td>
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">{fmtMoney(member.earnedFees || 0)}</td>
-                      <td className="px-4 py-3 text-sm text-green-700">{member.earlyTasks || 0}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{member.onTimeTasks || 0}</td>
-                      <td className="px-4 py-3 text-sm text-yellow-700">{member.lateTasks || 0}</td>
+                      <td className="px-4 py-3 text-sm text-sky-700 text-blue-700">{member.earlyTasks || 0}</td>
+                      <td className="px-4 py-3 text-sm text-green-700">{member.onTimeTasks || 0}</td>
+                      <td className="px-4 py-3 text-sm text-yellow-700" style={{ color: '#b45309' }}>{member.lateTasks || 0}</td>
                       <td className="px-4 py-3 text-sm text-red-700">{member.overdueTasks || 0}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">
                         <div className="flex gap-1.5 flex-wrap">
-                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">{member.excellentTasks || 0}</span>
-                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">{member.goodTasks || 0}</span>
-                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">{member.delayedTasks || 0}</span>
-                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{member.riskTasks || 0}</span>
+                          <span className="rounded-full bg-sky-600 bg-blue-600 px-2 py-0.5 text-xs text-white">{member.excellentTasks || 0}</span>
+                          <span className="rounded-full bg-green-600 px-2 py-0.5 text-xs text-white">{member.goodTasks || 0}</span>
+                          <span className="rounded-full bg-yellow-500 px-2 py-0.5 text-xs text-yellow-900">{member.delayedTasks || 0}</span>
+                          <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">{member.riskTasks || 0}</span>
                         </div>
                         <div className="mt-1 text-xs text-gray-500">
                           Avg used: {member.averageTimeUsedPercent == null ? '—' : `${member.averageTimeUsedPercent}%`}

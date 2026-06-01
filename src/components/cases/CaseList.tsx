@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, Briefcase, ArrowUpDown, Trash2 } from 'lucide-react';
+import { Plus, Search, Briefcase, ArrowUpDown } from 'lucide-react';
 import { UserRole } from '../../App';
 import { getAllCases, deleteCase, CaseData } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
@@ -331,21 +331,9 @@ export default function CaseList({ userRole }: CaseListProps) {
                   </td>
 
                   <td className="px-6 py-5">
-                    <div className="flex items-center gap-3">
-                      <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">
-                        Open →
-                      </Link>
-                      {canManageCases && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCase(item._id)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded border border-red-200 text-red-600 hover:bg-red-50"
-                          title="Delete case"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
+                    <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">
+                      Open →
+                    </Link>
                   </td>
                 </tr>
               ))}

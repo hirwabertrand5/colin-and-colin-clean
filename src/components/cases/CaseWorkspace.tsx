@@ -1138,7 +1138,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   // Helper function to get urgency color based on percentage remaining
   const getUrgencyColor = (percentageRemaining: number): string => {
-    if (percentageRemaining > 75) return 'bg-blue-100 border-blue-500';
+    if (percentageRemaining > 75) return 'bg-sky-100 border-sky-500';
     if (percentageRemaining > 50) return 'bg-green-100 border-green-500';
     if (percentageRemaining > 25) return 'bg-yellow-100 border-yellow-500';
     return 'bg-red-100 border-red-500';
@@ -1146,7 +1146,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   // Helper function to get urgency text color based on percentage remaining
   const getUrgencyTextColor = (percentageRemaining: number): string => {
-    if (percentageRemaining > 75) return 'text-blue-700';
+    if (percentageRemaining > 75) return 'text-sky-700';
     if (percentageRemaining > 50) return 'text-green-700';
     if (percentageRemaining > 25) return 'text-gray-900';
     return 'text-red-700';
