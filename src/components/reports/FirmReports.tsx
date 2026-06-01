@@ -536,7 +536,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {data.team.map((member) => (
+                  {orderedTeam.map((member) => (
                     <tr key={member.name}>
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">{member.name}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{member.tasksCompleted}</td>
