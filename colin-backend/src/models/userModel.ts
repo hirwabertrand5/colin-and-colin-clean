@@ -7,10 +7,15 @@ export type UserRole =
   | 'senior_partner'
   | 'partner'
   | 'associate_partner'
+  | 'executive_associate_partner'
   | 'senior_associate'
+  | 'senior_executive_assistant'
   | 'associate'
   | 'trainee_associate'
   | 'executive_assistant'
+  | 'executive_partner'
+  | 'executive_managing_partner'
+  | 'originating_attorney'
   | 'intern';
 
 export interface IUser extends Document {
@@ -37,11 +42,16 @@ const UserSchema = new Schema<IUser>(
     'managing_partner',
     'senior_partner',
     'partner',
+    'executive_partner',
     'associate_partner',
+    'executive_associate_partner',
     'senior_associate',
+    'senior_executive_assistant',
     'associate',
     'trainee_associate',
     'executive_assistant',
+    'executive_managing_partner',
+    'originating_attorney',
     'intern'
   ],
   required: true

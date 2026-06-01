@@ -1177,10 +1177,18 @@ export default function CreateCase() {
 
 const ROLE_DISPLAY_MAP: Record<string, string> = {
   managing_director: 'Managing Director',
-  lawyer: 'Lawyer',
+  managing_partner: 'Managing Partner',
+  executive_managing_partner: 'Executive Managing Partner',
+  senior_partner: 'Senior Partner',
+  partner: 'Partner',
+  executive_partner: 'Executive Partner',
+  associate_partner: 'Associate Partner',
+  executive_associate_partner: 'Executive Associate Partner',
+  senior_associate: 'Senior Associate',
+  senior_executive_assistant: 'Senior Executive Assistant',
   associate: 'Associate',
-  junior_associate: 'Junior Associate',
-  assistant: 'Assistant',
+  trainee_associate: 'Trainee Associate',
   executive_assistant: 'Executive Assistant',
+  originating_attorney: 'Originating Attorney',
   intern: 'Intern',
 };

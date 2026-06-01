@@ -429,7 +429,7 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
 
 export const deleteCase = async (req: AuthRequest, res: Response) => {
   try {
-    if (req.user?.role !== 'managing_director') {
+    if (req.user?.role !== 'managing_director' && req.user?.role !== 'executive_assistant') {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 

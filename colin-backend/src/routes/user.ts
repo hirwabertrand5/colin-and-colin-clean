@@ -22,12 +22,17 @@ router.get(
   authorize([
     'managing_director',
     'managing_partner',
+    'executive_managing_partner',
     'senior_partner',
     'partner',
+    'executive_partner',
     'associate_partner',
+    'executive_associate_partner',
     'senior_associate',
+    'senior_executive_assistant',
     'associate',
     'executive_assistant',
+    'originating_attorney',
   ]),
   getStaffUsers
 );

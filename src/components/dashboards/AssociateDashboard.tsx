@@ -69,7 +69,7 @@ const priorityChip = (priority: string) => {
     case 'High':
       return 'bg-red-100 text-red-700';
     case 'Medium':
-      return 'bg-yellow-100 text-yellow-700';
+      return 'bg-yellow-100 text-gray-900';
     case 'Low':
       return 'bg-green-100 text-green-700';
     default:
@@ -356,7 +356,7 @@ export default function AssociateDashboard() {
                         </span>
 
                         {task.requiresApproval && task.approvalStatus === 'Pending' && (
-                          <span className="px-2 py-0.5 text-xs rounded bg-yellow-100 text-yellow-700">
+                          <span className="px-2 py-0.5 text-xs rounded bg-yellow-100 text-gray-900">
                             Pending approval
                           </span>
                         )}

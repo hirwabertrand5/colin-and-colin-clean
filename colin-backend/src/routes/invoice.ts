@@ -21,6 +21,7 @@ router.post(
   '/cases/:caseId/invoices',
   authenticate,
   authorize(FINANCE_ROLES),
+  upload.single('file'),
   addInvoiceToCase
 );
 

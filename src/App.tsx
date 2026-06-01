@@ -25,13 +25,18 @@ import { useAutoLogout } from './hooks/useAutoLogout';
 export type UserRole =
   | 'managing_director'
   | 'managing_partner'
+  | 'executive_managing_partner'
   | 'senior_partner'
   | 'partner'
+  | 'executive_partner'
   | 'associate_partner'
+  | 'executive_associate_partner'
   | 'senior_associate'
+  | 'senior_executive_assistant'
   | 'associate'
   | 'trainee_associate'
   | 'executive_assistant'
+  | 'originating_attorney'
   | 'intern';
 
 export interface User {
@@ -86,7 +91,15 @@ function App() {
   }
 
   const isMD = user?.role === 'managing_director';
-  const isPartner = user?.role === 'managing_partner' || user?.role === 'senior_partner' || user?.role === 'partner' || user?.role === 'associate_partner';
+  const isPartner =
+    user?.role === 'managing_partner' ||
+    user?.role === 'executive_managing_partner' ||
+    user?.role === 'senior_partner' ||
+    user?.role === 'partner' ||
+    user?.role === 'executive_partner' ||
+    user?.role === 'associate_partner' ||
+    user?.role === 'executive_associate_partner' ||
+    user?.role === 'originating_attorney';
   const isExec = user?.role === 'executive_assistant';
   const isAssocLike = isAssociateLike(user?.role);
 

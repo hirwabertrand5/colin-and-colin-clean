@@ -4,6 +4,9 @@ import Invoice from '../models/invoiceModel';
 import Counter from '../models/counterModel';
 import { writeAudit } from '../services/auditService';
 
+const invoiceFilePath = (file?: Express.Multer.File) => (file ? `/uploads/${file.filename}` : undefined);
+const paramValue = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+
 // Get all invoices for a case
 export const getInvoicesForCase = async (req: Request, res: Response) => {
   try {
@@ -27,11 +30,15 @@ export const addInvoiceToCase = async (req: Request, res: Response) => {
     let caseId = req.params.caseId;
     if (Array.isArray(caseId)) caseId = caseId[0];
     if (!caseId) return res.status(400).json({ message: 'Missing caseId' });
+    if (!mongoose.Types.ObjectId.isValid(caseId)) {
+      return res.status(400).json({ message: 'Invalid caseId' });
+    }
 
     const { date, amount, notes } = req.body;
+    const invoiceAmount = Number(amount);
 
-    if (!date || amount === undefined) {
-      return res.status(400).json({ message: 'date and amount are required' });
+    if (!date || !Number.isFinite(invoiceAmount) || invoiceAmount <= 0) {
+      return res.status(400).json({ message: 'date and a valid amount are required' });
     }
 
     const year = new Date().getFullYear();
@@ -60,9 +67,10 @@ export const addInvoiceToCase = async (req: Request, res: Response) => {
       seqYear,
       seqCase,
       date,
-      amount,
+      amount: invoiceAmount,
       status: 'Pending',
       notes,
+      invoiceFileUrl: invoiceFilePath(req.file),
     });
 
     await invoice.save();
@@ -77,19 +85,25 @@ export const addInvoiceToCase = async (req: Request, res: Response) => {
       actorUserId,
       action: 'INVOICE_CREATED',
       message: 'Created invoice',
-      detail: `${invoiceNo} • RWF ${Number(amount).toLocaleString()}`,
+      detail: `${invoiceNo} • RWF ${invoiceAmount.toLocaleString()}`,
     });
 
     res.status(201).json(invoice);
-  } catch {
-    res.status(500).json({ message: 'Failed to create invoice.' });
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: 'Invoice number conflict. Please try creating the invoice again.' });
+    }
+    res.status(500).json({ message: error?.message || 'Failed to create invoice.' });
   }
 };
 
 // Mark invoice as paid + upload proof
 export const uploadProof = async (req: Request, res: Response) => {
   try {
-    const invoiceId = req.params.invoiceId;
+    const invoiceId = paramValue(req.params.invoiceId);
+    if (!invoiceId || !mongoose.Types.ObjectId.isValid(invoiceId)) {
+      return res.status(400).json({ message: 'Invalid invoiceId' });
+    }
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
     // First get invoice (to know caseId + invoiceNo for audit)
@@ -98,7 +112,7 @@ export const uploadProof = async (req: Request, res: Response) => {
 
     const invoice = await Invoice.findByIdAndUpdate(
       invoiceId,
-      { status: 'Paid', proofUrl: `/uploads/${req.file.filename}` },
+      { status: 'Paid', proofUrl: invoiceFilePath(req.file) },
       { new: true }
     );
 
@@ -118,15 +132,18 @@ export const uploadProof = async (req: Request, res: Response) => {
     });
 
     res.json(invoice);
-  } catch {
-    res.status(500).json({ message: 'Failed to upload proof.' });
+  } catch (error: any) {
+    res.status(500).json({ message: error?.message || 'Failed to upload proof.' });
   }
 };
 
 // ✅ NEW: upload invoice file (separate from proof)
 export const uploadInvoiceFile = async (req: Request, res: Response) => {
   try {
-    const invoiceId = req.params.invoiceId;
+    const invoiceId = paramValue(req.params.invoiceId);
+    if (!invoiceId || !mongoose.Types.ObjectId.isValid(invoiceId)) {
+      return res.status(400).json({ message: 'Invalid invoiceId' });
+    }
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
     const existing = await Invoice.findById(invoiceId);
@@ -134,7 +151,7 @@ export const uploadInvoiceFile = async (req: Request, res: Response) => {
 
     const updated = await Invoice.findByIdAndUpdate(
       invoiceId,
-      { invoiceFileUrl: `/uploads/${req.file.filename}` },
+      { invoiceFileUrl: invoiceFilePath(req.file) },
       { new: true }
     );
 
@@ -151,15 +168,18 @@ export const uploadInvoiceFile = async (req: Request, res: Response) => {
     });
 
     res.json(updated);
-  } catch {
-    res.status(500).json({ message: 'Failed to upload invoice file.' });
+  } catch (error: any) {
+    res.status(500).json({ message: error?.message || 'Failed to upload invoice file.' });
   }
 };
 
 // ✅ NEW: delete invoice
 export const deleteInvoice = async (req: Request, res: Response) => {
   try {
-    const invoiceId = req.params.invoiceId;
+    const invoiceId = paramValue(req.params.invoiceId);
+    if (!invoiceId || !mongoose.Types.ObjectId.isValid(invoiceId)) {
+      return res.status(400).json({ message: 'Invalid invoiceId' });
+    }
 
     const existing = await Invoice.findById(invoiceId);
     if (!existing) return res.status(404).json({ message: 'Invoice not found.' });

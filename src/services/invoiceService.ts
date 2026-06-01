@@ -19,27 +19,49 @@ export interface Invoice {
 
 const getToken = () => localStorage.getItem('token');
 
+const readErrorMessage = async (res: Response, fallback: string) => {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await res.json().catch(() => ({}));
+    return data?.message || fallback;
+  }
+  const text = await res.text().catch(() => '');
+  return text || fallback;
+};
+
 export const getInvoicesForCase = async (caseId: string): Promise<Invoice[]> => {
   const res = await fetch(`${API_URL}/cases/${caseId}/invoices`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch invoices');
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to fetch invoices'));
   return res.json();
 };
 
 export const addInvoiceToCase = async (
   caseId: string,
-  invoice: { date: string; amount: number; notes?: string }
+  invoice: { date: string; amount: number; notes?: string; file?: File | null }
 ): Promise<Invoice> => {
+  const hasFile = Boolean(invoice.file);
+  const body = hasFile
+    ? (() => {
+        const formData = new FormData();
+        formData.append('date', invoice.date);
+        formData.append('amount', String(invoice.amount));
+        if (invoice.notes) formData.append('notes', invoice.notes);
+        if (invoice.file) formData.append('file', invoice.file);
+        return formData;
+      })()
+    : JSON.stringify({ date: invoice.date, amount: invoice.amount, notes: invoice.notes });
+
   const res = await fetch(`${API_URL}/cases/${caseId}/invoices`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
       Authorization: `Bearer ${getToken()}`,
+      ...(hasFile ? {} : { 'Content-Type': 'application/json' }),
     },
-    body: JSON.stringify(invoice),
+    body,
   });
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to create invoice');
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to create invoice'));
   return res.json();
 };
 
@@ -54,7 +76,7 @@ export const uploadInvoiceFile = async (invoiceId: string, file: File): Promise<
     body: formData,
   });
 
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to upload invoice file');
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to upload invoice file'));
   return res.json();
 };
 
@@ -69,7 +91,7 @@ export const uploadProof = async (invoiceId: string, file: File): Promise<Invoic
     body: formData,
   });
 
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to upload proof');
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to upload proof'));
   return res.json();
 };
 
@@ -80,7 +102,7 @@ export const deleteInvoice = async (invoiceId: string): Promise<void> => {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
 
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to delete invoice');
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to delete invoice'));
 };
 
 export type InvoiceWithCase = Invoice & {
@@ -91,7 +113,7 @@ export const getRecentInvoices = async (limit = 10): Promise<InvoiceWithCase[]> 
   const res = await fetch(`${API_URL}/invoices/recent?limit=${limit}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch recent invoices');
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to fetch recent invoices'));
   return res.json();
 };
 
@@ -112,6 +134,6 @@ export const listInvoices = async (params?: {
   const res = await fetch(`${API_URL}/invoices?${qs.toString()}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch invoices');
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to fetch invoices'));
   return res.json();
 };

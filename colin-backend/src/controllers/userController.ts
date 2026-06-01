@@ -6,13 +6,18 @@ const ASSOCIATE_ASSIGNABLE_ROLES = ['trainee_associate', 'intern'];
 const STAFF_ASSIGNABLE_ROLES = [
   'managing_director',
   'managing_partner',
+  'executive_managing_partner',
   'senior_partner',
   'partner',
+  'executive_partner',
   'associate_partner',
+  'executive_associate_partner',
   'senior_associate',
+  'senior_executive_assistant',
   'associate',
   'trainee_associate',
   'executive_assistant',
+  'originating_attorney',
   'intern',
 ];
 

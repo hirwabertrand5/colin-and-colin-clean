@@ -54,7 +54,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
       name: 'Matters',
       href: '/matters',
       icon: Briefcase,
-      roles: ['managing_director', 'managing_partner', 'senior_partner', 'partner', 'associate_partner', 'senior_associate', 'associate', 'trainee_associate', 'executive_assistant', 'intern'],
+      roles: ['managing_director', 'managing_partner', 'executive_managing_partner', 'senior_partner', 'partner', 'executive_partner', 'associate_partner', 'executive_associate_partner', 'senior_associate', 'senior_executive_assistant', 'associate', 'trainee_associate', 'executive_assistant', 'originating_attorney', 'intern'],
       submenu: [
         { name: 'Intake & Prospects', href: '/matters/intake-prospects' },
         { name: 'Active Matters', href: '/matters' },
@@ -62,13 +62,13 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
     },
     { name: 'Tasks', href: '/tasks', icon: CheckSquare },
     { name: 'Calendar & Deadlines', href: '/calendar', icon: CalendarIcon },
-    { name: 'Billing & Margins', href: '/billing', icon: DollarSign, roles: ['managing_director', 'managing_partner', 'senior_partner', 'partner', 'associate_partner', 'executive_assistant'] },
-    { name: 'Firm Reports', href: '/reports', icon: BarChart3, roles: ['managing_director', 'managing_partner', 'senior_partner', 'partner', 'associate_partner'] },
+    { name: 'Billing & Margins', href: '/billing', icon: DollarSign, roles: ['managing_director', 'managing_partner', 'executive_managing_partner', 'senior_partner', 'partner', 'executive_partner', 'associate_partner', 'executive_associate_partner', 'executive_assistant', 'originating_attorney'] },
+    { name: 'Firm Reports', href: '/reports', icon: BarChart3, roles: ['managing_director', 'executive_assistant'] },
     {
       name: 'Performance',
       href: '/performance',
       icon: BarChart3,
-      roles: ['senior_associate', 'associate', 'trainee_associate', 'intern'],
+      roles: ['senior_associate', 'senior_executive_assistant', 'associate', 'trainee_associate', 'intern'],
     },
   ];
 

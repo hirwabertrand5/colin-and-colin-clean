@@ -18,23 +18,33 @@ const ROLE_OPTIONS = [
   { value: 'associate', label: 'Associate' },
   { value: 'executive_assistant', label: 'Executive Assistant' },
   { value: 'senior_associate', label: 'Senior Associate' },
+  { value: 'senior_executive_assistant', label: 'Senior Executive Assistant' },
   { value: 'associate_partner', label: 'Associate Partner' },
+  { value: 'executive_associate_partner', label: 'Executive Associate Partner' },
   { value: 'partner', label: 'Partner' },
+  { value: 'executive_partner', label: 'Executive Partner' },
   { value: 'managing_partner', label: 'Managing Partner' },
+  { value: 'executive_managing_partner', label: 'Executive Managing Partner' },
   { value: 'senior_partner', label: 'Senior Partner' },
+  { value: 'originating_attorney', label: 'Originating Attorney' },
   { value: 'managing_director', label: 'Managing Director' },
 ];
 
 const ROLE_DISPLAY_MAP: Record<string, string> = {
   managing_director: 'Managing Director',
   managing_partner: 'Managing Partner',
+  executive_managing_partner: 'Executive Managing Partner',
   senior_partner: 'Senior Partner',
   partner: 'Partner',
+  executive_partner: 'Executive Partner',
   associate_partner: 'Associate Partner',
+  executive_associate_partner: 'Executive Associate Partner',
   senior_associate: 'Senior Associate',
+  senior_executive_assistant: 'Senior Executive Assistant',
   associate: 'Associate',
   trainee_associate: 'Trainee Associate',
   executive_assistant: 'Executive Assistant',
+  originating_attorney: 'Originating Attorney',
   intern: 'Intern',
 };
 
@@ -205,13 +215,18 @@ export default function UserManagement() {
     switch (role) {
       case 'managing_director': return 'bg-purple-100 text-purple-700';
       case 'managing_partner': return 'bg-purple-100 text-purple-700';
+      case 'executive_managing_partner': return 'bg-purple-100 text-purple-700';
       case 'senior_partner': return 'bg-purple-100 text-purple-700';
       case 'partner': return 'bg-purple-100 text-purple-700';
+      case 'executive_partner': return 'bg-purple-100 text-purple-700';
       case 'associate_partner': return 'bg-indigo-100 text-indigo-700';
+      case 'executive_associate_partner': return 'bg-indigo-100 text-indigo-700';
       case 'senior_associate': return 'bg-cyan-100 text-cyan-700';
+      case 'senior_executive_assistant': return 'bg-cyan-100 text-cyan-700';
       case 'associate': return 'bg-cyan-100 text-cyan-700';
       case 'trainee_associate': return 'bg-sky-100 text-sky-700';
       case 'executive_assistant': return 'bg-green-100 text-green-700';
+      case 'originating_attorney': return 'bg-purple-100 text-purple-700';
       case 'intern': return 'bg-gray-100 text-gray-700';
       default: return 'bg-gray-100 text-gray-700';
     }
@@ -246,10 +261,15 @@ export default function UserManagement() {
     'associate': 2,
     'executive_assistant': 3,
     'senior_associate': 4,
+    'senior_executive_assistant': 4,
     'associate_partner': 5,
+    'executive_associate_partner': 5,
     'partner': 6,
     'managing_partner': 7,
+    'executive_managing_partner': 7,
     'senior_partner': 8,
+    'executive_partner': 8,
+    'originating_attorney': 8,
     'managing_director': 9,
   };
 

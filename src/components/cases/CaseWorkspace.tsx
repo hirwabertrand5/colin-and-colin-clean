@@ -128,7 +128,7 @@ const calculateWorkflowActionProgress = (wf: WorkflowInstance | null, plannedAmo
 };
 
 const getInvoiceStatusChip = (status: Invoice['status']) => {
-  return status === 'Paid' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700';
+  return status === 'Paid' ? 'bg-green-50 text-green-700' : 'bg-yellow-100 text-gray-900';
 };
 
 const getServicePathAccent = (caseType?: CaseData['caseType']) => {
@@ -145,7 +145,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   const isRestrictedAssigneeRole = ['trainee_associate', 'intern'].includes(userRole);
   const canManageCase = userRole === 'managing_director' || userRole === 'executive_assistant';
-  const canDeleteCase = userRole === 'managing_director';
+  const canDeleteCase = userRole === 'managing_director' || userRole === 'executive_assistant';
   const canAssignTasks =
     userRole === 'managing_director' || userRole === 'executive_assistant' || userRole === 'associate';
   const canManageBilling = userRole === 'managing_director' || userRole === 'executive_assistant';
@@ -320,6 +320,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     notes: '',
   });
   const [newInvoiceFile, setNewInvoiceFile] = useState<File | null>(null);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
 
   const [showUploadProofModal, setShowUploadProofModal] = useState(false);
   const [proofInvoiceId, setProofInvoiceId] = useState<string | null>(null);
@@ -904,16 +905,14 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     }
 
     try {
+      setCreatingInvoice(true);
       setInvoicesError('');
-      const created = await addInvoiceToCase(caseData._id, {
+      await addInvoiceToCase(caseData._id, {
         date: newInvoice.date,
         amount: amountNum,
         notes: newInvoice.notes,
+        file: newInvoiceFile,
       });
-
-      if (created?._id && newInvoiceFile) {
-        await uploadInvoiceFile(created._id, newInvoiceFile);
-      }
 
       setShowAddInvoiceModal(false);
       setNewInvoice({ date: '', amount: '', notes: '' });
@@ -921,6 +920,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       reloadInvoices();
     } catch (err: any) {
       setInvoicesError(err.message || 'Failed to create invoice');
+    } finally {
+      setCreatingInvoice(false);
     }
   };
 
@@ -981,8 +982,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     billingHealth === 'loss' || billingHealth === 'red'
       ? 'bg-red-600'
       : billingHealth === 'yellow'
-        ? 'bg-yellow-500'
+        ? 'bg-yellow-400'
         : 'bg-green-600';
+  const billingHealthBadgeClass =
+    billingHealth === 'yellow' ? 'bg-yellow-100 text-gray-900' : `${billingHealthClass} text-white`;
   const billingHealthText =
     billingHealth === 'loss'
       ? 'Loss risk'
@@ -1145,7 +1148,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const getUrgencyTextColor = (percentageRemaining: number): string => {
     if (percentageRemaining > 75) return 'text-blue-700';
     if (percentageRemaining > 50) return 'text-green-700';
-    if (percentageRemaining > 25) return 'text-yellow-700';
+    if (percentageRemaining > 25) return 'text-gray-900';
     return 'text-red-700';
   };
 
@@ -2299,7 +2302,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <div className="flex items-center gap-3">
-                <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold text-white ${billingHealthClass}`}>
+                <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${billingHealthBadgeClass}`}>
                   {billingHealthText}
                 </span>
               </div>
@@ -2598,6 +2601,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Invoice File (optional)</label>
                     <input
                       type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx"
+                      disabled={creatingInvoice}
                       onChange={(e) => setNewInvoiceFile(e.target.files?.[0] || null)}
                       className="w-full"
                     />
@@ -2619,9 +2624,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800"
+                      disabled={creatingInvoice}
+                      className="flex-1 px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
                     >
-                      Create Invoice
+                      {creatingInvoice ? 'Creating...' : 'Create Invoice'}
                     </button>
                   </div>
                 </form>
@@ -2638,6 +2644,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 <form onSubmit={handleUploadProof} className="space-y-4">
                   <input
                     type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx"
+                    disabled={uploadingProof}
                     required
                     onChange={(e) => setProofFile(e.target.files?.[0] || null)}
                     className="w-full"

@@ -1,5 +1,6 @@
 import multer, { StorageEngine } from 'multer';
 import path from 'path';
+import fs from 'fs';
 import mongoose from 'mongoose';
 import { Response } from 'express';
 
@@ -9,7 +10,9 @@ import { writeAudit } from '../services/auditService';
 
 const storage: StorageEngine = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/');
+    const uploadDir = path.join(process.cwd(), 'uploads');
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);

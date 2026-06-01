@@ -211,7 +211,7 @@ export default function ExecutiveAssistantDashboard() {
         <div className="bg-white border border-gray-200 rounded-lg">
           <div className="px-5 py-4 border-b border-gray-200 flex justify-between items-center">
             <h2 className="font-semibold text-gray-900">Pending Follow-up</h2>
-            <span className="px-2 py-1 text-xs rounded bg-yellow-100 text-yellow-700">
+            <span className="px-2 py-1 text-xs rounded bg-yellow-100 text-gray-900">
               {loading ? '…' : `${pendingCoordination.length} items`}
             </span>
           </div>
