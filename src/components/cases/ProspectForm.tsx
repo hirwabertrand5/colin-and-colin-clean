@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
 import { createProspect, updateProspect, Prospect } from '../../services/prospectService';
 import { LEGAL_SERVICES_TREE } from '../../constants/legalServicesTree';
+import { getRoleSuggestions } from '../../constants/partyRoles';
 import { getStaffUsers, User } from '../../services/userService';
 
 interface ProspectFormProps {
@@ -26,8 +27,14 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   const [servicePath, setServicePath] = useState<string[]>(
     prospect?.legalServicePath ? prospect.legalServicePath.map((p) => p.id) : []
   );
+
+  const [partiesStructured, setPartiesStructured] = useState(false);
+  const [partiesList, setPartiesList] = useState<Array<{ name: string; role: string }>>(
+    prospect?.parties ? [{ name: prospect.parties, role: '' }] : []
+  );
   const [form, setForm] = useState({
     clientName: prospect?.clientName || '',
+    parties: prospect?.parties || '',
     contact: {
       name: prospect?.contact.name || prospect?.clientName || '',
       email: prospect?.contact.email || '',
@@ -47,6 +54,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   useEffect(() => {
     setForm({
       clientName: prospect?.clientName || '',
+      parties: prospect?.parties || '',
       contact: {
         name: prospect?.contact.name || prospect?.clientName || '',
         email: prospect?.contact.email || '',
@@ -134,6 +142,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     if (!form.contact.email.includes('@')) return 'Please enter a valid email address.';
     if (!form.contact.phone?.trim()) return 'Contact phone is required.';
     if (!form.inquiryDescription?.trim()) return 'Inquiry description is required.';
+    if (!form.parties?.trim()) return 'Parties is required.';
     if (!form.stage) return 'Please select a stage.';
     if (!form.assignedTo) return 'Please select a staff member to assign this prospect to.';
     return null;
@@ -154,8 +163,13 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
 
     try {
       // Ensure we have clean data
+      const finalParties = partiesStructured
+        ? partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ')
+        : form.parties;
+
       const data = {
         clientName: form.clientName.trim(),
+        parties: finalParties,
         contact: {
           name: form.clientName.trim(),
           email: form.contact.email.trim().toLowerCase(),
@@ -229,6 +243,85 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
                 />
               </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Parties *</label>
+                    <div className="text-xs text-gray-500">
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="form-checkbox"
+                          checked={partiesStructured}
+                          onChange={(e) => setPartiesStructured(e.target.checked)}
+                        />
+                        <span className="text-xs">Structured</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {!partiesStructured ? (
+                    <input
+                      type="text"
+                      value={form.parties}
+                      onChange={(e) => setForm({ ...form, parties: e.target.value })}
+                      placeholder="e.g., John vs Smith"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {partiesList.map((p, idx) => (
+                        <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                          <input
+                            className="col-span-5 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                            placeholder="Party name"
+                            value={p.name}
+                            onChange={(e) => setPartiesList((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))}
+                          />
+                          <select
+                            value={p.role}
+                            onChange={(e) => setPartiesList((prev) => prev.map((x, i) => (i === idx ? { ...x, role: e.target.value } : x)))}
+                            className="col-span-5 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                          >
+                            <option value="">Select role...</option>
+                            {getRoleSuggestions({ caseType: undefined, sectorLabel: selectedServiceNodes[0]?.label, matterType: (selectedServiceNodes.length ? selectedServiceNodes[selectedServiceNodes.length-1]?.suggestedMatterTypes?.[0] : undefined) || undefined }).map((r) => (
+                              <option key={r} value={r}>{r}</option>
+                            ))}
+                          </select>
+                          <div className="col-span-2">
+                            <button
+                              type="button"
+                              onClick={() => setPartiesList((prev) => prev.filter((_, i) => i !== idx))}
+                              className="px-3 py-2 border rounded text-sm text-red-600"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPartiesList((prev) => [...prev, { name: '', role: '' }])}
+                          className="px-3 py-2 border rounded text-sm bg-gray-50"
+                        >
+                          Add party
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const preview = partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ');
+                            setForm((f) => ({ ...f, parties: preview }));
+                          }}
+                          className="px-3 py-2 border rounded text-sm bg-gray-50"
+                        >
+                          Save as text
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>

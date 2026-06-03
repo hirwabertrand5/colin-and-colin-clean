@@ -19,6 +19,7 @@ export interface Prospect {
   _id: string;
   prospectNo: string;
   clientName: string;
+  parties?: string;
   contact: ProspectContact;
   legalServicePath?: { id: string; label: string }[];
   inquiryDescription: string;

@@ -12,6 +12,7 @@ export interface IProspectContact {
 export interface IProspect extends Document {
   prospectNo: string;
   clientName: string;
+  parties?: string;
   
   // Contact Information
   contact: IProspectContact;
@@ -41,6 +42,7 @@ export interface IProspect extends Document {
   engagementDate?: Date;
   engagementNotes?: string;
   conversionReason?: string; // For non-converted prospects
+  parties?: string;
   
   // Assignment & Management
   assignedTo: mongoose.Types.ObjectId; // User ID
@@ -78,6 +80,11 @@ const ProspectSchema = new Schema<IProspect>(
       required: true,
       trim: true,
       index: true,
+    },
+    parties: {
+      type: String,
+      trim: true,
+      default: '',
     },
     contact: {
       type: ProspectContactSchema,

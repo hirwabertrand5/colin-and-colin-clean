@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { createCase, CaseData, CaseType } from '../../services/caseService';
 import { listActiveWorkflowTemplates, WorkflowTemplate } from '../../services/workflowService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
+import { getRoleSuggestions } from '../../constants/partyRoles';
 
 type StaffUser = {
   _id: string;
@@ -55,6 +56,9 @@ export default function CreateCase() {
 
   const [servicePath, setServicePath] = useState<string[]>([]);
 
+  // Parties structured UI state
+  const [partiesStructured, setPartiesStructured] = useState(false);
+  const [partiesList, setPartiesList] = useState<Array<{ name: string; role: string }>>([]);
   const [formData, setFormData] = useState<CaseData>({
     caseNo: '',
     parties: '',
@@ -269,6 +273,8 @@ export default function CreateCase() {
     return null;
   };
 
+  
+
   // Keep formData.caseType always in sync with tree selection
   useEffect(() => {
     const ct = resolveCaseTypeFromSelection(selectedServiceNodes);
@@ -324,8 +330,11 @@ export default function CreateCase() {
         throw new Error('Enter the negotiated planned value before creating the case.');
       }
 
+      const finalParties = partiesStructured ? partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') : formData.parties;
+
       await createCase({
         ...formData,
+        parties: finalParties,
         matterTiming,
         workflowAutomation: true,
         workflowTemplateId: formData.workflowTemplateId,
@@ -356,7 +365,10 @@ export default function CreateCase() {
 
   const canProceed = () => {
     if (step === 1) {
-      return Boolean(formData.caseNo && formData.parties && formData.assignedTo && isServiceSelectionValid());
+      const hideCaseNo = (computedCaseType || formData.caseType) === 'Transactional Cases';
+      const partiesOk = partiesStructured ? partiesList.length > 0 && partiesList.every((p) => p.name && p.name.trim()) : Boolean(formData.parties && String(formData.parties).trim());
+      const caseNoOk = hideCaseNo ? true : Boolean(formData.caseNo && String(formData.caseNo).trim());
+      return Boolean(caseNoOk && partiesOk && formData.assignedTo && isServiceSelectionValid());
     }
     if (step === 2) {
       return Boolean(formData.workflowTemplateId && formData.workflowStartDate && plannedValueAmount > 0);
@@ -722,27 +734,7 @@ export default function CreateCase() {
         {/* Step 1: Case Basics */}
         {step === 1 && (
           <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Case No. *</label>
-              <input
-                type="text"
-                value={formData.caseNo}
-                onChange={(e) => handleInputChange('caseNo', e.target.value)}
-                placeholder="e.g., RS/SCP/RCOM 00388/2024/TC"
-                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Parties *</label>
-              <input
-                type="text"
-                value={formData.parties}
-                onChange={(e) => handleInputChange('parties', e.target.value)}
-                placeholder="e.g., John vs Smith"
-                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-              />
-            </div>
+            {/* Note: Case No. and Parties are shown after the workflow / legal service selection below */}
 
             {/* ✅ Decision Tree */}
             <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
@@ -801,6 +793,99 @@ export default function CreateCase() {
                   Selected path: <span className="font-medium">{selectedServicePathLabel}</span>
                 </p>
               ) : null}
+            </div>
+
+            {/* --- Moved: Case No. & Parties (appear after workflow selection) --- */}
+            <div>
+              {/* Hide case number for transactional cases */}
+              {((computedCaseType || formData.caseType) !== 'Transactional Cases') && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Case No. *</label>
+                  <input
+                    type="text"
+                    value={formData.caseNo}
+                    onChange={(e) => handleInputChange('caseNo', e.target.value)}
+                    placeholder="e.g., RS/SCP/RCOM 00388/2024/TC"
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  />
+                </div>
+              )}
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Parties *</label>
+                  <div className="text-xs text-gray-500">
+                    <label className="inline-flex items-center gap-2">
+                      <input type="checkbox" className="form-checkbox" checked={partiesStructured} onChange={(e) => setPartiesStructured(e.target.checked)} />
+                      <span>Structured</span>
+                    </label>
+                  </div>
+                </div>
+
+                {!partiesStructured ? (
+                  <input
+                    type="text"
+                    value={formData.parties}
+                    onChange={(e) => handleInputChange('parties', e.target.value)}
+                    placeholder="e.g., John vs Smith"
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {partiesList.map((p, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                        <input
+                          className="col-span-5 px-3 py-2 border border-gray-300 rounded"
+                          placeholder="Party name"
+                          value={p.name}
+                          onChange={(e) => setPartiesList((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))}
+                        />
+                        <select
+                          value={p.role}
+                          onChange={(e) => setPartiesList((prev) => prev.map((x, i) => (i === idx ? { ...x, role: e.target.value } : x)))}
+                          className="col-span-5 px-3 py-2 border border-gray-300 rounded bg-white"
+                        >
+                          {/* Role suggestions based on computed case type */}
+                          <option value="">Select role...</option>
+                          {getRoleSuggestions({ caseType: computedCaseType, sectorLabel: selectedServiceNodes[0]?.label, matterType: formData.workflow }).map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
+                        <div className="col-span-2">
+                          <button
+                            type="button"
+                            onClick={() => setPartiesList((prev) => prev.filter((_, i) => i !== idx))}
+                            className="px-3 py-2 border rounded text-sm text-red-600"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPartiesList((prev) => [...prev, { name: '', role: '' }])}
+                        className="px-3 py-2 border rounded text-sm bg-gray-50"
+                      >
+                        Add party
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // convert structured list into free-text preview
+                          const preview = partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ');
+                          handleInputChange('parties', preview);
+                        }}
+                        className="px-3 py-2 border rounded text-sm bg-gray-50"
+                      >
+                        Save as text
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>

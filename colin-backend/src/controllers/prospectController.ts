@@ -30,6 +30,7 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
   const assignedTo = cleanString(body.assignedTo) || fallbackUserId || '';
   const clientName = cleanString(body.clientName);
   return {
+    parties: cleanString(body.parties) || clientName,
     clientName,
     contact: {
       name: cleanString(body.contact?.name) || clientName,
@@ -311,7 +312,7 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
     const caseNo = await generateCaseNo();
     const newCase = new Case({
       caseNo,
-      parties: prospect.clientName,
+      parties: prospect.parties || prospect.clientName,
       description: prospect.inquiryDescription,
       legalServicePath: prospect.legalServicePath || [],
       clientContacts: [

@@ -60,6 +60,7 @@ import {
   WorkflowTemplate,
 } from '../../services/workflowService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
+import { getRoleSuggestions } from '../../constants/partyRoles';
 import { getCasePracticePath } from '../../utils/caseLabels';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -299,6 +300,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   // Edit case modal
   const [showEditCase, setShowEditCase] = useState(false);
   const [editCaseData, setEditCaseData] = useState<CaseData | null>(null);
+  const [partiesStructured, setPartiesStructured] = useState(false);
+  const [partiesList, setPartiesList] = useState<Array<{ name: string; role: string }>>([]);
   const [editServicePath, setEditServicePath] = useState<string[]>([]);
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowTemplatesLoading, setWorkflowTemplatesLoading] = useState(false);
@@ -396,6 +399,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
       const ids = (editCaseData?.legalServicePath || []).map((x) => x.id).filter(Boolean);
       setEditServicePath(ids);
+      // initialize parties structured state from editCaseData
+      setPartiesStructured(false);
+      setPartiesList(editCaseData?.parties ? [{ name: editCaseData.parties, role: '' }] : []);
     }
   }, [showEditCase, editCaseData, editModalInitializedRef]);
 
@@ -824,7 +830,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     if (!canManageCase) return;
 
     try {
-      await updateCase(editCaseData._id, editCaseData);
+      const finalParties = partiesStructured ? partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') : editCaseData.parties;
+      const payload = { ...editCaseData, parties: finalParties } as CaseData;
+      await updateCase(editCaseData._id, payload);
       setShowEditCase(false);
       const updated = await getCaseById(editCaseData._id);
       setCaseData(updated);
@@ -2729,25 +2737,72 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
             <form onSubmit={handleEditCase} className="flex-1 overflow-y-auto space-y-4 p-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Case No.</label>
-                <input
-                  type="text"
-                  value={editCaseData.caseNo}
-                  onChange={(e) => setEditCaseData((c) => (c ? { ...c, caseNo: e.target.value } : c))}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                />
+                {/* Hide case number for transactional cases */}
+                {editCaseData.caseType !== 'Transactional Cases' && (
+                  <>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Case No.</label>
+                    <input
+                      type="text"
+                      value={editCaseData.caseNo}
+                      onChange={(e) => setEditCaseData((c) => (c ? { ...c, caseNo: e.target.value } : c))}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded"
+                    />
+                  </>
+                )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Parties</label>
-                <input
-                  type="text"
-                  value={editCaseData.parties}
-                  onChange={(e) => setEditCaseData((c) => (c ? { ...c, parties: e.target.value } : c))}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Parties</label>
+                  <div className="text-xs text-gray-500">
+                    <label className="inline-flex items-center gap-2">
+                      <input type="checkbox" className="form-checkbox" checked={partiesStructured} onChange={(e) => setPartiesStructured(e.target.checked)} />
+                      <span>Structured</span>
+                    </label>
+                  </div>
+                </div>
+
+                {!partiesStructured ? (
+                  <input
+                    type="text"
+                    value={editCaseData.parties}
+                    onChange={(e) => setEditCaseData((c) => (c ? { ...c, parties: e.target.value } : c))}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {partiesList.map((p, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                        <input
+                          className="col-span-6 px-3 py-2 border border-gray-300 rounded"
+                          placeholder="Party name"
+                          value={p.name}
+                          onChange={(e) => setPartiesList((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))}
+                        />
+                        <select
+                          value={p.role}
+                          onChange={(e) => setPartiesList((prev) => prev.map((x, i) => (i === idx ? { ...x, role: e.target.value } : x)))}
+                          className="col-span-5 px-3 py-2 border border-gray-300 rounded bg-white"
+                        >
+                          <option value="">Select role...</option>
+                          {getRoleSuggestions({ caseType: resolveCaseTypeFromSelection(selectedEditServiceNodes), sectorLabel: selectedEditServiceNodes[0]?.label, matterType: editCaseData.workflow }).map((r) => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
+                        <div className="col-span-1">
+                          <button type="button" onClick={() => setPartiesList((prev) => prev.filter((_, i) => i !== idx))} className="px-2 py-1 border rounded text-sm text-red-600">Remove</button>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setPartiesList((prev) => [...prev, { name: '', role: '' }])} className="px-3 py-2 border rounded text-sm bg-gray-50">Add party</button>
+                      <button type="button" onClick={() => setEditCaseData((c) => (c ? { ...c, parties: partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') } : c))} className="px-3 py-2 border rounded text-sm bg-gray-50">Save as text</button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
