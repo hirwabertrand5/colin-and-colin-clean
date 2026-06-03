@@ -27,6 +27,7 @@ import {
   updateTask,
   deleteTask,
   TaskData,
+  TaskStatus,
   submitTaskForApproval,
   approveTask,
   rejectTask,
@@ -203,6 +204,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     dueDate: '',
     description: '',
     requiresApproval: false,
+    approvalStatus: 'Not Required',
   });
 
   const currentWorkflowStep = useMemo(() => {
@@ -635,6 +637,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         dueDate: '',
         description: '',
         requiresApproval: false,
+        approvalStatus: 'Not Required',
       });
       reloadTasks();
     } catch (err: any) {
@@ -677,7 +680,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     }
   };
 
-  const handleStatusChange = async (task: TaskData, newStatus: string) => {
+  const handleStatusChange = async (task: TaskData, newStatus: TaskStatus) => {
     if (isRestrictedAssigneeRole) return;
     try {
       await updateTask(task._id!, { status: newStatus });

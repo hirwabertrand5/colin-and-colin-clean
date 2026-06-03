@@ -43,7 +43,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
 
   const canExtendDeadlines = canCompleteSteps;
   const [extendOpenFor, setExtendOpenFor] = useState<string>('');
-  const [extendDays, setExtendDays] = useState<string>('1');
+  const [extendDate, setExtendDate] = useState<string>('');
   const [extendReason, setExtendReason] = useState<string>('');
 
   const load = async () => {
@@ -123,19 +123,40 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
 
   const onExtendDeadline = async (stepKey: string) => {
     if (!canExtendDeadlines) return;
-    const days = Number(extendDays);
-    if (!Number.isFinite(days) || days <= 0) {
-      setErr('Provide a valid number of days to extend.');
+    const step = wf?.steps?.find((x) => x.stepKey === stepKey);
+    if (!step) {
+      setErr('Step not found');
+      return;
+    }
+    if (!step.dueAt) {
+      setErr('Step has no current due date to extend.');
+      return;
+    }
+    if (!extendDate) {
+      setErr('Please choose a new due date.');
       return;
     }
     try {
+      const currentDue = new Date(step.dueAt);
+      const selected = new Date(`${extendDate}T00:00:00`);
+      const diffMs = selected.getTime() - currentDue.getTime();
+      const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (!Number.isFinite(days) || days <= 0) {
+        setErr('Please choose a later date than the current due date.');
+        return;
+      }
+      if (days > 365) {
+        setErr('Extension must be 365 days or fewer.');
+        return;
+      }
+
       setBusyKey(`extend:${stepKey}`);
       setErr('');
       const updated = await extendWorkflowStepDeadline(caseId, stepKey, days, extendReason);
       setWf(updated);
       await onWorkflowChanged?.();
       setExtendOpenFor('');
-      setExtendDays('1');
+      setExtendDate('');
       setExtendReason('');
     } catch (e: any) {
       setErr(e.message || 'Failed to extend deadline');
@@ -277,7 +298,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
               {canExtendDeadlines && s.status !== 'Completed' && (
                 <button
                   type="button"
-                  onClick={() => setExtendOpenFor((k) => (k === s.stepKey ? '' : s.stepKey))}
+                  onClick={() => {
+                    if (extendOpenFor === s.stepKey) {
+                      setExtendOpenFor('');
+                      setExtendDate('');
+                    } else {
+                      setExtendOpenFor(s.stepKey);
+                      setExtendDate(s.dueAt ? new Date(s.dueAt).toISOString().slice(0, 10) : '');
+                    }
+                  }}
                   className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded"
                   title="Extend deadline"
                 >
@@ -364,34 +393,32 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
           {extendOpenFor === s.stepKey && canExtendDeadlines ? (
             <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
               <div className="text-sm font-semibold text-gray-900">Extend deadline</div>
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Add days</label>
-                  <input
-                    value={extendDays}
-                    onChange={(e) => setExtendDays(e.target.value)}
-                    type="number"
-                    min={1}
-                    max={365}
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
-                  />
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">New due date</label>
+                    <input
+                      value={extendDate}
+                      onChange={(e) => setExtendDate(e.target.value)}
+                      type="date"
+                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Reason (optional)</label>
+                    <input
+                      value={extendReason}
+                      onChange={(e) => setExtendReason(e.target.value)}
+                      placeholder="e.g., Awaiting client documents"
+                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                    />
+                  </div>
                 </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Reason (optional)</label>
-                  <input
-                    value={extendReason}
-                    onChange={(e) => setExtendReason(e.target.value)}
-                    placeholder="e.g., Awaiting client documents"
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
-                  />
-                </div>
-              </div>
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => {
                     setExtendOpenFor('');
-                    setExtendDays('1');
+                    setExtendDate('');
                     setExtendReason('');
                   }}
                   className="px-3 py-2 border border-gray-300 rounded text-gray-700 hover:bg-white"
