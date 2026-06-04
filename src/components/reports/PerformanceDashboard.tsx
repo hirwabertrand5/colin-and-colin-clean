@@ -251,8 +251,8 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
         color:
           perf.rating.value >= 4
             ? 'bg-green-100 text-green-700'
-            : perf.rating.value >= 3
-              ? 'bg-yellow-100 text-gray-900'
+              : perf.rating.value >= 3
+              ? 'bg-yellow-400 text-black'
               : 'bg-red-100 text-red-700',
       });
     }
@@ -279,7 +279,7 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
       title: `On-time completion: ${onTime}%`,
       description: `Uses completedAt (backend) compared to due dates`,
       icon: TrendingUp,
-      color: onTime >= 90 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-gray-900',
+      color: onTime >= 90 ? 'bg-green-100 text-green-700' : 'bg-yellow-400 text-black',
     });
 
     list.push({
@@ -417,7 +417,7 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
                 <span className="px-2.5 py-1 text-xs rounded bg-gray-100 text-gray-700">
                   Completed this month: <b>{workflowSignals.completedThisMonthCount}</b>
                 </span>
-                <span className="px-2.5 py-1 text-xs rounded bg-yellow-100 text-gray-900">
+                <span className="px-2.5 py-1 text-xs rounded bg-yellow-400 text-black">
                   Pending approvals: <b>{workflowSignals.pendingApprovalsCount}</b>
                 </span>
                 <span

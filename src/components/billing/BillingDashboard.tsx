@@ -112,7 +112,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
   const getStatusChip = (status: 'Paid' | 'Pending') =>
     status === 'Paid'
       ? 'bg-green-100 text-green-700'
-      : 'bg-yellow-100 text-gray-900';
+      : 'bg-yellow-400 text-black';
 
   if (!canAccessBilling(userRole)) return null;
 

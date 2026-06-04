@@ -130,7 +130,7 @@ const calculateWorkflowActionProgress = (wf: WorkflowInstance | null, plannedAmo
 };
 
 const getInvoiceStatusChip = (status: Invoice['status']) => {
-  return status === 'Paid' ? 'bg-green-50 text-green-700' : 'bg-yellow-100 text-gray-900';
+  return status === 'Paid' ? 'bg-green-50 text-green-700' : 'bg-yellow-400 text-black';
 };
 
 const getServicePathAccent = (caseType?: CaseData['caseType']) => {
@@ -996,7 +996,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         ? 'bg-yellow-400'
         : 'bg-green-600';
   const billingHealthBadgeClass =
-    billingHealth === 'yellow' ? 'bg-yellow-100 text-gray-900' : `${billingHealthClass} text-white`;
+    billingHealth === 'yellow' ? 'bg-yellow-400 text-black' : `${billingHealthClass} text-white`;
   const billingHealthText =
     billingHealth === 'loss'
       ? 'Loss risk'
@@ -1159,7 +1159,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const getUrgencyTextColor = (percentageRemaining: number): string => {
     if (percentageRemaining > 75) return 'text-sky-700';
     if (percentageRemaining > 50) return 'text-green-700';
-    if (percentageRemaining > 25) return 'text-gray-900';
+    if (percentageRemaining > 25) return 'text-black';
     return 'text-red-700';
   };
 

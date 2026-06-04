@@ -6,6 +6,7 @@ import ManagingPartnerDashboard from './components/dashboards/ManagingPartnerDas
 import AssociateDashboard from './components/dashboards/AssociateDashboard';
 import ExecutiveAssistantDashboard from './components/dashboards/ExecutiveAssistantDashboard';
 import CaseList from './components/cases/CaseList';
+import ClosedCases from './components/cases/ClosedCases';
 import CreateCase from './components/cases/CreateCase';
 import CaseWorkspace from './components/cases/CaseWorkspace';
 import IntakeProspects from './components/cases/IntakeProspects';
@@ -134,6 +135,7 @@ function App() {
                   <Route path="/cases" element={<CaseList userRole={user.role} />} />
                   <Route path="/matters" element={<CaseList userRole={user.role} />} />
                   <Route path="/matters/intake-prospects" element={<IntakeProspects />} />
+                  <Route path="/matters/closed" element={<ClosedCases userRole={user.role} />} />
 
                   {(isMD || isExec) && <Route path="/cases/new" element={<CreateCase />} />}
                   {(isMD || isExec) && <Route path="/matters/new" element={<CreateCase />} />}

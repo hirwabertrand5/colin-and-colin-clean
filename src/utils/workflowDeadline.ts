@@ -49,7 +49,7 @@ export const getUrgencyColorForDueDate = (
 export const getUrgencyClass = (color: UrgencyColor) => {
   if (color === 'blue') return 'bg-blue-600 text-white border-blue-700';
   if (color === 'green') return 'bg-green-600 text-white border-green-700';
-  if (color === 'yellow') return 'bg-yellow-100 text-gray-900 border-yellow-500';
+  if (color === 'yellow') return 'bg-yellow-400 text-black border-yellow-500';
   if (color === 'red') return 'bg-red-600 text-white border-red-700';
   return 'bg-gray-500 text-white border-gray-600';
 };

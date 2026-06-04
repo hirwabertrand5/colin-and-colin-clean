@@ -148,7 +148,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
       case 'High':
         return 'bg-red-100 text-red-700';
       case 'Medium':
-        return 'bg-yellow-100 text-gray-900';
+        return 'bg-yellow-400 text-black';
       case 'Low':
         return 'bg-green-100 text-green-700';
       default:

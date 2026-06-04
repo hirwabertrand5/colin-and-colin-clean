@@ -14,6 +14,7 @@ import {
   LogOut,
   Users,
   Wallet,
+  FolderTree,
   Sun,
   Moon,
   ChevronDown,
@@ -36,8 +37,9 @@ type NavItem = {
   href: string;
   icon: React.ComponentType<any>;
   roles?: string[];
-  submenu?: { name: string; href: string }[];
+  submenu?: { name: string; href: string; icon?: React.ComponentType<any>; exact?: boolean }[];
 };
+
 
 export default function DashboardLayout({ user, onLogout, children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -56,8 +58,9 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
       icon: Briefcase,
       roles: ['managing_director', 'managing_partner', 'executive_managing_partner', 'senior_partner', 'partner', 'executive_partner', 'associate_partner', 'executive_associate_partner', 'senior_associate', 'senior_executive_assistant', 'associate', 'trainee_associate', 'executive_assistant', 'originating_attorney', 'intern'],
       submenu: [
-        { name: 'Intake & Prospects', href: '/matters/intake-prospects' },
-        { name: 'Active Matters', href: '/matters' },
+        { name: 'Intake & Prospects', href: '/matters/intake-prospects', icon: Users },
+        { name: 'Active Matters', href: '/matters', icon: Briefcase, exact: true },
+        { name: 'Closed Matters', href: '/matters/closed', icon: FolderTree },
       ],
     },
     { name: 'Tasks', href: '/tasks', icon: CheckSquare },
@@ -78,9 +81,10 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
     { name: 'Settings', href: '/admin/settings', icon: Settings, roles: ['managing_director', 'executive_assistant'] },
   ];
 
-  const isActive = (href: string) => {
+  const isPathActive = (href: string, exact = false) => {
     if (href === '/') return location.pathname === '/';
-    return location.pathname.startsWith(href);
+    if (exact) return location.pathname === href || location.pathname === href + '/';
+    return location.pathname === href || location.pathname.startsWith(href + '/');
   };
 
   const hasAccess = (item: { roles?: string[] }) => !item.roles || item.roles.includes(user.role);
@@ -154,7 +158,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                 const Icon = item.icon;
                 const hasSubmenu = item.submenu && item.submenu.length > 0;
                 const isExpanded = expandedMenu === item.name;
-                const isSubmenuActive = hasSubmenu && item.submenu.some(sub => isActive(sub.href));
+                const isSubmenuActive = hasSubmenu && item.submenu.some(sub => isPathActive(sub.href, !!sub.exact));
 
                 if (hasSubmenu) {
                   return (
@@ -178,23 +182,27 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                       {isExpanded && (
                         <div className="mt-2 ml-3">
                           <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm p-2">
-                            {item.submenu.map((sub) => (
-                              <Link
-                                key={sub.name}
-                                to={sub.href}
-                                className={`
-                                  flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors
-                                  ${isActive(sub.href)
-                                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium'
-                                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
-                                  }
-                                `}
-                                onClick={() => setSidebarOpen(false)}
-                              >
-                                <Briefcase className="w-4 h-4 text-gray-400" />
-                                <span className="truncate">{sub.name}</span>
-                              </Link>
-                            ))}
+                            {item.submenu.map((sub: any) => {
+                              const SubIcon = sub.icon || Briefcase;
+                              const subActive = isPathActive(sub.href, !!sub.exact);
+                              return (
+                                <Link
+                                  key={sub.name}
+                                  to={sub.href}
+                                  className={`
+                                    flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors
+                                    ${subActive
+                                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium'
+                                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                                    }
+                                  `}
+                                  onClick={() => setSidebarOpen(false)}
+                                >
+                                  <SubIcon className="w-4 h-4 text-gray-400" />
+                                  <span className="truncate">{sub.name}</span>
+                                </Link>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -208,7 +216,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                     to={item.href}
                     className={`
                       flex items-center px-3 py-2 text-sm rounded transition-colors
-                      ${isActive(item.href)
+                      ${isPathActive(item.href)
                         ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
                       }
@@ -237,7 +245,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                         to={item.href}
                         className={`
                           flex items-center px-3 py-2 text-sm rounded transition-colors
-                          ${isActive(item.href)
+                          ${isPathActive(item.href)
                             ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
                             : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
                           }
