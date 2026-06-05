@@ -62,6 +62,22 @@ export const createNotification = async (payload: {
   return typeof doc?.toObject === 'function' ? doc.toObject() : doc;
 };
 
+// Lightweight SMS logger / placeholder for SMS provider integration.
+// Records SMS attempts as notifications so they are auditable. Replace with provider integration if needed.
+export const sendSms = async (phones: string[], message: string, caseId?: string) => {
+  if (!Array.isArray(phones) || phones.length === 0) return null;
+  const title = 'Workflow SMS';
+  const payload: any = {
+    type: 'WORKFLOW_SMS',
+    title,
+    message: `${message}\nRecipients: ${phones.join(', ')}`,
+    severity: 'info',
+  };
+  if (caseId) payload.caseId = new mongoose.Types.ObjectId(caseId);
+  const doc: any = await Notification.create(payload);
+  return typeof doc?.toObject === 'function' ? doc.toObject() : doc;
+};
+
 const ensurePrefsExist = async (userIds: string[]) => {
   const unique = Array.from(new Set(userIds.map(String)));
   const existing = await NotificationPreferences.find({ userId: { $in: unique } }).select('userId').lean();

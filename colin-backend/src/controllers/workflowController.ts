@@ -7,6 +7,8 @@ import Case from '../models/caseModel';
 import Document from '../models/documentModel';
 import Task from '../models/taskModel';
 import { writeAudit } from '../services/auditService';
+import { createNotification, sendSms } from '../services/notifyService';
+import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps } from '../utils/workflowCompute';
 
 const isAdmin = (role?: string) =>
@@ -125,6 +127,7 @@ const completeStepInternal = async (req: AuthRequest, c: any, inst: any, stepKey
     throw err;
   }
 
+  const previousStepStatus = step.status;
   step.status = 'Completed';
   step.completedAt = new Date();
 
@@ -141,17 +144,89 @@ const completeStepInternal = async (req: AuthRequest, c: any, inst: any, stepKey
   }
 
   await inst.save();
+
+  // Capture previous case workflow status for auditing
+  const previousCaseWorkflowStatus = c.workflowProgress?.status;
+
   await updateCaseWorkflowProgress(c, inst);
 
   const actor = actorFromReq(req);
+
+  // Include stage transition info when available
+  const prevStage = (inst.steps || []).find((s: any) => s.stepKey === stepKey)?.stageKey || 'unknown';
+  const newStage = (() => {
+    if (!inst.currentStepKey) return undefined;
+    const ref = (inst.steps || []).find((s: any) => s.stepKey === inst.currentStepKey);
+    return ref?.stageKey;
+  })();
+
+  const stepDetailParts = [`${stepKey} • ${step.title}`];
+  if (previousStepStatus) stepDetailParts.push(`from ${previousStepStatus} to ${step.status}`);
+  if (prevStage && newStage && prevStage !== newStage) stepDetailParts.push(`stage: ${prevStage} → ${newStage}`);
+
   await writeAudit({
     caseId: String(c._id),
     actorName: actor.actorName,
     ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
     action: 'WORKFLOW_STEP_COMPLETED',
     message: 'Completed workflow step',
-    detail: `${stepKey} • ${step.title}`,
+    detail: stepDetailParts.join(' • '),
   });
+
+  // If the case workflow status changed, write a CASE_UPDATED audit entry
+  const newCaseWorkflowStatus = c.workflowProgress?.status;
+  if (previousCaseWorkflowStatus !== newCaseWorkflowStatus) {
+    await writeAudit({
+      caseId: String(c._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'CASE_UPDATED',
+      message: 'Case workflow status updated',
+      detail: `Workflow status: ${previousCaseWorkflowStatus || 'unknown'} → ${newCaseWorkflowStatus}`,
+    });
+  }
+
+  // Notifications for ownership transfer approval (finalization)
+  try {
+    if (String(stepKey).toUpperCase() === 'VOT_12_OWNERSHIP_TRANSFER_APPROVAL') {
+      // Find buyer & seller contacts on the case
+      const contacts: any[] = Array.isArray(c.clientContacts) ? c.clientContacts : [];
+      const emails = contacts.map((p: any) => String(p.email || '').trim()).filter(Boolean);
+      const phones = contacts.map((p: any) => String(p.phone || '').trim()).filter(Boolean);
+
+      const subject = 'Vehicle Ownership Transfer Completed';
+      const plate = (c.parties || '') as string;
+      const html = `<p>The ownership transfer has been completed for case ${String(c.caseNo || '')}.</p><p>Reference: ${String(c.caseNo || '')}</p>`;
+      // Send emails (best-effort)
+      if (emails.length) {
+        try {
+          await sendEmailResend(emails, subject, html);
+        } catch {
+          // ignore email send failures
+        }
+      }
+
+      // Send SMS placeholder
+      if (phones.length) {
+        try {
+          await sendSms(phones, `Ownership transfer completed for case ${String(c.caseNo || '')}.` , String(c._id));
+        } catch {}
+      }
+
+      // In-app notification for internal staff roles
+      try {
+        await createNotification({
+          type: 'WORKFLOW_NOTIFICATION',
+          title: 'Ownership transfer approved',
+          message: `Ownership transfer approved for case ${String(c.caseNo || '')}`,
+          audienceRoles: ['executive_assistant', 'associate', 'partner', 'compliance_officer'],
+          caseId: String(c._id),
+        } as any);
+      } catch {}
+    }
+  } catch (e) {
+    // swallow notification errors to avoid breaking primary flow
+  }
 
   return inst;
 };

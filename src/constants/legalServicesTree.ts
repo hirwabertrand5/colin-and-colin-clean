@@ -366,9 +366,19 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
             label: 'Property Transactions',
             caseType: 'Transactional Cases',
             children: [
-              { id: 'sale_purchase_agreements', label: 'Sale and purchase agreements', caseType: 'Transactional Cases' },
+              {
+                id: 'sale_purchase_agreements',
+                label: 'Sale and purchase agreements',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Condominium Transfer'],
+              },
               { id: 'title_due_diligence', label: 'Title due diligence', caseType: 'Transactional Cases', suggestedMatterTypes: ['Due Diligence (Land)'] },
-              { id: 'transfer_registration', label: 'Transfer and registration', caseType: 'Transactional Cases' },
+              {
+                id: 'transfer_registration',
+                label: 'Transfer and registration',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Condominium Transfer', 'Foreigner Acquiring Land in Rwanda'],
+              },
               { id: 'escrow_structuring', label: 'Escrow structuring', caseType: 'Transactional Cases' },
             ],
           },
@@ -379,8 +389,18 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
             children: [
               { id: 'zoning_land_use_approvals', label: 'Zoning and land use approvals', caseType: 'Transactional Cases' },
               { id: 'development_structuring', label: 'Development structuring', caseType: 'Transactional Cases' },
-              { id: 'land_regulatory_compliance', label: 'Regulatory compliance', caseType: 'Transactional Cases' },
-              { id: 'government_engagement_land', label: 'Government engagement', caseType: 'Transactional Cases' },
+              {
+                id: 'land_regulatory_compliance',
+                label: 'Regulatory compliance',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Foreigner Acquiring Land in Rwanda'],
+              },
+              {
+                id: 'government_engagement_land',
+                label: 'Government engagement',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Foreigner Acquiring Land in Rwanda'],
+              },
             ],
           },
           {

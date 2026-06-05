@@ -14,6 +14,9 @@ export interface ICaseDocument extends Document {
   uploadedDate: string;
   size: string;
   url: string;
+  // Versioning
+  version?: number;
+  previousVersionId?: mongoose.Types.ObjectId;
 }
 
 const DocumentSchema = new Schema<ICaseDocument>(
@@ -31,6 +34,9 @@ const DocumentSchema = new Schema<ICaseDocument>(
     uploadedDate: { type: String, required: true },
     size: { type: String, required: true },
     url: { type: String, required: true },
+    // Versioning support
+    version: { type: Number, default: 1, min: 1 },
+    previousVersionId: { type: Schema.Types.ObjectId, ref: 'Document' },
   },
   { timestamps: true }
 );

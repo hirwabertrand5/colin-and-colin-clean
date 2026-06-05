@@ -1,16 +1,9 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, Briefcase, ArrowUpDown } from 'lucide-react';
+import { Search, Briefcase, ArrowUpDown } from 'lucide-react';
 import { UserRole } from '../../App';
 import { getAllCases, CaseData } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
-import {
-  getDueRemainingRatio,
-  getUrgencyClass,
-  getUrgencyColorForDueDate,
-  getUrgencyColorFromRatio,
-  formatDueCountdown,
-} from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
 
 interface ClosedCasesProps {
@@ -20,14 +13,22 @@ interface ClosedCasesProps {
 const isAssociateLike = (role: UserRole) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
 
+const isClosedMatter = (c: CaseData) => {
+  const caseStatusClosed = String(c.status || '').trim().toLowerCase() === 'closed';
+  if (!caseStatusClosed) return false;
+
+  const workflowStatus = String(c.workflowProgress?.status || '').trim().toLowerCase();
+  return !workflowStatus || workflowStatus === 'completed';
+};
+
 export default function ClosedCases({ userRole }: ClosedCasesProps) {
   const CASES_PER_PAGE = 10;
 
   usePageTitle('Closed Matters');
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortKey, setSortKey] = useState<'nextDeadline' | 'createdAt' | 'caseNo' | 'parties' | 'workflow' | 'currentStep'>('nextDeadline');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [sortKey, setSortKey] = useState<'createdAt' | 'caseNo' | 'parties' | 'workflow' | 'currentStep'>('createdAt');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [cases, setCases] = useState<CaseData[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -47,23 +48,13 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
     setError('');
     try {
       const data = await getAllCases();
-      // Consider closed cases as those explicitly marked 'Closed' or marked as historical
-      const closed = (data || []).filter((c) => String(c.status || '').toLowerCase() === 'closed' || c.matterTiming === 'historical');
+      const closed = (data || []).filter(isClosedMatter);
       setCases(closed);
     } catch (err: any) {
       setError(err.message || 'Failed to load closed cases');
     } finally {
       setLoading(false);
     }
-  };
-
-  const getDeadlinePillClass = (c: CaseData) => {
-    return getUrgencyClass(
-      getUrgencyColorForDueDate(
-        c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt,
-        c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt
-      )
-    );
   };
 
   const collator = useMemo(() => new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }), []);
@@ -75,26 +66,6 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
       return Number.isFinite(ms) ? ms : 0;
     };
 
-    const urgencyRank = (c: CaseData) => {
-      const ratio = getDueRemainingRatio(
-        c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt,
-        c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt
-      );
-      const color = getUrgencyColorFromRatio(ratio);
-      if (color === 'red') return 0;
-      if (color === 'yellow') return 1;
-      if (color === 'green') return 2;
-      if (color === 'blue') return 3;
-      return 4;
-    };
-
-    const nextDueAtMs = (c: CaseData) => {
-      const raw = c.workflowProgress?.nextDueAt || c.workflowProgress?.currentStepDueAt;
-      if (!raw) return Number.MAX_SAFE_INTEGER;
-      const ms = Date.parse(String(raw));
-      return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;
-    };
-
     return cases.map((c, originalIndex) => ({
       c,
       originalIndex,
@@ -102,8 +73,6 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
       createdAtMs: toMs(c.createdAt),
       workflowLabel: getCasePracticePath(c).toLowerCase(),
       currentStepLabel: String(c.workflowProgress?.currentStepTitle || '').toLowerCase(),
-      deadlineRank: urgencyRank(c),
-      nextDueAtMs: nextDueAtMs(c),
     }));
   }, [cases]);
 
@@ -123,11 +92,6 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
         case 'createdAt':
           cmp = a.createdAtMs - b.createdAtMs;
           break;
-        case 'nextDeadline': {
-          cmp = a.deadlineRank - b.deadlineRank;
-          if (cmp === 0) cmp = a.nextDueAtMs - b.nextDueAtMs;
-          break;
-        }
         case 'caseNo':
           cmp = collator.compare(a.c.caseNo ?? '', b.c.caseNo ?? '');
           break;
@@ -192,11 +156,9 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
               onChange={(e) => {
                 const nextKey = e.target.value as any;
                 setSortKey(nextKey);
-                if (nextKey === 'nextDeadline') setSortDir('asc');
               }}
               className="px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-400 focus:outline-none"
             >
-              <option value="nextDeadline">Sort: Next Deadline (Urgent)</option>
               <option value="createdAt">Sort: Date Created</option>
               <option value="workflow">Sort: Workflow</option>
               <option value="currentStep">Sort: Current Step</option>
@@ -227,7 +189,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
           <table className="w-full">
             <thead className="bg-gray-50 border-b">
               <tr>
-                {['No.', 'Case No.', 'Parties', 'Workflow', 'Current Step', 'Assigned To', 'Date Created', 'Next Deadline', 'Actions'].map((header) => (
+                {['No.', 'Case No.', 'Parties', 'Workflow', 'Current Step', 'Assigned To', 'Date Created', 'Actions'].map((header) => (
                   <th key={header} className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">{header}</th>
                 ))}
               </tr>
@@ -243,12 +205,6 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
                   <td className="px-6 py-5 text-sm text-gray-700">{item.workflowProgress?.status === 'Completed' ? 'Completed' : item.workflowProgress?.currentStepTitle || '—'}</td>
                   <td className="px-6 py-5 text-sm text-gray-600">{item.assignedTo}</td>
                   <td className="px-6 py-5 text-sm text-gray-500">{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}</td>
-                  <td className="px-6 py-5 text-sm text-gray-500">
-                    {item.workflowProgress?.nextDueAt ? new Date(item.workflowProgress.nextDueAt).toLocaleDateString() : '—'}
-                    {item.workflowProgress?.nextDueAt ? (
-                      <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClass(item)}`}>{formatDueCountdown(item.workflowProgress?.nextDueAt)}</div>
-                    ) : null}
-                  </td>
                   <td className="px-6 py-5">
                     <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">Open →</Link>
                   </td>

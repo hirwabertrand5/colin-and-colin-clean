@@ -57,7 +57,6 @@ export const addDocumentToCase = async (req: AuthRequest, res: Response) => {
       caseId: new mongoose.Types.ObjectId(caseId),
       name: req.body.name,
       category: req.body.category || undefined,
-
       workflowInstanceId: req.body.workflowInstanceId
         ? new mongoose.Types.ObjectId(req.body.workflowInstanceId)
         : undefined,
@@ -70,7 +69,24 @@ export const addDocumentToCase = async (req: AuthRequest, res: Response) => {
       url: `/uploads/${req.file.filename}`,
     });
 
-    await newDoc.save();
+    // Versioning: if there's an existing document for same case + step/output + name, increment version
+    try {
+      const query: any = { caseId: newDoc.caseId };
+      if (newDoc.workflowInstanceId) query.workflowInstanceId = newDoc.workflowInstanceId;
+      if (newDoc.stepKey) query.stepKey = newDoc.stepKey;
+      if (newDoc.outputKey) query.outputKey = newDoc.outputKey;
+      if (newDoc.name) query.name = newDoc.name;
+
+      const prev = await Document.find(query).sort({ version: -1 }).limit(1).lean();
+      if (Array.isArray(prev) && prev.length > 0 && typeof prev[0].version === 'number') {
+        (newDoc as any).version = (prev[0].version || 1) + 1;
+        (newDoc as any).previousVersionId = prev[0]._id;
+      }
+
+      await newDoc.save();
+    } catch (e) {
+      await newDoc.save();
+    }
 
     const actor = actorFromReq(req);
 

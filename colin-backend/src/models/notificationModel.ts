@@ -9,8 +9,13 @@ export type NotificationType =
   | 'TASK_DUE_REMINDER'
   | 'EVENT_REMINDER';
 
+// Extend NotificationType with workflow-related values
+export type ExtendedNotificationType = NotificationType | 'WORKFLOW_NOTIFICATION' | 'WORKFLOW_SMS' | 'WORKFLOW_EMAIL';
+
+
+
 export interface INotification extends Document {
-  type: NotificationType;
+  type: ExtendedNotificationType;
   title: string;
   message: string;
 

@@ -5,13 +5,13 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 import app from './app';
 import connectDB from './config/db.js';
-import { seedDueDiligenceTemplate } from './seed/seedDueDiligence';
+import { seedAllWorkflowTemplates } from './seed';
 
 const PORT = process.env.PORT || 5000;
 
 connectDB().then(async () => {
   // ✅ seed workflow templates
-  await seedDueDiligenceTemplate();
+  await seedAllWorkflowTemplates();
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
