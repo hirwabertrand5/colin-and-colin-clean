@@ -145,11 +145,6 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
         setErr('Please choose a later date than the current due date.');
         return;
       }
-      if (days > 365) {
-        setErr('Extension must be 365 days or fewer.');
-        return;
-      }
-
       setBusyKey(`extend:${stepKey}`);
       setErr('');
       const updated = await extendWorkflowStepDeadline(caseId, stepKey, days, extendReason);

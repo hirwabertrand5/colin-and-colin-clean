@@ -542,8 +542,8 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     const { extendDays, reason } = req.body || {};
 
     const days = Number(extendDays);
-    if (!Number.isFinite(days) || days <= 0 || days > 365) {
-      return res.status(400).json({ message: 'extendDays must be a number between 1 and 365.' });
+    if (!Number.isFinite(days) || days <= 0) {
+      return res.status(400).json({ message: 'extendDays must be a positive number.' });
     }
 
     const c: any = await Case.findById(caseId);
