@@ -160,3 +160,66 @@
 .dark .dark\:text-red-400 {
   color: var(--color-red-500);
 }
+
+/* Deadline urgency pills. These are explicit because the prebuilt Tailwind
+   bundle does not generate every yellow utility used by the app. */
+.deadline-urgency-blue {
+  background-color: #2563eb;
+  color: #ffffff;
+  border-color: #1d4ed8;
+}
+
+.deadline-urgency-green {
+  background-color: #16a34a;
+  color: #ffffff;
+  border-color: #15803d;
+}
+
+.deadline-urgency-yellow {
+  background-color: #facc15;
+  color: #111827;
+  border-color: #ca8a04;
+}
+
+.deadline-urgency-red {
+  background-color: #dc2626;
+  color: #ffffff;
+  border-color: #b91c1c;
+}
+
+.deadline-urgency-gray {
+  background-color: #6b7280;
+  color: #ffffff;
+  border-color: #4b5563;
+}
+
+.dark .deadline-urgency-blue {
+  background-color: #3b82f6;
+  color: #ffffff;
+  border-color: #93c5fd;
+}
+
+.dark .deadline-urgency-green {
+  background-color: #22c55e;
+  color: #052e16;
+  border-color: #86efac;
+}
+
+.dark .deadline-urgency-yellow {
+  background-color: #facc15;
+  color: #111827;
+  border-color: #fde047;
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.35);
+}
+
+.dark .deadline-urgency-red {
+  background-color: #ef4444;
+  color: #ffffff;
+  border-color: #fca5a5;
+}
+
+.dark .deadline-urgency-gray {
+  background-color: #9ca3af;
+  color: #111827;
+  border-color: #d1d5db;
+}

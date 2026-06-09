@@ -75,7 +75,7 @@ export const reopenWorkflowStep = async (caseId: string, stepKey: string): Promi
 export const extendWorkflowStepDeadline = async (
   caseId: string,
   stepKey: string,
-  extendDays: number,
+  dueAt: string,
   reason?: string
 ): Promise<WorkflowInstance> => {
   const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/extend-deadline`, {
@@ -84,7 +84,7 @@ export const extendWorkflowStepDeadline = async (
       'Content-Type': 'application/json',
       Authorization: `Bearer ${getToken()}`,
     },
-    body: JSON.stringify({ extendDays, reason }),
+    body: JSON.stringify({ dueAt, reason }),
   });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to extend deadline');
   return res.json();
