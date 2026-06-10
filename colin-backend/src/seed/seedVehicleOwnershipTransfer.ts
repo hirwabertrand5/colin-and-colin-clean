@@ -4,7 +4,10 @@ export const seedVehicleOwnershipTransferTemplate = async () => {
   const name = 'Vehicle Ownership Transfer';
   const version = 1;
 
-  const template = {
+  const exists = await WorkflowTemplate.findOne({ name, version });
+  if (exists) return exists;
+
+  return WorkflowTemplate.create({
     name,
     matterType: 'Vehicle Ownership Transfer',
     caseType: 'Transactional Cases',
@@ -259,16 +262,5 @@ export const seedVehicleOwnershipTransferTemplate = async () => {
         sla: { unit: 'days', min: 1, max: 14, text: '1–14 days' },
       },
     ],
-  };
-
-  await WorkflowTemplate.updateMany(
-    { name, version: { $lt: version } },
-    { $set: { active: false } }
-  );
-
-  return WorkflowTemplate.findOneAndUpdate(
-    { name, version },
-    { $set: template },
-    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
-  );
+  });
 };

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Eye, Plus, FileText, Trash2, Download } from 'lucide-react';
+import { Eye, Plus, FileText, Trash2, Download, Save, CalendarDays } from 'lucide-react';
 import { CaseData, updateCase } from '../../services/caseService';
 import {
   generateReportForCase,
@@ -34,6 +34,9 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
 
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState('');
+  const [reportSummary, setReportSummary] = useState(caseData.description || '');
+  const [reportStatus, setReportStatus] = useState(caseData.status || '');
+  const [reportAssignedTo, setReportAssignedTo] = useState(caseData.assignedTo || '');
 
   const [reports, setReports] = useState<ClientReportRun[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
@@ -41,6 +44,7 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
 
   const [periodDays, setPeriodDays] = useState<number>(30);
   const [generating, setGenerating] = useState(false);
+  const [generatingKind, setGeneratingKind] = useState<'weekly' | 'monthly' | 'manual' | null>(null);
 
   const [previewReport, setPreviewReport] = useState<ClientReportRun | null>(null);
 
@@ -55,10 +59,17 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
     setOnUpdateEnabled(
       caseData.reporting?.onUpdateEnabled === undefined ? true : Boolean(caseData.reporting?.onUpdateEnabled)
     );
+    setReportSummary(caseData.description || '');
+    setReportStatus(caseData.status || '');
+    setReportAssignedTo(caseData.assignedTo || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseData._id]);
 
   const recipientCount = useMemo(() => (contacts || []).filter((c) => c.email).length, [contacts]);
+  const serviceRequested = useMemo(() => {
+    const path = caseData.legalServicePath || [];
+    return path.length > 0 ? path.map((item) => item.label).join(' / ') : caseData.matterType || caseData.workflow || caseData.caseType;
+  }, [caseData]);
 
   const loadReports = async () => {
     if (!caseId) return;
@@ -106,6 +117,9 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
 
       await updateCase(caseId, {
         clientContacts: contacts,
+        description: reportSummary,
+        status: reportStatus,
+        assignedTo: reportAssignedTo,
         reporting: {
           weeklyEnabled,
           monthlyEnabled,
@@ -119,18 +133,44 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
     }
   };
 
+  const downloadPdfBlob = async (r: ClientReportRun) => {
+    const blob = await downloadReportPdf(r._id);
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    const safeName = (r.subject || 'case-report').replace(/[^\w\s\-().]/g, '').replace(/\s+/g, ' ').trim();
+    a.href = url;
+    a.download = `${safeName.slice(0, 120)}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    URL.revokeObjectURL(url);
+  };
+
   const onGenerate = async () => {
+    return onGenerateTyped('manual', false);
+  };
+
+  const onGenerateTyped = async (trigger: 'weekly' | 'monthly' | 'manual', downloadAfterCreate = true) => {
     if (!caseId) return;
     try {
       setGenerating(true);
+      setGeneratingKind(trigger);
       setReportsError('');
-      const created = await generateReportForCase(caseId, { periodDays });
+      const created = await generateReportForCase(caseId, trigger === 'manual' ? { periodDays } : { trigger });
       await loadReports();
       setPreviewReport(created);
+      if (downloadAfterCreate) {
+        setDownloadingId(created._id);
+        await downloadPdfBlob(created);
+      }
     } catch (e: any) {
       setReportsError(e?.message || 'Failed to generate report');
     } finally {
       setGenerating(false);
+      setGeneratingKind(null);
+      setDownloadingId(null);
     }
   };
 
@@ -139,18 +179,7 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
       setDownloadingId(r._id);
       setReportsError('');
 
-      const blob = await downloadReportPdf(r._id);
-      const url = URL.createObjectURL(blob);
-
-      const a = document.createElement('a');
-      const safeName = (r.subject || 'case-report').replace(/[^\w\s\-().]/g, '').replace(/\s+/g, ' ').trim();
-      a.href = url;
-      a.download = `${safeName.slice(0, 120)}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      URL.revokeObjectURL(url);
+      await downloadPdfBlob(r);
     } catch (e: any) {
       setReportsError(e?.message || 'Failed to download PDF');
     } finally {
@@ -164,9 +193,9 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="font-semibold text-gray-900">Client Reporting Settings</h2>
+            <h2 className="font-semibold text-gray-900">Client Report Workspace</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Manage client contacts and reporting rules for this case. Reports are generated as drafts for review (not sent automatically).
+              Prepare formal client update reports using the case information already recorded across the workspace.
             </p>
           </div>
 
@@ -174,8 +203,9 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
             type="button"
             onClick={saveSettings}
             disabled={!canManage || savingSettings}
-            className="px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
           >
+            <Save className="w-4 h-4" />
             {savingSettings ? 'Saving...' : 'Save Settings'}
           </button>
         </div>
@@ -185,6 +215,81 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
             {settingsError}
           </div>
         )}
+
+        <div className="mt-6 border border-gray-200 rounded-lg p-5 bg-gray-50">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Editable Report Details</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                These fields feed the Case Information and Case Overview sections in the client report.
+              </p>
+            </div>
+            <div className="hidden md:block text-xs text-gray-500 text-right">
+              Service Requested<br />
+              <span className="font-medium text-gray-700">{serviceRequested}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Case Summary</label>
+              <textarea
+                value={reportSummary}
+                onChange={(e) => setReportSummary(e.target.value)}
+                disabled={!canManage}
+                rows={6}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+                placeholder="Summarise the matter, background, and client objective for the report."
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Current Stage</label>
+                <input
+                  value={reportStatus}
+                  onChange={(e) => setReportStatus(e.target.value)}
+                  disabled={!canManage}
+                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Partner / Associate In Charge</label>
+                <input
+                  value={reportAssignedTo}
+                  onChange={(e) => setReportAssignedTo(e.target.value)}
+                  disabled={!canManage}
+                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+                />
+              </div>
+              <div className="md:hidden">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Service Requested</label>
+                <div className="px-3 py-2 border border-gray-200 rounded bg-white text-sm text-gray-700">{serviceRequested}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => onGenerateTyped('weekly')}
+              disabled={!canManage || generating}
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
+            >
+              <CalendarDays className="w-4 h-4" />
+              {generatingKind === 'weekly' ? 'Preparing Weekly PDF...' : 'Download Weekly PDF'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onGenerateTyped('monthly')}
+              disabled={!canManage || generating}
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 border border-gray-900 text-gray-900 rounded hover:bg-gray-100 disabled:opacity-60"
+            >
+              <Download className="w-4 h-4" />
+              {generatingKind === 'monthly' ? 'Preparing Monthly PDF...' : 'Download Monthly PDF'}
+            </button>
+          </div>
+        </div>
 
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Contacts */}

@@ -10,8 +10,6 @@ import { seedDataProtectionLicensesTemplate } from './seedDataProtectionLicenses
 import { seedImmigrationTemplate } from './seedImmigration';
 import { seedComprehensiveLegalWorkflows } from './seedComprehensiveLegalWorkflows';
 import { seedVehicleOwnershipTransferTemplate } from './seedVehicleOwnershipTransfer';
-import { seedForeignerLandAcquisitionTemplate } from './seedForeignerLandAcquisition';
-import { seedCondominiumTransferTemplate } from './seedCondominiumTransfer';
 
 export const seedAllWorkflowTemplates = async () => {
   await seedDueDiligenceTemplate();
@@ -26,6 +24,4 @@ export const seedAllWorkflowTemplates = async () => {
   await seedImmigrationTemplate();
   await seedComprehensiveLegalWorkflows();
   await seedVehicleOwnershipTransferTemplate();
-  await seedForeignerLandAcquisitionTemplate();
-  await seedCondominiumTransferTemplate();
 };

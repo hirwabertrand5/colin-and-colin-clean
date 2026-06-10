@@ -35,7 +35,7 @@ export const listReportsForCase = async (caseId: string): Promise<ClientReportRu
 
 export const generateReportForCase = async (
   caseId: string,
-  payload?: { periodDays?: number }
+  payload?: { periodDays?: number; trigger?: 'manual' | 'weekly' | 'monthly' | 'update' }
 ): Promise<ClientReportRun> => {
   const res = await fetch(`${API_URL}/cases/${caseId}/reports/generate`, {
     method: 'POST',

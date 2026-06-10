@@ -137,14 +137,22 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
       return;
     }
     try {
+      const currentDue = new Date(step.dueAt);
       const selected = new Date(`${extendDate}T00:00:00`);
-      if (!Number.isFinite(selected.getTime())) {
-        setErr('Please choose a valid due date.');
+      const diffMs = selected.getTime() - currentDue.getTime();
+      const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (!Number.isFinite(days) || days <= 0) {
+        setErr('Please choose a later date than the current due date.');
         return;
       }
+      if (days > 365) {
+        setErr('Extension must be 365 days or fewer.');
+        return;
+      }
+
       setBusyKey(`extend:${stepKey}`);
       setErr('');
-      const updated = await extendWorkflowStepDeadline(caseId, stepKey, extendDate, extendReason);
+      const updated = await extendWorkflowStepDeadline(caseId, stepKey, days, extendReason);
       setWf(updated);
       await onWorkflowChanged?.();
       setExtendOpenFor('');
