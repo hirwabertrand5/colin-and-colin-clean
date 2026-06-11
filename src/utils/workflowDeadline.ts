@@ -19,9 +19,9 @@ export const getDueRemainingRatio = (startAt?: Date | string, dueAt?: Date | str
 
 export const getUrgencyColorFromRatio = (ratio: number | undefined): UrgencyColor => {
   if (ratio === undefined) return 'gray';
-  if (ratio > 0.75) return 'blue';
-  if (ratio > 0.5) return 'green';
-  if (ratio > 0.25) return 'yellow';
+  if (ratio >= 0.75) return 'blue';
+  if (ratio >= 0.5) return 'green';
+  if (ratio >= 0.25) return 'yellow';
   return 'red';
 };
 
@@ -30,28 +30,34 @@ export const getUrgencyColorForDueDate = (
   startAt?: Date | string,
   now = new Date()
 ): UrgencyColor => {
+  // Use absolute remaining-time thresholds (platform-wide business rules):
+  // - overdue OR <= 48 hours => RED
+  // - <= 7 days => YELLOW
+  // - <= 21 days => GREEN
+  // - > 21 days => BLUE
   if (!dueAt) return 'gray';
   const d = dueAt instanceof Date ? dueAt : new Date(dueAt);
   const dueMs = d.getTime();
   if (!Number.isFinite(dueMs)) return 'gray';
 
-  const ratio = getDueRemainingRatio(startAt, dueAt, now);
-  if (ratio !== undefined) return getUrgencyColorFromRatio(ratio);
+  const nowMs = now.getTime();
+  const remainingMs = dueMs - nowMs;
+  const hoursLeft = remainingMs / (1000 * 60 * 60);
+  const daysLeft = hoursLeft / 24;
 
-  const hoursLeft = (dueMs - now.getTime()) / (1000 * 60 * 60);
-  if (hoursLeft <= 0) return 'red';
+  if (remainingMs <= 0) return 'red';
   if (hoursLeft <= 48) return 'red';
-  if (hoursLeft <= 24 * 7) return 'yellow';
-  if (hoursLeft <= 24 * 21) return 'green';
+  if (daysLeft <= 7) return 'yellow';
+  if (daysLeft <= 21) return 'green';
   return 'blue';
 };
 
 export const getUrgencyClass = (color: UrgencyColor) => {
-  if (color === 'blue') return 'bg-blue-600 text-white border-blue-700';
-  if (color === 'green') return 'bg-green-600 text-white border-green-700';
-  if (color === 'yellow') return 'bg-yellow-400 text-black border-yellow-500';
-  if (color === 'red') return 'bg-red-600 text-white border-red-700';
-  return 'bg-gray-500 text-white border-gray-600';
+  if (color === 'blue') return 'deadline-urgency-blue';
+  if (color === 'green') return 'deadline-urgency-green';
+  if (color === 'yellow') return 'deadline-urgency-yellow';
+  if (color === 'red') return 'deadline-urgency-red';
+  return 'deadline-urgency-gray';
 };
 
 export const getPerformanceZoneFromUsedRatio = (ratio: number | undefined): DeadlineZone => {
@@ -68,6 +74,11 @@ export const getZoneColor = (zone: DeadlineZone): UrgencyColor => {
   if (zone === 'delayed') return 'yellow';
   if (zone === 'risk') return 'red';
   return 'gray';
+};
+
+// Returns the CSS class for a deadline pill given due and start dates.
+export const getDeadlinePillClass = (dueAt?: Date | string, startAt?: Date | string) => {
+  return getUrgencyClass(getUrgencyColorForDueDate(dueAt, startAt));
 };
 
 export const getTimeUsedRatio = (startAt?: Date | string, endAt?: Date | string, dueAt?: Date | string) => {

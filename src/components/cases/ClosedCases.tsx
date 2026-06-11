@@ -5,11 +5,9 @@ import { UserRole } from '../../App';
 import { getAllCases, CaseData } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
 import {
-  getDueRemainingRatio,
-  getUrgencyClass,
-  getUrgencyColorForDueDate,
-  getUrgencyColorFromRatio,
   formatDueCountdown,
+  getDeadlinePillClass,
+  getUrgencyColorForDueDate,
 } from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
 
@@ -47,8 +45,12 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
     setError('');
     try {
       const data = await getAllCases();
-      // Consider closed cases as those explicitly marked 'Closed' or marked as historical
-      const closed = (data || []).filter((c) => String(c.status || '').toLowerCase() === 'closed' || c.matterTiming === 'historical');
+      // Consider closed cases as those explicitly marked 'Closed' or where the workflow progress status is 'Completed'.
+      const closed = (data || []).filter((c) => {
+        const isClosedStatus = String(c.status || '').toLowerCase() === 'closed';
+        const isWorkflowCompleted = (c.workflowProgress && c.workflowProgress.status) === 'Completed';
+        return isClosedStatus || isWorkflowCompleted;
+      });
       setCases(closed);
     } catch (err: any) {
       setError(err.message || 'Failed to load closed cases');
@@ -57,14 +59,12 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
     }
   };
 
-  const getDeadlinePillClass = (c: CaseData) => {
-    return getUrgencyClass(
-      getUrgencyColorForDueDate(
-        c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt,
-        c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt
-      )
+  const getDeadlinePillClassForCase = (c: CaseData) =>
+    // Use only current active step due date for closed-case badge (if present).
+    getDeadlinePillClass(
+      c.workflowProgress?.currentStepDueAt,
+      c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt
     );
-  };
 
   const collator = useMemo(() => new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }), []);
 
@@ -76,11 +76,9 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
     };
 
     const urgencyRank = (c: CaseData) => {
-      const ratio = getDueRemainingRatio(
-        c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt,
-        c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt
-      );
-      const color = getUrgencyColorFromRatio(ratio);
+      const start = c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt;
+      const due = c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt;
+      const color = getUrgencyColorForDueDate(due, start);
       if (color === 'red') return 0;
       if (color === 'yellow') return 1;
       if (color === 'green') return 2;
@@ -240,13 +238,29 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
                   <td className="px-6 py-5 text-sm font-medium text-gray-900">{item.caseNo}</td>
                   <td className="px-6 py-5 text-sm text-gray-900">{item.parties}</td>
                   <td className="px-6 py-5 text-sm text-gray-700">{item.workflow || item.matterType || '—'}</td>
-                  <td className="px-6 py-5 text-sm text-gray-700">{item.workflowProgress?.status === 'Completed' ? 'Completed' : item.workflowProgress?.currentStepTitle || '—'}</td>
+                  <td className="px-6 py-5 text-sm text-gray-700">
+                    {(String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed')
+                      ? 'Completed'
+                      : item.workflowProgress?.currentStepTitle || '—'}
+                  </td>
                   <td className="px-6 py-5 text-sm text-gray-600">{item.assignedTo}</td>
                   <td className="px-6 py-5 text-sm text-gray-500">{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}</td>
                   <td className="px-6 py-5 text-sm text-gray-500">
-                    {item.workflowProgress?.nextDueAt ? new Date(item.workflowProgress.nextDueAt).toLocaleDateString() : '—'}
-                    {item.workflowProgress?.nextDueAt ? (
-                      <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClass(item)}`}>{formatDueCountdown(item.workflowProgress?.nextDueAt)}</div>
+                    {String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed'
+                      ? '—'
+                      : item.workflowProgress?.currentStepDueAt
+                      ? new Date(item.workflowProgress.currentStepDueAt).toLocaleDateString()
+                      : '—'}
+                    {!(String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed') && item.workflowProgress?.currentStepDueAt ? (
+                      <div
+                        className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}
+                        data-urgency-color={getUrgencyColorForDueDate(
+                          item.workflowProgress?.currentStepDueAt,
+                          item.workflowProgress?.currentStepStartAt || item.workflowStartDate || item.createdAt
+                        )}
+                      >
+                        {formatDueCountdown(item.workflowProgress?.currentStepDueAt)}
+                      </div>
                     ) : null}
                   </td>
                   <td className="px-6 py-5">

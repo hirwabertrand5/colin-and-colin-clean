@@ -5,7 +5,8 @@
     "dev": "nodemon --exec tsx src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "seed:workflows": "ts-node src/seed/runSeeds.ts"
+    "seed:workflows": "ts-node src/seed/runSeeds.ts",
+    "audit:workflows": "ts-node src/scripts/auditFixWorkflows.ts"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -34,4 +35,5 @@
     "tsx": "^4.22.3",
     "typescript": "^5.9.3"
   }
+
 }

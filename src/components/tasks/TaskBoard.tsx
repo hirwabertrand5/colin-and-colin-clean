@@ -5,14 +5,7 @@ import { UserRole } from '../../App';
 import { getAllTasks, TaskData } from '../../services/taskService';
 import { getAllCases, CaseData } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
-import {
-  formatDueCountdown,
-  getPerformanceZoneFromUsedRatio,
-  getTimeUsedRatio,
-  getUrgencyClass,
-  getUrgencyColorForDueDate,
-  getZoneColor,
-} from '../../utils/workflowDeadline';
+import { formatDueCountdown, getDeadlinePillClass } from '../../utils/workflowDeadline';
 
 interface TaskBoardProps {
   userRole: UserRole;
@@ -75,27 +68,9 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
   };
 
   const getTaskDeadlineColor = (task: TaskData) =>
-    getUrgencyClass(getUrgencyColorForDueDate(`${task.dueDate}T23:59:59.999`, task.createdAt));
+    getDeadlinePillClass(`${task.dueDate}T23:59:59.999`, task.createdAt);
 
-  const getTaskPerformance = (task: TaskData) => {
-    const zone = getPerformanceZoneFromUsedRatio(
-      getTimeUsedRatio(task.createdAt, task.completedAt, `${task.dueDate}T23:59:59.999`)
-    );
-    return {
-      zone,
-      label:
-        zone === 'excellent'
-          ? 'Excellent'
-          : zone === 'good'
-            ? 'Good'
-            : zone === 'delayed'
-              ? 'Delayed'
-              : zone === 'risk'
-                ? 'Risk'
-                : 'Untracked',
-      className: getUrgencyClass(getZoneColor(zone)),
-    };
-  };
+  // Performance badge intentionally removed — show only deadline pill
 
   const filteredTasks = useMemo(() => {
     return tasks.filter((t) => {
@@ -211,7 +186,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
 
                         const showApproval = task.requiresApproval && task.approvalStatus === 'Pending';
                         const showRejected = task.requiresApproval && task.approvalStatus === 'Rejected';
-                        const performance = getTaskPerformance(task);
+                        const isCompleted = task.status === 'Completed';
 
                         return (
                           <Link
@@ -245,14 +220,12 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
                               <span className="shrink-0">Due {task.dueDate}</span>
                             </div>
                             <div className="mt-3 flex items-center gap-2 flex-wrap">
-                              <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${getTaskDeadlineColor(task)}`}>
-                                {formatDueCountdown(`${task.dueDate}T23:59:59.999`)}
-                              </span>
-                              {task.status === 'Completed' ? (
-                                <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${performance.className}`}>
-                                  {performance.label}
+                              {!isCompleted && (
+                                <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${getTaskDeadlineColor(task)}`}>
+                                  {formatDueCountdown(`${task.dueDate}T23:59:59.999`)}
                                 </span>
-                              ) : null}
+                              )}
+                              {/* performance badge removed */}
                             </div>
                           </Link>
                         );

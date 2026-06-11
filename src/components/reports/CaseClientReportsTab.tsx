@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Eye, Plus, FileText, Trash2, Download, Save, CalendarDays } from 'lucide-react';
-import { CaseData, updateCase } from '../../services/caseService';
+import { CaseData, ClientReportTemplate, updateCase } from '../../services/caseService';
 import {
   generateReportForCase,
   listReportsForCase,
@@ -20,6 +20,46 @@ type ClientContact = {
   isPrimary?: boolean;
 };
 
+const buildDefaultTemplate = (caseData: CaseData): ClientReportTemplate => {
+  const primary = (caseData.clientContacts || []).find((contact) => contact.isPrimary) || (caseData.clientContacts || [])[0];
+  const serviceRequested =
+    (caseData.legalServicePath || []).length > 0
+      ? (caseData.legalServicePath || []).map((item) => item.label).join(' / ')
+      : caseData.matterType || caseData.workflow || caseData.caseType;
+
+  return {
+    clientName: primary?.name || caseData.parties || '',
+    clientAddress: 'Kigali, RWANDA',
+    clientPhone: primary?.phone || '',
+    clientEmail: primary?.email || '',
+    salutation: 'Dear Sir/Madam,',
+    introduction: `We hereby present the updated progress report of the matters we are handling on behalf of ${
+      primary?.name || caseData.parties || 'you'
+    }.`,
+    caseSummary: caseData.description || '',
+    caseParties: caseData.parties || '',
+    caseNumber: caseData.caseNo || '',
+    caseTypeLabel: caseData.caseType || '',
+    updateReportDate: '',
+    serviceRequested,
+    partnerInCharge: caseData.assignedTo || '',
+    reportPeriodLabel: '',
+    reportTypeLabel: '',
+    workDone: '',
+    nextAction: '',
+    nextActionDate: '',
+    upcomingMilestone: '',
+    clientInputDecision: '',
+    overallStatus: caseData.status || '',
+    priority: caseData.priority || '',
+    recentDevelopment: '',
+    closing:
+      'We want to reassure you that our team is actively and dedicatedly pursuing your case, aiming for the best possible outcome. Should you have any inquiries regarding the progress of your case or any related issues, please feel free to reach out to us.\n\nThank you for choosing us to handle your legal matters. We value your ongoing cooperation and trust.',
+    signatureName: 'Colin & Colin Legal Solutions',
+    ...(caseData.reporting?.reportTemplate || {}),
+  };
+};
+
 export default function CaseClientReportsTab({ caseData, canManage }: Props) {
   const caseId = caseData._id as string;
 
@@ -34,9 +74,7 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
 
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState('');
-  const [reportSummary, setReportSummary] = useState(caseData.description || '');
-  const [reportStatus, setReportStatus] = useState(caseData.status || '');
-  const [reportAssignedTo, setReportAssignedTo] = useState(caseData.assignedTo || '');
+  const [reportTemplate, setReportTemplate] = useState<ClientReportTemplate>(() => buildDefaultTemplate(caseData));
 
   const [reports, setReports] = useState<ClientReportRun[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
@@ -59,17 +97,22 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
     setOnUpdateEnabled(
       caseData.reporting?.onUpdateEnabled === undefined ? true : Boolean(caseData.reporting?.onUpdateEnabled)
     );
-    setReportSummary(caseData.description || '');
-    setReportStatus(caseData.status || '');
-    setReportAssignedTo(caseData.assignedTo || '');
+    setReportTemplate(buildDefaultTemplate(caseData));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseData._id]);
 
   const recipientCount = useMemo(() => (contacts || []).filter((c) => c.email).length, [contacts]);
   const serviceRequested = useMemo(() => {
     const path = caseData.legalServicePath || [];
-    return path.length > 0 ? path.map((item) => item.label).join(' / ') : caseData.matterType || caseData.workflow || caseData.caseType;
-  }, [caseData]);
+    return (
+      reportTemplate.serviceRequested ||
+      (path.length > 0 ? path.map((item) => item.label).join(' / ') : caseData.matterType || caseData.workflow || caseData.caseType)
+    );
+  }, [caseData, reportTemplate.serviceRequested]);
+
+  const setTemplateField = (field: keyof ClientReportTemplate, value: string) => {
+    setReportTemplate((prev) => ({ ...prev, [field]: value }));
+  };
 
   const loadReports = async () => {
     if (!caseId) return;
@@ -117,13 +160,14 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
 
       await updateCase(caseId, {
         clientContacts: contacts,
-        description: reportSummary,
-        status: reportStatus,
-        assignedTo: reportAssignedTo,
+        description: reportTemplate.caseSummary,
+        status: reportTemplate.overallStatus,
+        assignedTo: reportTemplate.partnerInCharge,
         reporting: {
           weeklyEnabled,
           monthlyEnabled,
           onUpdateEnabled,
+          reportTemplate,
         },
       } as any);
     } catch (e: any) {
@@ -145,7 +189,7 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
     a.click();
     a.remove();
 
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const onGenerate = async () => {
@@ -158,7 +202,10 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
       setGenerating(true);
       setGeneratingKind(trigger);
       setReportsError('');
-      const created = await generateReportForCase(caseId, trigger === 'manual' ? { periodDays } : { trigger });
+      const created = await generateReportForCase(
+        caseId,
+        trigger === 'manual' ? { periodDays, reportTemplate } : { trigger, reportTemplate }
+      );
       await loadReports();
       setPreviewReport(created);
       if (downloadAfterCreate) {
@@ -219,9 +266,9 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
         <div className="mt-6 border border-gray-200 rounded-lg p-5 bg-gray-50">
           <div className="flex items-start justify-between gap-4 mb-4">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">Editable Report Details</h3>
+              <h3 className="text-sm font-semibold text-gray-900">Editable Report Template</h3>
               <p className="text-xs text-gray-500 mt-1">
-                These fields feed the Case Information and Case Overview sections in the client report.
+                Every visible report section can be adjusted here before the weekly or monthly PDF is downloaded.
               </p>
             </div>
             <div className="hidden md:block text-xs text-gray-500 text-right">
@@ -230,42 +277,255 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Client Name</label>
+              <input
+                value={reportTemplate.clientName || ''}
+                onChange={(e) => setTemplateField('clientName', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Client Phone</label>
+              <input
+                value={reportTemplate.clientPhone || ''}
+                onChange={(e) => setTemplateField('clientPhone', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Client Email</label>
+              <input
+                value={reportTemplate.clientEmail || ''}
+                onChange={(e) => setTemplateField('clientEmail', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Salutation</label>
+              <input
+                value={reportTemplate.salutation || ''}
+                onChange={(e) => setTemplateField('salutation', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
             <div className="lg:col-span-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Client Address</label>
+              <textarea
+                value={reportTemplate.clientAddress || ''}
+                onChange={(e) => setTemplateField('clientAddress', e.target.value)}
+                disabled={!canManage}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+              />
+            </div>
+            <div className="lg:col-span-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Opening Paragraph</label>
+              <textarea
+                value={reportTemplate.introduction || ''}
+                onChange={(e) => setTemplateField('introduction', e.target.value)}
+                disabled={!canManage}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+              />
+            </div>
+
+            <div className="lg:col-span-4 pt-2 border-t border-gray-200">
+              <div className="text-xs font-semibold text-gray-900 uppercase tracking-wide">Case Information</div>
+            </div>
+
+            <div className="lg:col-span-4">
               <label className="block text-xs font-medium text-gray-700 mb-1">Case Summary</label>
               <textarea
-                value={reportSummary}
-                onChange={(e) => setReportSummary(e.target.value)}
+                value={reportTemplate.caseSummary || ''}
+                onChange={(e) => setTemplateField('caseSummary', e.target.value)}
                 disabled={!canManage}
-                rows={6}
+                rows={7}
                 className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
                 placeholder="Summarise the matter, background, and client objective for the report."
               />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Case Parties</label>
+              <input
+                value={reportTemplate.caseParties || ''}
+                onChange={(e) => setTemplateField('caseParties', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Case Number</label>
+              <input
+                value={reportTemplate.caseNumber || ''}
+                onChange={(e) => setTemplateField('caseNumber', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Case Type</label>
+              <input
+                value={reportTemplate.caseTypeLabel || ''}
+                onChange={(e) => setTemplateField('caseTypeLabel', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Update Report Date</label>
+              <input
+                value={reportTemplate.updateReportDate || ''}
+                onChange={(e) => setTemplateField('updateReportDate', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+                placeholder="Blank uses today's date"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Service Requested</label>
+              <input
+                value={reportTemplate.serviceRequested || ''}
+                onChange={(e) => setTemplateField('serviceRequested', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Partner / Associate In Charge</label>
+              <input
+                value={reportTemplate.partnerInCharge || ''}
+                onChange={(e) => setTemplateField('partnerInCharge', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Report Period</label>
+              <input
+                value={reportTemplate.reportPeriodLabel || ''}
+                onChange={(e) => setTemplateField('reportPeriodLabel', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+                placeholder="Blank uses selected period"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Report Type</label>
+              <input
+                value={reportTemplate.reportTypeLabel || ''}
+                onChange={(e) => setTemplateField('reportTypeLabel', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+                placeholder="Blank uses Weekly/Monthly update"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Overall Status</label>
+              <input
+                value={reportTemplate.overallStatus || ''}
+                onChange={(e) => setTemplateField('overallStatus', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Priority</label>
+              <input
+                value={reportTemplate.priority || ''}
+                onChange={(e) => setTemplateField('priority', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
+            </div>
+          </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Current Stage</label>
-                <input
-                  value={reportStatus}
-                  onChange={(e) => setReportStatus(e.target.value)}
-                  disabled={!canManage}
-                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Partner / Associate In Charge</label>
-                <input
-                  value={reportAssignedTo}
-                  onChange={(e) => setReportAssignedTo(e.target.value)}
-                  disabled={!canManage}
-                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
-                />
-              </div>
-              <div className="md:hidden">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Service Requested</label>
-                <div className="px-3 py-2 border border-gray-200 rounded bg-white text-sm text-gray-700">{serviceRequested}</div>
-              </div>
+          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Work Done</label>
+              <textarea
+                value={reportTemplate.workDone || ''}
+                onChange={(e) => setTemplateField('workDone', e.target.value)}
+                disabled={!canManage}
+                rows={5}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+                placeholder="One item per line. Blank uses completed tasks, updates, and documents."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Upcoming Milestone</label>
+              <textarea
+                value={reportTemplate.upcomingMilestone || ''}
+                onChange={(e) => setTemplateField('upcomingMilestone', e.target.value)}
+                disabled={!canManage}
+                rows={5}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+                placeholder="One item per line. Blank uses pending tasks and upcoming events."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Next Action</label>
+              <textarea
+                value={reportTemplate.nextAction || ''}
+                onChange={(e) => setTemplateField('nextAction', e.target.value)}
+                disabled={!canManage}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Next Action Date</label>
+              <input
+                value={reportTemplate.nextActionDate || ''}
+                onChange={(e) => setTemplateField('nextActionDate', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+                placeholder="Example: 06 October 2025"
+              />
+              <label className="block text-xs font-medium text-gray-700 mt-4 mb-1">Client Input And Decision</label>
+              <textarea
+                value={reportTemplate.clientInputDecision || ''}
+                onChange={(e) => setTemplateField('clientInputDecision', e.target.value)}
+                disabled={!canManage}
+                rows={2}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Recent Development</label>
+              <textarea
+                value={reportTemplate.recentDevelopment || ''}
+                onChange={(e) => setTemplateField('recentDevelopment', e.target.value)}
+                disabled={!canManage}
+                rows={5}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+                placeholder="One item per line. Blank uses audit updates."
+              />
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Closing Paragraph</label>
+              <textarea
+                value={reportTemplate.closing || ''}
+                onChange={(e) => setTemplateField('closing', e.target.value)}
+                disabled={!canManage}
+                rows={4}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm resize-y disabled:opacity-60"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Signature Name</label>
+              <input
+                value={reportTemplate.signatureName || ''}
+                onChange={(e) => setTemplateField('signatureName', e.target.value)}
+                disabled={!canManage}
+                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm disabled:opacity-60"
+              />
             </div>
           </div>
 
@@ -512,7 +772,17 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
 
             <div className="p-6 overflow-y-auto">
               <div className="border border-gray-200 rounded-lg p-4 bg-white">
-                <div dangerouslySetInnerHTML={{ __html: previewReport.contentHtml }} />
+                <iframe
+                  title="Report preview"
+                  srcDoc={(() => {
+                    const s = previewReport.contentHtml || '<div>No content</div>';
+                    return String(s || '')
+                      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+                      .replace(/on\w+\s*=(("|').*?\2|[^>\s]+)/gi, '');
+                  })()}
+                  sandbox="allow-same-origin allow-downloads"
+                  style={{ width: '100%', height: '70vh', border: 0 }}
+                />
               </div>
 
               <div className="mt-4">

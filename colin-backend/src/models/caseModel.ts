@@ -14,12 +14,42 @@ export interface ILegalServicePathItem {
   label: string;
 }
 
+export interface IClientReportTemplate {
+  clientName?: string;
+  clientAddress?: string;
+  clientPhone?: string;
+  clientEmail?: string;
+  salutation?: string;
+  introduction?: string;
+  caseSummary?: string;
+  caseParties?: string;
+  caseNumber?: string;
+  caseTypeLabel?: string;
+  updateReportDate?: string;
+  serviceRequested?: string;
+  partnerInCharge?: string;
+  reportPeriodLabel?: string;
+  reportTypeLabel?: string;
+  workDone?: string;
+  nextAction?: string;
+  nextActionDate?: string;
+  upcomingMilestone?: string;
+  clientInputDecision?: string;
+  overallStatus?: string;
+  priority?: string;
+  recentDevelopment?: string;
+  documentsAdded?: string;
+  closing?: string;
+  signatureName?: string;
+}
+
 export interface ICaseReportingSettings {
   weeklyEnabled?: boolean;
   monthlyEnabled?: boolean;
   onUpdateEnabled?: boolean;
   lastGeneratedAt?: Date;
   lastSentAt?: Date;
+  reportTemplate?: IClientReportTemplate;
 }
 
 export interface ICase extends Document {
@@ -98,6 +128,38 @@ const LegalServicePathItemSchema = new Schema<ILegalServicePathItem>(
   {
     id: { type: String, required: true, trim: true },
     label: { type: String, required: true, trim: true },
+  },
+  { _id: false }
+);
+
+const ClientReportTemplateSchema = new Schema<IClientReportTemplate>(
+  {
+    clientName: { type: String, trim: true },
+    clientAddress: { type: String, trim: true },
+    clientPhone: { type: String, trim: true },
+    clientEmail: { type: String, trim: true },
+    salutation: { type: String, trim: true },
+    introduction: { type: String },
+    caseSummary: { type: String },
+    caseParties: { type: String },
+    caseNumber: { type: String, trim: true },
+    caseTypeLabel: { type: String, trim: true },
+    updateReportDate: { type: String, trim: true },
+    serviceRequested: { type: String },
+    partnerInCharge: { type: String, trim: true },
+    reportPeriodLabel: { type: String, trim: true },
+    reportTypeLabel: { type: String, trim: true },
+    workDone: { type: String },
+    nextAction: { type: String },
+    nextActionDate: { type: String, trim: true },
+    upcomingMilestone: { type: String },
+    clientInputDecision: { type: String },
+    overallStatus: { type: String, trim: true },
+    priority: { type: String, trim: true },
+    recentDevelopment: { type: String },
+    documentsAdded: { type: String },
+    closing: { type: String },
+    signatureName: { type: String, trim: true },
   },
   { _id: false }
 );
@@ -202,6 +264,7 @@ const CaseSchema = new Schema<ICase>(
         onUpdateEnabled: { type: Boolean, default: true },
         lastGeneratedAt: { type: Date },
         lastSentAt: { type: Date },
+        reportTemplate: { type: ClientReportTemplateSchema, default: {} },
       },
       default: {},
     },

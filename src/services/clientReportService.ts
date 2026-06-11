@@ -1,3 +1,5 @@
+import type { ClientReportTemplate } from './caseService';
+
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
 
@@ -5,6 +7,16 @@ const authHeaders = (extra?: Record<string, string>) => ({
   ...(extra || {}),
   Authorization: `Bearer ${getToken()}`,
 });
+
+const readErrorMessage = async (res: Response, fallback: string) => {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await res.json().catch(() => ({}));
+    return data?.message || fallback;
+  }
+  const text = await res.text().catch(() => '');
+  return text || fallback;
+};
 
 export type ClientContact = {
   name?: string;
@@ -35,7 +47,7 @@ export const listReportsForCase = async (caseId: string): Promise<ClientReportRu
 
 export const generateReportForCase = async (
   caseId: string,
-  payload?: { periodDays?: number; trigger?: 'manual' | 'weekly' | 'monthly' | 'update' }
+  payload?: { periodDays?: number; trigger?: 'manual' | 'weekly' | 'monthly' | 'update'; reportTemplate?: ClientReportTemplate }
 ): Promise<ClientReportRun> => {
   const res = await fetch(`${API_URL}/cases/${caseId}/reports/generate`, {
     method: 'POST',
@@ -55,6 +67,10 @@ export const getReportById = async (reportId: string): Promise<ClientReportRun> 
 // ✅ NEW: download PDF as blob
 export const downloadReportPdf = async (reportId: string): Promise<Blob> => {
   const res = await fetch(`${API_URL}/reports/${reportId}/pdf`, { headers: authHeaders() });
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to download PDF');
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to download PDF'));
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/pdf')) {
+    throw new Error('The server did not return a PDF file.');
+  }
   return res.blob();
 };

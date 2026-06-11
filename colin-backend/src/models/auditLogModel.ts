@@ -25,7 +25,14 @@ export type AuditAction =
   | 'WORKFLOW_STEP_REOPENED'
   | 'WORKFLOW_STEP_ACTION_TOGGLED'
   | 'WORKFLOW_STEP_FEE_SET'
-  | 'WORKFLOW_STEP_DEADLINE_EXTENDED';
+  | 'WORKFLOW_STEP_DEADLINE_EXTENDED'
+  // Additional workflow edit actions
+  | 'WORKFLOW_STEP_ADDED'
+  | 'WORKFLOW_STEP_UPDATED'
+  | 'WORKFLOW_STEP_DELETED'
+  | 'WORKFLOW_STEP_ACTION_ADDED'
+  | 'WORKFLOW_STEP_ACTION_UPDATED'
+  | 'WORKFLOW_STEP_ACTION_DELETED';
 
 export interface IAuditLog extends Document {
   caseId: mongoose.Types.ObjectId;

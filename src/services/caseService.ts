@@ -14,6 +14,35 @@ export type LegalServicePathItem = {
   label: string;
 };
 
+export type ClientReportTemplate = {
+  clientName?: string;
+  clientAddress?: string;
+  clientPhone?: string;
+  clientEmail?: string;
+  salutation?: string;
+  introduction?: string;
+  caseSummary?: string;
+  caseParties?: string;
+  caseNumber?: string;
+  caseTypeLabel?: string;
+  updateReportDate?: string;
+  serviceRequested?: string;
+  partnerInCharge?: string;
+  reportPeriodLabel?: string;
+  reportTypeLabel?: string;
+  workDone?: string;
+  nextAction?: string;
+  nextActionDate?: string;
+  upcomingMilestone?: string;
+  clientInputDecision?: string;
+  overallStatus?: string;
+  priority?: string;
+  recentDevelopment?: string;
+  documentsAdded?: string;
+  closing?: string;
+  signatureName?: string;
+};
+
 export interface CaseData {
   _id?: string;
   caseNo: string;
@@ -32,6 +61,7 @@ export interface CaseData {
     onUpdateEnabled?: boolean;
     lastGeneratedAt?: string;
     lastSentAt?: string;
+    reportTemplate?: ClientReportTemplate;
   };
 
   workflow?: string;

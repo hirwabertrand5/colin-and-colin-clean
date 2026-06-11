@@ -104,6 +104,87 @@ export const toggleWorkflowStepAction = async (
   return data;
 };
 
+export const addWorkflowStep = async (caseId: string, step: any): Promise<WorkflowInstance> => {
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(step),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Failed to add workflow step');
+  return data;
+};
+
+export const updateWorkflowStep = async (caseId: string, stepKey: string, patch: any): Promise<WorkflowInstance> => {
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(patch),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Failed to update workflow step');
+  return data;
+};
+
+export const deleteWorkflowStep = async (caseId: string, stepKey: string): Promise<WorkflowInstance> => {
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Failed to delete workflow step');
+  return data;
+};
+
+export const addWorkflowStepAction = async (caseId: string, stepKey: string, text: string): Promise<WorkflowInstance> => {
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/actions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ text }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Failed to add key action');
+  return data;
+};
+
+export const updateWorkflowStepAction = async (
+  caseId: string,
+  stepKey: string,
+  index: number,
+  patch: any
+): Promise<WorkflowInstance> => {
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/actions/${index}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(patch),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Failed to update workflow action');
+  return data;
+};
+
+export const deleteWorkflowStepAction = async (caseId: string, stepKey: string, index: number): Promise<WorkflowInstance> => {
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/actions/${index}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Failed to delete workflow action');
+  return data;
+};
+
 export const setWorkflowStepFeeAmount = async (
   caseId: string,
   stepKey: string,

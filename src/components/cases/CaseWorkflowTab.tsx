@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react';
-import { CalendarPlus } from 'lucide-react';
+import { CalendarPlus, Plus } from 'lucide-react';
 import {
   getWorkflowForCase,
   completeWorkflowStep,
   reopenWorkflowStep,
   extendWorkflowStepDeadline,
   toggleWorkflowStepAction,
+  addWorkflowStep,
+  addWorkflowStepAction,
+  updateWorkflowStep,
+  deleteWorkflowStep,
+  updateWorkflowStepAction,
+  deleteWorkflowStepAction,
   WorkflowInstance,
 } from '../../services/workflowInstanceService';
 import { getWorkflowTemplateById, WorkflowTemplate } from '../../services/workflowService';
-import {
-  formatDueCountdown,
-  getUrgencyClass,
-  getUrgencyColorForDueDate,
-} from '../../utils/workflowDeadline';
+import { formatDueCountdown, getDeadlinePillClass, getUrgencyColorForDueDate } from '../../utils/workflowDeadline';
 
 type Props = {
   caseId: string;
@@ -39,6 +41,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [busyKey, setBusyKey] = useState<string>('');
+  const [showAddStep, setShowAddStep] = useState(false);
+  const [newStepTitle, setNewStepTitle] = useState('');
+  const [newStepActions, setNewStepActions] = useState('');
+  const [addActionFor, setAddActionFor] = useState<string | null>(null);
+  const [newActionText, setNewActionText] = useState('');
+  const [editingStepKey, setEditingStepKey] = useState<string | null>(null);
+  const [editingStepTitle, setEditingStepTitle] = useState('');
+  const [editingActionFor, setEditingActionFor] = useState<{ stepKey: string; index: number } | null>(null);
+  const [editingActionText, setEditingActionText] = useState('');
   const [template, setTemplate] = useState<WorkflowTemplate | null>(null);
 
   const canExtendDeadlines = canCompleteSteps;
@@ -174,6 +185,121 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
     </div>
   );
 
+  const onAddStep = async () => {
+    if (!newStepTitle.trim()) return setErr('Please enter a step title');
+    try {
+      setBusyKey('add-step');
+      setErr('');
+      const actions = String(newStepActions || '')
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const payload = { title: newStepTitle.trim(), actions };
+      const updated = await addWorkflowStep(caseId, payload);
+      setWf(updated);
+      setShowAddStep(false);
+      setNewStepTitle('');
+      setNewStepActions('');
+      await onWorkflowChanged?.();
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to add step');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const onAddKeyAction = async (stepKey: string) => {
+    if (!newActionText.trim()) return setErr('Please enter action text');
+    try {
+      setBusyKey(`addaction:${stepKey}`);
+      setErr('');
+      const updated = await addWorkflowStepAction(caseId, stepKey, newActionText.trim());
+      setWf(updated);
+      setAddActionFor(null);
+      setNewActionText('');
+      await onWorkflowChanged?.();
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to add key action');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const onStartEditStep = (stepKey: string) => {
+    const s = wf?.steps?.find((x) => x.stepKey === stepKey);
+    if (!s) return;
+    setEditingStepKey(stepKey);
+    setEditingStepTitle(s.title || '');
+  };
+
+  const onSaveEditStep = async (stepKey: string) => {
+    try {
+      setBusyKey(`edit-step:${stepKey}`);
+      setErr('');
+      const updated = await updateWorkflowStep(caseId, stepKey, { title: editingStepTitle });
+      setWf(updated);
+      setEditingStepKey(null);
+      setEditingStepTitle('');
+      await onWorkflowChanged?.();
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to update step');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const onDeleteStepClicked = async (stepKey: string) => {
+    if (!window.confirm('Delete this step? This cannot be undone.')) return;
+    try {
+      setBusyKey(`delete-step:${stepKey}`);
+      setErr('');
+      const updated = await deleteWorkflowStep(caseId, stepKey);
+      setWf(updated);
+      await onWorkflowChanged?.();
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to delete step');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const onStartEditAction = (stepKey: string, idx: number, currentText: string) => {
+    setEditingActionFor({ stepKey, index: idx });
+    setEditingActionText(currentText || '');
+  };
+
+  const onSaveEditAction = async () => {
+    if (!editingActionFor) return;
+    try {
+      setBusyKey(`edit-action:${editingActionFor.stepKey}:${editingActionFor.index}`);
+      setErr('');
+      const updated = await updateWorkflowStepAction(caseId, editingActionFor.stepKey, editingActionFor.index, { text: editingActionText });
+      setWf(updated);
+      setEditingActionFor(null);
+      setEditingActionText('');
+      await onWorkflowChanged?.();
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to update action');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const onDeleteActionClicked = async (stepKey: string, idx: number) => {
+    if (!window.confirm('Delete this key action?')) return;
+    try {
+      setBusyKey(`delete-action:${stepKey}:${idx}`);
+      setErr('');
+      const updated = await deleteWorkflowStepAction(caseId, stepKey, idx);
+      setWf(updated);
+      await onWorkflowChanged?.();
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to delete action');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   if (loading) return <div className="py-8 text-gray-500">Loading workflow...</div>;
   if (err) return <div className="py-4 text-red-700 bg-red-50 border border-red-100 rounded px-4">{err}</div>;
   if (!wf) return <div className="py-8 text-gray-500">No workflow found for this case.</div>;
@@ -210,6 +336,30 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
           </div>
         </div>
         <div className="mt-3">{templatePill}</div>
+        {canCompleteSteps && (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowAddStep((s) => !s)}
+              className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <Plus className="w-4 h-4" />
+              Add Step
+            </button>
+            {showAddStep && (
+              <div className="mt-3 border p-3 rounded bg-gray-50">
+                <div className="grid grid-cols-1 gap-2">
+                  <input value={newStepTitle} onChange={(e) => setNewStepTitle(e.target.value)} placeholder="Step title" className="px-3 py-2 border rounded" />
+                  <textarea value={newStepActions} onChange={(e) => setNewStepActions(e.target.value)} placeholder="Key actions (one per line) - optional" rows={3} className="px-3 py-2 border rounded resize-y" />
+                  <div className="flex items-center gap-2 justify-end">
+                    <button type="button" onClick={() => { setShowAddStep(false); setNewStepTitle(''); setNewStepActions(''); }} className="px-3 py-2 border rounded text-gray-700">Cancel</button>
+                    <button type="button" onClick={onAddStep} disabled={busyKey === 'add-step'} className="px-3 py-2 bg-gray-900 text-white rounded">{busyKey === 'add-step' ? 'Adding…' : 'Add Step'}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {steps.map((s, index, arr) => {
@@ -255,14 +405,19 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
               <div className="font-semibold text-gray-900 dark:text-gray-100">{s.title}</div>
               <div className="text-sm text-gray-600 dark:text-gray-400">Status: {s.status}</div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span
-                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${getUrgencyClass(
-                    getUrgencyColorForDueDate(s.dueAt, s.startAt)
-                  )}`}
-                  title={s.dueAt ? `Due: ${new Date(s.dueAt).toLocaleString()}` : 'No due date'}
-                >
-                  {formatDueCountdown(s.dueAt)}
-                </span>
+                {(() => {
+                  const stepCss = getDeadlinePillClass(s.dueAt, s.startAt);
+                  const stepColor = getUrgencyColorForDueDate(s.dueAt, s.startAt);
+                  return (
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${stepCss}`}
+                      data-urgency-color={stepColor}
+                      title={s.dueAt ? `Due: ${new Date(s.dueAt).toLocaleString()}` : 'No due date'}
+                    >
+                      {formatDueCountdown(s.dueAt)}
+                    </span>
+                  );
+                })()}
                 {!previousStepCompleted && !isCompleted && (
                   <span className="text-xs text-gray-500 dark:text-gray-400" title="Previous steps must be completed first">
                     ← Complete previous steps first
@@ -313,6 +468,24 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                   <CalendarPlus className="w-4 h-4" />
                   Extend
                 </button>
+              )}
+
+              {/* Edit / Delete step controls */}
+              {canCompleteSteps && (
+                <div className="flex items-center gap-2">
+                  {editingStepKey === s.stepKey ? (
+                    <div className="flex items-center gap-2">
+                      <input value={editingStepTitle} onChange={(e) => setEditingStepTitle(e.target.value)} className="px-2 py-1 border rounded" />
+                      <button onClick={() => onSaveEditStep(s.stepKey)} className="px-2 py-1 bg-blue-600 text-white rounded">Save</button>
+                      <button onClick={() => { setEditingStepKey(null); setEditingStepTitle(''); }} className="px-2 py-1 border rounded">Cancel</button>
+                    </div>
+                  ) : (
+                    <>
+                      <button onClick={() => onStartEditStep(s.stepKey)} className="px-2 py-1 border rounded text-sm">Edit</button>
+                      <button onClick={() => onDeleteStepClicked(s.stepKey)} className="px-2 py-1 border rounded text-sm text-red-600">Delete</button>
+                    </>
+                  )}
+                </div>
               )}
 
               {canCompleteSteps && (
@@ -380,13 +553,46 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                           {isDone ? <span className="text-white text-xs">✓</span> : null}
                         </div>
                       )}
-                      <div className={`text-sm ${isDone ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-200'}`}>
-                        {label}
+                      <div className={`flex-1 flex items-center justify-between gap-3`}> 
+                        {editingActionFor && editingActionFor.stepKey === s.stepKey && editingActionFor.index === idx ? (
+                          <div className="flex-1 flex items-center gap-2">
+                            <input value={editingActionText} onChange={(e) => setEditingActionText(e.target.value)} className="flex-1 px-2 py-1 border rounded" />
+                            <button onClick={onSaveEditAction} className="px-2 py-1 bg-blue-600 text-white rounded">Save</button>
+                            <button onClick={() => { setEditingActionFor(null); setEditingActionText(''); }} className="px-2 py-1 border rounded">Cancel</button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className={`text-sm ${isDone ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-200'}`}>{label}</div>
+                            {canCompleteSteps && (
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => onStartEditAction(s.stepKey, idx, label)} className="px-2 py-1 border rounded text-xs">Edit</button>
+                                <button onClick={() => onDeleteActionClicked(s.stepKey, idx)} className="px-2 py-1 border rounded text-xs text-red-600">Delete</button>
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                     </li>
                   );
                 })}
               </ul>
+            </div>
+          )}
+
+          {canCompleteSteps && (
+            <div className="px-5 py-3 border-b border-gray-200 bg-gray-50">
+              {addActionFor === s.stepKey ? (
+                <div className="flex gap-2">
+                  <input value={newActionText} onChange={(e) => setNewActionText(e.target.value)} placeholder="New key action" className="flex-1 px-3 py-2 border rounded" />
+                  <button onClick={() => onAddKeyAction(s.stepKey)} disabled={busyKey === `addaction:${s.stepKey}`} className="px-3 py-2 bg-gray-900 text-white rounded">{busyKey === `addaction:${s.stepKey}` ? 'Adding…' : 'Add'}</button>
+                  <button onClick={() => { setAddActionFor(null); setNewActionText(''); }} className="px-3 py-2 border rounded text-gray-700">Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => setAddActionFor(s.stepKey)} className="inline-flex items-center gap-2 px-3 py-2 border rounded text-sm text-gray-700 hover:bg-gray-50">
+                  <Plus className="w-4 h-4" />
+                  Add Key Action
+                </button>
+              )}
             </div>
           )}
 

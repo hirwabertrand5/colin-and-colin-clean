@@ -209,11 +209,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   const currentWorkflowStep = useMemo(() => {
     if (!workflowInstance?.steps?.length) return null;
-    return (
-      workflowInstance.steps.find((step) => step.stepKey === workflowInstance.currentStepKey) ||
-      workflowInstance.steps.find((step) => step.status !== 'Completed') ||
-      null
-    );
+    // Use the server-provided currentStepKey only — do not fallback to the first non-completed step.
+    return workflowInstance.steps.find((step) => step.stepKey === workflowInstance.currentStepKey) || null;
   }, [workflowInstance]);
 
   const suggestedTaskDeadline = currentWorkflowStep?.dueAt ? currentWorkflowStep.dueAt.slice(0, 10) : '';

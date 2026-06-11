@@ -9,10 +9,18 @@ import {
   deleteTemplate,
   getWorkflowForCase,
   initWorkflowForCase,
+  auditCaseWorkflowMismatches,
+  fixCaseWorkflowMismatches,
   attachOutputDocument,
   completeStep,
   reopenStep,
   extendStepDeadline,
+  addStep,
+  addStepAction,
+  updateStep,
+  deleteStep,
+  updateStepAction,
+  deleteStepAction,
   toggleStepAction,
   setStepFeeAmount,
 } from '../controllers/workflowController';
@@ -31,6 +39,24 @@ router.delete('/templates/:templateId', authenticate, authorize(ADMIN_ROLES), de
 // Instances
 router.get('/cases/:caseId', authenticate, getWorkflowForCase);
 router.post('/cases/:caseId/init', authenticate, authorize(ADMIN_ROLES), initWorkflowForCase);
+
+// Add a step to a workflow instance (admin only)
+router.post('/cases/:caseId/steps', authenticate, authorize(ADMIN_ROLES), addStep);
+
+// Add a key action to a specific step (admin only)
+router.post('/cases/:caseId/steps/:stepKey/actions', authenticate, authorize(ADMIN_ROLES), addStepAction);
+
+// Update / delete a step
+router.put('/cases/:caseId/steps/:stepKey', authenticate, authorize(ADMIN_ROLES), updateStep);
+router.delete('/cases/:caseId/steps/:stepKey', authenticate, authorize(ADMIN_ROLES), deleteStep);
+
+// Update / delete a key action
+router.put('/cases/:caseId/steps/:stepKey/actions/:index', authenticate, authorize(ADMIN_ROLES), updateStepAction);
+router.delete('/cases/:caseId/steps/:stepKey/actions/:index', authenticate, authorize(ADMIN_ROLES), deleteStepAction);
+
+// Audit and fix mismatches between workflow instances and case records (admin only)
+router.get('/audit/mismatches', authenticate, authorize(ADMIN_ROLES), auditCaseWorkflowMismatches);
+router.post('/audit/fix', authenticate, authorize(ADMIN_ROLES), fixCaseWorkflowMismatches);
 
 // Outputs
 router.post(

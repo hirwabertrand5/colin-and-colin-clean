@@ -5,11 +5,9 @@ import { UserRole } from '../../App';
 import { getAllCases, deleteCase, CaseData } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
 import {
-  getDueRemainingRatio,
-  getUrgencyClass,
-  getUrgencyColorForDueDate,
-  getUrgencyColorFromRatio,
   formatDueCountdown,
+  getDeadlinePillClass,
+  getUrgencyColorForDueDate,
 } from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
 
@@ -51,7 +49,13 @@ export default function CaseList({ userRole }: CaseListProps) {
     setError('');
     try {
       const data = await getAllCases();
-      setCases(data);
+      // Treat a case as closed if its explicit status is 'Closed' or its workflowProgress.status is 'Completed'.
+      const active = (data || []).filter((c) => {
+        const isClosedStatus = String(c.status || '').toLowerCase() === 'closed';
+        const isWorkflowCompleted = (c.workflowProgress && c.workflowProgress.status) === 'Completed';
+        return !(isClosedStatus || isWorkflowCompleted);
+      });
+      setCases(active);
     } catch (err: any) {
       setError(err.message || 'Failed to load cases');
     } finally {
@@ -72,13 +76,10 @@ export default function CaseList({ userRole }: CaseListProps) {
     }
   };
 
-  const getDeadlinePillClass = (c: CaseData) => {
-    return getUrgencyClass(
-      getUrgencyColorForDueDate(
-        c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt,
-        c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt
-      )
-    );
+  const getDeadlinePillClassForCase = (c: CaseData) => {
+    const due = c.workflowProgress?.currentStepDueAt;
+    const start = c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt;
+    return getDeadlinePillClass(due, start);
   };
 
   const collator = useMemo(() => new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }), []);
@@ -91,11 +92,9 @@ export default function CaseList({ userRole }: CaseListProps) {
     };
 
     const urgencyRank = (c: CaseData) => {
-      const ratio = getDueRemainingRatio(
-        c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt,
-        c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt
-      );
-      const color = getUrgencyColorFromRatio(ratio);
+      const start = c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt;
+      const due = c.workflowProgress?.currentStepDueAt;
+      const color = getUrgencyColorForDueDate(due, start);
       if (color === 'red') return 0;
       if (color === 'yellow') return 1;
       if (color === 'green') return 2;
@@ -104,7 +103,8 @@ export default function CaseList({ userRole }: CaseListProps) {
     };
 
     const nextDueAtMs = (c: CaseData) => {
-      const raw = c.workflowProgress?.nextDueAt || c.workflowProgress?.currentStepDueAt;
+      // Use only the current active step due date for sorting (business rule)
+      const raw = c.workflowProgress?.currentStepDueAt;
       if (!raw) return Number.MAX_SAFE_INTEGER;
       const ms = Date.parse(String(raw));
       return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;
@@ -288,7 +288,14 @@ export default function CaseList({ userRole }: CaseListProps) {
             </thead>
 
             <tbody className="divide-y divide-gray-200">
-              {paginatedCases.map((item, index) => (
+              {paginatedCases.map((item, index) => {
+                const pillClass = getDeadlinePillClassForCase(item);
+                const pillColor = getUrgencyColorForDueDate(
+                  item.workflowProgress?.currentStepDueAt,
+                  item.workflowProgress?.currentStepStartAt || item.workflowStartDate || item.createdAt
+                );
+
+                return (
                 <tr key={item._id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-5 text-sm text-gray-500">
                     {(currentPage - 1) * CASES_PER_PAGE + index + 1}
@@ -322,21 +329,24 @@ export default function CaseList({ userRole }: CaseListProps) {
                   </td>
 
                   <td className="px-6 py-5 text-sm text-gray-500">
-                    {item.workflowProgress?.nextDueAt ? new Date(item.workflowProgress.nextDueAt).toLocaleDateString() : '—'}
-                    {item.workflowProgress?.nextDueAt ? (
-                      <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClass(item)}`}>
-                        {formatDueCountdown(item.workflowProgress?.nextDueAt)}
+                    {item.workflowProgress?.currentStepDueAt ? new Date(item.workflowProgress.currentStepDueAt).toLocaleDateString() : '—'}
+                    {item.workflowProgress?.currentStepDueAt ? (
+                      <div
+                        className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${pillClass}`}
+                        data-urgency-color={pillColor}
+                      >
+                        {formatDueCountdown(item.workflowProgress?.currentStepDueAt)}
                       </div>
                     ) : null}
                   </td>
-
                   <td className="px-6 py-5">
                     <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">
                       Open →
                     </Link>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
