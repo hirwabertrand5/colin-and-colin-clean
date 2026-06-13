@@ -187,6 +187,29 @@ export const deleteExpense = async (expenseId: string): Promise<void> => {
   await handleAuth(res);
 };
 
+export const updateExpense = async (
+  expenseId: string,
+  payload: {
+    date?: string;
+    title?: string;
+    amount?: number;
+    category?: string | null;
+    vendor?: string | null;
+    note?: string | null;
+    receiptRef?: string | null;
+  }
+): Promise<void> => {
+  const res = await fetch(`${API_URL}/petty-cash/expenses/${expenseId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  await handleAuth(res);
+};
+
 export const addRefundToExpense = async (
   expenseId: string,
   payload: {

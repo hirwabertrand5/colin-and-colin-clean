@@ -183,6 +183,25 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
             label: 'Contract Drafting & Negotiation',
             caseType: 'Transactional Cases',
           },
+          // --- New Corporate & Commercial direct options ---
+          {
+            id: 'business_registration',
+            label: 'Business Registration',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['Business Registration Procedure'],
+          },
+          {
+            id: 'ngo_registration_corp',
+            label: 'NGO Registration',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['NGO Registration'],
+          },
+          {
+            id: 'corporate_ngo_registration',
+            label: 'Corporate & NGO Registration',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['Corporate & NGO Registration'],
+          },
         ],
       },
       {
@@ -284,6 +303,13 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
               { id: 'regulatory_engagement_approvals', label: 'Regulatory engagement and approvals', caseType: 'Transactional Cases' },
             ],
           },
+          // Banking & Finance: Auction & Mortgage Enforcement
+          {
+            id: 'auction_mortgage_enforcement',
+            label: 'Auction & Mortgage Enforcement',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['Auction & Mortgage Enforcement'],
+          },
         ],
       },
       {
@@ -354,6 +380,31 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
           { id: 'risk_management_frameworks', label: 'Risk Management Frameworks', caseType: 'Transactional Cases' },
           { id: 'licensing_approvals', label: 'Licensing & Approvals', caseType: 'Transactional Cases' },
           { id: 'esg_sustainability_compliance', label: 'ESG & Sustainability Compliance', caseType: 'Transactional Cases' },
+          // Regulatory & Compliance additions
+          {
+            id: 'licences_regulatory',
+            label: 'Licences',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['Licences'],
+          },
+          {
+            id: 'data_protection_licenses_regulatory',
+            label: 'Data Protection Licenses',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['Data Protection Licenses'],
+          },
+          {
+            id: 'immigration_regulatory',
+            label: 'Immigration',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['Immigration'],
+          },
+          {
+            id: 'permits_and_visa_regulatory',
+            label: 'PERMITS AND VISA',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['PERMITS AND VISA'],
+          },
         ],
       },
       {
@@ -372,7 +423,38 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
                 caseType: 'Transactional Cases',
                 suggestedMatterTypes: ['Condominium Transfer'],
               },
+              // Real Estate & Projects additions
+              {
+                id: 'motor_vehicle_transfer',
+                label: 'Motor Vehicle Transfer',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Motor Vehicle Transfer'],
+              },
+              {
+                id: 'vehicle_ownership_transfer',
+                label: 'Vehicle Ownership Transfer',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Vehicle Ownership Transfer'],
+              },
               { id: 'title_due_diligence', label: 'Title due diligence', caseType: 'Transactional Cases', suggestedMatterTypes: ['Due Diligence (Land)'] },
+              {
+                id: 'condominium_transfer',
+                label: 'Condominium Transfer',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Condominium Transfer'],
+              },
+              {
+                id: 'foreigner_acquiring_land_rwanda',
+                label: 'Foreigner Acquiring Land in Rwanda',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Foreigner Acquiring Land in Rwanda'],
+              },
+              {
+                id: 'due_diligence_land',
+                label: 'Due Diligence (Land)',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Due Diligence (Land)'],
+              },
               {
                 id: 'transfer_registration',
                 label: 'Transfer and registration',
