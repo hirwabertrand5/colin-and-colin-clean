@@ -56,7 +56,7 @@ const wrapHtmlDoc = (title: string, bodyHtml: string) => {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${safe(title)}</title>
   <style>
-    @page { size: A4; margin: 10mm 12mm 28mm; }
+    @page { size: A4; margin: 10mm 12mm 20mm; }
     html, body { margin: 0; font-family: Georgia, "Times New Roman", serif; color: #111; background: #fff; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-size: 10.5pt; line-height: 1.42; }
@@ -156,8 +156,7 @@ const buildHtml = (payload: {
   return `
   <style>
     /* Reserve consistent footer space and allow content to break across pages when needed */
-    .report-page { min-height: 100vh; padding: 0 4mm 32mm; position: relative; box-sizing: border-box; }
-    .report-content { box-sizing: border-box; }
+    .report-page { min-height: 100vh; padding: 0 4mm 26mm; position: relative; box-sizing: border-box; }
     .topline { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
     .logo { width: 188px; height: auto; object-fit: contain; }
     .date { font-size: 10pt; white-space: nowrap; padding-top: 8px; }
@@ -170,7 +169,6 @@ const buildHtml = (payload: {
     .intro { margin-bottom: 14px; }
     /* Allow long sections to break across pages to avoid overflow into footer */
     .report-section { break-inside: auto; page-break-inside: auto; }
-    h2, h3 { break-after: avoid; page-break-after: avoid; }
     .case-summary { border: 1px solid #777; padding: 10px 12px; margin: 8px 0 0; overflow-wrap: anywhere; page-break-inside: auto; }
     .case-summary .summary-label { font-weight: 700; margin-bottom: 5px; }
     .info-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -188,7 +186,7 @@ const buildHtml = (payload: {
     .status-grid .label { font-weight: 700; background: #f3f3f3; border-right: 1px solid #777; }
     .closing { margin-top: 22px; }
     .signature { margin-top: 22px; }
-    .print-footer { position: fixed; left: 12mm; right: 12mm; bottom: 4mm; min-height: 18mm; font-family: Arial, sans-serif; font-size: 8.3pt; color: #111; background: #fff; box-shadow: none; }
+    .print-footer { position: fixed; left: 12mm; right: 12mm; bottom: 4mm; height: 16mm; font-family: Arial, sans-serif; font-size: 8.3pt; color: #111; background: #fff; box-shadow: none; }
     .motto { text-align: center; font-weight: 700; letter-spacing: .3px; margin-bottom: 4px; }
     .footer-lines { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; border-top: 1px solid #333; padding-top: 4px; }
     .footer-lines div { line-height: 1.35; }
@@ -197,7 +195,6 @@ const buildHtml = (payload: {
     }
   </style>
   <div class="report-page">
-  <div class="report-content">
     <div class="topline">
       <div>${logo ? `<img class="logo" src="${logo}" alt="Colin & Colin" />` : '<strong>COLIN & COLIN</strong>'}</div>
       <div class="date">Date: ${safe(reportDate)}</div>
@@ -296,7 +293,6 @@ const buildHtml = (payload: {
     <div class="signature">
       <p>Sincerely,</p>
       <p><strong>${safe(payload.signatureName || 'Colin & Colin Legal Solutions')}</strong></p>
-    </div>
     </div>
 
     <div class="print-footer">
@@ -487,7 +483,6 @@ export const downloadReportPdf = async (req: AuthRequest, res: Response) => {
   const { reportId } = req.params as any;
 
   if (!reportId) return res.status(400).json({ message: 'Missing reportId' });
-  if (!mongoose.isValidObjectId(reportId)) return res.status(400).json({ message: 'Invalid reportId' });
 
   const report: any = await ClientReport.findById(reportId);
   if (!report) return res.status(404).json({ message: 'Report not found.' });
@@ -502,232 +497,44 @@ export const downloadReportPdf = async (req: AuthRequest, res: Response) => {
   const fileName = `${filenameSafe}.pdf`;
 
   const htmlDoc = wrapHtmlDoc(report.subject || 'Case Report', report.contentHtml || '<div>No content</div>');
-  // Sanitize HTML to avoid executing any embedded scripts or inline event handlers
-  // which can cause runtime errors inside Playwright's page.evaluate.
-  const sanitizeHtml = (s: string) =>
-    String(s || '')
-      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-      .replace(/on\w+\s*=(("|').*?\2|[^>\s]+)/gi, '');
-  const sanitizedHtmlDoc = sanitizeHtml(htmlDoc);
-  const hadScripts = /<script\b/i.test(htmlDoc) || /on\w+=/i.test(htmlDoc);
-  const debugDir = path.resolve(process.cwd(), '.debug', 'client-reports');
-  fs.mkdirSync(debugDir, { recursive: true });
-  const debugBase = `${String(reportId).replace(/[^\w-]/g, '')}-${Date.now()}`;
-  const initialHtmlPath = path.join(debugDir, `${debugBase}-initial.html`);
-  const finalHtmlPath = path.join(debugDir, `${debugBase}-final.html`);
-  const screenshotPath = path.join(debugDir, `${debugBase}-before-pdf.png`);
-  fs.writeFileSync(initialHtmlPath, htmlDoc);
 
   // Render PDF
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+  const browser = await chromium.launch();
   try {
-    browser = await chromium.launch({
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    const page = await browser.newPage();
+    await page.setContent(htmlDoc, { waitUntil: 'networkidle' });
+
+    // Measure footer height in CSS pixels and compute a safe bottom margin in mm.
+    const measured = await page.evaluate(() => {
+      const footer = document.querySelector('.print-footer');
+      if (!footer) return { height: 0 };
+      const rect = footer.getBoundingClientRect();
+      const style = window.getComputedStyle(footer);
+      const marginTop = parseFloat(style.marginTop || '0') || 0;
+      const marginBottom = parseFloat(style.marginBottom || '0') || 0;
+      const total = rect.height + marginTop + marginBottom;
+      return { height: total };
     });
-    const page = await browser.newPage({ viewport: { width: 794, height: 1123 } });
-    // Use sanitized HTML when rendering in Playwright to avoid running unexpected scripts.
-    let usedSimpleFallback = false;
-    try {
-      await page.setContent(sanitizedHtmlDoc, { waitUntil: 'networkidle' });
-      if (hadScripts) {
-        console.warn('[ClientReportPDF] Sanitized HTML removed script tags or inline handlers for report', { reportId: String(reportId) });
-      }
-    } catch (err: any) {
-      // If setContent fails (e.g. due to template artifacts), fall back to a simple, safe HTML
-      console.error('[ClientReportPDF] page.setContent(sanitizedHtmlDoc) failed, falling back to simple content', {
-        reportId: String(reportId),
-        message: err?.message || String(err),
-      });
-      const safeTextOnly = String(report.contentHtml || '').replace(/<[^>]+>/g, '');
-      const simpleHtml = wrapHtmlDoc(report.subject || 'Case Report', `<div style="padding:20px;font-family:Arial, sans-serif;"><h1>${safe(report.subject || 'Case Report')}</h1><pre style="white-space:pre-wrap;">${safeTextOnly}</pre></div>`);
-      await page.setContent(simpleHtml, { waitUntil: 'networkidle' });
-      usedSimpleFallback = true;
-    }
-    if (usedSimpleFallback) console.warn('[ClientReportPDF] Used simple fallback HTML for report', { reportId: String(reportId) });
-    await page.emulateMedia({ media: 'print' });
 
-    // Measure footer height and try to add intelligent page breaks. If any DOM-evaluation
-    // step fails (for example due to leftover page scripts), fall back to safe defaults
-    // so PDF generation still succeeds.
+    // Convert px -> mm. CSS reference: 1in = 96px, 1in = 25.4mm
     const pxToMm = (px: number) => (px * 25.4) / 96;
-    let bottomMarginMm = 30; // default fallback
-    let pageBreakResult: any = null;
-    let finalMeasured: { footerHeight: number; reportPageHeight: number; contentHeight: number } = {
-      footerHeight: 0,
-      reportPageHeight: 0,
-      contentHeight: 0,
-    };
+    const footerMm = measured && measured.height ? pxToMm(measured.height) : 0;
+    const safetyMm = 6; // extra safe gap to avoid collisions
+    const bottomMarginMm = Math.max(22, Math.ceil(footerMm + safetyMm));
 
-    try {
-      // Measure footer and content sizes
-      const measured = await page.evaluate(() => {
-        const footer = document.querySelector('.print-footer');
-        const reportPage = document.querySelector('.report-page');
-        const content = document.querySelector('.report-content');
-        if (!footer) return { footerHeight: 0, reportPageHeight: 0, contentHeight: 0 };
-        const footerRect = footer.getBoundingClientRect();
-        const footerStyle = window.getComputedStyle(footer);
-        const marginTop = parseFloat(footerStyle.marginTop || '0') || 0;
-        const marginBottom = parseFloat(footerStyle.marginBottom || '0') || 0;
-        const total = footerRect.height + marginTop + marginBottom;
-        return {
-          footerHeight: total,
-          reportPageHeight: reportPage ? (reportPage as HTMLElement).scrollHeight : 0,
-          contentHeight: content ? (content as HTMLElement).scrollHeight : 0,
-        };
-      });
+    // Ensure the page content reserves at least the bottom margin so content does not flow under footer.
+    await page.addStyleTag({ content: `.report-page { padding-bottom: ${bottomMarginMm}mm !important; }` });
 
-      const footerMm = measured && measured.footerHeight ? pxToMm(measured.footerHeight) : 0;
-      const safetyMm = 10;
-      bottomMarginMm = Math.max(30, Math.ceil(footerMm + safetyMm));
-
-      try {
-        await page.addStyleTag({ content: `.report-page { padding-bottom: ${bottomMarginMm}mm !important; }` });
-      } catch (e) {
-        console.warn('[ClientReportPDF] Failed to add padding style, continuing with computed bottom margin', e?.message || e);
-      }
-
-      // Try to add page breaks for large blocks; if this fails, we'll still continue.
-      try {
-        pageBreakResult = await page.evaluate(({ bottomMarginMm }) => {
-          const mmToPx = (mm: number) => (mm * 96) / 25.4;
-          const pageHeightPx = mmToPx(297);
-          const topMarginPx = mmToPx(10);
-          const bottomMarginPx = mmToPx(bottomMarginMm);
-          const footerLimitPx = pageHeightPx - bottomMarginPx;
-          const selectors = ['.report-section', '.closing', '.signature'];
-          let breaksAdded = 0;
-
-          for (let pass = 0; pass < 4; pass += 1) {
-            let changed = false;
-            const blocks = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
-            blocks.forEach((block: any) => {
-              const rect = block.getBoundingClientRect();
-              const topInPage = ((rect.top % pageHeightPx) + pageHeightPx) % pageHeightPx;
-              const bottomInPage = topInPage + rect.height;
-              const fitsOnFreshPage = rect.height <= footerLimitPx - topMarginPx;
-              if (fitsOnFreshPage && bottomInPage > footerLimitPx) {
-                const currentMarginTop = parseFloat(window.getComputedStyle(block).marginTop || '0') || 0;
-                const pushToNextPage = pageHeightPx - topInPage + topMarginPx;
-                block.style.breakBefore = 'page';
-                block.style.pageBreakBefore = 'always';
-                block.style.marginTop = `${currentMarginTop + pushToNextPage}px`;
-                breaksAdded += 1;
-                changed = true;
-              }
-            });
-            if (!changed) break;
-          }
-
-          const blocks = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
-          const overlapBlocks = blocks
-            .map((block: any) => {
-              const rect = block.getBoundingClientRect();
-              const topInPage = ((rect.top % pageHeightPx) + pageHeightPx) % pageHeightPx;
-              const bottomInPage = topInPage + rect.height;
-              return {
-                tag: block.tagName.toLowerCase(),
-                className: block.className,
-                topInPage,
-                bottomInPage,
-                entersFooter: bottomInPage > footerLimitPx,
-              };
-            })
-            .filter((item: any) => item.entersFooter);
-
-          return { pageHeightPx, footerLimitPx, breaksAdded, overlapBlocks };
-        }, { bottomMarginMm });
-      } catch (e) {
-        console.warn('[ClientReportPDF] page.evaluate for page breaks failed, continuing with defaults', e?.message || e);
-      }
-
-      // Add a temporary debug style and capture a screenshot & final markup for debugging.
-      let debugStyle: any = null;
-      try {
-        debugStyle = await page.addStyleTag({
-          content: `.report-page { border: 2px solid blue !important; } .report-content { border: 2px solid blue !important; } .print-footer { border: 2px solid red !important; }`,
-        });
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-      } catch (e) {
-        console.warn('[ClientReportPDF] Debug screenshot/style injection failed', e?.message || e);
-      }
-
-      try {
-        fs.writeFileSync(finalHtmlPath, await page.content());
-      } catch (e) {
-        console.warn('[ClientReportPDF] Failed to write final HTML content', e?.message || e);
-      }
-
-      try {
-        if (debugStyle && typeof (debugStyle as any).evaluate === 'function') await debugStyle.evaluate((node: any) => node.parentNode?.removeChild(node));
-      } catch (e) {
-        // not critical
-      }
-
-      try {
-        finalMeasured = await page.evaluate(() => {
-          const footer = document.querySelector('.print-footer') as HTMLElement | null;
-          const reportPage = document.querySelector('.report-page') as HTMLElement | null;
-          const content = document.querySelector('.report-content') as HTMLElement | null;
-          return {
-            footerHeight: footer ? footer.getBoundingClientRect().height : 0,
-            reportPageHeight: reportPage ? reportPage.scrollHeight : 0,
-            contentHeight: content ? content.scrollHeight : 0,
-          };
-        });
-      } catch (e) {
-        console.warn('[ClientReportPDF] final measurement evaluate failed', e?.message || e);
-      }
-
-      console.log('[ClientReportPDF]', {
-        reportId: String(reportId),
-        initialHtmlPath,
-        finalHtmlPath,
-        screenshotPath,
-        footerHeightPx: finalMeasured.footerHeight,
-        calculatedBottomMarginMm: bottomMarginMm,
-        reportPageHeightPx: finalMeasured.reportPageHeight,
-        contentHeightPx: finalMeasured.contentHeight,
-        pageBreakResult,
-      });
-    } catch (e: any) {
-      // Defensive fallback if any DOM-evaluation step failed (for example due to page scripts).
-      console.error('[ClientReportPDF] DOM evaluation failed, falling back to safe PDF render', {
-        reportId: String(reportId),
-        message: e?.message || String(e),
-      });
-      bottomMarginMm = 30;
-      try {
-        fs.writeFileSync(finalHtmlPath, await page.content());
-      } catch {}
-    }
-
-    // Try to render PDF; if the first attempt fails, retry with a conservative fixed margin.
-    let pdfBuffer: Buffer;
-    try {
-      pdfBuffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '10mm', right: '12mm', bottom: `${bottomMarginMm}mm`, left: '12mm' },
-      });
-    } catch (e) {
-      console.error('[ClientReportPDF] PDF render failed, retrying with fixed margin', { reportId: String(reportId), message: e?.message || String(e) });
-      pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '10mm', right: '12mm', bottom: '30mm', left: '12mm' } });
-    }
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '10mm', right: '12mm', bottom: `${bottomMarginMm}mm`, left: '12mm' },
+    });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('Content-Length', String(pdfBuffer.length));
     res.send(pdfBuffer);
-  } catch (e: any) {
-    console.error('[ClientReportPDF] Failed to render PDF', {
-      reportId: String(reportId),
-      message: e?.message || String(e),
-    });
-    if (!res.headersSent) {
-      res.status(500).json({ message: e?.message || 'Failed to download PDF.' });
-    }
   } finally {
-    if (browser) await browser.close();
+    await browser.close();
   }
 };

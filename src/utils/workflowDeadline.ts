@@ -19,9 +19,9 @@ export const getDueRemainingRatio = (startAt?: Date | string, dueAt?: Date | str
 
 export const getUrgencyColorFromRatio = (ratio: number | undefined): UrgencyColor => {
   if (ratio === undefined) return 'gray';
-  if (ratio >= 0.75) return 'blue';
-  if (ratio >= 0.5) return 'green';
-  if (ratio >= 0.25) return 'yellow';
+  if (ratio > 0.75) return 'blue';
+  if (ratio > 0.5) return 'green';
+  if (ratio > 0.25) return 'yellow';
   return 'red';
 };
 
@@ -53,11 +53,12 @@ export const getUrgencyColorForDueDate = (
 };
 
 export const getUrgencyClass = (color: UrgencyColor) => {
-  if (color === 'blue') return 'deadline-urgency-blue';
-  if (color === 'green') return 'deadline-urgency-green';
-  if (color === 'yellow') return 'deadline-urgency-yellow';
-  if (color === 'red') return 'deadline-urgency-red';
-  return 'deadline-urgency-gray';
+  if (color === 'blue') return 'bg-blue-600 text-white border-blue-700';
+  if (color === 'green') return 'bg-green-600 text-white border-green-700';
+  // Use a lighter yellow with dark text for better contrast/readability
+  if (color === 'yellow') return 'bg-yellow-400 text-black border-yellow-400';
+  if (color === 'red') return 'bg-red-600 text-white border-red-700';
+  return 'bg-gray-500 text-white border-gray-600';
 };
 
 export const getPerformanceZoneFromUsedRatio = (ratio: number | undefined): DeadlineZone => {

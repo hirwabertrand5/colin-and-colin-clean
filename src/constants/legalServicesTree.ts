@@ -69,7 +69,7 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
               },
               { id: 'property_disputes', label: 'Property disputes', caseType: 'Litigation Cases' },
               { id: 'tort_liability_claims', label: 'Tort/liability claims', caseType: 'Litigation Cases' },
-              { id: 'debt_recovery_enforcement', label: 'Debt recovery & enforcement', caseType: 'Litigation Cases' },
+              { id: 'debt_recovery_enforcement', label: 'Debt recovery & enforcement', caseType: 'Litigation Cases', suggestedMatterTypes: ['DEBT RECOVERY'] },
               { id: 'succession_estate_disputes', label: 'Succession & estate disputes', caseType: 'Litigation Cases' },
               { id: 'divorce', label: 'Divorce', caseType: 'Litigation Cases' },
             ],
@@ -202,6 +202,12 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
             caseType: 'Transactional Cases',
             suggestedMatterTypes: ['Corporate & NGO Registration'],
           },
+          {
+            id: 'tontine_registration_corp',
+            label: 'Tontine Registration',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['Tontine Registration'],
+          },
         ],
       },
       {
@@ -300,7 +306,13 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
                 label: 'Capital adequacy and prudential requirements',
                 caseType: 'Transactional Cases',
               },
-              { id: 'regulatory_engagement_approvals', label: 'Regulatory engagement and approvals', caseType: 'Transactional Cases' },
+                { id: 'regulatory_engagement_approvals', label: 'Regulatory engagement and approvals', caseType: 'Transactional Cases' },
+                {
+                  id: 'cma_licensing_compliance',
+                  label: 'CAPITAL MARKET AUTHORITY (CMA) LICENSING & COMPLIANCE',
+                  caseType: 'Transactional Cases',
+                  suggestedMatterTypes: ['CAPITAL MARKET AUTHORITY (CMA) LICENSING & COMPLIANCE'],
+                },
             ],
           },
           // Banking & Finance: Auction & Mortgage Enforcement
@@ -450,6 +462,12 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
                 suggestedMatterTypes: ['Foreigner Acquiring Land in Rwanda'],
               },
               {
+                id: 'rwandan_citizen_acquiring_land',
+                label: 'RWANDAN CITIZEN ACQUIRING LAND IN RWANDA',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['RWANDAN CITIZEN ACQUIRING LAND IN RWANDA'],
+              },
+              {
                 id: 'due_diligence_land',
                 label: 'Due Diligence (Land)',
                 caseType: 'Transactional Cases',
@@ -571,6 +589,8 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
               { id: 'ip_licensing', label: 'IP licensing', caseType: 'Transactional Cases' },
               { id: 'commercialisation_strategies', label: 'Commercialisation strategies', caseType: 'Transactional Cases' },
               { id: 'technology_transfer_agreements', label: 'Technology transfer agreements', caseType: 'Transactional Cases' },
+              { id: 'copyright_registration_protection', label: 'COPYRIGHT REGISTRATION & PROTECTION', caseType: 'Transactional Cases', suggestedMatterTypes: ['COPYRIGHT REGISTRATION & PROTECTION'] },
+              { id: 'trademark_registration_protection', label: 'TRADEMARK REGISTRATION & PROTECTION', caseType: 'Transactional Cases', suggestedMatterTypes: ['TRADEMARK REGISTRATION & PROTECTION'] },
             ],
           },
           {

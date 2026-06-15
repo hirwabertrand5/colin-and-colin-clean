@@ -77,8 +77,45 @@ export default function CaseList({ userRole }: CaseListProps) {
   };
 
   const getDeadlinePillClassForCase = (c: CaseData) => {
-    const due = c.workflowProgress?.currentStepDueAt;
-    const start = c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt;
+    // Prefer current step due date when the current step exists and the case is not completed.
+    const hasCurrent = Boolean(c.workflowProgress?.currentStepTitle || c.workflowProgress?.currentStepKey);
+    const useCurrent = hasCurrent && String(c.workflowProgress?.status || '').toLowerCase() !== 'completed' && Boolean(c.workflowProgress?.currentStepDueAt);
+    const due = useCurrent
+      ? c.workflowProgress?.currentStepDueAt
+      : c.workflowProgress?.nextDueAt || c.workflowProgress?.currentStepDueAt;
+    const start = useCurrent
+      ? c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt
+      : c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt;
+
+    // Logging for diagnostics: deadline, now, remaining ms/hours/days, computed status and color
+    try {
+      const now = new Date();
+      if (!due) {
+        console.log(`[CaseDeadline] caseId=${c._id} caseNo=${c.caseNo || 'N/A'} no current step due date`);
+        return getDeadlinePillClass(due, start);
+      }
+      const dueMs = Date.parse(String(due));
+      const remainingMs = Number.isFinite(dueMs) ? dueMs - now.getTime() : NaN;
+      const hours = Number.isFinite(remainingMs) ? remainingMs / (1000 * 60 * 60) : NaN;
+      const days = Number.isFinite(hours) ? hours / 24 : NaN;
+
+      const color = getUrgencyColorForDueDate(due, start, now);
+      const cssClass = getDeadlinePillClass(due, start);
+
+      let computedStatus = 'invalid';
+      if (!Number.isFinite(remainingMs)) computedStatus = 'invalid date';
+      else if (remainingMs <= 0) computedStatus = 'OVERDUE';
+      else if (hours <= 48) computedStatus = '<=48h';
+      else if (days <= 7) computedStatus = '<=7d';
+      else if (days <= 21) computedStatus = '<=21d';
+      else computedStatus = '>21d';
+
+      console.log(`[CaseDeadline] caseId=${c._id} caseNo=${c.caseNo || 'N/A'} currentStepKey=${c.workflowProgress?.currentStepKey || 'N/A'} currentStepTitle=${c.workflowProgress?.currentStepTitle || 'N/A'} due=${due} now=${now.toISOString()} remainingMs=${remainingMs} hours=${hours} days=${days} status=${computedStatus} color=${color} cssClass=${cssClass}`);
+    } catch (e) {
+      // swallow logging errors to avoid breaking UI
+      // console.error(e);
+    }
+
     return getDeadlinePillClass(due, start);
   };
 
@@ -93,7 +130,7 @@ export default function CaseList({ userRole }: CaseListProps) {
 
     const urgencyRank = (c: CaseData) => {
       const start = c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt;
-      const due = c.workflowProgress?.currentStepDueAt;
+      const due = c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt;
       const color = getUrgencyColorForDueDate(due, start);
       if (color === 'red') return 0;
       if (color === 'yellow') return 1;
@@ -288,14 +325,7 @@ export default function CaseList({ userRole }: CaseListProps) {
             </thead>
 
             <tbody className="divide-y divide-gray-200">
-              {paginatedCases.map((item, index) => {
-                const pillClass = getDeadlinePillClassForCase(item);
-                const pillColor = getUrgencyColorForDueDate(
-                  item.workflowProgress?.currentStepDueAt,
-                  item.workflowProgress?.currentStepStartAt || item.workflowStartDate || item.createdAt
-                );
-
-                return (
+              {paginatedCases.map((item, index) => (
                 <tr key={item._id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-5 text-sm text-gray-500">
                     {(currentPage - 1) * CASES_PER_PAGE + index + 1}
@@ -331,22 +361,19 @@ export default function CaseList({ userRole }: CaseListProps) {
                   <td className="px-6 py-5 text-sm text-gray-500">
                     {item.workflowProgress?.currentStepDueAt ? new Date(item.workflowProgress.currentStepDueAt).toLocaleDateString() : '—'}
                     {item.workflowProgress?.currentStepDueAt ? (
-                      <div
-                        className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${pillClass}`}
-                        data-urgency-color={pillColor}
-                      >
+                      <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>
                         {formatDueCountdown(item.workflowProgress?.currentStepDueAt)}
                       </div>
                     ) : null}
                   </td>
+
                   <td className="px-6 py-5">
                     <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">
                       Open →
                     </Link>
                   </td>
                 </tr>
-              );
-              })}
+              ))}
             </tbody>
           </table>
         </div>

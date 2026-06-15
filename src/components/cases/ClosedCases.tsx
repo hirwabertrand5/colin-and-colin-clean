@@ -248,19 +248,11 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
                   <td className="px-6 py-5 text-sm text-gray-500">
                     {String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed'
                       ? '—'
-                      : item.workflowProgress?.currentStepDueAt
-                      ? new Date(item.workflowProgress.currentStepDueAt).toLocaleDateString()
+                      : item.workflowProgress?.nextDueAt
+                      ? new Date(item.workflowProgress.nextDueAt).toLocaleDateString()
                       : '—'}
-                    {!(String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed') && item.workflowProgress?.currentStepDueAt ? (
-                      <div
-                        className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}
-                        data-urgency-color={getUrgencyColorForDueDate(
-                          item.workflowProgress?.currentStepDueAt,
-                          item.workflowProgress?.currentStepStartAt || item.workflowStartDate || item.createdAt
-                        )}
-                      >
-                        {formatDueCountdown(item.workflowProgress?.currentStepDueAt)}
-                      </div>
+                    {!(String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed') && item.workflowProgress?.nextDueAt ? (
+                      <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>{formatDueCountdown(item.workflowProgress?.currentStepDueAt)}</div>
                     ) : null}
                   </td>
                   <td className="px-6 py-5">

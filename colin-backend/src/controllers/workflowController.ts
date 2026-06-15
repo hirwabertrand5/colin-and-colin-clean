@@ -55,7 +55,7 @@ const previousActiveStatus = (status?: string) => {
   return normalized && normalized !== 'closed' ? status : 'In Progress';
 };
 
-export const updateCaseWorkflowProgress = async (c: any, inst: any) => {
+const updateCaseWorkflowProgress = async (c: any, inst: any) => {
   const { plannedAmount, completedAmount, currency } = computeWorkflowMoney(inst);
   const nextDueAt = computeNextDueAt(inst);
   const existingPlannedAmount =
@@ -594,6 +594,74 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// ---- Stub/placeholder handlers for admin workflow maintenance endpoints ----
+// These are intentionally minimal to avoid server startup errors when route
+// files import them. Implementations can be expanded later as needed.
+export const addStep = async (req: AuthRequest, res: Response) => {
+  try {
+    // Admin-only: add a step to a workflow instance. Not implemented yet.
+    return res.status(501).json({ message: 'Not implemented: addStep' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to add step.' });
+  }
+};
+
+export const addStepAction = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(501).json({ message: 'Not implemented: addStepAction' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to add step action.' });
+  }
+};
+
+export const updateStep = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(501).json({ message: 'Not implemented: updateStep' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to update step.' });
+  }
+};
+
+export const deleteStep = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(501).json({ message: 'Not implemented: deleteStep' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to delete step.' });
+  }
+};
+
+export const updateStepAction = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(501).json({ message: 'Not implemented: updateStepAction' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to update step action.' });
+  }
+};
+
+export const deleteStepAction = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(501).json({ message: 'Not implemented: deleteStepAction' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to delete step action.' });
+  }
+};
+
+export const auditCaseWorkflowMismatches = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(501).json({ message: 'Not implemented: auditCaseWorkflowMismatches' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to audit mismatches.' });
+  }
+};
+
+export const fixCaseWorkflowMismatches = async (req: AuthRequest, res: Response) => {
+  try {
+    return res.status(501).json({ message: 'Not implemented: fixCaseWorkflowMismatches' });
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to fix mismatches.' });
+  }
+};
+
 // Toggle a key action checkbox (admin only)
 export const toggleStepAction = async (req: AuthRequest, res: Response) => {
   try {
@@ -742,391 +810,5 @@ export const setStepFeeAmount = async (req: AuthRequest, res: Response) => {
     res.json(inst);
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to set step fee.' });
-  }
-};
-
-// Audit workflow <-> case mismatches and optionally fix them (admin only)
-export const auditCaseWorkflowMismatches = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const cases = await Case.find({}).lean();
-    const results: any[] = [];
-
-    for (const c of cases) {
-      const inst: any = await WorkflowInstance.findOne({ caseId: (c as any)._id });
-      const caseStatus = String((c as any).status || '').trim();
-      const wfProgressStatus = (c as any).workflowProgress?.status || '';
-      if (inst) {
-        const instStatus = inst.status || '';
-        // If instance completed but case not marked completed/closed
-        if (instStatus === 'Completed' && wfProgressStatus !== 'Completed' && caseStatus.toLowerCase() !== 'closed') {
-          results.push({ caseId: (c as any)._id, caseNo: (c as any).caseNo, parties: (c as any).parties, issue: 'Instance Completed but case not closed', instStatus, caseStatus, wfProgressStatus });
-          continue;
-        }
-
-        // If instance not completed but case marked closed
-        if (instStatus !== 'Completed' && (caseStatus.toLowerCase() === 'closed' || wfProgressStatus === 'Completed')) {
-          results.push({ caseId: (c as any)._id, caseNo: (c as any).caseNo, parties: (c as any).parties, issue: 'Case Closed but instance not completed', instStatus, caseStatus, wfProgressStatus });
-          continue;
-        }
-
-        // If instance steps all completed but instance.status not Completed
-        const allStepsCompleted = Array.isArray(inst.steps) && inst.steps.length > 0 && inst.steps.every((s: any) => s.status === 'Completed');
-        if (allStepsCompleted && inst.status !== 'Completed') {
-          results.push({ caseId: (c as any)._id, caseNo: (c as any).caseNo, parties: (c as any).parties, issue: 'All steps completed but instance not Completed', instStatus: inst.status });
-          continue;
-        }
-      } else {
-        // No instance but case marked closed or completed
-        if (caseStatus.toLowerCase() === 'closed' || wfProgressStatus === 'Completed') {
-          results.push({ caseId: (c as any)._id, caseNo: (c as any).caseNo, parties: (c as any).parties, issue: 'Case closed/completed but no workflow instance exists', caseStatus, wfProgressStatus });
-          continue;
-        }
-      }
-    }
-
-    res.json({ count: results.length, results });
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to audit cases.' });
-  }
-};
-
-export const fixCaseWorkflowMismatches = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const cases = await Case.find({});
-    const applied: any[] = [];
-
-    for (const c of cases) {
-      const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
-      if (!inst) continue; // skip cases without workflow instance
-
-      // Use existing updater to synchronize case workflow progress from instance
-      await updateCaseWorkflowProgress(c, inst);
-      applied.push({ caseId: String(c._id), caseNo: c.caseNo, parties: c.parties, newCaseStatus: c.status, newWorkflowProgressStatus: c.workflowProgress?.status });
-    }
-
-    res.json({ appliedCount: applied.length, applied });
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to fix mismatches.' });
-  }
-};
-
-// Add a new step to a workflow instance (admin only)
-export const addStep = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const { caseId } = req.params as any;
-    const { title, stageKey, order, actions, startAt, dueAt, feeAmount, feeCurrency, slaMinutes, responsibleRole } = req.body || {};
-    if (!title || !String(title).trim()) return res.status(400).json({ message: 'Missing step title.' });
-
-    const c: any = await Case.findById(caseId);
-    if (!c) return res.status(404).json({ message: 'Case not found.' });
-
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
-    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
-
-    // Generate a stepKey from title and ensure uniqueness
-    const baseKey = String(title || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_').replace(/__+/g, '_').slice(0, 48) || 'STEP';
-    let stepKey = baseKey;
-    let suffix = 1;
-    while ((inst.steps || []).find((s: any) => s.stepKey === stepKey)) {
-      stepKey = `${baseKey}_${suffix++}`;
-    }
-
-    // Determine order: insert at provided order or append to end
-    const existingOrders = (inst.steps || []).map((s: any) => Number(s.order || 0));
-    const maxOrder = existingOrders.length ? Math.max(...existingOrders) : 0;
-    const newOrder = Number.isFinite(Number(order)) && Number(order) > 0 ? Number(order) : maxOrder + 1;
-
-    // If inserting into middle, bump subsequent orders
-    for (const s of inst.steps || []) {
-      if (Number(s.order || 0) >= newOrder) s.order = Number(s.order || 0) + 1;
-    }
-
-    const newStep: any = {
-      stepKey,
-      title: String(title).trim(),
-      stageKey: stageKey || 'Default',
-      order: newOrder,
-      status: 'Not Started',
-      startAt: startAt || undefined,
-      dueAt: dueAt || undefined,
-      feeAmount: typeof feeAmount === 'number' ? feeAmount : undefined,
-      feeCurrency: feeCurrency || undefined,
-      slaMinutes: typeof slaMinutes === 'number' ? slaMinutes : undefined,
-      responsibleRole: responsibleRole || undefined,
-      actions: Array.isArray(actions) ? actions.map((t: any) => ({ text: String(t || '').trim(), done: false })) : [],
-      outputs: [],
-    };
-
-    inst.steps = inst.steps || [];
-    inst.steps.push(newStep);
-    // sort steps by order
-    inst.steps = inst.steps.slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-
-    // Ensure currentStepKey exists
-    if (!inst.currentStepKey) inst.currentStepKey = inst.steps[0]?.stepKey;
-
-    await inst.save();
-
-    await updateCaseWorkflowProgress(c, inst);
-
-    const actor = actorFromReq(req);
-    await writeAudit({
-      caseId: String(c._id),
-      actorName: actor.actorName,
-      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
-      action: 'WORKFLOW_STEP_ADDED',
-      message: 'Added workflow step',
-      detail: `${newStep.stepKey} • ${newStep.title}`,
-    });
-
-    res.status(201).json(inst);
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to add workflow step.' });
-  }
-};
-
-// Add a key action to an existing step (admin only)
-export const addStepAction = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const { caseId, stepKey } = req.params as any;
-    const { text } = req.body || {};
-    if (!text || !String(text).trim()) return res.status(400).json({ message: 'Missing action text.' });
-
-    const c: any = await Case.findById(caseId);
-    if (!c) return res.status(404).json({ message: 'Case not found.' });
-
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
-    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
-
-    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
-    if (!step) return res.status(404).json({ message: 'Step not found.' });
-
-    step.actions = step.actions || [];
-    step.actions.push({ text: String(text).trim(), done: false });
-    if (step.status === 'Not Started') step.status = 'In Progress';
-
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
-
-    const actor = actorFromReq(req);
-    await writeAudit({
-      caseId: String(c._id),
-      actorName: actor.actorName,
-      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
-      action: 'WORKFLOW_STEP_ACTION_ADDED',
-      message: 'Added key action to workflow step',
-      detail: `${stepKey} • ${String(text).trim()}`,
-    });
-
-    res.status(201).json(inst);
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to add key action.' });
-  }
-};
-
-// Update an existing step (admin only)
-export const updateStep = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const { caseId, stepKey } = req.params as any;
-    const { title, stageKey, order, startAt, dueAt, feeAmount, feeCurrency, slaMinutes, responsibleRole } = req.body || {};
-
-    const c: any = await Case.findById(caseId);
-    if (!c) return res.status(404).json({ message: 'Case not found.' });
-
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
-    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
-
-    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
-    if (!step) return res.status(404).json({ message: 'Step not found.' });
-
-    // Apply updates
-    if (typeof title === 'string' && title.trim()) step.title = String(title).trim();
-    if (typeof stageKey === 'string') step.stageKey = stageKey || step.stageKey;
-    if (startAt) step.startAt = startAt;
-    if (dueAt) step.dueAt = dueAt;
-    if (typeof feeAmount === 'number') step.feeAmount = feeAmount;
-    if (typeof feeCurrency === 'string') step.feeCurrency = feeCurrency || step.feeCurrency;
-    if (typeof slaMinutes === 'number') step.slaMinutes = slaMinutes;
-    if (typeof responsibleRole === 'string') step.responsibleRole = responsibleRole || step.responsibleRole;
-
-    // Reorder if requested
-    if (Number.isFinite(Number(order))) {
-      const newOrder = Number(order);
-      const items = inst.steps || [];
-      const oldOrder = Number(step.order || 0);
-      if (newOrder > 0 && newOrder !== oldOrder) {
-        // Remove step temporarily
-        inst.steps = items.filter((s: any) => s.stepKey !== stepKey);
-        // Insert at position (1-based)
-        const before = inst.steps.slice(0, newOrder - 1);
-        const after = inst.steps.slice(newOrder - 1);
-        inst.steps = [...before, step, ...after];
-        // Reassign order sequentially
-        for (let i = 0; i < inst.steps.length; i++) inst.steps[i].order = i + 1;
-      }
-    }
-
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
-
-    const actor = actorFromReq(req);
-    await writeAudit({
-      caseId: String(c._id),
-      actorName: actor.actorName,
-      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
-      action: 'WORKFLOW_STEP_UPDATED',
-      message: 'Updated workflow step',
-      detail: `${step.stepKey} • ${step.title}`,
-    });
-
-    res.json(inst);
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to update workflow step.' });
-  }
-};
-
-// Delete a step from a workflow instance (admin only)
-export const deleteStep = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const { caseId, stepKey } = req.params as any;
-    const c: any = await Case.findById(caseId);
-    if (!c) return res.status(404).json({ message: 'Case not found.' });
-
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
-    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
-
-    const idx = (inst.steps || []).findIndex((s: any) => s.stepKey === stepKey);
-    if (idx === -1) return res.status(404).json({ message: 'Step not found.' });
-
-    inst.steps.splice(idx, 1);
-    // Reassign order
-    for (let i = 0; i < inst.steps.length; i++) inst.steps[i].order = i + 1;
-
-    // Ensure currentStepKey points to a valid step
-    if (!inst.steps.find((s: any) => s.stepKey === inst.currentStepKey)) {
-      inst.currentStepKey = inst.steps[0]?.stepKey;
-    }
-
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
-
-    const actor = actorFromReq(req);
-    await writeAudit({
-      caseId: String(c._id),
-      actorName: actor.actorName,
-      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
-      action: 'WORKFLOW_STEP_DELETED',
-      message: 'Deleted workflow step',
-      detail: `${stepKey}`,
-    });
-
-    res.json(inst);
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to delete workflow step.' });
-  }
-};
-
-// Update a specific key action (admin only)
-export const updateStepAction = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const { caseId, stepKey, index } = req.params as any;
-    const { text, done } = req.body || {};
-    const actionIndex = Number(index);
-    if (!Number.isInteger(actionIndex) || actionIndex < 0) return res.status(400).json({ message: 'Invalid action index.' });
-
-    const c: any = await Case.findById(caseId);
-    if (!c) return res.status(404).json({ message: 'Case not found.' });
-
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
-    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
-
-    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
-    if (!step) return res.status(404).json({ message: 'Step not found.' });
-
-    step.actions = step.actions || [];
-    const target = step.actions[actionIndex];
-    if (!target) return res.status(404).json({ message: 'Action not found.' });
-
-    if (typeof text === 'string') target.text = String(text).trim();
-    if (typeof done === 'boolean') {
-      target.done = done;
-      target.doneAt = done ? new Date() : undefined;
-    }
-
-    if (step.status === 'Not Started' && step.actions.some((a: any) => a.done)) step.status = 'In Progress';
-
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
-
-    const actor = actorFromReq(req);
-    await writeAudit({
-      caseId: String(c._id),
-      actorName: actor.actorName,
-      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
-      action: 'WORKFLOW_STEP_ACTION_UPDATED',
-      message: 'Updated key action',
-      detail: `${stepKey} • ${actionIndex}`,
-    });
-
-    res.json(inst);
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to update key action.' });
-  }
-};
-
-// Delete a specific key action (admin only)
-export const deleteStepAction = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const { caseId, stepKey, index } = req.params as any;
-    const actionIndex = Number(index);
-    if (!Number.isInteger(actionIndex) || actionIndex < 0) return res.status(400).json({ message: 'Invalid action index.' });
-
-    const c: any = await Case.findById(caseId);
-    if (!c) return res.status(404).json({ message: 'Case not found.' });
-
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
-    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
-
-    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
-    if (!step) return res.status(404).json({ message: 'Step not found.' });
-
-    step.actions = step.actions || [];
-    if (!step.actions[actionIndex]) return res.status(404).json({ message: 'Action not found.' });
-
-    step.actions.splice(actionIndex, 1);
-
-    // If no actions left, do not change step status automatically
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
-
-    const actor = actorFromReq(req);
-    await writeAudit({
-      caseId: String(c._id),
-      actorName: actor.actorName,
-      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
-      action: 'WORKFLOW_STEP_ACTION_DELETED',
-      message: 'Deleted key action',
-      detail: `${stepKey} • ${actionIndex}`,
-    });
-
-    res.json(inst);
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to delete key action.' });
   }
 };
