@@ -55,7 +55,7 @@ const previousActiveStatus = (status?: string) => {
   return normalized && normalized !== 'closed' ? status : 'In Progress';
 };
 
-const updateCaseWorkflowProgress = async (c: any, inst: any) => {
+export const updateCaseWorkflowProgress = async (c: any, inst: any) => {
   const { plannedAmount, completedAmount, currency } = computeWorkflowMoney(inst);
   const nextDueAt = computeNextDueAt(inst);
   const existingPlannedAmount =

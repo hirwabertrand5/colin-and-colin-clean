@@ -78,9 +78,10 @@ export const addDocumentToCase = async (req: AuthRequest, res: Response) => {
       if (newDoc.name) query.name = newDoc.name;
 
       const prev = await Document.find(query).sort({ version: -1 }).limit(1).lean();
-      if (Array.isArray(prev) && prev.length > 0 && typeof prev[0].version === 'number') {
-        (newDoc as any).version = (prev[0].version || 1) + 1;
-        (newDoc as any).previousVersionId = prev[0]._id;
+      const latest = Array.isArray(prev) ? prev[0] : undefined;
+      if (latest && typeof latest.version === 'number') {
+        (newDoc as any).version = (latest.version || 1) + 1;
+        (newDoc as any).previousVersionId = latest._id;
       }
 
       await newDoc.save();

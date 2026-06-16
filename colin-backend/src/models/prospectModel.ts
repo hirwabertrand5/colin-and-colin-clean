@@ -42,7 +42,6 @@ export interface IProspect extends Document {
   engagementDate?: Date;
   engagementNotes?: string;
   conversionReason?: string; // For non-converted prospects
-  parties?: string;
   
   // Assignment & Management
   assignedTo: mongoose.Types.ObjectId; // User ID

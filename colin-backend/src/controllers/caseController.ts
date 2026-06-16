@@ -7,6 +7,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { buildInstanceSteps } from '../utils/workflowCompute';
+import { buildYearlySequence } from '../utils/counter';
 
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
@@ -57,6 +58,8 @@ const calculateActionProgress = (steps: any[], plannedAmount: number) => {
   const percent = total > 0 ? Math.round((checked / total) * 100) : 0;
   return { percent, completedAmount: Math.round((plannedAmount * percent) / 100) };
 };
+
+const generateCaseNo = () => buildYearlySequence('case', 'CASE');
 
 const applySequentialInitialActions = (steps: any[], rawInitialActions: any) => {
   const allowed = rawInitialActions && typeof rawInitialActions === 'object' ? rawInitialActions : {};
@@ -116,8 +119,10 @@ export const createCase = async (req: AuthRequest, res: Response) => {
     }
 
     const workflowAutomation = (req.body as any)?.workflowAutomation !== false && (req.body as any)?.matterTiming !== 'historical';
+    const caseNo = String((req.body as any)?.caseNo || '').trim() || (await generateCaseNo());
     const newCase = new Case({
       ...req.body,
+      caseNo,
       matterTiming: workflowAutomation ? 'new' : 'historical',
       workflowAutomation,
       ...(workflowAutomation
@@ -248,8 +253,8 @@ export const createCase = async (req: AuthRequest, res: Response) => {
     });
 
     return res.status(201).json(newCase);
-  } catch {
-    return res.status(500).json({ message: 'Failed to create case.' });
+  } catch (err: any) {
+    return res.status(500).json({ message: err?.message || 'Failed to create case.' });
   }
 };
 
