@@ -332,8 +332,13 @@ export default function CreateCase() {
 
       const finalParties = partiesStructured ? partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') : formData.parties;
 
+      // Ensure we send an explicit caseNo so the server does not auto-generate the CASE-YYYY-00001 format.
+      // If the user left the field blank, send 'N/A' per requirements.
+      const caseNoToSend = String(formData.caseNo || '').trim() || 'N/A';
+
       await createCase({
         ...formData,
+        caseNo: caseNoToSend,
         parties: finalParties,
         matterTiming,
         workflowAutomation: true,
