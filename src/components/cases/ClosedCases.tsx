@@ -60,9 +60,9 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
   };
 
   const getDeadlinePillClassForCase = (c: CaseData) =>
-    // Use only current active step due date for closed-case badge (if present).
+    // Use the same deadline value shown in the table.
     getDeadlinePillClass(
-      c.workflowProgress?.currentStepDueAt,
+      c.workflowProgress?.nextDueAt || c.workflowProgress?.currentStepDueAt,
       c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt
     );
 
@@ -248,11 +248,11 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
                   <td className="px-6 py-5 text-sm text-gray-500">
                     {String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed'
                       ? '—'
-                      : item.workflowProgress?.nextDueAt
-                      ? new Date(item.workflowProgress.nextDueAt).toLocaleDateString()
+                      : item.workflowProgress?.nextDueAt || item.workflowProgress?.currentStepDueAt
+                      ? new Date(item.workflowProgress.nextDueAt || item.workflowProgress.currentStepDueAt || '').toLocaleDateString()
                       : '—'}
-                    {!(String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed') && item.workflowProgress?.nextDueAt ? (
-                      <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>{formatDueCountdown(item.workflowProgress?.currentStepDueAt)}</div>
+                    {!(String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed') && (item.workflowProgress?.nextDueAt || item.workflowProgress?.currentStepDueAt) ? (
+                      <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>{formatDueCountdown(item.workflowProgress?.nextDueAt || item.workflowProgress?.currentStepDueAt)}</div>
                     ) : null}
                   </td>
                   <td className="px-6 py-5">

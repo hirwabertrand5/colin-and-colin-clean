@@ -359,10 +359,10 @@ export default function CaseList({ userRole }: CaseListProps) {
                   </td>
 
                   <td className="px-6 py-5 text-sm text-gray-500">
-                    {item.workflowProgress?.currentStepDueAt ? new Date(item.workflowProgress.currentStepDueAt).toLocaleDateString() : '—'}
-                    {item.workflowProgress?.currentStepDueAt ? (
+                    {item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt ? new Date(item.workflowProgress.currentStepDueAt || item.workflowProgress.nextDueAt || '').toLocaleDateString() : '—'}
+                    {item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt ? (
                       <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>
-                        {formatDueCountdown(item.workflowProgress?.currentStepDueAt)}
+                        {formatDueCountdown(item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt)}
                       </div>
                     ) : null}
                   </td>

@@ -69,6 +69,7 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
               },
               { id: 'property_disputes', label: 'Property disputes', caseType: 'Litigation Cases' },
               { id: 'tort_liability_claims', label: 'Tort/liability claims', caseType: 'Litigation Cases' },
+              { id: 'debt_recovery', label: 'Debt Recovery', caseType: 'Litigation Cases', suggestedMatterTypes: ['DEBT RECOVERY'] },
               { id: 'debt_recovery_enforcement', label: 'Debt recovery & enforcement', caseType: 'Litigation Cases', suggestedMatterTypes: ['DEBT RECOVERY'] },
               { id: 'succession_estate_disputes', label: 'Succession & estate disputes', caseType: 'Litigation Cases' },
               { id: 'divorce', label: 'Divorce', caseType: 'Litigation Cases' },
@@ -182,6 +183,7 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
             id: 'contract_drafting_negotiation',
             label: 'Contract Drafting & Negotiation',
             caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['Contract Drafting & Negotiation'],
           },
           // --- New Corporate & Commercial direct options ---
           {
@@ -321,6 +323,12 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
             label: 'Auction & Mortgage Enforcement',
             caseType: 'Transactional Cases',
             suggestedMatterTypes: ['Auction & Mortgage Enforcement'],
+          },
+          {
+            id: 'cma_licensing_compliance_direct',
+            label: 'CAPITAL MARKET AUTHORITY (CMA) LICENSING & COMPLIANCE',
+            caseType: 'Transactional Cases',
+            suggestedMatterTypes: ['CAPITAL MARKET AUTHORITY (CMA) LICENSING & COMPLIANCE'],
           },
         ],
       },
@@ -559,6 +567,12 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
                 label: 'Cross-border data transfer advisory',
                 caseType: 'Transactional Cases',
               },
+              {
+                id: 'data_protection_licenses_tmt',
+                label: 'Data Protection Licenses',
+                caseType: 'Transactional Cases',
+                suggestedMatterTypes: ['Data Protection Licenses'],
+              },
             ],
           },
           {
@@ -583,14 +597,14 @@ export const LEGAL_SERVICES_TREE: ServiceNode[] = [
           },
           {
             id: 'commercial_ip',
-            label: 'Intellectual Property (Commercial)',
+            label: 'Intellectual Property',
             caseType: 'Transactional Cases',
             children: [
               { id: 'ip_licensing', label: 'IP licensing', caseType: 'Transactional Cases' },
               { id: 'commercialisation_strategies', label: 'Commercialisation strategies', caseType: 'Transactional Cases' },
               { id: 'technology_transfer_agreements', label: 'Technology transfer agreements', caseType: 'Transactional Cases' },
-              { id: 'copyright_registration_protection', label: 'COPYRIGHT REGISTRATION & PROTECTION', caseType: 'Transactional Cases', suggestedMatterTypes: ['COPYRIGHT REGISTRATION & PROTECTION'] },
-              { id: 'trademark_registration_protection', label: 'TRADEMARK REGISTRATION & PROTECTION', caseType: 'Transactional Cases', suggestedMatterTypes: ['TRADEMARK REGISTRATION & PROTECTION'] },
+              { id: 'copyright_registration_protection', label: 'Copyright Registration & Protection', caseType: 'Transactional Cases', suggestedMatterTypes: ['COPYRIGHT REGISTRATION & PROTECTION'] },
+              { id: 'trademark_registration_protection', label: 'Trademark Registration & Protection', caseType: 'Transactional Cases', suggestedMatterTypes: ['TRADEMARK REGISTRATION & PROTECTION'] },
             ],
           },
           {
