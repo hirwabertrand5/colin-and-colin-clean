@@ -542,9 +542,10 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     const { extendDays, reason } = req.body || {};
 
     const days = Number(extendDays);
-    if (!Number.isFinite(days) || days <= 0 || days > 365) {
-      return res.status(400).json({ message: 'extendDays must be a number between 1 and 365.' });
+    if (!Number.isFinite(days)) {
+      return res.status(400).json({ message: 'extendDays must be a valid number.' });
     }
+    const dayOffset = Math.round(days);
 
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
@@ -558,25 +559,14 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     if (step.status === 'Completed') return res.status(400).json({ message: 'Cannot extend a completed step.' });
 
     const oldDue = new Date(step.dueAt);
-    const newDue = new Date(oldDue.getTime() + days * 24 * 60 * 60 * 1000);
+    const newDue = new Date(oldDue.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+    if (!Number.isFinite(newDue.getTime())) {
+      return res.status(400).json({ message: 'Resulting due date is invalid.' });
+    }
     step.dueAt = newDue;
 
     await inst.save();
-
-    // Update case nextDueAt if this step is now the nearest pending
-    const nextDueAt = (() => {
-      const pending = (inst.steps || [])
-        .filter((s: any) => s.status !== 'Completed')
-        .slice()
-        .sort((a: any, b: any) => new Date(a.dueAt || 0).getTime() - new Date(b.dueAt || 0).getTime())[0];
-      return pending?.dueAt;
-    })();
-
-    c.workflowProgress = {
-      ...(c.workflowProgress || {}),
-      nextDueAt,
-    };
-    await c.save();
+    await updateCaseWorkflowProgress(c, inst);
 
     const actor = actorFromReq(req);
     await writeAudit({
@@ -584,8 +574,8 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       actorName: actor.actorName,
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_STEP_DEADLINE_EXTENDED',
-      message: 'Extended workflow step deadline',
-      detail: `${stepKey} • +${days}d${reason ? ` • ${String(reason).trim()}` : ''}`,
+      message: 'Updated workflow step deadline',
+      detail: `${stepKey} • ${dayOffset}d${reason ? ` • ${String(reason).trim()}` : ''}`,
     });
 
     res.json(inst);

@@ -33,6 +33,24 @@ const formatWorkflowStepFee = (step: WorkflowInstance['steps'][number]) => {
   return step.feeText || 'No fee set';
 };
 
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+const formatDateInputValue = (value?: string | Date | null) => {
+  if (!value) return '';
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const dateInputValueToUtcMs = (value: string) => {
+  const [year, month, day] = value.split('-').map((part) => Number(part));
+  if (![year, month, day].every(Number.isFinite)) return NaN;
+  return Date.UTC(year, month - 1, day);
+};
+
 export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, onWorkflowChanged }: Props) {
   void canUpload;
   const [wf, setWf] = useState<WorkflowInstance | null>(null);
@@ -137,16 +155,18 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
       return;
     }
     try {
-      const currentDue = new Date(step.dueAt);
-      const selected = new Date(`${extendDate}T00:00:00`);
-      const diffMs = selected.getTime() - currentDue.getTime();
-      const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      if (!Number.isFinite(days) || days <= 0) {
-        setErr('Please choose a later date than the current due date.');
+      const currentDueDate = formatDateInputValue(step.dueAt);
+      const currentDueMs = dateInputValueToUtcMs(currentDueDate);
+      const selectedMs = dateInputValueToUtcMs(extendDate);
+
+      if (!Number.isFinite(currentDueMs) || !Number.isFinite(selectedMs)) {
+        setErr('Please choose a valid date.');
         return;
       }
-      if (days > 365) {
-        setErr('Extension must be 365 days or fewer.');
+
+      const days = Math.round((selectedMs - currentDueMs) / MS_PER_DAY);
+      if (!Number.isFinite(days)) {
+        setErr('Please choose a valid date.');
         return;
       }
 
@@ -302,9 +322,9 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                     if (extendOpenFor === s.stepKey) {
                       setExtendOpenFor('');
                       setExtendDate('');
-                    } else {
+                  } else {
                       setExtendOpenFor(s.stepKey);
-                      setExtendDate(s.dueAt ? new Date(s.dueAt).toISOString().slice(0, 10) : '');
+                      setExtendDate(formatDateInputValue(s.dueAt));
                     }
                   }}
                   className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded"
