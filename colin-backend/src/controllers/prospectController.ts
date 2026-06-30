@@ -21,23 +21,58 @@ const canManageProspects = (role?: string) =>
   role === 'trainee_associate' ||
   role === 'intern';
 
-const validStages = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Converted', 'Non-Converted'];
+const validStages = [
+  'Inquiry',
+  'Consultation',
+  'Conflict Check',
+  'Quotation',
+  'Quotation Preparation',
+  'Conversion Assessment',
+  'Quotation Issued',
+  'Awaiting Client Decision',
+  'Final Follow-Up',
+  'Engagement',
+  'Converted',
+  'Non-Converted',
+];
+const terminalStages = ['Converted', 'Non-Converted'];
+const convertedOutcomes = ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'];
+const nonConvertedOutcomes = ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'];
 
 const cleanString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 const getRouteId = (value: unknown) => (typeof value === 'string' ? value : '');
+const toOptionalNumber = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
 
 const getProspectPayload = (body: any, fallbackUserId?: string) => {
-  const assignedTo = cleanString(body.assignedTo) || fallbackUserId || '';
+  const responsibleAssociate = cleanString(body.responsibleAssociate) || cleanString(body.assignedTo) || fallbackUserId || '';
+  const responsiblePartner = cleanString(body.responsiblePartner);
+  const assignedTo = cleanString(body.assignedTo) || responsibleAssociate || fallbackUserId || '';
   const clientName = cleanString(body.clientName);
+  const stage = validStages.includes(cleanString(body.stage)) ? cleanString(body.stage) : 'Inquiry';
+  const conversionOutcome = cleanString(body.conversionOutcome);
   return {
     parties: cleanString(body.parties) || clientName,
     clientName,
+    enquiryNature: cleanString(body.enquiryNature),
+    priorityLevel: ['High', 'Medium', 'Low'].includes(cleanString(body.priorityLevel))
+      ? cleanString(body.priorityLevel)
+      : 'Medium',
+    enquirySource: cleanString(body.enquirySource),
+    referralSource: cleanString(body.referralSource),
+    estimatedMatterValue: toOptionalNumber(body.estimatedMatterValue),
+    estimatedFeeValue: toOptionalNumber(body.estimatedFeeValue),
     contact: {
       name: cleanString(body.contact?.name) || clientName,
-      email: cleanString(body.contact?.email),
-      phone: cleanString(body.contact?.phone),
+      email: cleanString(body.contact?.email) || undefined,
+      phone: cleanString(body.contact?.phone) || undefined,
       ...(cleanString(body.contact?.position) ? { position: cleanString(body.contact.position) } : {}),
     },
+    responsiblePartner: responsiblePartner || undefined,
+    responsibleAssociate: responsibleAssociate || undefined,
     legalServicePath: Array.isArray(body.legalServicePath)
       ? body.legalServicePath
           .map((item: any) => ({
@@ -47,17 +82,20 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
           .filter((item: any) => item.id && item.label)
       : [],
     inquiryDescription: cleanString(body.inquiryDescription),
-    stage: validStages.includes(body.stage) ? body.stage : 'Inquiry',
+    stage,
     engagementNotes: cleanString(body.engagementNotes),
+    conversionOutcome: conversionOutcome || undefined,
+    conversionReason: cleanString(body.conversionReason) || conversionOutcome || undefined,
     assignedTo,
   };
 };
 
 const validateProspectPayload = async (payload: ReturnType<typeof getProspectPayload>) => {
   if (!payload.clientName) return 'Client name is required.';
-  if (!payload.contact.email) return 'Contact email is required.';
-  if (!payload.contact.phone) return 'Contact phone is required.';
+  if (!payload.contact.name) return 'Contact person is required.';
   if (!payload.inquiryDescription) return 'Inquiry description is required.';
+  if (!payload.responsiblePartner) return 'Responsible partner is required.';
+  if (!payload.responsibleAssociate) return 'Responsible associate is required.';
   
   if (!payload.assignedTo) {
     return 'Please select a staff member to assign this prospect to.';
@@ -69,6 +107,35 @@ const validateProspectPayload = async (payload: ReturnType<typeof getProspectPay
 
   const assigneeExists = await User.exists({ _id: payload.assignedTo, isActive: true });
   if (!assigneeExists) return 'The selected staff member was not found or is inactive. Please select another staff member.';
+
+  if (payload.responsiblePartner && !mongoose.Types.ObjectId.isValid(payload.responsiblePartner)) {
+    return 'Invalid responsible partner. Please select a valid staff member.';
+  }
+
+  if (payload.responsibleAssociate && !mongoose.Types.ObjectId.isValid(payload.responsibleAssociate)) {
+    return 'Invalid responsible associate. Please select a valid staff member.';
+  }
+
+  if (payload.contact.email) {
+    const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.contact.email);
+    if (!emailLooksValid) return 'Please enter a valid contact email address.';
+  }
+
+  if (terminalStages.includes(payload.stage as any)) {
+    if (!payload.conversionOutcome) {
+      return 'Please select a conversion outcome before closing this prospect.';
+    }
+
+    const validOutcome = terminalStages.includes(payload.stage as any)
+      ? (payload.stage === 'Converted'
+          ? convertedOutcomes.includes(payload.conversionOutcome)
+          : nonConvertedOutcomes.includes(payload.conversionOutcome))
+      : true;
+
+    if (!validOutcome) {
+      return 'Please select a valid conversion outcome for the selected closing stage.';
+    }
+  }
 
   return null;
 };
@@ -90,6 +157,8 @@ export const getAllProspects = async (req: AuthRequest, res: Response) => {
 
     const prospects = await Prospect.find(filter)
       .populate('assignedTo', 'name email')
+      .populate('responsiblePartner', 'name email role')
+      .populate('responsibleAssociate', 'name email role')
       .populate('createdBy', 'name email')
       .sort({ dateReceived: -1 });
 
@@ -113,6 +182,8 @@ export const getProspectById = async (req: AuthRequest, res: Response) => {
 
     const prospect = await Prospect.findById(prospectId)
       .populate('assignedTo', 'name email')
+      .populate('responsiblePartner', 'name email role')
+      .populate('responsibleAssociate', 'name email role')
       .populate('createdBy', 'name email')
       .populate('convertedToMatters', 'caseNo');
 
@@ -151,6 +222,8 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
     const saved = await prospect.save();
     const populated = await Prospect.findById(saved._id)
       .populate('assignedTo', 'name email')
+      .populate('responsiblePartner', 'name email role')
+      .populate('responsibleAssociate', 'name email role')
       .populate('createdBy', 'name email');
 
     return res.status(201).json(populated);
@@ -199,6 +272,8 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
     const saved = await prospect.save();
     const populated = await Prospect.findById(saved._id)
       .populate('assignedTo', 'name email')
+      .populate('responsiblePartner', 'name email role')
+      .populate('responsibleAssociate', 'name email role')
       .populate('createdBy', 'name email')
       .populate('convertedToMatters', 'caseNo');
 
@@ -264,6 +339,11 @@ export const getProspectStats = async (req: AuthRequest, res: Response) => {
       Consultation: 0,
       'Conflict Check': 0,
       Quotation: 0,
+      'Quotation Preparation': 0,
+      'Conversion Assessment': 0,
+      'Quotation Issued': 0,
+      'Awaiting Client Decision': 0,
+      'Final Follow-Up': 0,
       Engagement: 0,
       Converted: 0,
       'Non-Converted': 0,
@@ -306,7 +386,16 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
       return res.status(400).json({ message: 'Prospect already converted to matter.' });
     }
 
-    const assignee = await User.findById(prospect.assignedTo).select('name').lean();
+    if (String(prospect.stage) !== 'Converted') {
+      return res.status(400).json({ message: 'Prospect must be marked Converted before converting to matter.' });
+    }
+
+    if (!String((prospect as any).conversionOutcome || '').trim()) {
+      return res.status(400).json({ message: 'Please record a conversion outcome before converting this prospect.' });
+    }
+
+    const assigneeSource = prospect.responsibleAssociate || prospect.assignedTo;
+    const assignee = await User.findById(assigneeSource).select('name').lean();
 
     // Create new case from prospect
     const caseNo = await generateCaseNo();
@@ -318,8 +407,8 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
       clientContacts: [
         {
           name: prospect.contact.name,
-          email: prospect.contact.email,
-          phone: prospect.contact.phone,
+          email: prospect.contact.email || undefined,
+          phone: prospect.contact.phone || undefined,
           isPrimary: true,
         },
       ],

@@ -17,7 +17,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const getToken = () => localStorage.getItem('token');
 
 const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
-const CREATE_CASE_DRAFT_KEY = 'createCaseDraft:v1';
+const DEFAULT_CREATE_CASE_DRAFT_KEY = 'createCaseDraft:v1';
 
 type PreviewWorkflowStep = {
   key: string;
@@ -38,7 +38,29 @@ type PreviewWorkflowStep = {
 
 type MatterTiming = 'new';
 
-export default function CreateCase() {
+interface CreateCaseProps {
+  initialStatus?: string;
+  pageTitle?: string;
+  pageSubtitle?: string;
+  backHref?: string;
+  backLabel?: string;
+  successNavigateTo?: string;
+  successMessage?: string;
+  submitLabel?: string;
+  draftKey?: string;
+}
+
+export default function CreateCase({
+  initialStatus = 'On Boarding',
+  pageTitle = 'Create New Case',
+  pageSubtitle = 'Follow the steps to set up a new case',
+  backHref = '/cases',
+  backLabel = 'Back to Cases',
+  successNavigateTo = '/cases',
+  successMessage = 'Case created successfully!',
+  submitLabel = 'Create Case',
+  draftKey = DEFAULT_CREATE_CASE_DRAFT_KEY,
+}: CreateCaseProps) {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -64,7 +86,7 @@ export default function CreateCase() {
     parties: '',
     // ✅ will be auto-set by decision tree
     caseType: 'Transactional Cases' as CaseType,
-    status: 'On Boarding',
+    status: initialStatus,
     priority: 'Medium',
     assignedTo: '',
     description: '',
@@ -107,13 +129,14 @@ export default function CreateCase() {
   // Load draft (local-only)
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(CREATE_CASE_DRAFT_KEY);
+      const raw = localStorage.getItem(draftKey);
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (parsed?.formData) {
         setFormData((prev) => ({
           ...prev,
           ...parsed.formData,
+          status: parsed.formData.status || initialStatus,
           matterTiming: 'new',
           workflowAutomation: true,
         }));
@@ -132,7 +155,7 @@ export default function CreateCase() {
   const saveDraft = () => {
     try {
       localStorage.setItem(
-        CREATE_CASE_DRAFT_KEY,
+        draftKey,
         JSON.stringify({
           step,
           matterTiming,
@@ -359,8 +382,8 @@ export default function CreateCase() {
           accruedUnbilled: previewEarnedValue,
         },
       });
-      setSuccess('Case created successfully!');
-      setTimeout(() => navigate('/cases'), 1000);
+      setSuccess(successMessage);
+      setTimeout(() => navigate(successNavigateTo), 1000);
     } catch (err: any) {
       setError(err.message || 'Failed to create case');
     } finally {
@@ -677,14 +700,14 @@ export default function CreateCase() {
       {/* Header */}
       <div className="mb-6">
         <button
-          onClick={() => navigate('/cases')}
+          onClick={() => navigate(backHref)}
           className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900 mb-4"
         >
           <ArrowLeft className="w-4 h-4 mr-1" />
-          Back to Cases
+          {backLabel}
         </button>
-        <h1 className="text-2xl font-semibold text-gray-900 mb-1">Create New Case</h1>
-        <p className="text-gray-600">Follow the steps to set up a new case</p>
+        <h1 className="text-2xl font-semibold text-gray-900 mb-1">{pageTitle}</h1>
+        <p className="text-gray-600">{pageSubtitle}</p>
       </div>
 
       {/* Progress Steps */}
@@ -1221,7 +1244,7 @@ export default function CreateCase() {
 
         <div className="flex gap-3">
           <button
-            onClick={() => navigate('/cases')}
+            onClick={() => navigate(backHref)}
             className="px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50 transition-colors"
           >
             Cancel
@@ -1254,7 +1277,7 @@ export default function CreateCase() {
               ) : (
                 <>
                   <Check className="w-4 h-4 mr-2" />
-                  Create Case
+                  {submitLabel}
                 </>
               )}
             </button>

@@ -1,11 +1,23 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type ProspectStage = 'Inquiry' | 'Consultation' | 'Conflict Check' | 'Quotation' | 'Engagement' | 'Converted' | 'Non-Converted';
+export type ProspectStage =
+  | 'Inquiry'
+  | 'Consultation'
+  | 'Conflict Check'
+  | 'Quotation'
+  | 'Quotation Preparation'
+  | 'Conversion Assessment'
+  | 'Quotation Issued'
+  | 'Awaiting Client Decision'
+  | 'Final Follow-Up'
+  | 'Engagement'
+  | 'Converted'
+  | 'Non-Converted';
 
 export interface IProspectContact {
   name: string;
-  email: string;
-  phone: string;
+  email?: string;
+  phone?: string;
   position?: string;
 }
 
@@ -13,9 +25,17 @@ export interface IProspect extends Document {
   prospectNo: string;
   clientName: string;
   parties?: string;
+  enquiryNature?: string;
+  priorityLevel?: 'High' | 'Medium' | 'Low';
+  enquirySource?: string;
+  referralSource?: string;
+  estimatedMatterValue?: number;
+  estimatedFeeValue?: number;
   
   // Contact Information
   contact: IProspectContact;
+  responsiblePartner?: mongoose.Types.ObjectId;
+  responsibleAssociate?: mongoose.Types.ObjectId;
   
   // Legal Service Category
   legalServicePath?: {
@@ -34,7 +54,6 @@ export interface IProspect extends Document {
   conflictCheckNotes?: string;
   
   // Quotation
-  estimatedMatterValue?: number;
   quotationAmount?: number;
   quotationDate?: Date;
   
@@ -42,6 +61,7 @@ export interface IProspect extends Document {
   engagementDate?: Date;
   engagementNotes?: string;
   conversionReason?: string; // For non-converted prospects
+  conversionOutcome?: string;
   
   // Assignment & Management
   assignedTo: mongoose.Types.ObjectId; // User ID
@@ -59,8 +79,8 @@ export interface IProspect extends Document {
 const ProspectContactSchema = new Schema<IProspectContact>(
   {
     name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, trim: true, lowercase: true },
-    phone: { type: String, required: true, trim: true },
+    email: { type: String, trim: true, lowercase: true },
+    phone: { type: String, trim: true },
     position: { type: String, trim: true },
   },
   { _id: false }
@@ -85,9 +105,41 @@ const ProspectSchema = new Schema<IProspect>(
       trim: true,
       default: '',
     },
+    enquiryNature: {
+      type: String,
+      trim: true,
+    },
+    priorityLevel: {
+      type: String,
+      enum: ['High', 'Medium', 'Low'],
+      default: 'Medium',
+      trim: true,
+    },
+    enquirySource: {
+      type: String,
+      trim: true,
+    },
+    referralSource: {
+      type: String,
+      trim: true,
+    },
+    estimatedMatterValue: Number,
+    estimatedFeeValue: Number,
     contact: {
       type: ProspectContactSchema,
       required: true,
+    },
+    responsiblePartner: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    responsibleAssociate: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
     },
     legalServicePath: [
       {
@@ -107,7 +159,20 @@ const ProspectSchema = new Schema<IProspect>(
     },
     stage: {
       type: String,
-      enum: ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Converted', 'Non-Converted'],
+      enum: [
+        'Inquiry',
+        'Consultation',
+        'Conflict Check',
+        'Quotation',
+        'Quotation Preparation',
+        'Conversion Assessment',
+        'Quotation Issued',
+        'Awaiting Client Decision',
+        'Final Follow-Up',
+        'Engagement',
+        'Converted',
+        'Non-Converted',
+      ],
       default: 'Inquiry',
       index: true,
     },
@@ -118,12 +183,15 @@ const ProspectSchema = new Schema<IProspect>(
     },
     conflictCheckDate: Date,
     conflictCheckNotes: String,
-    estimatedMatterValue: Number,
     quotationAmount: Number,
     quotationDate: Date,
     engagementDate: Date,
     engagementNotes: String,
     conversionReason: String,
+    conversionOutcome: {
+      type: String,
+      trim: true,
+    },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

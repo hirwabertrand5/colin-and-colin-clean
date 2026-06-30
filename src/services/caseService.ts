@@ -101,6 +101,9 @@ export interface CaseData {
   updatedAt?: string;
 }
 
+export const isTemporarilyClosedCase = (caseData?: Pick<CaseData, 'status'> | null) =>
+  String(caseData?.status || '').trim().toLowerCase() === 'temporarily closed';
+
 const getToken = () => localStorage.getItem('token');
 
 export const getAllCases = async (): Promise<CaseData[]> => {

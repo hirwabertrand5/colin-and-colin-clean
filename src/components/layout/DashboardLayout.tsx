@@ -15,6 +15,7 @@ import {
   Users,
   Wallet,
   FolderTree,
+  Clock3,
   Sun,
   Moon,
   ChevronDown,
@@ -60,6 +61,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
       submenu: [
         { name: 'Intake & Prospects', href: '/matters/intake-prospects', icon: Users },
         { name: 'Active Matters', href: '/matters', icon: Briefcase, exact: true },
+        { name: 'Temporarily Closed', href: '/matters/temporarily-closed', icon: Clock3 },
         { name: 'Closed Matters', href: '/matters/closed', icon: FolderTree },
       ],
     },

@@ -47,9 +47,11 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
       const data = await getAllCases();
       // Consider closed cases as those explicitly marked 'Closed' or where the workflow progress status is 'Completed'.
       const closed = (data || []).filter((c) => {
-        const isClosedStatus = String(c.status || '').toLowerCase() === 'closed';
+        const status = String(c.status || '').toLowerCase();
+        const isClosedStatus = status === 'closed';
+        const isTemporaryClosed = status === 'temporarily closed';
         const isWorkflowCompleted = (c.workflowProgress && c.workflowProgress.status) === 'Completed';
-        return isClosedStatus || isWorkflowCompleted;
+        return !isTemporaryClosed && (isClosedStatus || isWorkflowCompleted);
       });
       setCases(closed);
     } catch (err: any) {

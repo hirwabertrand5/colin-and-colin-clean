@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { UserRole } from '../../App';
 import { getAllTasks, TaskData } from '../../services/taskService';
-import { getAllCases, CaseData } from '../../services/caseService';
+import { getAllCases, CaseData, isTemporarilyClosedCase } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
 import { formatDueCountdown, getDeadlinePillClass } from '../../utils/workflowDeadline';
 
@@ -53,6 +53,11 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
     return map;
   }, [cases]);
 
+  const activeTasks = useMemo(
+    () => tasks.filter((task) => !isTemporarilyClosedCase(caseMap.get(task.caseId))),
+    [tasks, caseMap]
+  );
+
   const getPriorityPill = (priority: string) => {
     if (priority === 'High') return 'bg-red-50 text-red-700 border border-red-100';
     if (priority === 'Medium') return 'bg-yellow-50 text-yellow-800 border border-yellow-100';
@@ -73,7 +78,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
   // Performance badge intentionally removed — show only deadline pill
 
   const filteredTasks = useMemo(() => {
-    return tasks.filter((t) => {
+    return activeTasks.filter((t) => {
       const relatedCase = caseMap.get(t.caseId);
       const caseLabel = relatedCase?.caseNo || relatedCase?.parties || '';
 
@@ -88,7 +93,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
 
       return matchesSearch && matchesStatus && matchesPriority;
     });
-  }, [tasks, searchTerm, filterStatus, filterPriority, caseMap]);
+  }, [activeTasks, searchTerm, filterStatus, filterPriority, caseMap]);
 
   const columns: BoardColumnId[] = ['Not Started', 'In Progress', 'Pending Approval', 'Completed'];
 
@@ -99,9 +104,9 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
       'Pending Approval': 0,
       Completed: 0,
     } as Record<BoardColumnId, number>;
-    tasks.forEach((t) => c[getColumn(t)]++);
+    activeTasks.forEach((t) => c[getColumn(t)]++);
     return c;
-  }, [tasks]);
+  }, [activeTasks]);
 
   const headerSubtitle =
     userRole === 'managing_director'

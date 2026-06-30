@@ -27,7 +27,20 @@ export default function IntakeProspects() {
   })();
   const canUseAdminActions = currentRole ? ADMIN_ROLES.includes(currentRole) : false;
 
-  const stageOrder = ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Engagement', 'Converted', 'Non-Converted'];
+  const stageOrder = [
+    'Inquiry',
+    'Consultation',
+    'Conflict Check',
+    'Quotation',
+    'Quotation Preparation',
+    'Conversion Assessment',
+    'Quotation Issued',
+    'Awaiting Client Decision',
+    'Final Follow-Up',
+    'Engagement',
+    'Converted',
+    'Non-Converted',
+  ];
 
   useEffect(() => {
     loadData();
@@ -61,7 +74,8 @@ export default function IntakeProspects() {
   };
 
   const handleConvert = async (prospect: Prospect) => {
-    if (!window.confirm(`Convert "${prospect.clientName}" to active matter?`)) return;
+    if (prospect.stage !== 'Converted') return;
+    if (!window.confirm(`Create a matter from "${prospect.clientName}"?`)) return;
     try {
       await convertProspectToMatter(prospect._id);
       setError('');
@@ -86,8 +100,15 @@ export default function IntakeProspects() {
     return new Date(b.dateReceived || b.createdAt).getTime() - new Date(a.dateReceived || a.createdAt).getTime();
   });
 
-  const getAssignedName = (assignedTo: Prospect['assignedTo']) =>
-    typeof assignedTo === 'string' ? assignedTo : assignedTo?.name || '—';
+  const getUserName = (value?: string | { name?: string } | null) =>
+    typeof value === 'string' ? value : value?.name || '—';
+
+  const getOutcomeBadgeClass = (stage: Prospect['stage']) =>
+    stage === 'Converted'
+      ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+      : stage === 'Non-Converted'
+      ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+      : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pt-20 pb-8">
@@ -120,18 +141,20 @@ export default function IntakeProspects() {
         )}
 
         {/* Prospects Table */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="flex flex-col gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-700 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="font-semibold text-gray-900 dark:text-gray-100">Prospects</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {filterStage ? `${stats[filterStage] || filteredProspects.length} ${filterStage} prospects` : `${filteredProspects.length} active prospects`}
+                {filterStage
+                  ? `${stats[filterStage] || filteredProspects.length} ${filterStage} prospects`
+                  : `${filteredProspects.length} active prospects`}
               </p>
             </div>
             <select
               value={filterStage || ''}
               onChange={(e) => setFilterStage(e.target.value || null)}
-              className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 md:w-64"
+              className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 md:w-80"
             >
               <option value="">All stages</option>
               {stageOrder.map((stage) => (
@@ -141,105 +164,153 @@ export default function IntakeProspects() {
               ))}
             </select>
           </div>
+
           {loading ? (
-            <div className="p-8 text-center text-gray-500 dark:text-gray-400">Loading prospects...</div>
+            <div className="p-10 text-center text-gray-500 dark:text-gray-400">Loading prospects...</div>
           ) : filteredProspects.length === 0 ? (
-            <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+            <div className="p-10 text-center text-gray-500 dark:text-gray-400">
               {filterStage ? `No ${filterStage} prospects` : 'No prospects found'}
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
+              <table className="min-w-[1480px] w-full table-fixed">
+                <thead className="bg-gray-50/80 dark:bg-gray-900/60">
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">No.</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Client</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Email</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Phone</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Service</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Inquiry</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Stage</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Assigned To</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Notes</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-100">Actions</th>
-                </tr>
-              </thead>
-                <tbody>
-                  {filteredProspects.map((prospect, index) => (
-                    <tr
-                      key={prospect._id}
-                      className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                    >
-                      <td className="px-6 py-4 text-sm font-medium text-gray-700 dark:text-gray-300">{index + 1}</td>
-                      <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
-                        <div className="font-medium">{prospect.clientName}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{prospect.prospectNo}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        {prospect.contact.email || '—'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        {prospect.contact.phone || '—'}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        {prospect.legalServicePath?.map((p) => p.label).join(' / ') || 'N/A'}
-                      </td>
-                      <td className="max-w-xs px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        <div className="line-clamp-2">{prospect.inquiryDescription || '—'}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            prospect.stage === 'Converted'
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                              : prospect.stage === 'Non-Converted'
-                              ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                              : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                          }`}
-                        >
-                          {prospect.stage}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{getAssignedName(prospect.assignedTo)}</td>
-                      <td className="max-w-xs px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        <div className="line-clamp-2">{prospect.engagementNotes || '—'}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm">
-                        <div className="flex gap-2">
-                          {prospect.stage !== 'Converted' && prospect.stage !== 'Non-Converted' && (
-                            <button
-                              onClick={() => {
-                                setSelectedProspect(prospect);
-                                setShowForm(true);
-                              }}
-                              className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
-                              title="Edit"
+                    <th className="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">#</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Prospect</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Contact</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Matter</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Enquiry</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Stage</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Ownership</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {filteredProspects.map((prospect, index) => {
+                    const contactBits = [
+                      prospect.contact.email,
+                      prospect.contact.phone,
+                    ].filter(Boolean);
+                    const partnerName = getUserName(prospect.responsiblePartner);
+                    const associateName = getUserName(prospect.responsibleAssociate || prospect.assignedTo);
+
+                    return (
+                      <tr key={prospect._id} className="align-top transition-colors hover:bg-gray-50/70 dark:hover:bg-gray-700/40">
+                        <td className="px-4 py-4 text-sm font-semibold text-gray-500 dark:text-gray-400">
+                          {index + 1}
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="space-y-1">
+                            <div className="font-semibold text-gray-900 dark:text-gray-100">{prospect.clientName}</div>
+                            <div className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              {prospect.prospectNo}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              Received {new Date(prospect.dateReceived || prospect.createdAt).toLocaleDateString()}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
+                            <div className="font-medium text-gray-900 dark:text-gray-100">{prospect.contact.name || '—'}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {contactBits.length ? contactBits.join(' • ') : 'No contact details provided'}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                            <div className="line-clamp-2">{prospect.legalServicePath?.map((p) => p.label).join(' / ') || 'N/A'}</div>
+                            {(prospect.estimatedMatterValue || prospect.estimatedFeeValue) && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                {prospect.estimatedMatterValue ? `Matter ${prospect.estimatedMatterValue}` : ''}
+                                {prospect.estimatedMatterValue && prospect.estimatedFeeValue ? ' • ' : ''}
+                                {prospect.estimatedFeeValue ? `Fee ${prospect.estimatedFeeValue}` : ''}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                            <div className="line-clamp-3">{prospect.inquiryDescription || '—'}</div>
+                            {(prospect.enquiryNature || prospect.enquirySource || prospect.referralSource) && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                {prospect.enquiryNature ? `${prospect.enquiryNature}` : ''}
+                                {prospect.enquiryNature && (prospect.enquirySource || prospect.referralSource) ? ' • ' : ''}
+                                {prospect.enquirySource ? `${prospect.enquirySource}` : ''}
+                                {prospect.enquirySource && prospect.referralSource ? ' • ' : ''}
+                                {prospect.referralSource ? `${prospect.referralSource}` : ''}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="space-y-2">
+                            <span
+                              className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getOutcomeBadgeClass(prospect.stage)}`}
                             >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canUseAdminActions && prospect.stage === 'Engagement' && (
-                            <button
-                              onClick={() => handleConvert(prospect)}
-                              className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"
-                              title="Convert to Matter"
-                            >
-                              <ArrowRight className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canUseAdminActions && prospect.stage !== 'Converted' && (
-                            <button
-                              onClick={() => handleDelete(prospect._id)}
-                              className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                              title="Delete"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                              {prospect.stage}
+                            </span>
+                            {prospect.conversionOutcome && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                {prospect.conversionOutcome}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="space-y-1 text-sm text-gray-600 dark:text-gray-300">
+                            <div>
+                              <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Partner</span>
+                              <p className="font-medium text-gray-900 dark:text-gray-100">{partnerName}</p>
+                            </div>
+                            <div>
+                              <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Associate</span>
+                              <p className="font-medium text-gray-900 dark:text-gray-100">{associateName}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex flex-wrap gap-2">
+                            {prospect.stage !== 'Converted' && prospect.stage !== 'Non-Converted' && (
+                              <button
+                                onClick={() => {
+                                  setSelectedProspect(prospect);
+                                  setShowForm(true);
+                                }}
+                                className="inline-flex items-center rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-900 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                                title="Edit"
+                              >
+                                <Edit className="mr-2 h-4 w-4" />
+                                Edit
+                              </button>
+                            )}
+                            {canUseAdminActions && prospect.stage === 'Converted' && !prospect.convertedToMatters && (
+                              <button
+                                onClick={() => handleConvert(prospect)}
+                                className="inline-flex items-center rounded-lg border border-green-200 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-50 dark:border-green-900 dark:text-green-300 dark:hover:bg-green-900/20"
+                                title="Create Matter"
+                              >
+                                <ArrowRight className="mr-2 h-4 w-4" />
+                                Convert
+                              </button>
+                            )}
+                            {canUseAdminActions && prospect.stage !== 'Converted' && (
+                              <button
+                                onClick={() => handleDelete(prospect._id)}
+                                className="inline-flex items-center rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-900/20"
+                                title="Delete"
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

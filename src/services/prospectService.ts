@@ -10,25 +10,47 @@ const getAuthHeaders = () => {
 
 export interface ProspectContact {
   name: string;
-  email: string;
-  phone: string;
+  email?: string;
+  phone?: string;
   position?: string;
 }
+
+export type ProspectStage =
+  | 'Inquiry'
+  | 'Consultation'
+  | 'Conflict Check'
+  | 'Quotation'
+  | 'Quotation Preparation'
+  | 'Conversion Assessment'
+  | 'Quotation Issued'
+  | 'Awaiting Client Decision'
+  | 'Final Follow-Up'
+  | 'Engagement'
+  | 'Converted'
+  | 'Non-Converted';
 
 export interface Prospect {
   _id: string;
   prospectNo: string;
   clientName: string;
   parties?: string;
+  enquiryNature?: string;
+  priorityLevel?: 'High' | 'Medium' | 'Low';
+  enquirySource?: string;
+  referralSource?: string;
+  estimatedMatterValue?: number;
+  estimatedFeeValue?: number;
   contact: ProspectContact;
+  responsiblePartner?: string | { _id: string; name: string; email?: string; role?: string };
+  responsibleAssociate?: string | { _id: string; name: string; email?: string; role?: string };
   legalServicePath?: { id: string; label: string }[];
   inquiryDescription: string;
   dateReceived: Date;
-  stage: 'Inquiry' | 'Consultation' | 'Conflict Check' | 'Quotation' | 'Engagement' | 'Converted' | 'Non-Converted';
+  stage: ProspectStage;
   conflictCheckStatus?: 'Pending' | 'Cleared' | 'Flagged';
   conflictCheckDate?: Date;
   conflictCheckNotes?: string;
-  estimatedMatterValue?: number;
+  conversionOutcome?: string;
   quotationAmount?: number;
   quotationDate?: Date;
   engagementDate?: Date;
@@ -46,11 +68,13 @@ export const getAllProspects = async (filters?: {
   stage?: string;
   assignedTo?: string;
   isActive?: boolean;
+  responsibleAssociate?: string;
 }): Promise<Prospect[]> => {
   const params = new URLSearchParams();
   if (filters?.stage) params.append('stage', filters.stage);
   if (filters?.assignedTo) params.append('assignedTo', filters.assignedTo);
   if (filters?.isActive !== undefined) params.append('isActive', String(filters.isActive));
+  if (filters?.responsibleAssociate) params.append('responsibleAssociate', filters.responsibleAssociate);
   const response = await axios.get(`${API_BASE_URL}/prospects?${params}`, { headers: getAuthHeaders() });
   return response.data;
 };

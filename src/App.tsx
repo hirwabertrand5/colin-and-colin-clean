@@ -132,15 +132,61 @@ function App() {
                   />
 
                   {/* Cases/Matters */}
-                  <Route path="/cases" element={<CaseList userRole={user.role} />} />
-                  <Route path="/matters" element={<CaseList userRole={user.role} />} />
+                  <Route path="/cases" element={<CaseList userRole={user.role} mode="active" />} />
+                  <Route path="/matters" element={<CaseList userRole={user.role} mode="active" />} />
                   <Route path="/matters/intake-prospects" element={<IntakeProspects />} />
+                  <Route
+                    path="/cases/temporarily-closed"
+                    element={<CaseList userRole={user.role} mode="temporarilyClosed" />}
+                  />
+                  <Route
+                    path="/matters/temporarily-closed"
+                    element={<CaseList userRole={user.role} mode="temporarilyClosed" />}
+                  />
                   <Route path="/matters/closed" element={<ClosedCases userRole={user.role} />} />
 
                   {(isMD || isExec) && <Route path="/cases/new" element={<CreateCase />} />}
                   {(isMD || isExec) && <Route path="/matters/new" element={<CreateCase />} />}
+                  {(isMD || isExec) && (
+                    <Route
+                      path="/cases/temporarily-closed/new"
+                      element={
+                        <CreateCase
+                          initialStatus="Temporarily Closed"
+                          pageTitle="Create Temporarily Closed Matter"
+                          pageSubtitle="Record a matter that is paused temporarily and may be reactivated later."
+                          backHref="/cases/temporarily-closed"
+                          backLabel="Back to Temporarily Closed Matters"
+                          successNavigateTo="/cases/temporarily-closed"
+                          successMessage="Temporarily closed matter created successfully!"
+                          submitLabel="Create Temporarily Closed Matter"
+                          draftKey="createTemporaryClosedMatterDraft:v1"
+                        />
+                      }
+                    />
+                  )}
+                  {(isMD || isExec) && (
+                    <Route
+                      path="/matters/temporarily-closed/new"
+                      element={
+                        <CreateCase
+                          initialStatus="Temporarily Closed"
+                          pageTitle="Create Temporarily Closed Matter"
+                          pageSubtitle="Record a matter that is paused temporarily and may be reactivated later."
+                          backHref="/matters/temporarily-closed"
+                          backLabel="Back to Temporarily Closed Matters"
+                          successNavigateTo="/matters/temporarily-closed"
+                          successMessage="Temporarily closed matter created successfully!"
+                          submitLabel="Create Temporarily Closed Matter"
+                          draftKey="createTemporaryClosedMatterDraft:v1"
+                        />
+                      }
+                    />
+                  )}
                   {isAssocLike && <Route path="/cases/new" element={<Navigate to="/cases" replace />} />}
                   {isAssocLike && <Route path="/matters/new" element={<Navigate to="/matters" replace />} />}
+                  {isAssocLike && <Route path="/cases/temporarily-closed/new" element={<Navigate to="/cases/temporarily-closed" replace />} />}
+                  {isAssocLike && <Route path="/matters/temporarily-closed/new" element={<Navigate to="/matters/temporarily-closed" replace />} />}
                   <Route path="/cases/:id/*" element={<CaseWorkspace userRole={user.role} />} />
                   <Route path="/matters/:id/*" element={<CaseWorkspace userRole={user.role} />} />
 

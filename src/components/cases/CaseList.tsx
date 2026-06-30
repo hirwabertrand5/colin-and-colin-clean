@@ -13,6 +13,7 @@ import { getCasePracticePath } from '../../utils/caseLabels';
 
 interface CaseListProps {
   userRole: UserRole;
+  mode?: 'active' | 'temporarilyClosed';
 }
 
 const isAssociateLike = (role: UserRole) =>
@@ -21,10 +22,12 @@ const isAssociateLike = (role: UserRole) =>
 type SortKey = 'nextDeadline' | 'createdAt' | 'caseNo' | 'parties' | 'workflow' | 'currentStep';
 type SortDir = 'asc' | 'desc';
 
-export default function CaseList({ userRole }: CaseListProps) {
+export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
   const CASES_PER_PAGE = 10;
 
-  usePageTitle('Active Matters');
+  const isTemporaryClosedMode = mode === 'temporarilyClosed';
+
+  usePageTitle(isTemporaryClosedMode ? 'Temporarily Closed Matters' : 'Active Matters');
 
   const [searchTerm, setSearchTerm] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('nextDeadline');
@@ -36,6 +39,7 @@ export default function CaseList({ userRole }: CaseListProps) {
 
   const assocLike = isAssociateLike(userRole);
   const canManageCases = userRole === 'managing_director' || userRole === 'executive_assistant';
+  const entityLabel = isTemporaryClosedMode ? 'matters' : 'cases';
 
   const deferredSearchTerm = useDeferredValue(searchTerm);
 
@@ -51,9 +55,12 @@ export default function CaseList({ userRole }: CaseListProps) {
       const data = await getAllCases();
       // Treat a case as closed if its explicit status is 'Closed' or its workflowProgress.status is 'Completed'.
       const active = (data || []).filter((c) => {
-        const isClosedStatus = String(c.status || '').toLowerCase() === 'closed';
+        const status = String(c.status || '').toLowerCase();
+        const isClosedStatus = status === 'closed';
+        const isTemporaryClosed = status === 'temporarily closed';
         const isWorkflowCompleted = (c.workflowProgress && c.workflowProgress.status) === 'Completed';
-        return !(isClosedStatus || isWorkflowCompleted);
+        if (isTemporaryClosedMode) return isTemporaryClosed;
+        return !(isClosedStatus || isWorkflowCompleted || isTemporaryClosed);
       });
       setCases(active);
     } catch (err: any) {
@@ -225,20 +232,24 @@ export default function CaseList({ userRole }: CaseListProps) {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-              {assocLike ? 'My Matters' : 'Practice Management'}
+              {isTemporaryClosedMode ? 'Temporarily Closed Matters' : assocLike ? 'My Matters' : 'Practice Management'}
             </h1>
             <p className="text-gray-600">
-              {assocLike ? 'Matters assigned to you' : 'Track firm-wide matters, assignments, and progress'}
+              {isTemporaryClosedMode
+                ? 'Matters that are paused temporarily and can be reactivated later'
+                : assocLike
+                  ? 'Matters assigned to you'
+                  : 'Track firm-wide matters, assignments, and progress'}
             </p>
           </div>
 
           {canManageCases && (
             <Link
-              to="/cases/new"
+              to={isTemporaryClosedMode ? '/matters/temporarily-closed/new' : '/cases/new'}
               className="inline-flex items-center px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 transition"
             >
               <Plus className="w-4 h-4 mr-2" />
-              Create Case
+              {isTemporaryClosedMode ? 'Create Temporarily Closed Matter' : 'Create Case'}
             </Link>
           )}
         </div>
@@ -378,12 +389,18 @@ export default function CaseList({ userRole }: CaseListProps) {
           </table>
         </div>
 
-        {loading && <div className="text-center py-12 text-gray-500">Loading cases...</div>}
+        {loading && (
+          <div className="text-center py-12 text-gray-500">
+            {isTemporaryClosedMode ? 'Loading temporarily closed matters...' : 'Loading cases...'}
+          </div>
+        )}
 
         {!loading && filteredSortedCases.length === 0 && (
           <div className="text-center py-12">
             <Briefcase className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500">No cases found</p>
+            <p className="text-gray-500">
+              {isTemporaryClosedMode ? 'No temporarily closed matters found' : 'No cases found'}
+            </p>
           </div>
         )}
 
@@ -391,7 +408,8 @@ export default function CaseList({ userRole }: CaseListProps) {
           <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4">
             <p className="text-sm text-gray-600">
               Showing {(currentPage - 1) * CASES_PER_PAGE + 1}-
-              {Math.min(currentPage * CASES_PER_PAGE, filteredSortedCases.length)} of {filteredSortedCases.length} cases
+              {Math.min(currentPage * CASES_PER_PAGE, filteredSortedCases.length)} of {filteredSortedCases.length}{' '}
+              {entityLabel}
             </p>
 
             <div className="flex items-center gap-2">
