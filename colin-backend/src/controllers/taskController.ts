@@ -8,6 +8,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { writeAudit } from '../services/auditService';
 import TaskTimeLog from '../models/taskTimeLogModel';
 import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
+import { buildYearlySequence } from '../utils/counter';
 
 const isAssociateLikeRole = (role?: string) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
@@ -27,6 +28,46 @@ const withActor = (req: AuthRequest) => {
 
 const isAdminCaseRole = (role?: string) =>
   role === 'managing_director' || role === 'executive_assistant';
+
+const TASK_WORKFLOW_STAGES = [
+  'Created',
+  'Assigned',
+  'Acknowledged',
+  'In Progress',
+  'Awaiting Review',
+  'Awaiting External Action',
+  'Completed',
+  'Closed',
+] as const;
+
+type TaskWorkflowStage = (typeof TASK_WORKFLOW_STAGES)[number];
+
+const normalizeWorkflowStage = (value: unknown): TaskWorkflowStage | null => {
+  const stage = String(value || '').trim();
+  return (TASK_WORKFLOW_STAGES as readonly string[]).includes(stage) ? (stage as TaskWorkflowStage) : null;
+};
+
+const stageToStatus = (stage?: TaskWorkflowStage | null) => {
+  if (stage === 'Completed' || stage === 'Closed') return 'Completed';
+  if (stage === 'Acknowledged' || stage === 'In Progress' || stage === 'Awaiting Review' || stage === 'Awaiting External Action')
+    return 'In Progress';
+  return 'Not Started';
+};
+
+const stageRequiresAcknowledgement = (stage?: TaskWorkflowStage | null) =>
+  stage === 'Acknowledged' || stage === 'In Progress' || stage === 'Awaiting Review' || stage === 'Awaiting External Action';
+
+const stageNeedsCompletionConfirmation = (stage?: TaskWorkflowStage | null) => stage === 'Closed';
+
+const generateTaskNo = () => buildYearlySequence('task', 'TASK');
+
+const normalizeTaskStartDate = (value: unknown) => {
+  if (!value) return new Date().toISOString().slice(0, 10);
+  const asString = String(value).trim();
+  return asString || new Date().toISOString().slice(0, 10);
+};
+
+const normalizeTaskDueDate = (value: unknown) => String(value || '').trim();
 
 const canCoordinateTasksForCase = async (req: AuthRequest, caseId: string) => {
   if (isAdminCaseRole(req.user?.role)) return true;
@@ -67,9 +108,9 @@ const assertAssigneeAllowed = async (req: AuthRequest, assigneeValue: unknown) =
   }
 };
 
-// Approved tasks become read-only for everyone
+// Approved or closed tasks become read-only for everyone
 const isApprovedLocked = (task: any) =>
-  task?.requiresApproval && String(task.approvalStatus) === 'Approved';
+  task?.workflowStage === 'Closed' || (task?.requiresApproval && String(task.approvalStatus) === 'Approved');
 
 /**
  * Professional case access:
@@ -139,21 +180,48 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
-    await assertAssigneeAllowed(req, req.body?.assignee);
+    const assignee = String(req.body?.assignee || '').trim();
+    const supervisor = String(req.body?.supervisor || '').trim();
+    const dueDate = normalizeTaskDueDate(req.body?.dueDate);
+    const startDate = normalizeTaskStartDate(req.body?.startDate);
+    const relatedStage = normalizeWorkflowStage(req.body?.workflowStage) || 'Assigned';
+
+    if (!assignee) return res.status(400).json({ message: 'Assignee is required.' });
+    if (!supervisor) return res.status(400).json({ message: 'Supervisor is required.' });
+    if (!dueDate) return res.status(400).json({ message: 'Due date is required.' });
+    if (relatedStage === 'Closed') {
+      return res.status(400).json({ message: 'A task cannot be created directly as Closed.' });
+    }
+
+    await assertAssigneeAllowed(req, assignee);
+
+    const caseRecord: any = await Case.findById(caseId).select('parties caseNo').lean();
+    const taskNo = String(req.body?.taskNo || '').trim() || (await generateTaskNo());
+    const relatedClient = String(req.body?.relatedClient || caseRecord?.parties || '').trim();
 
     const requiresApproval = Boolean(req.body.requiresApproval);
     const approvalStatus = requiresApproval ? 'Draft' : 'Not Required';
 
     const newTask = new Task({
       ...req.body,
+      taskNo,
       caseId: new mongoose.Types.ObjectId(caseId),
       requiresApproval,
       approvalStatus,
+      assignee,
+      supervisor,
+      relatedClient: relatedClient || undefined,
+      startDate,
+      dueDate,
+      workflowStage: relatedStage,
+      status: stageToStatus(relatedStage),
+      acknowledgedAt: stageRequiresAcknowledgement(relatedStage) ? new Date() : undefined,
+      completedAt: relatedStage === 'Completed' ? new Date() : undefined,
+      closedAt: undefined,
       assignedBy: req.user?.name || 'System',
       submittedAt: undefined,
       approvedAt: undefined,
       rejectedAt: undefined,
-      completedAt: undefined,
     });
 
     await newTask.save();
@@ -163,9 +231,9 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
       ...withActor(req),
       action: 'TASK_CREATED',
       message: 'Created task',
-      detail: `${newTask.title || 'Untitled'} • Assignee: ${newTask.assignee || '-'} • Due: ${
-        newTask.dueDate || '-'
-      }`,
+      detail: `${newTask.taskNo || 'Task'} • ${newTask.title || 'Untitled'} • Assignee: ${
+        newTask.assignee || '-'
+      } • Due: ${newTask.dueDate || '-'}`,
     });
 
     // ✅ Notify assignee (customized per-user)
@@ -177,20 +245,20 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
         await notifyUsersById({
           userIds: [String(assigneeUser._id)],
           category: 'taskAssignments',
-          notification: {
-            type: 'TASK_ASSIGNED',
-            title: 'New task assigned',
-            message: `${newTask.title || 'Task'} (Due: ${newTask.dueDate || '-'})`,
-            severity: 'info',
-            caseId: String(caseId),
-            taskId: String(newTask._id),
-            link: `/tasks/${newTask._id}`,
-          },
-          email: {
-            subject: `Task assigned: ${newTask.title || 'Task'}`,
+            notification: {
+              type: 'TASK_ASSIGNED',
+              title: 'New task assigned',
+              message: `${newTask.taskNo || 'Task'} • ${newTask.title || 'Task'} (Due: ${newTask.dueDate || '-'})`,
+              severity: 'info',
+              caseId: String(caseId),
+              taskId: String(newTask._id),
+              link: `/tasks/${newTask._id}`,
+            },
+            email: {
+            subject: `Task assigned: ${newTask.taskNo || 'Task'}`,
             html: `<div style="font-family: Arial, sans-serif">
                     <p>A new task has been assigned to you.</p>
-                    <p><b>${newTask.title || 'Task'}</b></p>
+                    <p><b>${newTask.taskNo || 'Task'} - ${newTask.title || 'Task'}</b></p>
                     <p>Due: ${newTask.dueDate || '-'}</p>
                   </div>`,
           },
@@ -213,7 +281,7 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
 
 export const getAllTasks = async (req: AuthRequest, res: Response) => {
   try {
-    const { q, status, priority, approvalStatus } = req.query as any;
+    const { q, status, priority, approvalStatus, workflowStage } = req.query as any;
 
     const filter: any = {};
 
@@ -231,10 +299,11 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
     if (status && status !== 'all') filter.status = status;
     if (priority && priority !== 'all') filter.priority = priority;
     if (approvalStatus && approvalStatus !== 'all') filter.approvalStatus = approvalStatus;
+    if (workflowStage && workflowStage !== 'all') filter.workflowStage = workflowStage;
 
     if (q && String(q).trim()) {
       const regex = new RegExp(String(q).trim(), 'i');
-      filter.$or = [{ title: regex }, { assignee: regex }];
+      filter.$or = [{ title: regex }, { assignee: regex }, { supervisor: regex }, { taskNo: regex }, { relatedClient: regex }];
     }
 
     const tasks = await Task.find(filter).sort({ dueDate: 1, createdAt: -1 });
@@ -282,7 +351,7 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
 
     if (!canManage) {
       const attemptedKeys = Object.keys(req.body || {}).filter((key) => req.body?.[key] !== undefined);
-      const allowedSelfServiceKeys = ['status'];
+      const allowedSelfServiceKeys = ['status', 'workflowStage'];
       if (attemptedKeys.some((key) => !allowedSelfServiceKeys.includes(key))) {
         return res.status(403).json({ message: 'You can only update task status.' });
       }
@@ -292,52 +361,129 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'This task is approved and locked (read-only).' });
     }
 
+    const updates: any = { ...(req.body || {}) };
+    delete updates.caseId;
+    delete updates.taskNo;
+
     if (canManage && Object.prototype.hasOwnProperty.call(req.body || {}, 'assignee')) {
-      await assertAssigneeAllowed(req, req.body?.assignee);
+      await assertAssigneeAllowed(req, updates?.assignee);
     }
 
-    // ✅ Maintain completedAt properly when status changes
-    const nextStatus = req.body?.status;
-
-    // if moving into Completed, set completedAt
-    if (nextStatus && nextStatus === 'Completed' && before.status !== 'Completed') {
-      req.body.completedAt = new Date();
+    if (Object.prototype.hasOwnProperty.call(updates, 'supervisor') && !String(updates.supervisor || '').trim()) {
+      return res.status(400).json({ message: 'Supervisor is required.' });
     }
 
-    // if moving away from Completed, clear completedAt
-    if (nextStatus && nextStatus !== 'Completed' && before.status === 'Completed') {
-      req.body.completedAt = undefined;
-    }
-
-    // If approvalStatus changes manually (not recommended), protect consistency a bit:
-    const nextApprovalStatus = req.body?.approvalStatus;
-    if (nextApprovalStatus && nextApprovalStatus !== before.approvalStatus) {
-      if (nextApprovalStatus === 'Rejected') {
-        req.body.rejectedAt = new Date();
-        req.body.approvedAt = undefined;
-        req.body.completedAt = undefined;
+    if (Object.prototype.hasOwnProperty.call(updates, 'dueDate')) {
+      updates.dueDate = normalizeTaskDueDate(updates.dueDate);
+      if (!updates.dueDate) {
+        return res.status(400).json({ message: 'Due date is required.' });
       }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'startDate')) {
+      updates.startDate = normalizeTaskStartDate(updates.startDate);
+    }
+
+    const hasWorkflowStage = Object.prototype.hasOwnProperty.call(updates, 'workflowStage');
+    const hasStatus = Object.prototype.hasOwnProperty.call(updates, 'status');
+    const hasApprovalStatus = Object.prototype.hasOwnProperty.call(updates, 'approvalStatus');
+    const confirmCompletion = Boolean((updates.confirmCompletion || updates.completionConfirmed));
+    delete updates.confirmCompletion;
+    delete updates.completionConfirmed;
+
+    const nextStage = hasWorkflowStage ? normalizeWorkflowStage(updates.workflowStage) : null;
+    if (hasWorkflowStage && !nextStage) {
+      return res.status(400).json({ message: 'Invalid workflow stage.' });
+    }
+
+    if (hasWorkflowStage) {
+      updates.workflowStage = nextStage;
+      updates.status = stageToStatus(nextStage);
+
+      if (stageRequiresAcknowledgement(nextStage) && !before.acknowledgedAt) {
+        updates.acknowledgedAt = new Date();
+      }
+
+      if (nextStage === 'Completed') {
+        updates.completedAt = before.completedAt || new Date();
+        updates.closedAt = undefined;
+      }
+
+      if (nextStage === 'Closed') {
+        if (!confirmCompletion) {
+          return res.status(400).json({ message: 'Confirm completion before closing the task.' });
+        }
+        updates.status = 'Completed';
+        updates.completedAt = before.completedAt || new Date();
+        updates.closedAt = new Date();
+      }
+    } else if (hasStatus) {
+      const nextStatus = String(updates.status || '').trim();
+      if (!['Not Started', 'In Progress', 'Completed'].includes(nextStatus)) {
+        return res.status(400).json({ message: 'Invalid status.' });
+      }
+
+      if (nextStatus === 'Completed') {
+        updates.workflowStage = 'Completed';
+        updates.completedAt = before.completedAt || new Date();
+        updates.closedAt = undefined;
+      } else if (nextStatus === 'In Progress') {
+        updates.workflowStage = before.workflowStage === 'Closed' ? 'In Progress' : 'In Progress';
+        if (!before.acknowledgedAt) {
+          updates.acknowledgedAt = new Date();
+        }
+        if (before.status === 'Completed') {
+          updates.completedAt = undefined;
+        }
+      } else if (nextStatus === 'Not Started') {
+        updates.workflowStage = before.workflowStage === 'Closed' ? 'Assigned' : 'Assigned';
+        if (before.status === 'Completed') {
+          updates.completedAt = undefined;
+        }
+      }
+    }
+
+    if (hasApprovalStatus) {
+      const nextApprovalStatus = String(updates.approvalStatus || '').trim();
+      if (nextApprovalStatus === 'Rejected') {
+        updates.rejectedAt = new Date();
+        updates.approvedAt = undefined;
+        updates.completedAt = undefined;
+        if (!hasWorkflowStage) updates.workflowStage = 'In Progress';
+        if (!hasStatus) updates.status = 'In Progress';
+        updates.closedAt = undefined;
+      }
+
       if (nextApprovalStatus === 'Approved') {
         const now = new Date();
-        req.body.approvedAt = now;
-        req.body.rejectedAt = undefined;
-        // approved implies completed for your workflow
-        req.body.status = 'Completed';
-        req.body.completedAt = now;
+        updates.approvedAt = now;
+        updates.rejectedAt = undefined;
+        updates.status = 'Completed';
+        updates.workflowStage = 'Completed';
+        updates.completedAt = now;
+        updates.closedAt = undefined;
       }
     }
 
-    const updated: any = await Task.findByIdAndUpdate(taskId, req.body, { new: true });
+    const updated: any = await Task.findByIdAndUpdate(taskId, updates, { new: true });
     if (!updated) return res.status(404).json({ message: 'Task not found.' });
 
     const changes: string[] = [];
     if (req.body.status && req.body.status !== before.status)
       changes.push(`Status: ${before.status} → ${req.body.status}`);
+    if (req.body.workflowStage && req.body.workflowStage !== before.workflowStage)
+      changes.push(`Workflow: ${before.workflowStage || '-'} → ${req.body.workflowStage}`);
     if (req.body.assignee && req.body.assignee !== before.assignee)
       changes.push(`Assignee: ${before.assignee || '-'} → ${req.body.assignee}`);
+    if (req.body.supervisor && req.body.supervisor !== before.supervisor)
+      changes.push(`Supervisor: ${before.supervisor || '-'} → ${req.body.supervisor}`);
     if (req.body.dueDate && req.body.dueDate !== before.dueDate)
       changes.push(`Due: ${before.dueDate || '-'} → ${req.body.dueDate}`);
+    if (req.body.startDate && req.body.startDate !== before.startDate)
+      changes.push(`Start: ${before.startDate || '-'} → ${req.body.startDate}`);
     if (req.body.title && req.body.title !== before.title) changes.push(`Title changed`);
+    if (req.body.relatedClient && req.body.relatedClient !== before.relatedClient)
+      changes.push(`Related client updated`);
 
     await writeAudit({
       caseId: String(updated.caseId),
@@ -396,6 +542,10 @@ export const submitTaskForApproval = async (req: AuthRequest, res: Response) => 
     const task: any = await Task.findById(taskId);
     if (!task) return res.status(404).json({ message: 'Task not found.' });
 
+    if (isApprovedLocked(task)) {
+      return res.status(400).json({ message: 'This task is locked and cannot be submitted.' });
+    }
+
     if (!task.requiresApproval) {
       return res.status(400).json({ message: 'This task does not require approval.' });
     }
@@ -406,6 +556,9 @@ export const submitTaskForApproval = async (req: AuthRequest, res: Response) => 
 
     task.approvalStatus = 'Pending';
     task.submittedAt = new Date();
+    task.workflowStage = 'Awaiting Review';
+    task.status = 'In Progress';
+    task.acknowledgedAt = task.acknowledgedAt || new Date();
     await task.save();
 
     await writeAudit({
@@ -477,6 +630,10 @@ export const approveTask = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
+    if (isApprovedLocked(task)) {
+      return res.status(400).json({ message: 'This task is locked.' });
+    }
+
     if (!task.requiresApproval) {
       return res.status(400).json({ message: 'This task does not require approval.' });
     }
@@ -489,11 +646,14 @@ export const approveTask = async (req: AuthRequest, res: Response) => {
 
     task.approvalStatus = 'Approved';
     task.status = 'Completed';
+    task.workflowStage = 'Completed';
 
     task.approvedAt = now;
     task.rejectedAt = undefined;
 
     task.completedAt = now;
+    task.closedAt = undefined;
+    task.acknowledgedAt = task.acknowledgedAt || now;
     task.approvedBy = req.user?.name || 'System';
     task.approvalComment = String(comment || '').trim();
 
@@ -527,6 +687,10 @@ export const rejectTask = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
+    if (isApprovedLocked(task)) {
+      return res.status(400).json({ message: 'This task is locked.' });
+    }
+
     if (!task.requiresApproval) {
       return res.status(400).json({ message: 'This task does not require approval.' });
     }
@@ -545,6 +709,9 @@ export const rejectTask = async (req: AuthRequest, res: Response) => {
       task.status = 'In Progress';
     }
     task.completedAt = undefined;
+    task.workflowStage = 'In Progress';
+    task.closedAt = undefined;
+    task.acknowledgedAt = task.acknowledgedAt || now;
 
     task.approvedBy = req.user?.name || 'System';
     task.approvalComment = String(comment || '').trim();

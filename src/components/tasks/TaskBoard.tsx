@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { UserRole } from '../../App';
-import { getAllTasks, TaskData } from '../../services/taskService';
+import { getAllTasks, TaskData, TASK_WORKFLOW_STAGES, TaskWorkflowStage } from '../../services/taskService';
 import { getAllCases, CaseData, isTemporarilyClosedCase } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
 import { formatDueCountdown, getDeadlinePillClass } from '../../utils/workflowDeadline';
@@ -22,6 +22,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | BoardColumnId>('all');
   const [filterPriority, setFilterPriority] = useState<'all' | 'High' | 'Medium' | 'Low'>('all');
+  const [filterWorkflowStage, setFilterWorkflowStage] = useState<'all' | TaskWorkflowStage>('all');
 
   const [tasks, setTasks] = useState<TaskData[]>([]);
   const [cases, setCases] = useState<CaseData[]>([]);
@@ -84,16 +85,21 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
 
       const matchesSearch =
         t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (t.taskNo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         String(caseLabel).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (t.assignee || '').toLowerCase().includes(searchTerm.toLowerCase());
+        (t.assignee || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (t.supervisor || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (t.relatedClient || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (t.workflowStage || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const column = getColumn(t);
       const matchesStatus = filterStatus === 'all' || column === filterStatus;
       const matchesPriority = filterPriority === 'all' || t.priority === filterPriority;
+      const matchesWorkflow = filterWorkflowStage === 'all' || t.workflowStage === filterWorkflowStage;
 
-      return matchesSearch && matchesStatus && matchesPriority;
+      return matchesSearch && matchesStatus && matchesPriority && matchesWorkflow;
     });
-  }, [activeTasks, searchTerm, filterStatus, filterPriority, caseMap]);
+  }, [activeTasks, searchTerm, filterStatus, filterPriority, filterWorkflowStage, caseMap]);
 
   const columns: BoardColumnId[] = ['Not Started', 'In Progress', 'Pending Approval', 'Completed'];
 
@@ -107,6 +113,29 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
     activeTasks.forEach((t) => c[getColumn(t)]++);
     return c;
   }, [activeTasks]);
+
+  const getWorkflowStagePill = (stage?: string) => {
+    switch (stage) {
+      case 'Created':
+        return 'bg-gray-50 text-gray-700 border border-gray-200';
+      case 'Assigned':
+        return 'bg-blue-50 text-blue-700 border border-blue-100';
+      case 'Acknowledged':
+        return 'bg-sky-50 text-sky-700 border border-sky-100';
+      case 'In Progress':
+        return 'bg-indigo-50 text-indigo-700 border border-indigo-100';
+      case 'Awaiting Review':
+        return 'bg-amber-50 text-amber-700 border border-amber-100';
+      case 'Awaiting External Action':
+        return 'bg-orange-50 text-orange-700 border border-orange-100';
+      case 'Completed':
+        return 'bg-green-50 text-green-700 border border-green-100';
+      case 'Closed':
+        return 'bg-gray-900 text-white border border-gray-900';
+      default:
+        return 'bg-gray-50 text-gray-700 border border-gray-200';
+    }
+  };
 
   const headerSubtitle =
     userRole === 'managing_director'
@@ -128,14 +157,14 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
         </div>
       )}
 
-      <div className="mb-6 flex flex-col sm:flex-row gap-3">
+      <div className="mb-6 flex flex-col xl:flex-row gap-3">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search tasks..."
+            placeholder="Search tasks, task no, assignee, supervisor, client..."
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-400 focus:outline-none"
           />
         </div>
@@ -161,6 +190,19 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
           <option value="High">High</option>
           <option value="Medium">Medium</option>
           <option value="Low">Low</option>
+        </select>
+
+        <select
+          value={filterWorkflowStage}
+          onChange={(e) => setFilterWorkflowStage(e.target.value as any)}
+          className="px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-400 focus:outline-none"
+        >
+          <option value="all">All Workflow Stages</option>
+          {TASK_WORKFLOW_STAGES.map((stage) => (
+            <option key={stage} value={stage}>
+              {stage}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -197,8 +239,15 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
                           <Link
                             key={task._id}
                             to={`/tasks/${task._id}`}
-                            className="block border border-gray-200 rounded-lg p-4 bg-white hover:shadow-sm transition"
+                            className="block border border-gray-200 rounded-xl p-4 bg-white hover:shadow-sm transition"
                           >
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                              <span className="text-xs font-semibold text-gray-500">{task.taskNo || 'Task'}</span>
+                              <span className={`px-2 py-0.5 text-[11px] rounded-full ${getWorkflowStagePill(task.workflowStage)}`}>
+                                {task.workflowStage || 'Assigned'}
+                              </span>
+                            </div>
+
                             <div className="flex items-center gap-2 mb-2 flex-wrap">
                               <span className={`px-2 py-0.5 text-xs rounded ${getPriorityPill(task.priority)}`}>
                                 {task.priority}
@@ -217,12 +266,18 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
                               )}
                             </div>
 
-                            <div className="text-sm font-semibold text-gray-900 mb-2">{task.title}</div>
-                            <div className="text-xs text-gray-500 mb-2 truncate">{caseLabel}</div>
+                            <div className="text-sm font-semibold text-gray-900 mb-1 line-clamp-2">{task.title}</div>
+                            <div className="text-xs text-gray-500 mb-3 truncate">{caseLabel}</div>
 
-                            <div className="flex items-center justify-between text-xs text-gray-500">
-                              <span className="truncate">{task.assignee}</span>
-                              <span className="shrink-0">Due {task.dueDate}</span>
+                            <div className="grid grid-cols-1 gap-1 text-xs text-gray-500">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="truncate">Assignee: {task.assignee || '—'}</span>
+                                <span className="shrink-0">Due {task.dueDate}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="truncate">Supervisor: {task.supervisor || '—'}</span>
+                                <span className="truncate">Client: {task.relatedClient || '—'}</span>
+                              </div>
                             </div>
                             <div className="mt-3 flex items-center gap-2 flex-wrap">
                               {!isCompleted && (

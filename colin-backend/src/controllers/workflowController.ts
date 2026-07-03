@@ -58,6 +58,12 @@ const previousActiveStatus = (status?: string) => {
 export const updateCaseWorkflowProgress = async (c: any, inst: any) => {
   const { plannedAmount, completedAmount, currency } = computeWorkflowMoney(inst);
   const nextDueAt = computeNextDueAt(inst);
+  const currentStep = inst.currentStepKey
+    ? (inst.steps || []).find((s: any) => s.stepKey === inst.currentStepKey)
+    : null;
+  const currentStepExtension = Array.isArray(currentStep?.extensionHistory) && currentStep.extensionHistory.length
+    ? currentStep.extensionHistory[currentStep.extensionHistory.length - 1]
+    : undefined;
   const existingPlannedAmount =
     typeof c.workflowProgress?.plannedValue?.amount === 'number'
       ? c.workflowProgress.plannedValue.amount
@@ -75,19 +81,26 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any) => {
     currentStepKey: inst.currentStepKey,
     currentStepTitle: (() => {
       if (!inst.currentStepKey) return undefined;
-      const ref = (inst.steps || []).find((s: any) => s.stepKey === inst.currentStepKey);
-      return ref?.title;
+      return currentStep?.title;
     })(),
     currentStepStartAt: (() => {
       if (!inst.currentStepKey) return undefined;
-      const ref = (inst.steps || []).find((s: any) => s.stepKey === inst.currentStepKey);
-      return ref?.startAt;
+      return currentStep?.startAt;
     })(),
     currentStepDueAt: (() => {
       if (!inst.currentStepKey) return undefined;
-      const ref = (inst.steps || []).find((s: any) => s.stepKey === inst.currentStepKey);
-      return ref?.dueAt;
+      return currentStep?.dueAt;
     })(),
+    currentStepExtension: currentStepExtension
+      ? {
+          days: currentStepExtension.days,
+          reason: currentStepExtension.reason,
+          grantedBy: currentStepExtension.grantedBy,
+          grantedAt: currentStepExtension.grantedAt,
+          previousDueAt: currentStepExtension.previousDueAt,
+          newDueAt: currentStepExtension.newDueAt,
+        }
+      : undefined,
     percent,
     nextDueAt,
     plannedValue: { amount: existingPlannedAmount || undefined, currency: existingCurrency },
@@ -564,6 +577,15 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Resulting due date is invalid.' });
     }
     step.dueAt = newDue;
+    step.extensionHistory = Array.isArray(step.extensionHistory) ? step.extensionHistory : [];
+    step.extensionHistory.push({
+      previousDueAt: oldDue,
+      newDueAt: newDue,
+      days: dayOffset,
+      reason: String(reason || '').trim(),
+      grantedBy: req.user?.name || 'System',
+      grantedAt: new Date(),
+    });
 
     await inst.save();
     await updateCaseWorkflowProgress(c, inst);

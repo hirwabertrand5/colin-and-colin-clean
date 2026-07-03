@@ -26,7 +26,14 @@ import {
 } from '../controllers/workflowController';
 
 const router = express.Router();
-const ADMIN_ROLES = ['managing_director', 'executive_assistant'];
+const ADMIN_ROLES = [
+  'managing_director',
+  'managing_partner',
+  'senior_partner',
+  'partner',
+  'associate_partner',
+  'executive_assistant',
+];
 
 // Templates
 router.get('/templates/active', authenticate, listActiveTemplates);

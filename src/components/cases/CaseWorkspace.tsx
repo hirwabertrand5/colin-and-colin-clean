@@ -27,7 +27,8 @@ import {
   updateTask,
   deleteTask,
   TaskData,
-  TaskStatus,
+  TASK_WORKFLOW_STAGES,
+  TaskWorkflowStage,
   submitTaskForApproval,
   approveTask,
   rejectTask,
@@ -133,6 +134,16 @@ const getInvoiceStatusChip = (status: Invoice['status']) => {
   return status === 'Paid' ? 'bg-green-50 text-green-700' : 'bg-yellow-400 text-black';
 };
 
+const getTaskWorkflowChip = (stage?: string) => {
+  if (stage === 'Completed') return 'bg-green-50 text-green-700 border-green-100';
+  if (stage === 'Closed') return 'bg-gray-900 text-white border-gray-900';
+  if (stage === 'Awaiting Review') return 'bg-amber-50 text-amber-700 border-amber-100';
+  if (stage === 'Awaiting External Action') return 'bg-orange-50 text-orange-700 border-orange-100';
+  if (stage === 'In Progress') return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+  if (stage === 'Acknowledged') return 'bg-sky-50 text-sky-700 border-sky-100';
+  return 'bg-blue-50 text-blue-700 border-blue-100';
+};
+
 const getServicePathAccent = (caseType?: CaseData['caseType']) => {
   if (caseType === 'Litigation Cases') return 'bg-red-50 text-red-700 border-red-200';
   if (caseType === 'Labor Cases') return 'bg-amber-50 text-amber-700 border-amber-200';
@@ -200,7 +211,11 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     title: '',
     priority: 'Medium',
     status: 'Not Started',
+    workflowStage: 'Assigned',
     assignee: '',
+    supervisor: '',
+    relatedClient: '',
+    startDate: new Date().toISOString().slice(0, 10),
     dueDate: '',
     description: '',
     requiresApproval: false,
@@ -224,6 +239,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     setNewTask((task) => ({
       ...task,
       dueDate: task.dueDate || suggestedTaskDeadline,
+      relatedClient: task.relatedClient || caseData?.parties || '',
+      startDate: task.startDate || new Date().toISOString().slice(0, 10),
     }));
     setShowAddTask(true);
   };
@@ -630,7 +647,11 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         title: '',
         priority: 'Medium',
         status: 'Not Started',
+        workflowStage: 'Assigned',
         assignee: '',
+        supervisor: '',
+        relatedClient: '',
+        startDate: new Date().toISOString().slice(0, 10),
         dueDate: '',
         description: '',
         requiresApproval: false,
@@ -652,7 +673,17 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     }
 
     try {
-      await updateTask(editTask._id, editTask);
+      const confirmCompletion =
+        editTask.workflowStage === 'Closed'
+          ? window.confirm('Confirm this task is completed and ready to close?')
+          : false;
+
+      if (editTask.workflowStage === 'Closed' && !confirmCompletion) return;
+
+      await updateTask(editTask._id, {
+        ...editTask,
+        ...(confirmCompletion ? ({ confirmCompletion: true } as any) : {}),
+      } as any);
       setShowEditTask(false);
       setEditTask(null);
       reloadTasks();
@@ -677,13 +708,23 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     }
   };
 
-  const handleStatusChange = async (task: TaskData, newStatus: TaskStatus) => {
+  const handleWorkflowStageChange = async (task: TaskData, newWorkflowStage: TaskWorkflowStage) => {
     if (isRestrictedAssigneeRole) return;
     try {
-      await updateTask(task._id!, { status: newStatus });
+      const confirmCompletion =
+        newWorkflowStage === 'Closed'
+          ? window.confirm('Confirm this task is completed and ready to close?')
+          : false;
+
+      if (newWorkflowStage === 'Closed' && !confirmCompletion) return;
+
+      await updateTask(task._id!, {
+        workflowStage: newWorkflowStage,
+        ...(confirmCompletion ? ({ confirmCompletion: true } as any) : {}),
+      } as any);
       reloadTasks();
     } catch (err: any) {
-      setTasksError(err.message || 'Failed to update status');
+      setTasksError(err.message || 'Failed to update workflow stage');
     }
   };
 
@@ -1443,46 +1484,71 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">No.</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Title</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Assignee</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Workflow Deadline</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Task</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Workflow</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Ownership</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Dates</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 uppercase">Actions</th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-gray-200">
                   {tasks.map((task, index) => (
                     <tr key={task._id}>
-                      <td className="px-4 py-3 text-gray-500">{index + 1}</td>
-                      <td className="px-4 py-3">{task.title}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-500">{index + 1}</td>
+                      <td className="px-4 py-3 min-w-[240px]">
+                        <div className="text-xs font-semibold text-gray-500">{task.taskNo || `Task ${index + 1}`}</div>
+                        <div className="mt-1 font-medium text-gray-900">{task.title}</div>
+                        {task.description ? (
+                          <div className="mt-1 max-w-md truncate text-xs text-gray-500">{task.description}</div>
+                        ) : null}
+                      </td>
 
-                      {/* ✅ Associates read-only status */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 min-w-[180px]">
                         {isRestrictedAssigneeRole ? (
-                          <span className="text-sm text-gray-700">{task.status}</span>
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${getTaskWorkflowChip(
+                              task.workflowStage
+                            )}`}
+                          >
+                            {task.workflowStage || 'Assigned'}
+                          </span>
                         ) : (
                           <select
-                            value={task.status}
-                            onChange={(e) => handleStatusChange(task, e.target.value)}
+                            value={task.workflowStage || 'Assigned'}
+                            onChange={(e) => handleWorkflowStageChange(task, e.target.value as TaskWorkflowStage)}
                             className="border border-gray-300 rounded px-2 py-1 text-xs"
                           >
-                            <option value="Not Started">Not Started</option>
-                            <option value="In Progress">In Progress</option>
-                            <option value="Completed">Completed</option>
+                            {TASK_WORKFLOW_STAGES.map((stage) => (
+                              <option key={stage} value={stage}>
+                                {stage}
+                              </option>
+                            ))}
                           </select>
+                        )}
+                        <div className="mt-2 text-xs text-gray-500">{task.status}</div>
+                      </td>
+
+                      <td className="px-4 py-3 min-w-[210px] text-sm">
+                        <div className="font-medium text-gray-900">{task.assignee || '—'}</div>
+                        <div className="text-xs text-gray-500">Supervisor: {task.supervisor || '—'}</div>
+                        <div className="mt-1 text-xs text-gray-500">Client: {task.relatedClient || caseData.parties || '—'}</div>
+                      </td>
+
+                      <td className="px-4 py-3 min-w-[180px]">
+                        <div className="text-sm font-medium text-gray-900">Due {task.dueDate || '—'}</div>
+                        <div className="text-xs text-gray-500">Start {task.startDate || '—'}</div>
+                        {task.completedAt ? (
+                          <div className="text-xs text-green-700">
+                            Completed {new Date(task.completedAt).toLocaleDateString()}
+                          </div>
+                        ) : (
+                          <div className="text-xs text-gray-500">{taskTimingSummary}</div>
                         )}
                       </td>
 
-                      <td className="px-4 py-3">{task.assignee}</td>
                       <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-gray-900">{task.dueDate || '—'}</div>
-                        <div className="text-xs text-gray-500">{taskTimingSummary}</div>
-                      </td>
-
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {/* ✅ Everyone can open task detail */}
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => navigate(`/tasks/${task._id}`)}
                             className="text-gray-700 hover:text-gray-900"
@@ -1512,9 +1578,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                                 <Trash2 className="w-4 h-4" />
                               </button>
 
-                              {task.status !== 'Completed' && (
+                              {task.workflowStage !== 'Completed' && task.workflowStage !== 'Closed' && (
                                 <button
-                                  onClick={() => handleStatusChange(task, 'Completed')}
+                                  onClick={() => handleWorkflowStageChange(task, 'Completed')}
                                   className="text-green-600 hover:text-green-900"
                                   title="Mark as Completed"
                                 >
@@ -1546,7 +1612,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       {/* Add Task Modal */}
       {showAddTask && canAssignTasks && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-lg w-full flex flex-col" style={{ maxHeight: '90vh' }}>
+          <div className="bg-white rounded-lg max-w-2xl w-full flex flex-col" style={{ maxHeight: '90vh' }}>
             <div className="p-6 border-b">
               <h3 className="text-lg font-semibold text-gray-900">Add Task</h3>
             </div>
@@ -1563,7 +1629,113 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 />
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Workflow Stage</label>
+                  <select
+                    value={newTask.workflowStage || 'Assigned'}
+                    onChange={(e) => setNewTask((t) => ({ ...t, workflowStage: e.target.value as TaskWorkflowStage }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                  >
+                    {TASK_WORKFLOW_STAGES.filter((stage) => stage !== 'Closed').map((stage) => (
+                      <option key={stage} value={stage}>
+                        {stage}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority Level</label>
+                  <select
+                    value={newTask.priority}
+                    onChange={(e) => setNewTask((t) => ({ ...t, priority: e.target.value as any }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                  >
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Assignee *</label>
+                  <select
+                    value={newTask.assignee}
+                    onChange={(e) => setNewTask((t) => ({ ...t, assignee: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                    disabled={staffLoading}
+                    required
+                  >
+                    <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
+                    {assignableStaffUsers.map((u) => (
+                      <option key={u._id} value={u.name}>
+                        {u.name} ({u.role.replace(/_/g, ' ')})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Supervisor *</label>
+                  <select
+                    value={newTask.supervisor || ''}
+                    onChange={(e) => setNewTask((t) => ({ ...t, supervisor: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                    disabled={staffLoading}
+                    required
+                  >
+                    <option value="">{staffLoading ? 'Loading...' : 'Select supervisor'}</option>
+                    {staffUsers.map((u) => (
+                      <option key={u._id} value={u.name}>
+                        {u.name} ({u.role.replace(/_/g, ' ')})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {staffError && <p className="text-xs text-red-600">{staffError}</p>}
+
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Related Client</label>
+                <input
+                  type="text"
+                  value={newTask.relatedClient || ''}
+                  onChange={(e) => setNewTask((t) => ({ ...t, relatedClient: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded"
+                  placeholder={caseData.parties || 'Client name'}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={newTask.startDate || ''}
+                    onChange={(e) => setNewTask((t) => ({ ...t, startDate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date *</label>
+                  <input
+                    type="date"
+                    value={newTask.dueDate}
+                    onChange={(e) => setNewTask((t) => ({ ...t, dueDate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                    required
+                  />
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500">{taskTimingSummary}</p>
+
+              <div className="hidden">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Initial Status</label>
                 <select
                   value={newTask.status}
@@ -1574,37 +1746,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   <option value="In Progress">In Progress</option>
                   <option value="Completed">Completed</option>
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Assignee</label>
-                <select
-                  value={newTask.assignee}
-                  onChange={(e) => setNewTask((t) => ({ ...t, assignee: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                  disabled={staffLoading}
-                  required
-                >
-                  <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
-                  {assignableStaffUsers.map((u) => (
-                    <option key={u._id} value={u.name}>
-                      {u.name} ({u.role.replace(/_/g, ' ')})
-                    </option>
-                  ))}
-                </select>
-
-                {staffError && <p className="text-xs text-red-600 mt-2">{staffError}</p>}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
-                <p className="mb-2 text-xs text-gray-500">{taskTimingSummary}</p>
-                <input
-                  type="date"
-                  value={newTask.dueDate}
-                  onChange={(e) => setNewTask((t) => ({ ...t, dueDate: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                />
               </div>
 
               <div>
@@ -1650,7 +1791,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       {/* Edit Task Modal */}
       {showEditTask && editTask && canAssignTasks && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-lg w-full flex flex-col" style={{ maxHeight: '90vh' }}>
+          <div className="bg-white rounded-lg max-w-2xl w-full flex flex-col" style={{ maxHeight: '90vh' }}>
             <div className="p-6 border-b">
               <h3 className="text-lg font-semibold text-gray-900">Edit Task</h3>
             </div>
@@ -1666,49 +1807,113 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <select
-                  value={editTask.status}
-                  onChange={(e) => setEditTask((t) => (t ? { ...t, status: e.target.value as any } : t))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                >
-                  <option value="Not Started">Not Started</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Completed">Completed</option>
-                </select>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Workflow Stage</label>
+                  <select
+                    value={editTask.workflowStage || 'Assigned'}
+                    onChange={(e) =>
+                      setEditTask((t) => (t ? { ...t, workflowStage: e.target.value as TaskWorkflowStage } : t))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                  >
+                    {TASK_WORKFLOW_STAGES.map((stage) => (
+                      <option key={stage} value={stage}>
+                        {stage}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority Level</label>
+                  <select
+                    value={editTask.priority}
+                    onChange={(e) => setEditTask((t) => (t ? { ...t, priority: e.target.value as any } : t))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                  >
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Assignee</label>
-                <select
-                  value={editTask.assignee || ''}
-                  onChange={(e) => setEditTask((t) => (t ? { ...t, assignee: e.target.value } : t))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                  disabled={staffLoading}
-                  required
-                >
-                  <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
-                  {assignableStaffUsers.map((u) => (
-                    <option key={u._id} value={u.name}>
-                      {u.name} ({u.role.replace(/_/g, ' ')})
-                    </option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Assignee *</label>
+                  <select
+                    value={editTask.assignee || ''}
+                    onChange={(e) => setEditTask((t) => (t ? { ...t, assignee: e.target.value } : t))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                    disabled={staffLoading}
+                    required
+                  >
+                    <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
+                    {assignableStaffUsers.map((u) => (
+                      <option key={u._id} value={u.name}>
+                        {u.name} ({u.role.replace(/_/g, ' ')})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                {staffError && <p className="text-xs text-red-600 mt-2">{staffError}</p>}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Supervisor *</label>
+                  <select
+                    value={editTask.supervisor || ''}
+                    onChange={(e) => setEditTask((t) => (t ? { ...t, supervisor: e.target.value } : t))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                    disabled={staffLoading}
+                    required
+                  >
+                    <option value="">{staffLoading ? 'Loading...' : 'Select supervisor'}</option>
+                    {staffUsers.map((u) => (
+                      <option key={u._id} value={u.name}>
+                        {u.name} ({u.role.replace(/_/g, ' ')})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
+              {staffError && <p className="text-xs text-red-600">{staffError}</p>}
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
-                <p className="mb-2 text-xs text-gray-500">{taskTimingSummary}</p>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Related Client</label>
                 <input
-                  type="date"
-                  value={editTask.dueDate}
-                  onChange={(e) => setEditTask((t) => (t ? { ...t, dueDate: e.target.value } : t))}
+                  type="text"
+                  value={editTask.relatedClient || ''}
+                  onChange={(e) => setEditTask((t) => (t ? { ...t, relatedClient: e.target.value } : t))}
                   className="w-full px-3 py-2 border border-gray-300 rounded"
+                  placeholder={caseData.parties || 'Client name'}
                 />
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={editTask.startDate || ''}
+                    onChange={(e) => setEditTask((t) => (t ? { ...t, startDate: e.target.value } : t))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date *</label>
+                  <input
+                    type="date"
+                    value={editTask.dueDate}
+                    onChange={(e) => setEditTask((t) => (t ? { ...t, dueDate: e.target.value } : t))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                    required
+                  />
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500">{taskTimingSummary}</p>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>

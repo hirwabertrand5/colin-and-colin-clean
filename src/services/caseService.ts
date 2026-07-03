@@ -81,6 +81,14 @@ export interface CaseData {
     currentStepTitle?: string;
     currentStepStartAt?: string;
     currentStepDueAt?: string;
+    currentStepExtension?: {
+      days?: number;
+      reason?: string;
+      grantedBy?: string;
+      grantedAt?: string;
+      previousDueAt?: string;
+      newDueAt?: string;
+    };
     percent?: number;
     nextDueAt?: string;
     plannedValue?: { amount?: number; currency?: string };

@@ -19,7 +19,7 @@ interface CaseListProps {
 const isAssociateLike = (role: UserRole) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
 
-type SortKey = 'nextDeadline' | 'createdAt' | 'caseNo' | 'parties' | 'workflow' | 'currentStep';
+type SortKey = 'nextDeadline' | 'createdAt' | 'caseNo' | 'parties' | 'assignedTo' | 'workflow' | 'currentStep';
 type SortDir = 'asc' | 'desc';
 
 export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
@@ -157,10 +157,11 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
     return cases.map((c, originalIndex) => ({
       c,
       originalIndex,
-      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''}`.toLowerCase(),
+      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''} ${c.assignedTo ?? ''}`.toLowerCase(),
       createdAtMs: toMs(c.createdAt),
       workflowLabel: getCasePracticePath(c).toLowerCase(),
       currentStepLabel: String(c.workflowProgress?.currentStepTitle || '').toLowerCase(),
+      assignedToLabel: String(c.assignedTo || '').toLowerCase(),
       deadlineRank: urgencyRank(c),
       nextDueAtMs: nextDueAtMs(c),
     }));
@@ -193,6 +194,9 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
           break;
         case 'parties':
           cmp = collator.compare(a.c.parties ?? '', b.c.parties ?? '');
+          break;
+        case 'assignedTo':
+          cmp = collator.compare(a.assignedToLabel, b.assignedToLabel);
           break;
         case 'workflow':
           cmp = collator.compare(a.workflowLabel, b.workflowLabel);
@@ -260,7 +264,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by case number or parties..."
+              placeholder="Search by case number, client name, or assigned user..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-gray-400 focus:outline-none"
@@ -282,7 +286,8 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
               <option value="workflow">Sort: Workflow</option>
               <option value="currentStep">Sort: Current Step</option>
               <option value="caseNo">Sort: Case No.</option>
-              <option value="parties">Sort: Parties</option>
+              <option value="parties">Sort: Client / Parties</option>
+              <option value="assignedTo">Sort: Assigned User</option>
             </select>
 
             <button
@@ -374,6 +379,15 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                     {item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt ? (
                       <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>
                         {formatDueCountdown(item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt)}
+                      </div>
+                    ) : null}
+                    {item.workflowProgress?.currentStepExtension ? (
+                      <div
+                        className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
+                        title={item.workflowProgress.currentStepExtension.reason || 'Extension granted'}
+                      >
+                        Extension {item.workflowProgress.currentStepExtension.days && item.workflowProgress.currentStepExtension.days > 0 ? '+' : ''}
+                        {item.workflowProgress.currentStepExtension.days || 0}d
                       </div>
                     ) : null}
                   </td>

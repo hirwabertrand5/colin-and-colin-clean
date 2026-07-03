@@ -4,6 +4,26 @@ const getToken = () => localStorage.getItem('token');
 export type TaskApprovalStatus = 'Not Required' | 'Draft' | 'Pending' | 'Approved' | 'Rejected';
 export type TaskStatus = 'Not Started' | 'In Progress' | 'Completed';
 export type TaskPriority = 'High' | 'Medium' | 'Low';
+export type TaskWorkflowStage =
+  | 'Created'
+  | 'Assigned'
+  | 'Acknowledged'
+  | 'In Progress'
+  | 'Awaiting Review'
+  | 'Awaiting External Action'
+  | 'Completed'
+  | 'Closed';
+
+export const TASK_WORKFLOW_STAGES: TaskWorkflowStage[] = [
+  'Created',
+  'Assigned',
+  'Acknowledged',
+  'In Progress',
+  'Awaiting Review',
+  'Awaiting External Action',
+  'Completed',
+  'Closed',
+];
 
 export type TaskChecklistItem = {
   _id: string;
@@ -25,12 +45,17 @@ export type TimeLog = {
 export interface TaskData {
   _id: string;
   caseId: string;
+  taskNo?: string;
 
   title: string;
   priority: TaskPriority;
   status: TaskStatus;
+  workflowStage?: TaskWorkflowStage;
 
   assignee: string;
+  supervisor?: string;
+  relatedClient?: string;
+  startDate?: string;
   dueDate: string;
   description?: string;
 
@@ -39,6 +64,8 @@ export interface TaskData {
   submittedAt?: string;
   approvedAt?: string;
   completedAt?: string;
+  acknowledgedAt?: string;
+  closedAt?: string;
   approvedBy?: string;
   approvalComment?: string;
 
@@ -79,6 +106,7 @@ export const getAllTasks = async (params?: {
   status?: TaskStatus | 'all';
   priority?: TaskPriority | 'all';
   approvalStatus?: TaskApprovalStatus | 'all';
+  workflowStage?: TaskWorkflowStage | 'all';
 }): Promise<TaskData[]> => {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
@@ -86,6 +114,7 @@ export const getAllTasks = async (params?: {
   if (params?.priority && params.priority !== 'all') qs.set('priority', params.priority);
   if (params?.approvalStatus && params.approvalStatus !== 'all')
     qs.set('approvalStatus', params.approvalStatus);
+  if (params?.workflowStage && params.workflowStage !== 'all') qs.set('workflowStage', params.workflowStage);
 
   const res = await fetch(`${API_URL}/tasks?${qs.toString()}`, { headers: authHeaders() });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch tasks');

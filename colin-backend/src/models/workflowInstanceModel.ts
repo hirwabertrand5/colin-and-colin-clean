@@ -22,6 +22,14 @@ export interface IInstanceStep {
   startAt?: Date;
   dueAt?: Date;
   completedAt?: Date;
+  extensionHistory?: Array<{
+    previousDueAt?: Date;
+    newDueAt?: Date;
+    days: number;
+    reason?: string;
+    grantedBy?: string;
+    grantedAt?: Date;
+  }>;
 
   actions: Array<{
     text: string;
@@ -82,6 +90,22 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     startAt: { type: Date },
     dueAt: { type: Date },
     completedAt: { type: Date },
+    extensionHistory: {
+      type: [
+        new Schema(
+          {
+            previousDueAt: { type: Date },
+            newDueAt: { type: Date },
+            days: { type: Number, required: true },
+            reason: { type: String, trim: true },
+            grantedBy: { type: String, trim: true },
+            grantedAt: { type: Date, default: Date.now },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
 
     actions: {
       type: [

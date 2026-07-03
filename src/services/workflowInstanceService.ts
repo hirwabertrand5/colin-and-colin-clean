@@ -16,6 +16,14 @@ export type WorkflowInstance = {
     startAt?: string;
     dueAt?: string;
     completedAt?: string;
+    extensionHistory?: Array<{
+      previousDueAt?: string;
+      newDueAt?: string;
+      days: number;
+      reason?: string;
+      grantedBy?: string;
+      grantedAt?: string;
+    }>;
 
     actions?: Array<{
       text: string;

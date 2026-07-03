@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Plus, Edit, Trash2, ArrowRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Plus, Edit, Trash2, ArrowRight, Search } from 'lucide-react';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getAllProspects, getProspectStats, deleteProspect, convertProspectToMatter, Prospect } from '../../services/prospectService';
 import ProspectForm from './ProspectForm';
@@ -18,6 +18,7 @@ export default function IntakeProspects() {
   const [showForm, setShowForm] = useState(false);
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [filterStage, setFilterStage] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const currentRole = (() => {
     try {
       return JSON.parse(localStorage.getItem('user') || '{}')?.role as string | undefined;
@@ -91,14 +92,42 @@ export default function IntakeProspects() {
     loadData();
   };
 
-  const filteredProspects = (filterStage 
-    ? prospects.filter(p => p.stage === filterStage)
-    : prospects
-  ).slice().sort((a, b) => {
-    const stageDiff = stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage);
-    if (stageDiff !== 0) return stageDiff;
-    return new Date(b.dateReceived || b.createdAt).getTime() - new Date(a.dateReceived || a.createdAt).getTime();
-  });
+  const filteredProspects = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+
+    return (filterStage ? prospects.filter((p) => p.stage === filterStage) : prospects)
+      .filter((prospect) => {
+        if (!q) return true;
+
+        const searchBits = [
+          prospect.prospectNo,
+          prospect.clientName,
+          prospect.parties,
+          prospect.contact.name,
+          prospect.contact.email,
+          prospect.contact.phone,
+          prospect.enquiryNature,
+          prospect.enquirySource,
+          prospect.referralSource,
+          prospect.inquiryDescription,
+          prospect.stage,
+          prospect.conversionOutcome,
+          prospect.responsiblePartner,
+          prospect.responsibleAssociate,
+        ]
+          .map((value) => (typeof value === 'string' ? value : value?.name || ''))
+          .join(' ')
+          .toLowerCase();
+
+        return searchBits.includes(q);
+      })
+      .slice()
+      .sort((a, b) => {
+        const stageDiff = stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage);
+        if (stageDiff !== 0) return stageDiff;
+        return new Date(b.dateReceived || b.createdAt).getTime() - new Date(a.dateReceived || a.createdAt).getTime();
+      });
+  }, [filterStage, prospects, searchTerm]);
 
   const getUserName = (value?: string | { name?: string } | null) =>
     typeof value === 'string' ? value : value?.name || '—';
@@ -147,29 +176,48 @@ export default function IntakeProspects() {
               <h2 className="font-semibold text-gray-900 dark:text-gray-100">Prospects</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 {filterStage
-                  ? `${stats[filterStage] || filteredProspects.length} ${filterStage} prospects`
+                  ? `${filteredProspects.length} ${filterStage} prospects`
                   : `${filteredProspects.length} active prospects`}
               </p>
             </div>
-            <select
-              value={filterStage || ''}
-              onChange={(e) => setFilterStage(e.target.value || null)}
-              className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 md:w-80"
-            >
-              <option value="">All stages</option>
-              {stageOrder.map((stage) => (
-                <option key={stage} value={stage}>
-                  {stage} ({stats[stage] || 0})
-                </option>
-              ))}
-            </select>
+            <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center">
+              <div className="relative w-full md:w-80">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="text"
+                  placeholder="Search by prospect, party, contact..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full rounded-xl border border-gray-300 bg-white py-2 pl-10 pr-3 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                />
+              </div>
+
+              <select
+                value={filterStage || ''}
+                onChange={(e) => setFilterStage(e.target.value || null)}
+                className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 md:w-80"
+              >
+                <option value="">All stages</option>
+                {stageOrder.map((stage) => (
+                  <option key={stage} value={stage}>
+                    {stage} ({stats[stage] || 0})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {loading ? (
             <div className="p-10 text-center text-gray-500 dark:text-gray-400">Loading prospects...</div>
           ) : filteredProspects.length === 0 ? (
             <div className="p-10 text-center text-gray-500 dark:text-gray-400">
-              {filterStage ? `No ${filterStage} prospects` : 'No prospects found'}
+              {searchTerm && filterStage
+                ? `No ${filterStage} prospects match your search`
+                : searchTerm
+                  ? 'No prospects match your search'
+                  : filterStage
+                    ? `No ${filterStage} prospects`
+                    : 'No prospects found'}
             </div>
           ) : (
             <div className="overflow-x-auto">

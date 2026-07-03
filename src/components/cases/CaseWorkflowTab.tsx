@@ -252,6 +252,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
         const hasActions = (derivedActions || []).length > 0;
         const allActionsDone = !hasActions || (derivedActions || []).every((a) => a.done);
         const cannotComplete = !isCompleted && (!previousStepCompleted || !allActionsDone);
+        const extensionHistory = Array.isArray(s.extensionHistory) ? s.extensionHistory : [];
+        const latestExtension = extensionHistory[extensionHistory.length - 1];
         
         // Build tooltip message
         let tooltipMessage = '';
@@ -293,6 +295,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                     ⏳ Key actions pending
                   </span>
                 )}
+                {latestExtension ? (
+                  <span
+                    className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
+                    title={latestExtension.reason || 'Extension granted'}
+                  >
+                    Extension granted: {latestExtension.days > 0 ? '+' : ''}
+                    {latestExtension.days}d
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -453,6 +464,31 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                 >
                   {busyKey === `extend:${s.stepKey}` ? 'Extending…' : 'Extend deadline'}
                 </button>
+              </div>
+            </div>
+          ) : null}
+
+          {extensionHistory.length > 0 ? (
+            <div className="px-5 py-3 border-b border-amber-100 bg-amber-50">
+              <div className="text-xs font-semibold uppercase tracking-wide text-amber-900">Extension history</div>
+              <div className="mt-2 space-y-2">
+                {extensionHistory.slice().reverse().map((extension, extIndex) => (
+                  <div key={`${extension.grantedAt || extIndex}`} className="text-xs text-amber-900">
+                    <span className="font-semibold">
+                      {extension.days > 0 ? '+' : ''}
+                      {extension.days} day{Math.abs(extension.days) === 1 ? '' : 's'}
+                    </span>
+                    {extension.previousDueAt && extension.newDueAt ? (
+                      <span>
+                        {' '}
+                        from {new Date(extension.previousDueAt).toLocaleDateString()} to{' '}
+                        {new Date(extension.newDueAt).toLocaleDateString()}
+                      </span>
+                    ) : null}
+                    {extension.reason ? <span> • {extension.reason}</span> : null}
+                    {extension.grantedBy ? <span> • granted by {extension.grantedBy}</span> : null}
+                  </div>
+                ))}
               </div>
             </div>
           ) : null}

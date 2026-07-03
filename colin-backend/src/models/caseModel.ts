@@ -87,6 +87,14 @@ export interface ICase extends Document {
     currentStepTitle?: string;
     currentStepStartAt?: Date;
     currentStepDueAt?: Date;
+    currentStepExtension?: {
+      days?: number;
+      reason?: string;
+      grantedBy?: string;
+      grantedAt?: Date;
+      previousDueAt?: Date;
+      newDueAt?: Date;
+    };
     percent?: number;
     nextDueAt?: Date;
     plannedValue?: {
@@ -224,6 +232,17 @@ const CaseSchema = new Schema<ICase>(
         currentStepTitle: { type: String, trim: true },
         currentStepStartAt: { type: Date },
         currentStepDueAt: { type: Date },
+        currentStepExtension: {
+          type: {
+            days: { type: Number },
+            reason: { type: String, trim: true },
+            grantedBy: { type: String, trim: true },
+            grantedAt: { type: Date },
+            previousDueAt: { type: Date },
+            newDueAt: { type: Date },
+          },
+          default: undefined,
+        },
         percent: { type: Number, min: 0, max: 100, default: 0 },
         nextDueAt: { type: Date },
         plannedValue: {

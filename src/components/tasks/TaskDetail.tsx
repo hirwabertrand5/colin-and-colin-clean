@@ -27,6 +27,8 @@ import {
   toggleChecklistItem,
   deleteChecklistItem,
   updateTask,
+  TASK_WORKFLOW_STAGES,
+  TaskWorkflowStage,
 } from '../../services/taskService';
 
 import { getCaseById, CaseData } from '../../services/caseService';
@@ -46,6 +48,35 @@ interface TaskDetailProps {
 
 const API_URL = import.meta.env.VITE_API_URL;
 const BACKEND_URL = API_URL ? API_URL.replace(/\/api\/?$/, '') : '';
+
+const inferWorkflowStageFromStatus = (status?: string): TaskWorkflowStage => {
+  if (status === 'Completed') return 'Completed';
+  if (status === 'In Progress') return 'In Progress';
+  return 'Assigned';
+};
+
+const getWorkflowStageColor = (stage: string) => {
+  switch (stage) {
+    case 'Created':
+      return 'bg-gray-100 text-gray-700';
+    case 'Assigned':
+      return 'bg-blue-100 text-blue-700';
+    case 'Acknowledged':
+      return 'bg-sky-100 text-sky-700';
+    case 'In Progress':
+      return 'bg-indigo-100 text-indigo-700';
+    case 'Awaiting Review':
+      return 'bg-amber-100 text-amber-700';
+    case 'Awaiting External Action':
+      return 'bg-orange-100 text-orange-700';
+    case 'Completed':
+      return 'bg-green-100 text-green-700';
+    case 'Closed':
+      return 'bg-gray-900 text-white';
+    default:
+      return 'bg-gray-100 text-gray-700';
+  }
+};
 
 export default function TaskDetail({ userRole }: TaskDetailProps) {
   const { id } = useParams();
@@ -90,8 +121,9 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const [checklistLoading, setChecklistLoading] = useState(false);
 
   // Update status modal
-  const [showStatusModal, setShowStatusModal] = useState(false);
-  const [newStatus, setNewStatus] = useState<'Not Started' | 'In Progress' | 'Completed'>('Not Started');
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [newWorkflowStage, setNewWorkflowStage] = useState<TaskWorkflowStage>('Assigned');
+  const [confirmCompletion, setConfirmCompletion] = useState(false);
   const [statusLoading, setStatusLoading] = useState(false);
 
   const isManagingDirector = userRole === 'managing_director';
@@ -107,8 +139,8 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   }, []);
 
   const isApprovedLocked = useMemo(() => {
-    return Boolean(task?.requiresApproval && task?.approvalStatus === 'Approved');
-  }, [task?.requiresApproval, task?.approvalStatus]);
+    return Boolean(task?.workflowStage === 'Closed' || (task?.requiresApproval && task?.approvalStatus === 'Approved'));
+  }, [task?.workflowStage, task?.requiresApproval, task?.approvalStatus]);
 
   // We now enforce read-only after Approved for everyone:
   const canWorkOnTask = useMemo(() => {
@@ -122,6 +154,14 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     if (!caseData) return '—';
     return caseData.parties || caseData.caseNo || '—';
   }, [caseData]);
+
+  const workflowStage = useMemo(
+    () => task?.workflowStage || inferWorkflowStageFromStatus(task?.status),
+    [task?.workflowStage, task?.status]
+  );
+
+  const workflowStageIndex = TASK_WORKFLOW_STAGES.indexOf(workflowStage);
+  const completionDateLabel = task?.completedAt ? new Date(task.completedAt).toLocaleDateString() : '—';
 
   // Submit visible only if requiresApproval AND Draft/Rejected AND not locked AND not MD
   const showSubmitForApproval =
@@ -277,16 +317,20 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   // --------------------
   const openUpdateStatus = () => {
     if (!task) return;
-    setNewStatus(task.status);
-    setShowStatusModal(true);
+    setNewWorkflowStage(task.workflowStage || inferWorkflowStageFromStatus(task.status));
+    setConfirmCompletion(false);
+    setShowWorkflowModal(true);
   };
 
   const saveStatus = async () => {
     if (!task?._id) return;
     try {
       setStatusLoading(true);
-      await updateTask(task._id, { status: newStatus });
-      setShowStatusModal(false);
+      await updateTask(task._id, {
+        workflowStage: newWorkflowStage,
+        confirmCompletion: confirmCompletion,
+      } as any);
+      setShowWorkflowModal(false);
       await loadAll();
     } catch (err: any) {
       setError(err.message || 'Failed to update status');
@@ -447,12 +491,20 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <h1 className="text-2xl font-semibold text-gray-900">{task.title}</h1>
 
+              <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-700 font-medium">
+                {task.taskNo || 'Task'}
+              </span>
+
               <span className={`px-2 py-1 text-xs rounded ${getPriorityColor(task.priority)}`}>
                 {task.priority}
               </span>
 
               <span className={`px-2 py-1 text-xs rounded ${getStatusColor(task.status)}`}>
                 {task.status}
+              </span>
+
+              <span className={`px-2 py-1 text-xs rounded ${getWorkflowStageColor(workflowStage)}`}>
+                {workflowStage}
               </span>
 
               {task.requiresApproval && task.approvalStatus === 'Draft' && (
@@ -478,10 +530,41 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
               Related to: <span className="text-gray-900 font-medium">{relatedCaseLabel}</span>
             </p>
 
+            <p className="text-sm text-gray-600 mt-1">
+              Related client: <span className="text-gray-900 font-medium">{task.relatedClient || relatedCaseLabel}</span>
+            </p>
+
+            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                <span>Workflow</span>
+                <span>{workflowStageIndex + 1} / {TASK_WORKFLOW_STAGES.length}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+                {TASK_WORKFLOW_STAGES.map((stage, index) => {
+                  const active = index <= workflowStageIndex;
+                  const current = stage === workflowStage;
+                  return (
+                    <div
+                      key={stage}
+                      className={`rounded-md border px-2 py-2 text-[11px] font-semibold leading-tight ${
+                        current
+                          ? 'border-gray-900 bg-gray-900 text-white'
+                          : active
+                            ? 'border-gray-300 bg-white text-gray-700'
+                            : 'border-dashed border-gray-200 bg-white text-gray-400'
+                      }`}
+                    >
+                      <div className="truncate">{stage}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* ✅ Locked banner */}
             {isApprovedLocked && (
               <div className="mt-3 bg-gray-50 border border-gray-200 text-gray-700 px-4 py-3 rounded text-sm">
-                This task has been <span className="font-semibold">Approved</span> and is now{' '}
+                This task has been <span className="font-semibold">finalized</span> and is now{' '}
                 <span className="font-semibold">locked (view-only)</span>.
               </div>
             )}
@@ -513,6 +596,14 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white border border-gray-200 rounded-lg p-4">
             <div className="flex items-center text-gray-600 mb-1">
+              <FileText className="w-4 h-4 mr-2" />
+              <span className="text-xs">Task Number</span>
+            </div>
+            <p className="text-sm font-medium text-gray-900">{task.taskNo || '—'}</p>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center text-gray-600 mb-1">
               <UserIcon className="w-4 h-4 mr-2" />
               <span className="text-xs">Assigned To</span>
             </div>
@@ -521,18 +612,18 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
           <div className="bg-white border border-gray-200 rounded-lg p-4">
             <div className="flex items-center text-gray-600 mb-1">
-              <Clock className="w-4 h-4 mr-2" />
-              <span className="text-xs">Due Date</span>
+              <UserIcon className="w-4 h-4 mr-2" />
+              <span className="text-xs">Supervisor</span>
             </div>
-            <p className="text-sm font-medium text-gray-900">{task.dueDate}</p>
+            <p className="text-sm font-medium text-gray-900">{task.supervisor || '—'}</p>
           </div>
 
           <div className="bg-white border border-gray-200 rounded-lg p-4">
             <div className="flex items-center text-gray-600 mb-1">
               <Clock className="w-4 h-4 mr-2" />
-              <span className="text-xs">Actual Hours</span>
+              <span className="text-xs">Due Date</span>
             </div>
-            <p className="text-sm font-medium text-gray-900">{totalHours.toFixed(1)}h</p>
+            <p className="text-sm font-medium text-gray-900">{task.dueDate}</p>
           </div>
         </div>
       </div>
@@ -758,6 +849,38 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
             <h3 className="font-semibold text-gray-900 mb-4">Task Information</h3>
             <div className="space-y-3 text-sm">
               <div>
+                <span className="text-gray-600">Task Number:</span>
+                <p className="font-medium text-gray-900">{task.taskNo || '—'}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Related Client:</span>
+                <p className="font-medium text-gray-900">{task.relatedClient || relatedCaseLabel}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Workflow Stage:</span>
+                <p className="font-medium text-gray-900">{workflowStage}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Supervisor:</span>
+                <p className="font-medium text-gray-900">{task.supervisor || '—'}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Start Date:</span>
+                <p className="font-medium text-gray-900">{task.startDate || '—'}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Due Date:</span>
+                <p className="font-medium text-gray-900">{task.dueDate || '—'}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Completion Date:</span>
+                <p className="font-medium text-gray-900">{completionDateLabel}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Actual Hours:</span>
+                <p className="font-medium text-gray-900">{totalHours.toFixed(1)}h</p>
+              </div>
+              <div>
                 <span className="text-gray-600">Created:</span>
                 <p className="font-medium text-gray-900">
                   {task.createdAt ? new Date(task.createdAt).toLocaleDateString() : '—'}
@@ -825,7 +948,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                 type="button"
                 disabled={!canWorkOnTask}
               >
-                Update Status
+                Update Workflow
               </button>
 
               {/* Submit */}
@@ -985,30 +1108,49 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
         </div>
       )}
 
-      {/* ✅ Update Status Modal (your requested format) */}
-      {showStatusModal && (
+      {/* Workflow update modal */}
+      {showWorkflowModal && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-lg w-full flex flex-col" style={{ maxHeight: '90vh' }}>
             {/* Header */}
             <div className="p-6 border-b">
-              <h3 className="text-lg font-semibold text-gray-900">Update Status</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Update Task Workflow</h3>
             </div>
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto space-y-4 p-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Workflow Stage</label>
                 <select
-                  value={newStatus}
-                  onChange={(e) => setNewStatus(e.target.value as any)}
+                  value={newWorkflowStage}
+                  onChange={(e) => {
+                    setNewWorkflowStage(e.target.value as TaskWorkflowStage);
+                    setConfirmCompletion(false);
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded"
                   disabled={statusLoading}
                 >
-                  <option value="Not Started">Not Started</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Completed">Completed</option>
+                  {TASK_WORKFLOW_STAGES.map((stage) => (
+                    <option key={stage} value={stage}>
+                      {stage}
+                    </option>
+                  ))}
                 </select>
               </div>
+
+              {newWorkflowStage === 'Closed' && (
+                <label className="flex items-start gap-3 rounded border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={confirmCompletion}
+                    onChange={(e) => setConfirmCompletion(e.target.checked)}
+                    className="mt-1 h-4 w-4"
+                  />
+                  <span>
+                    Confirm that the task has been completed and is ready to close.
+                  </span>
+                </label>
+              )}
             </div>
 
             {/* Footer */}
@@ -1016,7 +1158,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setShowStatusModal(false)}
+                  onClick={() => setShowWorkflowModal(false)}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
                   disabled={statusLoading}
                 >
@@ -1027,7 +1169,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                   type="button"
                   onClick={saveStatus}
                   className="flex-1 px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-60"
-                  disabled={statusLoading}
+                  disabled={statusLoading || (newWorkflowStage === 'Closed' && !confirmCompletion)}
                 >
                   {statusLoading ? 'Saving...' : 'Save'}
                 </button>
