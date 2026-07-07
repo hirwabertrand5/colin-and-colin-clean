@@ -46,6 +46,18 @@ const toOptionalNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 };
+const normalizePracticeArea = (value: unknown) => {
+  const cleaned = cleanString(value);
+  return cleaned === 'Converted' || cleaned === 'Non Converted' ? cleaned : undefined;
+};
+const normalizePaymentArrangement = (value: unknown) => {
+  const cleaned = cleanString(value);
+  return cleaned === 'Full Payment' || cleaned === 'Installments' ? cleaned : undefined;
+};
+const normalizePaymentMethod = (value: unknown) => {
+  const cleaned = cleanString(value);
+  return ['Bank Transfer', 'Cash', 'Mobile Money', 'Cheque', 'Card', 'Mixed'].includes(cleaned) ? cleaned : undefined;
+};
 
 const getProspectPayload = (body: any, fallbackUserId?: string) => {
   const responsibleAssociate = cleanString(body.responsibleAssociate) || cleanString(body.assignedTo) || fallbackUserId || '';
@@ -65,6 +77,14 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
     referralSource: cleanString(body.referralSource),
     estimatedMatterValue: toOptionalNumber(body.estimatedMatterValue),
     estimatedFeeValue: toOptionalNumber(body.estimatedFeeValue),
+    practiceArea: normalizePracticeArea(body.practiceArea),
+    subPracticeActions: Array.isArray(body.subPracticeActions)
+      ? body.subPracticeActions.map((item: unknown) => cleanString(item)).filter(Boolean)
+      : [],
+    paymentArrangement: normalizePaymentArrangement(body.paymentArrangement),
+    paymentMethod: normalizePaymentMethod(body.paymentMethod),
+    installmentCount: toOptionalNumber(body.installmentCount),
+    depositAmount: toOptionalNumber(body.depositAmount),
     contact: {
       name: cleanString(body.contact?.name) || clientName,
       email: cleanString(body.contact?.email) || undefined,

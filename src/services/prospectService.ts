@@ -9,7 +9,7 @@ const getAuthHeaders = () => {
 };
 
 export interface ProspectContact {
-  name: string;
+  name?: string;
   email?: string;
   phone?: string;
   position?: string;
@@ -35,11 +35,15 @@ export interface Prospect {
   clientName: string;
   parties?: string;
   enquiryNature?: string;
-  priorityLevel?: 'High' | 'Medium' | 'Low';
   enquirySource?: string;
   referralSource?: string;
   estimatedMatterValue?: number;
-  estimatedFeeValue?: number;
+  practiceArea?: 'Converted' | 'Non Converted';
+  subPracticeActions?: string[];
+  paymentArrangement?: 'Full Payment' | 'Installments';
+  paymentMethod?: 'Bank Transfer' | 'Cash' | 'Mobile Money' | 'Cheque' | 'Card' | 'Mixed';
+  installmentCount?: number;
+  depositAmount?: number;
   contact: ProspectContact;
   responsiblePartner?: string | { _id: string; name: string; email?: string; role?: string };
   responsibleAssociate?: string | { _id: string; name: string; email?: string; role?: string };

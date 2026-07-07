@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { createProspect, updateProspect, Prospect } from '../../services/prospectService';
-import { LEGAL_SERVICES_TREE } from '../../constants/legalServicesTree';
 import { getRoleSuggestions } from '../../constants/partyRoles';
 import { getStaffUsers, User } from '../../services/userService';
 
@@ -24,9 +23,11 @@ const STAGES = [
   'Converted',
   'Non-Converted',
 ];
-const CONVERTED_OUTCOMES = ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'];
-const NON_CONVERTED_OUTCOMES = ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'];
-const SERVICE_LEVEL_LABELS = ['Practice Area', 'Sub-Practice Area', 'Service Line', 'Sub-category', 'Detail'];
+const PRACTICE_AREAS = ['Converted', 'Non Converted'] as const;
+const PRACTICE_ACTIONS: Record<(typeof PRACTICE_AREAS)[number], string[]> = {
+  Converted: ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'],
+  'Non Converted': ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'],
+};
 
 const getUserId = (value?: string | { _id: string } | null) => {
   if (!value) return '';
@@ -39,9 +40,6 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   const [usersError, setUsersError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [servicePath, setServicePath] = useState<string[]>(
-    prospect?.legalServicePath ? prospect.legalServicePath.map((p) => p.id) : []
-  );
 
   const [partiesStructured, setPartiesStructured] = useState(false);
   const [partiesList, setPartiesList] = useState<Array<{ name: string; role: string }>>(
@@ -51,18 +49,21 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     clientName: prospect?.clientName || '',
     parties: prospect?.parties || '',
     enquiryNature: prospect?.enquiryNature || '',
-    priorityLevel: prospect?.priorityLevel || 'Medium',
     enquirySource: prospect?.enquirySource || '',
     referralSource: prospect?.referralSource || '',
     estimatedMatterValue: prospect?.estimatedMatterValue?.toString() || '',
-    estimatedFeeValue: prospect?.estimatedFeeValue?.toString() || '',
-    conversionOutcome: prospect?.conversionOutcome || '',
+    paymentArrangement: prospect?.paymentArrangement || '',
+    paymentMethod: prospect?.paymentMethod || '',
+    installmentCount: prospect?.installmentCount?.toString() || '',
+    depositAmount: prospect?.depositAmount?.toString() || '',
+    practiceArea:
+      prospect?.practiceArea || (prospect?.stage === 'Converted' ? 'Converted' : prospect?.stage === 'Non-Converted' ? 'Non Converted' : ''),
+    subPracticeActions: prospect?.subPracticeActions || (prospect?.conversionOutcome ? [prospect.conversionOutcome] : []),
     contact: {
       name: prospect?.contact.name || prospect?.clientName || '',
       email: prospect?.contact.email || '',
       phone: prospect?.contact.phone || '',
     },
-    legalServicePath: prospect?.legalServicePath || [],
     inquiryDescription: prospect?.inquiryDescription || '',
     stage: prospect?.stage || 'Inquiry',
     engagementNotes: prospect?.engagementNotes || '',
@@ -80,18 +81,21 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
       clientName: prospect?.clientName || '',
       parties: prospect?.parties || '',
       enquiryNature: prospect?.enquiryNature || '',
-      priorityLevel: prospect?.priorityLevel || 'Medium',
       enquirySource: prospect?.enquirySource || '',
       referralSource: prospect?.referralSource || '',
       estimatedMatterValue: prospect?.estimatedMatterValue?.toString() || '',
-      estimatedFeeValue: prospect?.estimatedFeeValue?.toString() || '',
-      conversionOutcome: prospect?.conversionOutcome || '',
+      paymentArrangement: prospect?.paymentArrangement || '',
+      paymentMethod: prospect?.paymentMethod || '',
+      installmentCount: prospect?.installmentCount?.toString() || '',
+      depositAmount: prospect?.depositAmount?.toString() || '',
+      practiceArea:
+        prospect?.practiceArea || (prospect?.stage === 'Converted' ? 'Converted' : prospect?.stage === 'Non-Converted' ? 'Non Converted' : ''),
+      subPracticeActions: prospect?.subPracticeActions || (prospect?.conversionOutcome ? [prospect.conversionOutcome] : []),
       contact: {
         name: prospect?.contact.name || prospect?.clientName || '',
         email: prospect?.contact.email || '',
         phone: prospect?.contact.phone || '',
       },
-      legalServicePath: prospect?.legalServicePath || [],
       inquiryDescription: prospect?.inquiryDescription || '',
       stage: prospect?.stage || 'Inquiry',
       engagementNotes: prospect?.engagementNotes || '',
@@ -99,61 +103,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
       responsibleAssociate: getUserId(prospect?.responsibleAssociate || prospect?.assignedTo),
       assignedTo: getUserId(prospect?.responsibleAssociate || prospect?.assignedTo),
     });
-    if (prospect?.legalServicePath) {
-      setServicePath(prospect.legalServicePath.map((p) => p.id));
-    } else {
-      setServicePath([]);
-    }
   }, [prospect]);
-
-  const findNode = (nodes: any[], id: string) => nodes.find((n) => n.id === id);
-
-  const selectedServiceNodes = useMemo(() => {
-    const nodes: any[] = [];
-    let currentNodes = LEGAL_SERVICES_TREE;
-    for (const id of servicePath) {
-      const match = findNode(currentNodes, id);
-      if (!match) break;
-      nodes.push(match);
-      currentNodes = match.children || [];
-    }
-    return nodes;
-  }, [servicePath]);
-
-  const serviceLevels = useMemo(() => {
-    const levels: Array<{ label: string; options: any[]; value: string; placeholder: string }> = [];
-    let currentOptions: any[] = LEGAL_SERVICES_TREE;
-    let depth = 0;
-    while (currentOptions.length > 0) {
-      levels.push({
-        label: SERVICE_LEVEL_LABELS[depth] || `Level ${depth + 1}`,
-        options: currentOptions,
-        value: servicePath[depth] || '',
-        placeholder: depth === 0 ? 'Select...' : `Select ${SERVICE_LEVEL_LABELS[depth - 1].toLowerCase()} first`,
-      });
-
-      const selectedNode = servicePath[depth] ? findNode(currentOptions, servicePath[depth]) : undefined;
-      if (!selectedNode?.children?.length) break;
-
-      currentOptions = selectedNode.children;
-      depth += 1;
-    }
-    return levels;
-  }, [servicePath]);
-
-  const updateServicePathAtLevel = (levelIndex: number, value: string) => {
-    setServicePath((prev) => {
-      const next = prev.slice(0, levelIndex);
-      if (value) next[levelIndex] = value;
-      return next;
-    });
-  };
-
-  useEffect(() => {
-    const legalServicePath = selectedServiceNodes.map((node) => ({ id: node.id, label: node.label }));
-    setForm((prev) => ({ ...prev, legalServicePath }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServiceNodes]);
 
   const loadUsers = async () => {
     setUsersLoading(true);
@@ -171,7 +121,6 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
 
   const validateForm = (): string | null => {
     if (!form.clientName?.trim()) return 'Client name is required.';
-    if (!form.contact.name?.trim()) return 'Contact person is required.';
     if (form.contact.email?.trim() && !form.contact.email.includes('@')) return 'Please enter a valid email address.';
     if (!form.inquiryDescription?.trim()) return 'Inquiry description is required.';
     if (!form.parties?.trim()) return 'Parties is required.';
@@ -180,10 +129,17 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     if (!form.responsibleAssociate) return 'Please select a responsible associate.';
     const matterValue = Number(form.estimatedMatterValue);
     if (form.estimatedMatterValue && !Number.isFinite(matterValue)) return 'Estimated matter value must be a number.';
-    const feeValue = Number(form.estimatedFeeValue);
-    if (form.estimatedFeeValue && !Number.isFinite(feeValue)) return 'Estimated fee value must be a number.';
-    if (['Converted', 'Non-Converted'].includes(form.stage) && !form.conversionOutcome) {
-      return 'Please select a conversion outcome before closing this prospect.';
+    if (!form.paymentArrangement) return 'Please select a payment arrangement.';
+    if (!form.paymentMethod) return 'Please select a payment method.';
+    if (form.paymentArrangement === 'Installments') {
+      const installmentCount = Number(form.installmentCount);
+      if (!form.installmentCount || !Number.isFinite(installmentCount) || installmentCount < 2) {
+        return 'Please enter a valid installment count.';
+      }
+    }
+    if (!form.practiceArea) return 'Please select a practice area.';
+    if (!form.subPracticeActions.length) {
+      return 'Please select at least one sub-practice area action.';
     }
     return null;
   };
@@ -211,21 +167,23 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
         clientName: form.clientName.trim(),
         parties: finalParties,
         enquiryNature: form.enquiryNature.trim(),
-        priorityLevel: form.priorityLevel,
         enquirySource: form.enquirySource.trim(),
         referralSource: form.referralSource.trim(),
         estimatedMatterValue: form.estimatedMatterValue ? Number(form.estimatedMatterValue) : undefined,
-        estimatedFeeValue: form.estimatedFeeValue ? Number(form.estimatedFeeValue) : undefined,
+        paymentArrangement: form.paymentArrangement || undefined,
+        paymentMethod: form.paymentMethod || undefined,
+        installmentCount: form.installmentCount ? Number(form.installmentCount) : undefined,
+        depositAmount: form.depositAmount ? Number(form.depositAmount) : undefined,
         contact: {
-          name: form.contact.name.trim(),
+          name: form.contact.name.trim() || form.clientName.trim(),
           email: form.contact.email.trim() ? form.contact.email.trim().toLowerCase() : undefined,
           phone: form.contact.phone.trim() || undefined,
         },
-        legalServicePath: form.legalServicePath,
         inquiryDescription: form.inquiryDescription.trim(),
         stage: form.stage,
         engagementNotes: form.engagementNotes.trim(),
-        conversionOutcome: form.conversionOutcome.trim() || undefined,
+        practiceArea: form.practiceArea || undefined,
+        subPracticeActions: form.subPracticeActions,
         responsiblePartner: form.responsiblePartner,
         responsibleAssociate: form.responsibleAssociate,
         assignedTo: form.responsibleAssociate,
@@ -358,14 +316,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                                 className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                               >
                                 <option value="">Select role...</option>
-                                {getRoleSuggestions({
-                                  caseType: undefined,
-                                  sectorLabel: selectedServiceNodes[0]?.label,
-                                  matterType:
-                                    (selectedServiceNodes.length
-                                      ? selectedServiceNodes[selectedServiceNodes.length - 1]?.suggestedMatterTypes?.[0]
-                                      : undefined) || undefined,
-                                }).map((r) => (
+                                {getRoleSuggestions({ matterType: form.practiceArea }).map((r) => (
                                   <option key={r} value={r}>
                                     {r}
                                   </option>
@@ -411,18 +362,6 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
 
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Contact Person *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={form.contact.name}
-                    onChange={(e) => setForm({ ...form, contact: { ...form.contact, name: e.target.value } })}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Email <span className="text-gray-400">(optional)</span>
                   </label>
                   <input
@@ -452,30 +391,71 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 <p className="text-sm text-gray-500 dark:text-gray-400">Capture the practice area and the business context for the enquiry.</p>
               </div>
 
-              <div className="space-y-3">
-                {serviceLevels.map((level, idx) => (
-                  <div key={level.label}>
-                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{level.label}</label>
-                    <select
-                      value={level.value}
-                      onChange={(e) => updateServicePathAtLevel(idx, e.target.value)}
-                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    >
-                      <option value="">Select...</option>
-                      {level.options.map((opt: any) => (
-                        <option key={opt.id} value={opt.id}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-                {form.legalServicePath.length > 0 && (
-                  <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-900/50 dark:text-gray-300">
-                    {form.legalServicePath.map((p) => p.label).join(' / ')}
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Practice Area *</label>
+                  <select
+                    value={form.practiceArea}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        practiceArea: e.target.value as any,
+                        subPracticeActions: [],
+                      })
+                    }
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  >
+                    <option value="">Select...</option>
+                    {PRACTICE_AREAS.map((area) => (
+                      <option key={area} value={area}>
+                        {area}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Sub-Practice Area *</div>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Select the key actions that apply to the chosen practice area.
                   </p>
-                )}
+                </div>
               </div>
+
+              {form.practiceArea ? (
+                <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800/60">
+                  {PRACTICE_ACTIONS[form.practiceArea as (typeof PRACTICE_AREAS)[number]].map((action) => {
+                    const checked = form.subPracticeActions.includes(action);
+                    return (
+                      <label key={action} className="flex items-start gap-3 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              subPracticeActions: e.target.checked
+                                ? [...prev.subPracticeActions, action]
+                                : prev.subPracticeActions.filter((item) => item !== action),
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-gray-900"
+                        />
+                        <span className="text-gray-700 dark:text-gray-200">{action}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400">
+                  Select a practice area to load its sub-practice actions.
+                </div>
+              )}
+
+              {form.subPracticeActions.length > 0 && (
+                <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-900/50 dark:text-gray-300">
+                  {form.practiceArea}: {form.subPracticeActions.join(' / ')}
+                </p>
+              )}
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
@@ -487,18 +467,6 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                     placeholder="e.g. New instruction, follow-up"
                     className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                   />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Priority Level</label>
-                  <select
-                    value={form.priorityLevel}
-                    onChange={(e) => setForm({ ...form, priorityLevel: e.target.value as any })}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
-                  </select>
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Enquiry Source</label>
@@ -532,16 +500,72 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Estimated Fee Value</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.estimatedFeeValue}
-                    onChange={(e) => setForm({ ...form, estimatedFeeValue: e.target.value })}
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Payment Arrangement *</label>
+                  <select
+                    value={form.paymentArrangement}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        paymentArrangement: e.target.value as any,
+                        installmentCount: e.target.value === 'Installments' ? form.installmentCount : '',
+                        depositAmount: e.target.value === 'Installments' ? form.depositAmount : '',
+                      })
+                    }
                     className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  />
+                  >
+                    <option value="">Select...</option>
+                    <option value="Full Payment">Full Payment</option>
+                    <option value="Installments">Installments</option>
+                  </select>
                 </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Payment Method *</label>
+                  <select
+                    value={form.paymentMethod}
+                    onChange={(e) => setForm({ ...form, paymentMethod: e.target.value as any })}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  >
+                    <option value="">Select...</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Mobile Money">Mobile Money</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="Card">Card</option>
+                    <option value="Mixed">Mixed</option>
+                  </select>
+                </div>
+                {form.paymentArrangement === 'Installments' ? (
+                  <>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Number of Installments *</label>
+                      <input
+                        type="number"
+                        min="2"
+                        step="1"
+                        value={form.installmentCount}
+                        onChange={(e) => setForm({ ...form, installmentCount: e.target.value })}
+                        placeholder="e.g. 3"
+                        className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Deposit Amount</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.depositAmount}
+                        onChange={(e) => setForm({ ...form, depositAmount: e.target.value })}
+                        placeholder="Optional upfront amount"
+                        className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 md:col-span-2">
+                    Full payment selected. The client settles the full amount in a single transaction.
+                  </div>
+                )}
               </div>
             </section>
           </div>
@@ -610,13 +634,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 <select
                   required
                   value={form.stage}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      stage: e.target.value as any,
-                      conversionOutcome: ['Converted', 'Non-Converted'].includes(e.target.value) ? form.conversionOutcome : '',
-                    })
-                  }
+                  onChange={(e) => setForm({ ...form, stage: e.target.value as any })}
                   className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                 >
                   {STAGES.map((s) => (
@@ -626,29 +644,9 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                   ))}
                 </select>
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  Use a closing stage only after the outcome has been selected.
+                  Use a closing stage only after the intake details above have been captured.
                 </p>
               </div>
-
-              {['Converted', 'Non-Converted'].includes(form.stage) && (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Conversion Outcome *
-                  </label>
-                  <select
-                    value={form.conversionOutcome}
-                    onChange={(e) => setForm({ ...form, conversionOutcome: e.target.value })}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    <option value="">Select outcome...</option>
-                    {(form.stage === 'Converted' ? CONVERTED_OUTCOMES : NON_CONVERTED_OUTCOMES).map((outcome) => (
-                      <option key={outcome} value={outcome}>
-                        {outcome}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </section>
 
             <section className="space-y-4 rounded-2xl border border-gray-200 bg-gray-50/70 p-5 dark:border-gray-700 dark:bg-gray-900/40">

@@ -51,6 +51,16 @@ const parseMoney = (value: unknown): number => {
   return Number.isFinite(n) && n > 0 ? n : 0;
 };
 
+const normalizeLegalServicePath = (value: unknown) =>
+  Array.isArray(value)
+    ? value
+        .map((item: any) => ({
+          id: String(item?.id || '').trim(),
+          label: String(item?.label || '').trim(),
+        }))
+        .filter((item: any) => item.id && item.label)
+    : [];
+
 const calculateActionProgress = (steps: any[], plannedAmount: number) => {
   const actions = (steps || []).flatMap((step: any) => (Array.isArray(step.actions) ? step.actions : []));
   const checked = actions.filter((action: any) => Boolean(action?.done)).length;
@@ -122,6 +132,7 @@ export const createCase = async (req: AuthRequest, res: Response) => {
     const caseNo = String((req.body as any)?.caseNo || '').trim() || (await generateCaseNo());
     const newCase = new Case({
       ...req.body,
+      legalServicePath: normalizeLegalServicePath((req.body as any)?.legalServicePath),
       caseNo,
       matterTiming: workflowAutomation ? 'new' : 'historical',
       workflowAutomation,
@@ -285,7 +296,13 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     }
 
     const before: any = await Case.findById(req.params.id);
-    const updated: any = await Case.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const updates: any = {
+      ...req.body,
+      ...(Object.prototype.hasOwnProperty.call(req.body, 'legalServicePath')
+        ? { legalServicePath: normalizeLegalServicePath((req.body as any)?.legalServicePath) }
+        : {}),
+    };
+    const updated: any = await Case.findByIdAndUpdate(req.params.id, updates, { new: true });
 
     if (!updated) return res.status(404).json({ message: 'Case not found.' });
 
@@ -408,7 +425,8 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
       if (req.body.parties && req.body.parties !== before.parties) changes.push(`Parties changed`);
       if (req.body.caseType && req.body.caseType !== before.caseType) changes.push(`Case type changed`);
       if (req.body.matterType && req.body.matterType !== before.matterType) changes.push(`Matter type changed`);
-      if (req.body.legalServicePath) changes.push(`Legal service classification updated`);
+      if (Object.prototype.hasOwnProperty.call(req.body, 'legalServicePath'))
+        changes.push(`Legal service classification updated`);
       if ((req.body as any)?.workflowTemplateId && String((req.body as any).workflowTemplateId) !== beforeTemplateId)
         changes.push(`Workflow template updated`);
       if ((req.body as any)?.workflowStartDate) changes.push(`Workflow start date updated`);

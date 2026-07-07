@@ -31,6 +31,12 @@ export interface IProspect extends Document {
   referralSource?: string;
   estimatedMatterValue?: number;
   estimatedFeeValue?: number;
+  practiceArea?: 'Converted' | 'Non Converted';
+  subPracticeActions?: string[];
+  paymentArrangement?: 'Full Payment' | 'Installments';
+  paymentMethod?: 'Bank Transfer' | 'Cash' | 'Mobile Money' | 'Cheque' | 'Card' | 'Mixed';
+  installmentCount?: number;
+  depositAmount?: number;
   
   // Contact Information
   contact: IProspectContact;
@@ -125,6 +131,27 @@ const ProspectSchema = new Schema<IProspect>(
     },
     estimatedMatterValue: Number,
     estimatedFeeValue: Number,
+    practiceArea: {
+      type: String,
+      enum: ['Converted', 'Non Converted'],
+      trim: true,
+    },
+    subPracticeActions: {
+      type: [String],
+      default: [],
+    },
+    paymentArrangement: {
+      type: String,
+      enum: ['Full Payment', 'Installments'],
+      trim: true,
+    },
+    paymentMethod: {
+      type: String,
+      enum: ['Bank Transfer', 'Cash', 'Mobile Money', 'Cheque', 'Card', 'Mixed'],
+      trim: true,
+    },
+    installmentCount: Number,
+    depositAmount: Number,
     contact: {
       type: ProspectContactSchema,
       required: true,

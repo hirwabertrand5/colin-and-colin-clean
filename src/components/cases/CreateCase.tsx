@@ -361,6 +361,7 @@ export default function CreateCase({
 
       await createCase({
         ...formData,
+        legalServicePath: formData.legalServicePath || [],
         caseNo: caseNoToSend,
         parties: finalParties,
         matterTiming,
