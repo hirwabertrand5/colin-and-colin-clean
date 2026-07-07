@@ -24,6 +24,15 @@ const STAGES = [
   'Non-Converted',
 ];
 const PRACTICE_AREAS = ['Converted', 'Non Converted'] as const;
+const ESTIMATED_CURRENCIES = [
+  { code: 'RWF', label: 'Rwandan Franc (RWF)' },
+  { code: 'USD', label: 'US Dollar (USD)' },
+  { code: 'EUR', label: 'Euro (EUR)' },
+  { code: 'GBP', label: 'British Pound (GBP)' },
+  { code: 'KES', label: 'Kenyan Shilling (KES)' },
+  { code: 'UGX', label: 'Ugandan Shilling (UGX)' },
+  { code: 'TZS', label: 'Tanzanian Shilling (TZS)' },
+] as const;
 const PRACTICE_ACTIONS: Record<(typeof PRACTICE_AREAS)[number], string[]> = {
   Converted: ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'],
   'Non Converted': ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'],
@@ -52,6 +61,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     enquirySource: prospect?.enquirySource || '',
     referralSource: prospect?.referralSource || '',
     estimatedMatterValue: prospect?.estimatedMatterValue?.toString() || '',
+    estimatedMatterCurrency: prospect?.estimatedMatterCurrency || 'RWF',
     paymentArrangement: prospect?.paymentArrangement || '',
     paymentMethod: prospect?.paymentMethod || '',
     installmentCount: prospect?.installmentCount?.toString() || '',
@@ -84,6 +94,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
       enquirySource: prospect?.enquirySource || '',
       referralSource: prospect?.referralSource || '',
       estimatedMatterValue: prospect?.estimatedMatterValue?.toString() || '',
+      estimatedMatterCurrency: prospect?.estimatedMatterCurrency || 'RWF',
       paymentArrangement: prospect?.paymentArrangement || '',
       paymentMethod: prospect?.paymentMethod || '',
       installmentCount: prospect?.installmentCount?.toString() || '',
@@ -129,6 +140,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     if (!form.responsibleAssociate) return 'Please select a responsible associate.';
     const matterValue = Number(form.estimatedMatterValue);
     if (form.estimatedMatterValue && !Number.isFinite(matterValue)) return 'Estimated matter value must be a number.';
+    if (!form.estimatedMatterCurrency) return 'Please select a currency for the estimated matter value.';
     if (!form.paymentArrangement) return 'Please select a payment arrangement.';
     if (!form.paymentMethod) return 'Please select a payment method.';
     if (form.paymentArrangement === 'Installments') {
@@ -170,6 +182,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
         enquirySource: form.enquirySource.trim(),
         referralSource: form.referralSource.trim(),
         estimatedMatterValue: form.estimatedMatterValue ? Number(form.estimatedMatterValue) : undefined,
+        estimatedMatterCurrency: form.estimatedMatterCurrency || 'RWF',
         paymentArrangement: form.paymentArrangement || undefined,
         paymentMethod: form.paymentMethod || undefined,
         installmentCount: form.installmentCount ? Number(form.installmentCount) : undefined,
@@ -490,14 +503,27 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Estimated Matter Value</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.estimatedMatterValue}
-                    onChange={(e) => setForm({ ...form, estimatedMatterValue: e.target.value })}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  />
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.estimatedMatterValue}
+                      onChange={(e) => setForm({ ...form, estimatedMatterValue: e.target.value })}
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    />
+                    <select
+                      value={form.estimatedMatterCurrency}
+                      onChange={(e) => setForm({ ...form, estimatedMatterCurrency: e.target.value as any })}
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    >
+                      {ESTIMATED_CURRENCIES.map((currency) => (
+                        <option key={currency.code} value={currency.code}>
+                          {currency.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Payment Arrangement *</label>

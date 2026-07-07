@@ -188,6 +188,12 @@ export default function IntakeProspects() {
   const formatMoney = (value?: number) =>
     typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : null;
 
+  const formatEstimatedValue = (prospect: Prospect) => {
+    const money = formatMoney(prospect.estimatedMatterValue);
+    if (!money) return 'Not set';
+    return `${prospect.estimatedMatterCurrency || 'RWF'} ${money}`;
+  };
+
   const getMatterEntryRows = (prospect: Prospect) => {
     const rows = [
       { label: 'Practice Area', value: getPracticeAreaLabel(prospect) },
@@ -196,7 +202,7 @@ export default function IntakeProspects() {
     ];
 
     if (formatMoney(prospect.estimatedMatterValue)) {
-      rows.push({ label: 'Estimated Value', value: formatMoney(prospect.estimatedMatterValue) || 'Not set' });
+      rows.push({ label: 'Estimated Value', value: formatEstimatedValue(prospect) });
     }
 
     if (prospect.paymentArrangement === 'Installments') {

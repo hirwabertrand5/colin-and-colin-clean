@@ -38,6 +38,7 @@ export interface Prospect {
   enquirySource?: string;
   referralSource?: string;
   estimatedMatterValue?: number;
+  estimatedMatterCurrency?: 'RWF' | 'USD' | 'EUR' | 'GBP' | 'KES' | 'UGX' | 'TZS';
   practiceArea?: 'Converted' | 'Non Converted';
   subPracticeActions?: string[];
   paymentArrangement?: 'Full Payment' | 'Installments';

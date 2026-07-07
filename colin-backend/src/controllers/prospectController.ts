@@ -38,6 +38,7 @@ const validStages = [
 const terminalStages = ['Converted', 'Non-Converted'];
 const convertedOutcomes = ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'];
 const nonConvertedOutcomes = ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'];
+const supportedCurrencies = ['RWF', 'USD', 'EUR', 'GBP', 'KES', 'UGX', 'TZS'];
 
 const cleanString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 const getRouteId = (value: unknown) => (typeof value === 'string' ? value : '');
@@ -45,6 +46,10 @@ const toOptionalNumber = (value: unknown) => {
   if (value === null || value === undefined || value === '') return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+};
+const normalizeCurrency = (value: unknown) => {
+  const cleaned = cleanString(value).toUpperCase();
+  return supportedCurrencies.includes(cleaned) ? cleaned : undefined;
 };
 const normalizePracticeArea = (value: unknown) => {
   const cleaned = cleanString(value);
@@ -76,6 +81,7 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
     enquirySource: cleanString(body.enquirySource),
     referralSource: cleanString(body.referralSource),
     estimatedMatterValue: toOptionalNumber(body.estimatedMatterValue),
+    estimatedMatterCurrency: normalizeCurrency(body.estimatedMatterCurrency) || 'RWF',
     estimatedFeeValue: toOptionalNumber(body.estimatedFeeValue),
     practiceArea: normalizePracticeArea(body.practiceArea),
     subPracticeActions: Array.isArray(body.subPracticeActions)
@@ -438,7 +444,7 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
       caseType: 'Transactional Cases',
       billingSettings: {
         paymentMode: 'postpaid',
-        currency: 'USD',
+        currency: prospect.estimatedMatterCurrency || 'RWF',
       },
       onboarding: {
         conflictCheckStatus: prospect.conflictCheckStatus || 'Pending',
