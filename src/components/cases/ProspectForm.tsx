@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { X } from 'lucide-react';
-import { createProspect, updateProspect, Prospect } from '../../services/prospectService';
+import { createProspect, updateProspect, Prospect, ProspectStage } from '../../services/prospectService';
 import { getRoleSuggestions } from '../../constants/partyRoles';
+import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { getStaffUsers, User } from '../../services/userService';
 
 interface ProspectFormProps {
@@ -23,7 +24,21 @@ const STAGES = [
   'Converted',
   'Non-Converted',
 ];
-const PRACTICE_AREAS = ['Converted', 'Non Converted'] as const;
+const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
+const STAGE_CHECKLIST = [
+  { value: 'Inquiry', label: 'Stage 1 – Inquiry', subtext: 'Initial contact received.' },
+  { value: 'Consultation', label: 'Stage 2 – Consultation', subtext: 'Initial consultation conducted.' },
+  { value: 'Conflict Check', label: 'Stage 3 – Conflict Check', subtext: 'Conflict review initiated.' },
+  { value: 'Quotation Preparation', label: 'Stage 4 – Quotation Preparation', subtext: 'Quotation being prepared.' },
+  { value: 'Conversion Assessment', label: 'Stage 4.5 – Conversion Assessment', subtext: 'Assess conversion readiness.' },
+  { value: 'Quotation Issued', label: 'Stage 5 – Quotation Issued', subtext: 'Quotation has been shared with the client.' },
+  { value: 'Awaiting Client Decision', label: 'Stage 6 – Awaiting Client Decision', subtext: 'Client decision is still pending.' },
+  { value: 'Final Follow-Up', label: 'Stage 6.5 – Final Follow-Up', subtext: 'A final follow-up is underway or completed.' },
+  { value: 'Converted', label: 'Stage 7 – Converted', subtext: 'The prospect is converted into an engagement.' },
+  { value: 'Non-Converted', label: 'Stage 8 – Non-Converted', subtext: 'The prospect is closed without conversion.' },
+] as const;
+const CONVERTED_OUTCOMES = ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'];
+const NON_CONVERTED_OUTCOMES = ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'];
 const ESTIMATED_CURRENCIES = [
   { code: 'RWF', label: 'Rwandan Franc (RWF)' },
   { code: 'USD', label: 'US Dollar (USD)' },
@@ -32,11 +47,18 @@ const ESTIMATED_CURRENCIES = [
   { code: 'KES', label: 'Kenyan Shilling (KES)' },
   { code: 'UGX', label: 'Ugandan Shilling (UGX)' },
   { code: 'TZS', label: 'Tanzanian Shilling (TZS)' },
+  { code: 'CNY', label: 'Chinese Yuan (CNY - ¥)' },
+  { code: 'INR', label: 'Indian Rupee (INR - ₹)' },
 ] as const;
-const PRACTICE_ACTIONS: Record<(typeof PRACTICE_AREAS)[number], string[]> = {
-  Converted: ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'],
-  'Non Converted': ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'],
-};
+
+const flattenLegalServiceOptions = (nodes: typeof LEGAL_SERVICES_TREE, prefix = ''): Array<{ id: string; label: string }> =>
+  nodes.flatMap((node) => {
+    const currentLabel = prefix ? `${prefix} / ${node.label}` : node.label;
+    const result = [{ id: node.id, label: currentLabel }];
+    return result.concat(flattenLegalServiceOptions(node.children || [], currentLabel));
+  });
+
+const LEGAL_SERVICE_OPTIONS = flattenLegalServiceOptions(LEGAL_SERVICES_TREE);
 
 const getUserId = (value?: string | { _id: string } | null) => {
   if (!value) return '';
@@ -54,7 +76,28 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   const [partiesList, setPartiesList] = useState<Array<{ name: string; role: string }>>(
     prospect?.parties ? [{ name: prospect.parties, role: '' }] : []
   );
-  const [form, setForm] = useState({
+  const [servicePath, setServicePath] = useState<string[]>(prospect?.legalServicePath?.map((item) => item.id) || []);
+  const [form, setForm] = useState<{
+    clientName: string;
+    parties: string;
+    enquiryNature: string;
+    enquirySource: string;
+    referralSource: string;
+    estimatedMatterValue: string;
+    estimatedMatterCurrency: Prospect['estimatedMatterCurrency'];
+    paymentArrangement: Prospect['paymentArrangement'];
+    paymentMethod: Prospect['paymentMethod'];
+    installmentCount: string;
+    depositAmount: string;
+    legalServicePath: Prospect['legalServicePath'];
+    contact: { name: string; email: string; phone: string };
+    inquiryDescription: string;
+    stage: ProspectStage;
+    conversionOutcome: string;
+    responsiblePartner: string;
+    responsibleAssociate: string;
+    assignedTo: string;
+  }>({
     clientName: prospect?.clientName || '',
     parties: prospect?.parties || '',
     enquiryNature: prospect?.enquiryNature || '',
@@ -62,13 +105,11 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     referralSource: prospect?.referralSource || '',
     estimatedMatterValue: prospect?.estimatedMatterValue?.toString() || '',
     estimatedMatterCurrency: prospect?.estimatedMatterCurrency || 'RWF',
-    paymentArrangement: prospect?.paymentArrangement || '',
-    paymentMethod: prospect?.paymentMethod || '',
+    paymentArrangement: prospect?.paymentArrangement || undefined,
+    paymentMethod: prospect?.paymentMethod || undefined,
     installmentCount: prospect?.installmentCount?.toString() || '',
     depositAmount: prospect?.depositAmount?.toString() || '',
-    practiceArea:
-      prospect?.practiceArea || (prospect?.stage === 'Converted' ? 'Converted' : prospect?.stage === 'Non-Converted' ? 'Non Converted' : ''),
-    subPracticeActions: prospect?.subPracticeActions || (prospect?.conversionOutcome ? [prospect.conversionOutcome] : []),
+    legalServicePath: prospect?.legalServicePath || [],
     contact: {
       name: prospect?.contact.name || prospect?.clientName || '',
       email: prospect?.contact.email || '',
@@ -76,7 +117,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     },
     inquiryDescription: prospect?.inquiryDescription || '',
     stage: prospect?.stage || 'Inquiry',
-    engagementNotes: prospect?.engagementNotes || '',
+    conversionOutcome: prospect?.conversionOutcome || '',
     responsiblePartner: getUserId(prospect?.responsiblePartner),
     responsibleAssociate: getUserId(prospect?.responsibleAssociate || prospect?.assignedTo),
     assignedTo: getUserId(prospect?.responsibleAssociate || prospect?.assignedTo),
@@ -87,6 +128,10 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   }, []);
 
   useEffect(() => {
+    setServicePath(prospect?.legalServicePath?.map((item) => item.id) || []);
+  }, [prospect]);
+
+  useEffect(() => {
     setForm({
       clientName: prospect?.clientName || '',
       parties: prospect?.parties || '',
@@ -95,13 +140,11 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
       referralSource: prospect?.referralSource || '',
       estimatedMatterValue: prospect?.estimatedMatterValue?.toString() || '',
       estimatedMatterCurrency: prospect?.estimatedMatterCurrency || 'RWF',
-      paymentArrangement: prospect?.paymentArrangement || '',
-      paymentMethod: prospect?.paymentMethod || '',
+      paymentArrangement: prospect?.paymentArrangement || undefined,
+      paymentMethod: prospect?.paymentMethod || undefined,
       installmentCount: prospect?.installmentCount?.toString() || '',
       depositAmount: prospect?.depositAmount?.toString() || '',
-      practiceArea:
-        prospect?.practiceArea || (prospect?.stage === 'Converted' ? 'Converted' : prospect?.stage === 'Non-Converted' ? 'Non Converted' : ''),
-      subPracticeActions: prospect?.subPracticeActions || (prospect?.conversionOutcome ? [prospect.conversionOutcome] : []),
+      legalServicePath: prospect?.legalServicePath || [],
       contact: {
         name: prospect?.contact.name || prospect?.clientName || '',
         email: prospect?.contact.email || '',
@@ -109,12 +152,86 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
       },
       inquiryDescription: prospect?.inquiryDescription || '',
       stage: prospect?.stage || 'Inquiry',
-      engagementNotes: prospect?.engagementNotes || '',
+      conversionOutcome: prospect?.conversionOutcome || '',
       responsiblePartner: getUserId(prospect?.responsiblePartner),
       responsibleAssociate: getUserId(prospect?.responsibleAssociate || prospect?.assignedTo),
       assignedTo: getUserId(prospect?.responsibleAssociate || prospect?.assignedTo),
     });
   }, [prospect]);
+
+  const findNode = (nodes: ServiceNode[], id: string) => nodes.find((node) => node.id === id);
+
+  const selectedServiceNodes = useMemo(() => {
+    const nodes: ServiceNode[] = [];
+    let currentNodes = LEGAL_SERVICES_TREE;
+
+    for (const id of servicePath) {
+      const match = findNode(currentNodes, id);
+      if (!match) break;
+      nodes.push(match);
+      currentNodes = match.children || [];
+    }
+
+    return nodes;
+  }, [servicePath]);
+
+  const serviceLevels = useMemo(() => {
+    const levels: Array<{ label: string; options: ServiceNode[]; value: string; placeholder: string }> = [];
+
+    let currentOptions = LEGAL_SERVICES_TREE;
+    let depth = 0;
+
+    while (currentOptions.length > 0) {
+      levels.push({
+        label: SERVICE_LEVEL_LABELS[depth] || `Level ${depth + 1}`,
+        options: currentOptions,
+        value: servicePath[depth] || '',
+        placeholder: depth === 0 ? 'Select...' : `Select ${SERVICE_LEVEL_LABELS[depth - 1].toLowerCase()} first`,
+      });
+
+      const selectedNode = servicePath[depth] ? findNode(currentOptions, servicePath[depth]) : undefined;
+      if (!selectedNode?.children?.length) break;
+
+      currentOptions = selectedNode.children;
+      depth += 1;
+    }
+
+    return levels;
+  }, [servicePath]);
+
+  const updateServicePathAtLevel = (levelIndex: number, value: string) => {
+    setServicePath((prev) => {
+      const next = prev.slice(0, levelIndex);
+      if (value) next[levelIndex] = value;
+      return next;
+    });
+  };
+
+  const resolveCaseTypeFromSelection = (nodes: ServiceNode[]): Prospect['practiceArea'] | null => {
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      if (nodes[i].caseType) return nodes[i].caseType as Prospect['practiceArea'];
+    }
+    return null;
+  };
+
+  const resolveSuggestedMatterType = (nodes: ServiceNode[]): string | null => {
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      const suggested = nodes[i].suggestedMatterTypes?.[0];
+      if (suggested) return suggested;
+    }
+    return null;
+  };
+
+  const computedCaseType = useMemo(() => resolveCaseTypeFromSelection(selectedServiceNodes), [selectedServiceNodes]);
+  const workflowSuggestion = useMemo(() => resolveSuggestedMatterType(selectedServiceNodes), [selectedServiceNodes]);
+  const selectedServicePathLabel = useMemo(() => selectedServiceNodes.map((node) => node.label).join(' -> '), [selectedServiceNodes]);
+
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      legalServicePath: selectedServiceNodes.map((node) => ({ id: node.id, label: node.label })),
+    }));
+  }, [selectedServiceNodes]);
 
   const loadUsers = async () => {
     setUsersLoading(true);
@@ -130,28 +247,48 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
     }
   };
 
+  const handleStageToggle = (stageValue: ProspectStage) => {
+    setForm((prev) => {
+      const isSameStage = prev.stage === stageValue;
+      const nextStage: ProspectStage = isSameStage ? 'Inquiry' : stageValue;
+      return {
+        ...prev,
+        stage: nextStage,
+        conversionOutcome: nextStage === 'Converted' || nextStage === 'Non-Converted' ? prev.conversionOutcome : '',
+      };
+    });
+  };
+
+  const handleOutcomeToggle = (outcome: string) => {
+    setForm((prev) => ({
+      ...prev,
+      conversionOutcome: prev.conversionOutcome === outcome ? '' : outcome,
+    }));
+  };
+
   const validateForm = (): string | null => {
     if (!form.clientName?.trim()) return 'Client name is required.';
+    if (!form.contact.name?.trim()) return 'Contact person is required.';
     if (form.contact.email?.trim() && !form.contact.email.includes('@')) return 'Please enter a valid email address.';
     if (!form.inquiryDescription?.trim()) return 'Inquiry description is required.';
     if (!form.parties?.trim()) return 'Parties is required.';
+    if (!form.legalServicePath?.length) return 'Please select a legal service classification.';
     if (!form.stage) return 'Please select a stage.';
+    if ((form.stage === 'Converted' || form.stage === 'Non-Converted') && !form.conversionOutcome) {
+      return 'Please select a conversion outcome before closing this prospect.';
+    }
     if (!form.responsiblePartner) return 'Please select a responsible partner.';
     if (!form.responsibleAssociate) return 'Please select a responsible associate.';
     const matterValue = Number(form.estimatedMatterValue);
     if (form.estimatedMatterValue && !Number.isFinite(matterValue)) return 'Estimated matter value must be a number.';
     if (!form.estimatedMatterCurrency) return 'Please select a currency for the estimated matter value.';
-    if (!form.paymentArrangement) return 'Please select a payment arrangement.';
+    if (!form.paymentArrangement) return 'Please select a billing trigger.';
     if (!form.paymentMethod) return 'Please select a payment method.';
     if (form.paymentArrangement === 'Installments') {
       const installmentCount = Number(form.installmentCount);
       if (!form.installmentCount || !Number.isFinite(installmentCount) || installmentCount < 2) {
         return 'Please enter a valid installment count.';
       }
-    }
-    if (!form.practiceArea) return 'Please select a practice area.';
-    if (!form.subPracticeActions.length) {
-      return 'Please select at least one sub-practice area action.';
     }
     return null;
   };
@@ -194,9 +331,8 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
         },
         inquiryDescription: form.inquiryDescription.trim(),
         stage: form.stage,
-        engagementNotes: form.engagementNotes.trim(),
-        practiceArea: form.practiceArea || undefined,
-        subPracticeActions: form.subPracticeActions,
+        legalServicePath: form.legalServicePath?.length ? form.legalServicePath : undefined,
+        conversionOutcome: form.stage === 'Converted' || form.stage === 'Non-Converted' ? form.conversionOutcome || undefined : undefined,
         responsiblePartner: form.responsiblePartner,
         responsibleAssociate: form.responsibleAssociate,
         assignedTo: form.responsibleAssociate,
@@ -273,6 +409,19 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                   />
                 </div>
 
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Contact Person *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={form.contact.name}
+                    onChange={(e) => setForm({ ...form, contact: { ...form.contact, name: e.target.value } })}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  />
+                </div>
+
                 <div className="md:col-span-2 space-y-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Parties *</label>
@@ -329,7 +478,7 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                                 className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                               >
                                 <option value="">Select role...</option>
-                                {getRoleSuggestions({ matterType: form.practiceArea }).map((r) => (
+                                {getRoleSuggestions({ matterType: form.legalServicePath?.[0]?.label }).map((r) => (
                                   <option key={r} value={r}>
                                     {r}
                                   </option>
@@ -404,71 +553,58 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 <p className="text-sm text-gray-500 dark:text-gray-400">Capture the practice area and the business context for the enquiry.</p>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Practice Area *</label>
-                  <select
-                    value={form.practiceArea}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        practiceArea: e.target.value as any,
-                        subPracticeActions: [],
-                      })
-                    }
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    <option value="">Select...</option>
-                    {PRACTICE_AREAS.map((area) => (
-                      <option key={area} value={area}>
-                        {area}
-                      </option>
-                    ))}
-                  </select>
+              <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Legal Service Classification *</div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  {serviceLevels.map((level, index) => (
+                    <div key={`${level.label}-${index}`}>
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{level.label}</label>
+                      <select
+                        value={level.value}
+                        onChange={(e) => updateServicePathAtLevel(index, e.target.value)}
+                        disabled={index > 0 && !servicePath[index - 1]}
+                        className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      >
+                        <option value="">{index === 0 || servicePath[index - 1] ? 'Select...' : level.placeholder}</option>
+                        {level.options.map((node) => (
+                          <option key={node.id} value={node.id}>
+                            {node.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
                 </div>
-                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Sub-Practice Area *</div>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Select the key actions that apply to the chosen practice area.
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Computed Case Type</label>
+                    <input
+                      value={computedCaseType || ''}
+                      readOnly
+                      className="w-full rounded-xl border border-gray-300 bg-gray-100 px-3 py-2 text-gray-900 outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                      placeholder="Select a legal service path"
+                    />
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Workflow</div>
+                    <div className="mt-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{workflowSuggestion || '—'}</div>
+                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Auto-selected from the legal service path.</div>
+                  </div>
+                </div>
+
+                {workflowSuggestion ? (
+                  <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
+                    Suggested matter type: <span className="font-medium text-gray-900 dark:text-gray-100">{workflowSuggestion}</span>
                   </p>
-                </div>
+                ) : null}
+
+                {selectedServicePathLabel ? (
+                  <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                    Selected path: <span className="font-medium text-gray-900 dark:text-gray-100">{selectedServicePathLabel}</span>
+                  </p>
+                ) : null}
               </div>
-
-              {form.practiceArea ? (
-                <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800/60">
-                  {PRACTICE_ACTIONS[form.practiceArea as (typeof PRACTICE_AREAS)[number]].map((action) => {
-                    const checked = form.subPracticeActions.includes(action);
-                    return (
-                      <label key={action} className="flex items-start gap-3 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              subPracticeActions: e.target.checked
-                                ? [...prev.subPracticeActions, action]
-                                : prev.subPracticeActions.filter((item) => item !== action),
-                            }))
-                          }
-                          className="mt-1 h-4 w-4 rounded border-gray-300 text-gray-900"
-                        />
-                        <span className="text-gray-700 dark:text-gray-200">{action}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400">
-                  Select a practice area to load its sub-practice actions.
-                </div>
-              )}
-
-              {form.subPracticeActions.length > 0 && (
-                <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-900/50 dark:text-gray-300">
-                  {form.practiceArea}: {form.subPracticeActions.join(' / ')}
-                </p>
-              )}
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
@@ -501,32 +637,38 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                     className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                   />
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Estimated Matter Value</label>
-                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.estimatedMatterValue}
-                      onChange={(e) => setForm({ ...form, estimatedMatterValue: e.target.value })}
-                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    />
-                    <select
-                      value={form.estimatedMatterCurrency}
-                      onChange={(e) => setForm({ ...form, estimatedMatterCurrency: e.target.value as any })}
-                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    >
-                      {ESTIMATED_CURRENCIES.map((currency) => (
-                        <option key={currency.code} value={currency.code}>
-                          {currency.label}
-                        </option>
-                      ))}
-                    </select>
+                <div className="md:col-span-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Business Development Information</div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Estimated Matter Value</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.estimatedMatterValue}
+                        onChange={(e) => setForm({ ...form, estimatedMatterValue: e.target.value })}
+                        className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Currency</label>
+                      <select
+                        value={form.estimatedMatterCurrency}
+                        onChange={(e) => setForm({ ...form, estimatedMatterCurrency: e.target.value as any })}
+                        className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                      >
+                        {ESTIMATED_CURRENCIES.map((currency) => (
+                          <option key={currency.code} value={currency.code}>
+                            {currency.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Payment Arrangement *</label>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Billing Triggers *</label>
                   <select
                     value={form.paymentArrangement}
                     onChange={(e) =>
@@ -654,23 +796,50 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
               )}
 
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Current Stage *
-                </label>
-                <select
-                  required
-                  value={form.stage}
-                  onChange={(e) => setForm({ ...form, stage: e.target.value as any })}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  {STAGES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Stage Tracking *</label>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Select the active milestone</span>
+                </div>
+                <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                  {STAGE_CHECKLIST.map((stage) => {
+                    const checked = form.stage === stage.value;
+                    const isClosingStage = form.stage === 'Converted' || form.stage === 'Non-Converted';
+                    const showOutcomeOptions = stage.value === 'Converted' || stage.value === 'Non-Converted';
+                    return (
+                      <div key={stage.value} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                        <label className="flex cursor-pointer items-start gap-3 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleStageToggle(stage.value)}
+                            className="mt-1 h-4 w-4 rounded border-gray-300 text-gray-900"
+                          />
+                          <span>
+                            <span className="font-medium text-gray-900 dark:text-gray-100">{stage.label}</span>
+                            <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">{stage.subtext}</span>
+                          </span>
+                        </label>
+                        {showOutcomeOptions && isClosingStage && checked && (
+                          <div className="ml-7 mt-3 space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                            {(stage.value === 'Converted' ? CONVERTED_OUTCOMES : NON_CONVERTED_OUTCOMES).map((outcome) => (
+                              <label key={outcome} className="flex cursor-pointer items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+                                <input
+                                  type="checkbox"
+                                  checked={form.conversionOutcome === outcome}
+                                  onChange={() => handleOutcomeToggle(outcome)}
+                                  className="h-4 w-4 rounded border-gray-300 text-gray-900"
+                                />
+                                <span>{outcome}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  Use a closing stage only after the intake details above have been captured.
+                  Select the current milestone and, when closing, choose the conversion outcome beneath the terminal stage.
                 </p>
               </div>
             </section>
@@ -694,17 +863,6 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
                 />
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Engagement Notes
-                </label>
-                <textarea
-                  rows={5}
-                  value={form.engagementNotes}
-                  onChange={(e) => setForm({ ...form, engagementNotes: e.target.value })}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                />
-              </div>
             </section>
           </div>
 

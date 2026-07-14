@@ -38,7 +38,7 @@ const validStages = [
 const terminalStages = ['Converted', 'Non-Converted'];
 const convertedOutcomes = ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'];
 const nonConvertedOutcomes = ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'];
-const supportedCurrencies = ['RWF', 'USD', 'EUR', 'GBP', 'KES', 'UGX', 'TZS'];
+const supportedCurrencies = ['RWF', 'USD', 'EUR', 'GBP', 'KES', 'UGX', 'TZS', 'CNY', 'INR'];
 
 const cleanString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 const getRouteId = (value: unknown) => (typeof value === 'string' ? value : '');
@@ -120,6 +120,7 @@ const validateProspectPayload = async (payload: ReturnType<typeof getProspectPay
   if (!payload.clientName) return 'Client name is required.';
   if (!payload.contact.name) return 'Contact person is required.';
   if (!payload.inquiryDescription) return 'Inquiry description is required.';
+  if (!payload.legalServicePath?.length) return 'Please select a legal service classification.';
   if (!payload.responsiblePartner) return 'Responsible partner is required.';
   if (!payload.responsibleAssociate) return 'Responsible associate is required.';
   

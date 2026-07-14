@@ -301,42 +301,6 @@ export default function IntakeProspects() {
             </div>
           ) : (
             <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-              <div className="flex flex-col gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-700 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h2 className="font-semibold text-gray-900 dark:text-gray-100">Prospects</h2>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {filterStage
-                      ? `${filteredProspects.length} ${filterStage} prospects`
-                      : `${filteredProspects.length} active prospects`}
-                  </p>
-                </div>
-                <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center">
-                  <div className="relative w-full md:w-80">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="text"
-                      placeholder="Search by prospect, party, contact..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full rounded-xl border border-gray-300 bg-white py-2 pl-10 pr-3 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    />
-                  </div>
-
-                  <select
-                    value={filterStage || ''}
-                    onChange={(e) => setFilterStage(e.target.value || null)}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 md:w-80"
-                  >
-                    <option value="">All stages</option>
-                    {stageOrder.map((stage) => (
-                      <option key={stage} value={stage}>
-                        {stage} ({stats[stage] || 0})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
               <div className="overflow-x-auto">
                 <table className="min-w-[1480px] w-full table-fixed">
                   <thead className="bg-gray-50/80 dark:bg-gray-900/60">

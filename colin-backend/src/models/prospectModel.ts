@@ -30,7 +30,7 @@ export interface IProspect extends Document {
   enquirySource?: string;
   referralSource?: string;
   estimatedMatterValue?: number;
-  estimatedMatterCurrency?: 'RWF' | 'USD' | 'EUR' | 'GBP' | 'KES' | 'UGX' | 'TZS';
+  estimatedMatterCurrency?: 'RWF' | 'USD' | 'EUR' | 'GBP' | 'KES' | 'UGX' | 'TZS' | 'CNY' | 'INR';
   estimatedFeeValue?: number;
   practiceArea?: 'Converted' | 'Non Converted';
   subPracticeActions?: string[];
@@ -133,7 +133,7 @@ const ProspectSchema = new Schema<IProspect>(
     estimatedMatterValue: Number,
     estimatedMatterCurrency: {
       type: String,
-      enum: ['RWF', 'USD', 'EUR', 'GBP', 'KES', 'UGX', 'TZS'],
+      enum: ['RWF', 'USD', 'EUR', 'GBP', 'KES', 'UGX', 'TZS', 'CNY', 'INR'],
       default: 'RWF',
       trim: true,
     },
