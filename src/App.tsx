@@ -10,6 +10,7 @@ import ClosedCases from './components/cases/ClosedCases';
 import CreateCase from './components/cases/CreateCase';
 import CaseWorkspace from './components/cases/CaseWorkspace';
 import IntakeProspects from './components/cases/IntakeProspects';
+import ProspectWorkspace from './components/cases/ProspectWorkspace';
 import TaskBoard from './components/tasks/TaskBoard';
 import TaskDetail from './components/tasks/TaskDetail';
 import Calendar from './components/calendar/Calendar';
@@ -135,6 +136,7 @@ function App() {
                   <Route path="/cases" element={<CaseList userRole={user.role} mode="active" />} />
                   <Route path="/matters" element={<CaseList userRole={user.role} mode="active" />} />
                   <Route path="/matters/intake-prospects" element={<IntakeProspects />} />
+                  <Route path="/matters/intake-prospects/:prospectId" element={<ProspectWorkspace />} />
                   <Route
                     path="/cases/temporarily-closed"
                     element={<CaseList userRole={user.role} mode="temporarilyClosed" />}
@@ -145,9 +147,9 @@ function App() {
                   />
                   <Route path="/matters/closed" element={<ClosedCases userRole={user.role} />} />
 
-                  {(isMD || isExec) && <Route path="/cases/new" element={<CreateCase />} />}
-                  {(isMD || isExec) && <Route path="/matters/new" element={<CreateCase />} />}
-                  {(isMD || isExec) && (
+                  {(isMD || isPartner || isExec) && <Route path="/cases/new" element={<CreateCase />} />}
+                  {(isMD || isPartner || isExec) && <Route path="/matters/new" element={<CreateCase />} />}
+                  {(isMD || isPartner || isExec) && (
                     <Route
                       path="/cases/temporarily-closed/new"
                       element={
@@ -165,7 +167,7 @@ function App() {
                       }
                     />
                   )}
-                  {(isMD || isExec) && (
+                  {(isMD || isPartner || isExec) && (
                     <Route
                       path="/matters/temporarily-closed/new"
                       element={

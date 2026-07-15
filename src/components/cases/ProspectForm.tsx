@@ -8,6 +8,7 @@ import { getStaffUsers, User } from '../../services/userService';
 interface ProspectFormProps {
   prospect?: Prospect | null;
   onClose: () => void;
+  layout?: 'modal' | 'side-over';
 }
 
 const STAGES = [
@@ -65,7 +66,7 @@ const getUserId = (value?: string | { _id: string } | null) => {
   return typeof value === 'string' ? value : value._id;
 };
 
-export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
+export default function ProspectForm({ prospect, onClose, layout = 'modal' }: ProspectFormProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState('');
@@ -355,8 +356,11 @@ export default function ProspectForm({ prospect, onClose }: ProspectFormProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-5xl w-full flex flex-col shadow-2xl" style={{ maxHeight: '92vh' }}>
+    <div className={`fixed inset-0 z-50 ${layout === 'side-over' ? 'flex justify-end bg-gray-900/60' : 'flex items-center justify-center bg-gray-900/50 p-4'}`}>
+      <div
+        className={`${layout === 'side-over' ? 'h-full w-full max-w-5xl overflow-y-auto rounded-l-3xl bg-white shadow-2xl dark:bg-gray-800' : 'bg-white dark:bg-gray-800 rounded-2xl max-w-5xl w-full flex flex-col shadow-2xl'}`}
+        style={layout === 'modal' ? { maxHeight: '92vh' } : undefined}
+      >
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
