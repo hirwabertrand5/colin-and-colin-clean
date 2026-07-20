@@ -47,10 +47,24 @@ const getCurrencySymbol = (currency?: string) => {
 };
 
 const formatEstimatedValue = (prospect?: Prospect | null) => {
-  if (!prospect?.estimatedMatterValue) return 'Not set';
-  const currency = prospect.estimatedMatterCurrency || 'RWF';
+  const rawValue = (prospect as Prospect & { estimated_matter_value?: number } | null | undefined)?.estimatedMatterValue;
+  if (typeof rawValue !== 'number' || Number.isNaN(rawValue)) return 'Not set';
+  const currency = prospect?.estimatedMatterCurrency || 'RWF';
   const symbol = getCurrencySymbol(currency);
-  const formattedValue = prospect.estimatedMatterValue.toLocaleString();
+  const formattedValue = rawValue.toLocaleString();
+  if (currency === 'RWF') return `${currency} ${formattedValue}`;
+  return `${currency} ${symbol} ${formattedValue}`;
+};
+
+const formatEstimatedFeeValue = (prospect?: Prospect | null) => {
+  const prospectData = prospect as (Prospect & { estimated_fee_value?: number | string; estimatedFeeValue?: number | string; estimated_matter_currency?: string }) | null | undefined;
+  const rawValue = prospectData?.estimatedFeeValue ?? prospectData?.estimated_fee_value;
+  if (rawValue === undefined || rawValue === null || rawValue === '') return 'Not set';
+  const numericValue = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+  if (!Number.isFinite(numericValue)) return 'Not set';
+  const currency = prospectData?.estimatedMatterCurrency || prospectData?.estimated_matter_currency || 'RWF';
+  const symbol = getCurrencySymbol(currency);
+  const formattedValue = numericValue.toLocaleString();
   if (currency === 'RWF') return `${currency} ${formattedValue}`;
   return `${currency} ${symbol} ${formattedValue}`;
 };
@@ -161,12 +175,20 @@ export default function ProspectWorkspace() {
 
   const milestoneItems = useMemo(() => {
     const currentStage = prospect?.stage || 'Inquiry';
+    const prospectData = prospect as (Prospect & { completed_stages?: string[] }) | null;
+    const rawCompletedStages = Array.isArray(prospectData?.completedStages)
+      ? prospectData?.completedStages
+      : Array.isArray(prospectData?.completed_stages)
+        ? prospectData?.completed_stages
+        : [];
+    const completedStages = (rawCompletedStages || []).filter((stage): stage is string => typeof stage === 'string');
+
     return STAGE_ORDER.map((stage) => ({
       stage,
-      completed: STAGE_ORDER.indexOf(stage) <= stageIndex,
+      completed: completedStages.includes(stage),
       active: stage === currentStage,
     }));
-  }, [prospect?.stage, stageIndex]);
+  }, [prospect?.stage, prospect?.completedStages, prospect?.completed_stages]);
 
   const currentStageLabel = prospect?.stage || 'Inquiry';
 
@@ -433,20 +455,26 @@ export default function ProspectWorkspace() {
                       </div>
                     </div>
 
-                    <div className="mt-6 space-y-4 text-sm text-gray-700 dark:text-gray-300">
-                      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Estimated matter value</div>
-                        <div className="mt-2 text-2xl font-semibold text-gray-900 dark:text-gray-100">{formatEstimatedValue(prospect)}</div>
+                    <div className="mt-6 space-y-4 text-sm text-slate-700 dark:text-slate-300">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Estimated matter value</div>
+                          <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">{formatEstimatedValue(prospect)}</div>
+                        </div>
+                        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Estimated fee value</div>
+                          <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">{formatEstimatedFeeValue(prospect)}</div>
+                        </div>
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Billing triggers</div>
-                          <div className="mt-2 font-semibold text-gray-900 dark:text-gray-100">{prospect.paymentArrangement || 'Not set'}</div>
+                          <div className="mt-2 font-semibold text-slate-900 dark:text-slate-100">{prospect.paymentArrangement || 'Not set'}</div>
                         </div>
                         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Payment method</div>
-                          <div className="mt-2 font-semibold text-gray-900 dark:text-gray-100">{prospect.paymentMethod || 'Not set'}</div>
+                          <div className="mt-2 font-semibold text-slate-900 dark:text-slate-100">{prospect.paymentMethod || 'Not set'}</div>
                         </div>
                       </div>
                     </div>

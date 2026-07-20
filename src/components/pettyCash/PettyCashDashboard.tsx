@@ -10,6 +10,8 @@ import {
   TrendingUp,
   TrendingDown,
   Receipt,
+  FileText,
+  Search,
 } from 'lucide-react';
 
 import {
@@ -48,13 +50,21 @@ export default function PettyCashDashboard() {
 
   // Add expense modal
   const [showAddExpense, setShowAddExpense] = useState(false);
+  const [selectedFundForWorkspace, setSelectedFundForWorkspace] = useState<PettyCashFund | null>(null);
+  const [selectedFundExpenses, setSelectedFundExpenses] = useState<PettyCashExpense[]>([]);
   const [cases, setCases] = useState<CaseData[]>([]);
   const [expenseForm, setExpenseForm] = useState({
   date: '',
   title: '',
+  itemDescription: '',
   chargeType: 'internal' as const,
   caseId: '',
   amount: '',
+  amountRwf: '',
+  dateSpent: '',
+  spentByUserId: '',
+  isBillableToMatter: false,
+  matterId: '',
   note: '',
   receiptFiles: [] as File[],
 });
@@ -69,6 +79,7 @@ export default function PettyCashDashboard() {
     note: '',
   });
   const [refundSubmitting, setRefundSubmitting] = useState(false);
+  const [selectedHistoricalFund, setSelectedHistoricalFund] = useState<PettyCashFund | null>(null);
   const refundableExpenses = useMemo(() => {
     return expenses
       .map((ex) => {
@@ -79,6 +90,29 @@ export default function PettyCashDashboard() {
       .filter((x) => x.remainingRefundable > 0)
       .sort((a, b) => (a.ex.date < b.ex.date ? 1 : -1));
   }, [expenses]);
+
+  const activeFundExpenses = useMemo(() => {
+    if (!fund?._id) return [];
+    return expenses.filter((expense) => expense.fundId === fund._id);
+  }, [expenses, fund?._id]);
+
+  const workspaceFund = selectedFundForWorkspace || selectedHistoricalFund || fund;
+  const workspaceExpenses = selectedFundForWorkspace || selectedHistoricalFund ? selectedFundExpenses : activeFundExpenses;
+  const workspaceTotalExpenses = useMemo(() => {
+    return workspaceExpenses.reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+  }, [workspaceExpenses]);
+  const workspaceRemaining = useMemo(() => {
+    if (!workspaceFund) return 0;
+    return (Number(workspaceFund.initialAmount) || 0) - workspaceTotalExpenses;
+  }, [workspaceFund, workspaceTotalExpenses]);
+  const workspaceBillableTotal = useMemo(() => {
+    return workspaceExpenses
+      .filter((expense) => expense.isBillableToMatter || expense.chargeType === 'client')
+      .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+  }, [workspaceExpenses]);
+  const workspaceFirmOverhead = useMemo(() => {
+    return Math.max(0, workspaceTotalExpenses - workspaceBillableTotal);
+  }, [workspaceBillableTotal, workspaceTotalExpenses]);
 
   const lowThreshold = useMemo(() => {
     if (!fund) return 0;
@@ -176,12 +210,19 @@ export default function PettyCashDashboard() {
         return;
       }
 
+      const amountRwf = Number(String(expenseForm.amountRwf).replace(/[^\d.]/g, ''));
       await addExpenseToFund(fund._id, {
         date: expenseForm.date,
         title: expenseForm.title.trim(),
         amount,
         chargeType: expenseForm.chargeType,
         caseId: expenseForm.chargeType === 'client' ? expenseForm.caseId : undefined,
+        itemDescription: expenseForm.itemDescription.trim() || undefined,
+        amountRwf: Number.isFinite(amountRwf) ? amountRwf : undefined,
+        dateSpent: expenseForm.dateSpent || undefined,
+        spentByUserId: expenseForm.spentByUserId.trim() || undefined,
+        isBillableToMatter: expenseForm.isBillableToMatter,
+        matterId: expenseForm.matterId.trim() || undefined,
         note: expenseForm.note.trim() || undefined,
         receiptFiles: expenseForm.receiptFiles.length > 0 ? expenseForm.receiptFiles : undefined,
       });
@@ -190,9 +231,15 @@ export default function PettyCashDashboard() {
       setExpenseForm({
         date: '',
         title: '',
+        itemDescription: '',
         chargeType: 'internal',
         caseId: '',
         amount: '',
+        amountRwf: '',
+        dateSpent: '',
+        spentByUserId: '',
+        isBillableToMatter: false,
+        matterId: '',
         note: '',
         receiptFiles: [],
       });
@@ -333,8 +380,19 @@ export default function PettyCashDashboard() {
     return '';
   };
 
+  const openFundWorkspace = async (fundItem: PettyCashFund) => {
+    setSelectedFundForWorkspace(fundItem);
+    setSelectedHistoricalFund(fundItem);
+    try {
+      const fundExpenses = await listExpensesForFund(fundItem._id);
+      setSelectedFundExpenses(fundExpenses);
+    } catch (e: any) {
+      setError(e.message || 'Failed to load fund ledger');
+    }
+  };
+
   return (
-    <div>
+    <div className="min-h-screen bg-slate-50 px-4 py-6 dark:bg-slate-950 lg:px-8">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
@@ -402,6 +460,114 @@ export default function PettyCashDashboard() {
         </div>
       )}
 
+      {workspaceFund && (selectedFundForWorkspace || selectedHistoricalFund) ? (
+        <div className="mb-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="border-b border-slate-200 bg-slate-50/70 px-6 py-5 dark:border-slate-700 dark:bg-slate-950/40">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">Ledger workspace</p>
+                <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-slate-100">{workspaceFund.name}</h2>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                  {workspaceFund.status === 'active' ? 'Active fund cycle' : 'Closed fund history'} • {workspaceFund.description || 'No description provided'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedFundForWorkspace(null);
+                  setSelectedHistoricalFund(null);
+                  setSelectedFundExpenses([]);
+                }}
+                className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Close workspace
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-4 p-6 md:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Initial fund allocation</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">{formatRwf(Number(workspaceFund.initialAmount) || 0)}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Total expenses logged</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">{formatRwf(workspaceTotalExpenses)}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Remaining cash on hand</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900 dark:text-slate-100">{formatRwf(workspaceRemaining)}</div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 border-t border-slate-200 p-6 lg:grid-cols-[1.15fr_0.85fr] dark:border-slate-700">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+              <div className="mb-3 flex items-center gap-2">
+                <FileText className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-600 dark:text-slate-400">Fund ledger</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-600 dark:text-slate-400">
+                      <th className="px-3 py-2">#</th>
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2">Item Description</th>
+                      <th className="px-3 py-2">Logged By</th>
+                      <th className="px-3 py-2">Amount (RWF)</th>
+                      <th className="px-3 py-2">Linked Matter / File ID</th>
+                      <th className="px-3 py-2">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workspaceExpenses.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-3 py-6 text-center text-slate-500 dark:text-slate-400">No expenses recorded in this fund cycle.</td>
+                      </tr>
+                    ) : (
+                      workspaceExpenses.map((expense, index) => (
+                        <tr key={expense._id} className="border-t border-slate-200 text-slate-700 dark:border-slate-700 dark:text-slate-300">
+                          <td className="px-3 py-3">{index + 1}</td>
+                          <td className="px-3 py-3">{expense.date}</td>
+                          <td className="px-3 py-3">{expense.itemDescription || expense.title}</td>
+                          <td className="px-3 py-3">{expense.createdByName}</td>
+                          <td className="px-3 py-3">{formatRwf(Number(expense.amount) || 0)}</td>
+                          <td className="px-3 py-3">{expense.matterId || expense.caseNoSnapshot || '—'}</td>
+                          <td className="px-3 py-3">
+                            {expense.receiptUrls?.length || expense.receiptUrl ? (
+                              <a href={BACKEND_URL + (expense.receiptUrls?.[0] || expense.receiptUrl || '')} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">View receipt</a>
+                            ) : (
+                              <span className="text-slate-400">No receipt</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <div className="flex items-center gap-2">
+                <Receipt className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-600 dark:text-slate-400">Allocation breakdown</h3>
+              </div>
+              <div className="mt-4 space-y-3">
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/40">
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Client-reimbursable disbursements</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">{formatRwf(workspaceBillableTotal)}</div>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/40">
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Firm overhead / internal spend</div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">{formatRwf(workspaceFirmOverhead)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {loading ? (
         <div className="text-gray-500">Loading…</div>
       ) : !fund ? (
@@ -422,7 +588,12 @@ export default function PettyCashDashboard() {
             </div>
             <div className="divide-y divide-gray-200">
               {fundHistory.map((item) => (
-                <div key={item._id} className="px-5 py-4 flex items-center justify-between gap-4">
+                <button
+                  key={item._id}
+                  type="button"
+                  onClick={() => void openFundWorkspace(item)}
+                  className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+                >
                   <div>
                     <p className="text-sm font-medium text-gray-900">{item.name}</p>
                     <p className="mt-1 text-xs text-gray-500">
@@ -433,7 +604,7 @@ export default function PettyCashDashboard() {
                     <p className="text-sm font-semibold text-gray-900">{formatRwf(item.initialAmount)}</p>
                     <p className="text-xs text-gray-500">{item.status}</p>
                   </div>
-                </div>
+                </button>
               ))}
               {fundHistory.length === 0 ? <div className="px-5 py-8 text-sm text-gray-500">No fund history yet.</div> : null}
             </div>
@@ -508,7 +679,12 @@ export default function PettyCashDashboard() {
             </div>
             <div className="divide-y divide-gray-200">
               {fundHistory.slice(0, 8).map((item) => (
-                <div key={item._id} className="px-5 py-4 flex items-center justify-between gap-4">
+                <button
+                  key={item._id}
+                  type="button"
+                  onClick={() => void openFundWorkspace(item)}
+                  className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+                >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
@@ -529,7 +705,7 @@ export default function PettyCashDashboard() {
                     <p className="text-sm font-semibold text-gray-900">{formatRwf(item.initialAmount)}</p>
                     <p className="text-xs text-gray-500">Remaining {formatRwf(item.remainingAmount)}</p>
                   </div>
-                </div>
+                </button>
               ))}
               {fundHistory.length === 0 ? <div className="px-5 py-8 text-sm text-gray-500">No fund history yet.</div> : null}
             </div>
@@ -791,15 +967,53 @@ export default function PettyCashDashboard() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Item / Expense Description *</label>
                 <input
                   type="text"
-                  value={expenseForm.title}
-                  onChange={(e) => setExpenseForm((p) => ({ ...p, title: e.target.value }))}
+                  value={expenseForm.itemDescription || expenseForm.title}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    setExpenseForm((p) => ({ ...p, itemDescription: nextValue, title: p.title || nextValue }));
+                  }}
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded"
-                  placeholder="Printer paper"
+                  placeholder="Taxi fare to client meeting"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Link to Specific Case File / Matter (Optional)</label>
+                <input
+                  list="petty-cash-case-options"
+                  value={expenseForm.caseId}
+                  onChange={(e) => setExpenseForm((p) => ({ ...p, caseId: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded"
+                  placeholder="Search case or matter"
+                />
+                <datalist id="petty-cash-case-options">
+                  {cases.map((c) => (
+                    <option key={String(c._id)} value={String(c._id)}>
+                      {c.caseNo} — {c.parties}
+                    </option>
+                  ))}
+                </datalist>
+                <p className="mt-1 text-xs text-gray-500">Use the case or matter reference when this expense should become a disbursement entry.</p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Billable to Client (Disbursement)</label>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">When enabled, this expense is flagged for client reimbursement and invoice routing.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setExpenseForm((p) => ({ ...p, isBillableToMatter: !p.isBillableToMatter, chargeType: !p.isBillableToMatter ? 'client' : 'internal' }))}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${expenseForm.isBillableToMatter ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${expenseForm.isBillableToMatter ? 'translate-x-5' : 'translate-x-1'}`} />
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -868,7 +1082,7 @@ export default function PettyCashDashboard() {
               </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Receipts (optional)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Upload Scan of Receipt / Cash Invoice *</label>
                 <div className="space-y-2">
                   {expenseForm.receiptFiles.length > 0 && (
                     <div className="space-y-2 mb-3">
@@ -901,21 +1115,35 @@ export default function PettyCashDashboard() {
                       ))}
                     </div>
                   )}
-                  <input
-                    type="file"
-                    multiple
-                    onChange={(e) => {
-                      const newFiles = Array.from(e.target.files || []);
-                      setExpenseForm((p) => ({
-                        ...p,
-                        receiptFiles: [...p.receiptFiles, ...newFiles],
-                      }));
-                      // Reset input so user can select same file again if needed
-                      if (e.target) e.target.value = '';
+                  <label
+                    className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-slate-400 dark:border-slate-700 dark:bg-slate-800/50"
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const droppedFiles = Array.from(event.dataTransfer?.files || []);
+                      if (droppedFiles.length > 0) {
+                        setExpenseForm((p) => ({ ...p, receiptFiles: [...p.receiptFiles, ...droppedFiles] }));
+                      }
                     }}
-                    className="w-full"
-                    accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.jfif,.doc,.docx"
-                  />
+                  >
+                    <Receipt className="mb-2 h-6 w-6 text-slate-500" />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Drop files here or click to browse</span>
+                    <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">PDF, JPG, PNG, WEBP, DOC, DOCX</span>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={(e) => {
+                        const newFiles = Array.from(e.target.files || []);
+                        setExpenseForm((p) => ({
+                          ...p,
+                          receiptFiles: [...p.receiptFiles, ...newFiles],
+                        }));
+                        if (e.target) e.target.value = '';
+                      }}
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.jfif,.doc,.docx"
+                    />
+                  </label>
                   <p className="text-xs text-gray-500 mt-1">
                     Supported: PDF, JPG/PNG/WEBP/HEIC, DOC/DOCX.
                   </p>

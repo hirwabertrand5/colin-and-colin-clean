@@ -4,6 +4,14 @@ import type { ICase } from './caseModel';
 export interface IPettyCashExpense extends Document {
   fundId: mongoose.Types.ObjectId;
 
+  expenseId?: string;
+  itemDescription?: string;
+  amountRwf?: number;
+  dateSpent?: string;
+  spentByUserId?: string;
+  isBillableToMatter?: boolean;
+  matterId?: string;
+
   date: string; // YYYY-MM-DD (consistent with your app)
   title: string;
   category?: string;
@@ -36,6 +44,14 @@ export interface IPettyCashExpense extends Document {
 const PettyCashExpenseSchema = new Schema<IPettyCashExpense>(
   {
     fundId: { type: Schema.Types.ObjectId, ref: 'PettyCashFund', required: true, index: true },
+
+    expenseId: { type: String, trim: true },
+    itemDescription: { type: String, trim: true },
+    amountRwf: { type: Number, min: 0 },
+    dateSpent: { type: String, trim: true },
+    spentByUserId: { type: String, trim: true },
+    isBillableToMatter: { type: Boolean, default: false },
+    matterId: { type: String, trim: true },
 
     date: { type: String, required: true },
     title: { type: String, required: true, trim: true },

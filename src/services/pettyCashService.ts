@@ -31,6 +31,13 @@ export interface PettyCashFund {
 export interface PettyCashExpense {
   _id: string;
   fundId: string;
+  expenseId?: string;
+  itemDescription?: string;
+  amountRwf?: number;
+  dateSpent?: string;
+  spentByUserId?: string;
+  isBillableToMatter?: boolean;
+  matterId?: string;
   date: string;
   title: string;
   category?: string;
@@ -146,6 +153,12 @@ export const addExpenseToFund = async (
     vendor?: string;
     chargeType?: 'internal' | 'client';
     caseId?: string;
+    itemDescription?: string;
+    amountRwf?: number;
+    dateSpent?: string;
+    spentByUserId?: string;
+    isBillableToMatter?: boolean;
+    matterId?: string;
     note?: string;
     receiptRef?: string;
     refundAmount?: number;
@@ -161,6 +174,12 @@ export const addExpenseToFund = async (
   if (payload.vendor) form.append('vendor', payload.vendor);
   if (payload.chargeType) form.append('chargeType', payload.chargeType);
   if (payload.caseId) form.append('caseId', payload.caseId);
+  if (payload.itemDescription) form.append('itemDescription', payload.itemDescription);
+  if (payload.amountRwf !== undefined) form.append('amountRwf', String(payload.amountRwf));
+  if (payload.dateSpent) form.append('dateSpent', payload.dateSpent);
+  if (payload.spentByUserId) form.append('spentByUserId', payload.spentByUserId);
+  if (payload.isBillableToMatter !== undefined) form.append('isBillableToMatter', String(payload.isBillableToMatter));
+  if (payload.matterId) form.append('matterId', payload.matterId);
   if (payload.note) form.append('note', payload.note);
   if (payload.receiptRef) form.append('receiptRef', payload.receiptRef);
   if (payload.refundAmount) form.append('refundAmount', String(payload.refundAmount));

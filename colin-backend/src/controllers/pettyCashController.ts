@@ -205,6 +205,12 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
       refundedBy,
       chargeType,
       caseId,
+      itemDescription,
+      amountRwf,
+      dateSpent,
+      spentByUserId,
+      isBillableToMatter,
+      matterId,
     } = req.body || {};
     if (!fundId) return res.status(400).json({ message: 'Missing fundId.' });
 
@@ -261,6 +267,17 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
         amount: amt,
         createdByName: actor.actorName,
       };
+      if (itemDescription) expensePayload.itemDescription = String(itemDescription).trim();
+      if (amountRwf !== undefined && amountRwf !== null && String(amountRwf) !== '') {
+        const parsedAmountRwf = Number(amountRwf);
+        if (Number.isFinite(parsedAmountRwf) && parsedAmountRwf >= 0) expensePayload.amountRwf = parsedAmountRwf;
+      }
+      if (dateSpent) expensePayload.dateSpent = String(dateSpent).trim();
+      if (spentByUserId) expensePayload.spentByUserId = String(spentByUserId).trim();
+      if (isBillableToMatter !== undefined && isBillableToMatter !== null) {
+        expensePayload.isBillableToMatter = String(isBillableToMatter) === 'true';
+      }
+      if (matterId) expensePayload.matterId = String(matterId).trim();
       if (category) expensePayload.category = String(category).trim();
       if (vendor) expensePayload.vendor = String(vendor).trim();
       if (note) expensePayload.note = String(note).trim();
