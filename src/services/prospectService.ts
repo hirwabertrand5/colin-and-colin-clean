@@ -38,10 +38,12 @@ export interface Prospect {
   enquirySource?: string;
   referralSource?: string;
   estimatedMatterValue?: number;
-  estimatedMatterCurrency?: 'RWF' | 'USD' | 'EUR' | 'GBP' | 'KES' | 'UGX' | 'TZS';
+  estimatedMatterCurrency?: 'RWF' | 'USD' | 'EUR' | 'GBP' | 'KES' | 'UGX' | 'TZS' | 'CNY' | 'INR';
+  estimatedFeeValue?: number;
+  completedStages?: ProspectStage[];
   practiceArea?: 'Converted' | 'Non Converted';
   subPracticeActions?: string[];
-  paymentArrangement?: 'Full Payment' | 'Installments';
+  paymentArrangement?: 'Full Payment' | 'Installments' | 'Quotation Accepted' | 'Agreed Billing Date Reached' | 'Legal Opinion Delivered' | 'Matter Milestone Completed' | 'Matter Completed' | 'Monthly Retainer Due';
   paymentMethod?: 'Bank Transfer' | 'Cash' | 'Mobile Money' | 'Cheque' | 'Card' | 'Mixed';
   installmentCount?: number;
   depositAmount?: number;

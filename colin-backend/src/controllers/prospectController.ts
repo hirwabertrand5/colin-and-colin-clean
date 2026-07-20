@@ -3,8 +3,10 @@ import mongoose from 'mongoose';
 import Prospect from '../models/prospectModel';
 import Case from '../models/caseModel';
 import User from '../models/userModel';
+import ProspectFeedback from '../models/prospectFeedbackModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { buildYearlySequence } from '../utils/counter';
+import { sendEmailResend } from '../services/emailResendService';
 
 const isAdminRole = (role?: string) =>
   role === 'managing_director' ||
@@ -57,7 +59,17 @@ const normalizePracticeArea = (value: unknown) => {
 };
 const normalizePaymentArrangement = (value: unknown) => {
   const cleaned = cleanString(value);
-  return cleaned === 'Full Payment' || cleaned === 'Installments' ? cleaned : undefined;
+  const supportedTriggers = [
+    'Full Payment',
+    'Installments',
+    'Quotation Accepted',
+    'Agreed Billing Date Reached',
+    'Legal Opinion Delivered',
+    'Matter Milestone Completed',
+    'Matter Completed',
+    'Monthly Retainer Due',
+  ];
+  return supportedTriggers.includes(cleaned) ? cleaned : undefined;
 };
 const normalizePaymentMethod = (value: unknown) => {
   const cleaned = cleanString(value);
@@ -83,6 +95,9 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
     estimatedMatterValue: toOptionalNumber(body.estimatedMatterValue),
     estimatedMatterCurrency: normalizeCurrency(body.estimatedMatterCurrency) || 'RWF',
     estimatedFeeValue: toOptionalNumber(body.estimatedFeeValue),
+    completedStages: Array.isArray(body.completedStages)
+      ? body.completedStages.filter((item: unknown): item is string => typeof item === 'string' && validStages.includes(item)).slice(0, validStages.length)
+      : [],
     practiceArea: normalizePracticeArea(body.practiceArea),
     subPracticeActions: Array.isArray(body.subPracticeActions)
       ? body.subPracticeActions.map((item: unknown) => cleanString(item)).filter(Boolean)
@@ -168,6 +183,43 @@ const validateProspectPayload = async (payload: ReturnType<typeof getProspectPay
 };
 
 const generateProspectNo = () => buildYearlySequence('prospect', 'PROS');
+
+const buildFeedbackEmailHtml = (prospectId: string) => {
+  const publicUrl = `${process.env.CLIENT_URL || 'http://localhost:5173'}/public/feedback/${prospectId}`;
+  return `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a;background:#f8fafc;padding:24px;">
+      <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px;border:1px solid #e2e8f0;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+          <div style="width:44px;height:44px;border-radius:12px;background:#0f172a;color:#ffffff;display:flex;align-items:center;justify-content:center;font-weight:700;">C&C</div>
+          <div>
+            <div style="font-size:18px;font-weight:700;color:#0f172a;">Colin & Colin Legal Solutions</div>
+            <div style="font-size:13px;color:#64748b;">Client experience follow-up</div>
+          </div>
+        </div>
+        <h2 style="margin:0 0 12px;font-size:24px;color:#0f172a;">Thank you for connecting with us</h2>
+        <p style="margin:0 0 16px;font-size:15px;color:#334155;">We appreciate the time you spent speaking with our team. Your perspective helps us improve how we support future matters.</p>
+        <p style="margin:0 0 24px;font-size:15px;color:#334155;">If you are willing, please share a few quick thoughts about your experience by clicking the button below.</p>
+        <a href="${publicUrl}" style="display:inline-block;padding:12px 18px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;">Provide Quick Feedback</a>
+      </div>
+    </div>
+  `;
+};
+
+const sendProspectFeedbackEmail = async (prospect: any) => {
+  const emailAddress = String(prospect?.contact?.email || '').trim();
+  if (!emailAddress) return { ok: false, error: 'Missing prospect email.' };
+
+  const html = buildFeedbackEmailHtml(String(prospect._id));
+  const result = await sendEmailResend([emailAddress], 'Thank you for connecting with Colin & Colin Legal Solutions', html);
+
+  const feedback = await ProspectFeedback.findOne({ prospectId: prospect._id });
+  if (feedback) {
+    feedback.feedbackEmailSentAt = result.ok ? new Date() : undefined as any;
+    await feedback.save();
+  }
+
+  return result;
+};
 
 export const getAllProspects = async (req: AuthRequest, res: Response) => {
   try {
@@ -291,12 +343,19 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: validationMessage });
     }
 
+    const shouldSendFeedbackEmail = prospect.stage !== 'Non-Converted' && updates.stage === 'Non-Converted';
+
     // Update fields
     (Object.keys(updates) as Array<keyof typeof updates>).forEach((key) => {
       (prospect as any)[key] = updates[key];
     });
 
     const saved = await prospect.save();
+
+    if (shouldSendFeedbackEmail) {
+      await sendProspectFeedbackEmail(saved);
+    }
+
     const populated = await Prospect.findById(saved._id)
       .populate('assignedTo', 'name email')
       .populate('responsiblePartner', 'name email role')

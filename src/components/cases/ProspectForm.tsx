@@ -38,6 +38,27 @@ const STAGE_CHECKLIST = [
   { value: 'Converted', label: 'Stage 7 – Converted', subtext: 'The prospect is converted into an engagement.' },
   { value: 'Non-Converted', label: 'Stage 8 – Non-Converted', subtext: 'The prospect is closed without conversion.' },
 ] as const;
+const BILLING_TRIGGER_OPTIONS: Prospect['paymentArrangement'][] = [
+  'Full Payment',
+  'Installments',
+  'Quotation Accepted',
+  'Agreed Billing Date Reached',
+  'Legal Opinion Delivered',
+  'Matter Milestone Completed',
+  'Matter Completed',
+  'Monthly Retainer Due',
+];
+const normalizeCompletedStages = (value: unknown, activeStage?: ProspectStage): ProspectStage[] => {
+  if (Array.isArray(value)) {
+    const normalized = value.filter((item): item is ProspectStage => typeof item === 'string' && STAGE_CHECKLIST.some((stage) => stage.value === item));
+    if (normalized.length) return normalized;
+  }
+
+  if (!activeStage) return [];
+  const activeIndex = STAGE_CHECKLIST.findIndex((stage) => stage.value === activeStage);
+  if (activeIndex < 0) return [];
+  return STAGE_CHECKLIST.slice(0, activeIndex + 1).map((stage) => stage.value as ProspectStage);
+};
 const CONVERTED_OUTCOMES = ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'];
 const NON_CONVERTED_OUTCOMES = ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'];
 const ESTIMATED_CURRENCIES = [
@@ -85,6 +106,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
     enquirySource: string;
     referralSource: string;
     estimatedMatterValue: string;
+    estimatedFeeValue: string;
     estimatedMatterCurrency: Prospect['estimatedMatterCurrency'];
     paymentArrangement: Prospect['paymentArrangement'];
     paymentMethod: Prospect['paymentMethod'];
@@ -94,6 +116,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
     contact: { name: string; email: string; phone: string };
     inquiryDescription: string;
     stage: ProspectStage;
+    completedStages: ProspectStage[];
     conversionOutcome: string;
     responsiblePartner: string;
     responsibleAssociate: string;
@@ -105,6 +128,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
     enquirySource: prospect?.enquirySource || '',
     referralSource: prospect?.referralSource || '',
     estimatedMatterValue: prospect?.estimatedMatterValue?.toString() || '',
+    estimatedFeeValue: prospect?.estimatedFeeValue?.toString() || '',
     estimatedMatterCurrency: prospect?.estimatedMatterCurrency || 'RWF',
     paymentArrangement: prospect?.paymentArrangement || undefined,
     paymentMethod: prospect?.paymentMethod || undefined,
@@ -118,6 +142,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
     },
     inquiryDescription: prospect?.inquiryDescription || '',
     stage: prospect?.stage || 'Inquiry',
+    completedStages: normalizeCompletedStages(prospect?.completedStages, prospect?.stage),
     conversionOutcome: prospect?.conversionOutcome || '',
     responsiblePartner: getUserId(prospect?.responsiblePartner),
     responsibleAssociate: getUserId(prospect?.responsibleAssociate || prospect?.assignedTo),
@@ -140,6 +165,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
       enquirySource: prospect?.enquirySource || '',
       referralSource: prospect?.referralSource || '',
       estimatedMatterValue: prospect?.estimatedMatterValue?.toString() || '',
+      estimatedFeeValue: prospect?.estimatedFeeValue?.toString() || '',
       estimatedMatterCurrency: prospect?.estimatedMatterCurrency || 'RWF',
       paymentArrangement: prospect?.paymentArrangement || undefined,
       paymentMethod: prospect?.paymentMethod || undefined,
@@ -153,6 +179,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
       },
       inquiryDescription: prospect?.inquiryDescription || '',
       stage: prospect?.stage || 'Inquiry',
+      completedStages: normalizeCompletedStages(prospect?.completedStages, prospect?.stage),
       conversionOutcome: prospect?.conversionOutcome || '',
       responsiblePartner: getUserId(prospect?.responsiblePartner),
       responsibleAssociate: getUserId(prospect?.responsibleAssociate || prospect?.assignedTo),
@@ -250,10 +277,22 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
 
   const handleStageToggle = (stageValue: ProspectStage) => {
     setForm((prev) => {
-      const isSameStage = prev.stage === stageValue;
-      const nextStage: ProspectStage = isSameStage ? 'Inquiry' : stageValue;
+      const isCompleted = prev.completedStages.includes(stageValue);
+      const stageOrder = STAGE_CHECKLIST.map((stage) => stage.value as ProspectStage);
+      const stageIndex = stageOrder.indexOf(stageValue);
+      const precedingStages = stageIndex >= 0 ? stageOrder.slice(0, stageIndex + 1) : [stageValue];
+
+      const nextCompletedStages = isCompleted
+        ? prev.completedStages.filter((stage) => stage !== stageValue)
+        : Array.from(new Set([...prev.completedStages, ...precedingStages]));
+
+      const nextStage = isCompleted
+        ? (prev.stage === stageValue ? prev.completedStages.filter((stage) => stage !== stageValue).slice(-1)[0] || 'Inquiry' : prev.stage)
+        : stageValue;
+
       return {
         ...prev,
+        completedStages: nextCompletedStages,
         stage: nextStage,
         conversionOutcome: nextStage === 'Converted' || nextStage === 'Non-Converted' ? prev.conversionOutcome : '',
       };
@@ -281,7 +320,9 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
     if (!form.responsiblePartner) return 'Please select a responsible partner.';
     if (!form.responsibleAssociate) return 'Please select a responsible associate.';
     const matterValue = Number(form.estimatedMatterValue);
+    const feeValue = Number(form.estimatedFeeValue);
     if (form.estimatedMatterValue && !Number.isFinite(matterValue)) return 'Estimated matter value must be a number.';
+    if (form.estimatedFeeValue && !Number.isFinite(feeValue)) return 'Estimated fee value must be a number.';
     if (!form.estimatedMatterCurrency) return 'Please select a currency for the estimated matter value.';
     if (!form.paymentArrangement) return 'Please select a billing trigger.';
     if (!form.paymentMethod) return 'Please select a payment method.';
@@ -320,6 +361,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
         enquirySource: form.enquirySource.trim(),
         referralSource: form.referralSource.trim(),
         estimatedMatterValue: form.estimatedMatterValue ? Number(form.estimatedMatterValue) : undefined,
+        estimatedFeeValue: form.estimatedFeeValue ? Number(form.estimatedFeeValue) : undefined,
         estimatedMatterCurrency: form.estimatedMatterCurrency || 'RWF',
         paymentArrangement: form.paymentArrangement || undefined,
         paymentMethod: form.paymentMethod || undefined,
@@ -332,6 +374,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
         },
         inquiryDescription: form.inquiryDescription.trim(),
         stage: form.stage,
+        completedStages: form.completedStages,
         legalServicePath: form.legalServicePath?.length ? form.legalServicePath : undefined,
         conversionOutcome: form.stage === 'Converted' || form.stage === 'Non-Converted' ? form.conversionOutcome || undefined : undefined,
         responsiblePartner: form.responsiblePartner,
@@ -642,10 +685,10 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
                   />
                 </div>
                 <div className="md:col-span-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-900/40">
-                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Business Development Information</div>
-                  <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Business Development Information</div>
+                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Estimated Matter Value</label>
+                      <label className="mb-1 block text-sm font-medium text-slate-900 dark:text-slate-100">Estimated Matter Value</label>
                       <input
                         type="number"
                         min="0"
@@ -656,56 +699,75 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Currency</label>
-                      <select
-                        value={form.estimatedMatterCurrency}
-                        onChange={(e) => setForm({ ...form, estimatedMatterCurrency: e.target.value as any })}
+                      <label className="mb-1 block text-sm font-medium text-slate-900 dark:text-slate-100">Estimated Fee Value</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.estimatedFeeValue}
+                        onChange={(e) => setForm({ ...form, estimatedFeeValue: e.target.value })}
                         className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                      >
-                        {ESTIMATED_CURRENCIES.map((currency) => (
-                          <option key={currency.code} value={currency.code}>
-                            {currency.label}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
                   </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Billing Triggers *</label>
-                  <select
-                    value={form.paymentArrangement}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        paymentArrangement: e.target.value as any,
-                        installmentCount: e.target.value === 'Installments' ? form.installmentCount : '',
-                        depositAmount: e.target.value === 'Installments' ? form.depositAmount : '',
-                      })
-                    }
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    <option value="">Select...</option>
-                    <option value="Full Payment">Full Payment</option>
-                    <option value="Installments">Installments</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Payment Method *</label>
-                  <select
-                    value={form.paymentMethod}
-                    onChange={(e) => setForm({ ...form, paymentMethod: e.target.value as any })}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    <option value="">Select...</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="Cash">Cash</option>
-                    <option value="Mobile Money">Mobile Money</option>
-                    <option value="Cheque">Cheque</option>
-                    <option value="Card">Card</option>
-                    <option value="Mixed">Mixed</option>
-                  </select>
-                </div>
+
+                  <div className="mt-4">
+                    <label className="mb-1 block text-sm font-medium text-slate-900 dark:text-slate-100">Currency</label>
+                    <select
+                      value={form.estimatedMatterCurrency}
+                      onChange={(e) => setForm({ ...form, estimatedMatterCurrency: e.target.value as any })}
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    >
+                      {ESTIMATED_CURRENCIES.map((currency) => (
+                        <option key={currency.code} value={currency.code}>
+                          {currency.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="mb-1 block text-sm font-medium text-slate-900 dark:text-slate-100">Billing Triggers *</label>
+                    <select
+                      value={form.paymentArrangement}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          paymentArrangement: e.target.value as any,
+                          installmentCount: e.target.value === 'Installments' ? form.installmentCount : '',
+                          depositAmount: e.target.value === 'Installments' ? form.depositAmount : '',
+                        })
+                      }
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    >
+                      <option value="">Select...</option>
+                      {BILLING_TRIGGER_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-xs italic text-slate-500 dark:text-slate-400">
+                      Selection automatically schedules financial tasks and triggers draft invoice alerts upon reaching this project milestone.
+                    </p>
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="mb-1 block text-sm font-medium text-slate-900 dark:text-slate-100">Payment Method *</label>
+                    <select
+                      value={form.paymentMethod}
+                      onChange={(e) => setForm({ ...form, paymentMethod: e.target.value as any })}
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    >
+                      <option value="">Select...</option>
+                      <option value="Bank Transfer">Bank Transfer</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Mobile Money">Mobile Money</option>
+                      <option value="Cheque">Cheque</option>
+                      <option value="Card">Card</option>
+                      <option value="Mixed">Mixed</option>
+                    </select>
+                  </div>
                 {form.paymentArrangement === 'Installments' ? (
                   <>
                     <div>
@@ -738,6 +800,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
                     Full payment selected. The client settles the full amount in a single transaction.
                   </div>
                 )}
+                </div>
               </div>
             </section>
           </div>
@@ -801,26 +864,32 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
 
               <div>
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Stage Tracking *</label>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Select the active milestone</span>
+                  <label className="text-sm font-medium text-slate-900 dark:text-slate-100">Stage Tracking *</label>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Select the active milestone</span>
                 </div>
                 <div className="space-y-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-900/40">
                   {STAGE_CHECKLIST.map((stage) => {
-                    const checked = form.stage === stage.value;
+                    const checked = form.completedStages.includes(stage.value as ProspectStage);
+                    const isActiveStage = form.stage === stage.value;
                     const isClosingStage = form.stage === 'Converted' || form.stage === 'Non-Converted';
                     const showOutcomeOptions = stage.value === 'Converted' || stage.value === 'Non-Converted';
                     return (
-                      <div key={stage.value} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                      <div
+                        key={stage.value}
+                        className={`rounded-xl border p-3 ${checked ? 'border-blue-300 bg-blue-50/80 dark:border-blue-700 dark:bg-blue-900/20' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}
+                      >
                         <label className="flex cursor-pointer items-start gap-3 text-sm">
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => handleStageToggle(stage.value)}
+                            onChange={() => handleStageToggle(stage.value as ProspectStage)}
                             className="mt-1 h-4 w-4 rounded border-gray-300 text-gray-900"
                           />
                           <span>
-                            <span className="font-medium text-gray-900 dark:text-gray-100">{stage.label}</span>
-                            <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">{stage.subtext}</span>
+                            <span className={`font-medium ${isActiveStage ? 'text-blue-700 dark:text-blue-300' : 'text-slate-900 dark:text-slate-100'}`}>
+                              {stage.label}
+                            </span>
+                            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">{stage.subtext}</span>
                           </span>
                         </label>
                         {showOutcomeOptions && isClosingStage && checked && (
@@ -842,7 +911,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
                     );
                   })}
                 </div>
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                   Select the current milestone and, when closing, choose the conversion outcome beneath the terminal stage.
                 </p>
               </div>

@@ -10,6 +10,11 @@ import {
 
 import WorkflowTemplates from './WorkflowTemplates';
 import { listAllWorkflowTemplates, WorkflowTemplate } from '../../services/workflowService';
+import {
+  getIntakeAutomationConfig,
+  updateIntakeAutomationConfig,
+  IntakeAutomationConfig,
+} from '../../services/intakeAutomationConfigService';
 
 type WorkflowRow = {
   stage: string;
@@ -110,6 +115,11 @@ export default function Settings() {
   usePageTitle('Settings');
   const [testSending, setTestSending] = useState(false);
   const [testTo, setTestTo] = useState('');
+  const [automationConfig, setAutomationConfig] = useState<IntakeAutomationConfig | null>(null);
+  const [automationConfigLoading, setAutomationConfigLoading] = useState(false);
+  const [automationConfigSaving, setAutomationConfigSaving] = useState(false);
+  const [automationConfigErr, setAutomationConfigErr] = useState('');
+  const [automationConfigMsg, setAutomationConfigMsg] = useState('');
 
   // Workflows UI state
   const [openWorkflowId, setOpenWorkflowId] = useState<string>('');
@@ -249,6 +259,28 @@ export default function Settings() {
     };
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setAutomationConfigLoading(true);
+        setAutomationConfigErr('');
+        const config = await getIntakeAutomationConfig();
+        if (!mounted) return;
+        setAutomationConfig(config);
+      } catch (e: any) {
+        if (!mounted) return;
+        setAutomationConfigErr(e?.message || 'Failed to load intake automation settings');
+      } finally {
+        if (!mounted) return;
+        setAutomationConfigLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const onSave = async () => {
     if (!prefs) return;
     try {
@@ -263,6 +295,23 @@ export default function Settings() {
       setErr(e?.message || 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onSaveAutomationConfig = async () => {
+    if (!automationConfig) return;
+    try {
+      setAutomationConfigSaving(true);
+      setAutomationConfigErr('');
+      setAutomationConfigMsg('');
+      const saved = await updateIntakeAutomationConfig(automationConfig);
+      setAutomationConfig(saved);
+      setAutomationConfigMsg('Automation settings saved.');
+      setTimeout(() => setAutomationConfigMsg(''), 2500);
+    } catch (e: any) {
+      setAutomationConfigErr(e?.message || 'Failed to save automation settings');
+    } finally {
+      setAutomationConfigSaving(false);
     }
   };
 
@@ -430,6 +479,77 @@ export default function Settings() {
             </div>
 
             <p className="text-xs text-gray-500">SMTP credentials are read from backend environment variables.</p>
+          </div>
+        </div>
+
+        {/* Intake Automation Configurations */}
+        <div className="bg-white border border-gray-200 rounded-lg p-6">
+          <div className="flex items-center mb-4">
+            <Database className="w-5 h-5 text-gray-700 mr-2" />
+            <h2 className="text-lg font-semibold text-gray-900">Intake Automation Configurations</h2>
+          </div>
+
+          {automationConfigErr && (
+            <div className="mb-4 px-4 py-3 bg-red-50 border border-red-100 text-red-700 rounded">
+              {automationConfigErr}
+            </div>
+          )}
+
+          {automationConfigMsg && (
+            <div className="mb-4 px-4 py-3 bg-green-50 border border-green-100 text-green-700 rounded">
+              {automationConfigMsg}
+            </div>
+          )}
+
+          {automationConfigLoading ? (
+            <div className="text-sm text-gray-500">Loading automation settings…</div>
+          ) : !automationConfig ? (
+            <div className="text-sm text-gray-500">No automation settings loaded.</div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Google Form Base URL</label>
+                <input
+                  type="text"
+                  value={automationConfig.googleFormBaseUrl}
+                  onChange={(e) =>
+                    setAutomationConfig((cur) =>
+                      cur ? { ...cur, googleFormBaseUrl: e.target.value } : cur
+                    )
+                  }
+                  placeholder="https://docs.google.com/forms/d/e/FORM_ID/viewform"
+                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                />
+                <p className="mt-1 text-xs text-gray-500">Use the Google Form URL without the prospect-specific parameter.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Google Form Entry ID</label>
+                <input
+                  type="text"
+                  value={automationConfig.googleFormEntryId}
+                  onChange={(e) =>
+                    setAutomationConfig((cur) =>
+                      cur ? { ...cur, googleFormEntryId: e.target.value } : cur
+                    )
+                  }
+                  placeholder="entry.123456789"
+                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                />
+                <p className="mt-1 text-xs text-gray-500">The form field key that receives the prospect ID.</p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end mt-4">
+            <button
+              type="button"
+              onClick={onSaveAutomationConfig}
+              disabled={!automationConfig || automationConfigSaving}
+              className="inline-flex items-center px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-60"
+            >
+              {automationConfigSaving ? 'Saving…' : 'Save Automation Settings'}
+            </button>
           </div>
         </div>
 

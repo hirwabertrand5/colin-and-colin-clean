@@ -32,9 +32,10 @@ export interface IProspect extends Document {
   estimatedMatterValue?: number;
   estimatedMatterCurrency?: 'RWF' | 'USD' | 'EUR' | 'GBP' | 'KES' | 'UGX' | 'TZS' | 'CNY' | 'INR';
   estimatedFeeValue?: number;
+  completedStages?: ProspectStage[];
   practiceArea?: 'Converted' | 'Non Converted';
   subPracticeActions?: string[];
-  paymentArrangement?: 'Full Payment' | 'Installments';
+  paymentArrangement?: 'Full Payment' | 'Installments' | 'Quotation Accepted' | 'Agreed Billing Date Reached' | 'Legal Opinion Delivered' | 'Matter Milestone Completed' | 'Matter Completed' | 'Monthly Retainer Due';
   paymentMethod?: 'Bank Transfer' | 'Cash' | 'Mobile Money' | 'Cheque' | 'Card' | 'Mixed';
   installmentCount?: number;
   depositAmount?: number;
@@ -138,6 +139,10 @@ const ProspectSchema = new Schema<IProspect>(
       trim: true,
     },
     estimatedFeeValue: Number,
+    completedStages: {
+      type: [String],
+      default: [],
+    },
     practiceArea: {
       type: String,
       enum: ['Converted', 'Non Converted'],
@@ -149,7 +154,16 @@ const ProspectSchema = new Schema<IProspect>(
     },
     paymentArrangement: {
       type: String,
-      enum: ['Full Payment', 'Installments'],
+      enum: [
+        'Full Payment',
+        'Installments',
+        'Quotation Accepted',
+        'Agreed Billing Date Reached',
+        'Legal Opinion Delivered',
+        'Matter Milestone Completed',
+        'Matter Completed',
+        'Monthly Retainer Due',
+      ],
       trim: true,
     },
     paymentMethod: {

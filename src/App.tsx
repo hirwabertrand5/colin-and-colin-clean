@@ -11,6 +11,7 @@ import CreateCase from './components/cases/CreateCase';
 import CaseWorkspace from './components/cases/CaseWorkspace';
 import IntakeProspects from './components/cases/IntakeProspects';
 import ProspectWorkspace from './components/cases/ProspectWorkspace';
+import PublicFeedbackForm from './components/public/PublicFeedbackForm';
 import TaskBoard from './components/tasks/TaskBoard';
 import TaskDetail from './components/tasks/TaskDetail';
 import Calendar from './components/calendar/Calendar';
@@ -93,6 +94,9 @@ function App() {
   }
 
   const isMD = user?.role === 'managing_director';
+  const isManagingPartner =
+    user?.role === 'managing_partner' ||
+    user?.role === 'executive_managing_partner';
   const isPartner =
     user?.role === 'managing_partner' ||
     user?.role === 'executive_managing_partner' ||
@@ -110,6 +114,7 @@ function App() {
       <Routes>
         {/* Public */}
         <Route path="/login" element={user ? <Navigate to="/" /> : <Login onLogin={handleLogin} />} />
+        <Route path="/public/feedback/:prospectId" element={<PublicFeedbackForm />} />
 
         {/* Protected */}
         <Route
@@ -215,7 +220,7 @@ function App() {
 
                   {/* Admin */}
                   {(isMD || isExec) && <Route path="/admin/users" element={<UserManagement />} />}
-                  {(isMD || isExec) && <Route path="/admin/settings" element={<Settings />} />}
+                  {(isMD || isManagingPartner || isExec) && <Route path="/admin/settings" element={<Settings />} />}
                 </Routes>
               </DashboardLayout>
             ) : (
