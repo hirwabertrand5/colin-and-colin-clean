@@ -3,6 +3,7 @@ import { Download, FileText, BarChart3, TrendingUp, Users } from 'lucide-react';
 import { UserRole } from '../../App';
 import { FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
 import usePageTitle from '../../hooks/usePageTitle';
+import { downloadWorkbook } from '../../utils/excelExport';
 
 interface FirmReportsProps {
   userRole: UserRole;
@@ -25,30 +26,6 @@ const ROLE_ORDER = [
 ];
 
 
-const downloadTextFile = (filename: string, content: string, mime = 'text/csv;charset=utf-8') => {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(url);
-};
-
-const toCsv = (rows: Array<Record<string, any>>) => {
-  if (!rows.length) return '';
-  const headers = Object.keys(rows[0]);
-  const esc = (v: any) => `"${String(v ?? '').replaceAll('"', '""')}"`;
-  const lines = [
-    headers.join(','),
-    ...rows.map((r) => headers.map((h) => esc(r[h])).join(',')),
-  ];
-  return lines.join('\n');
-};
 
 export default function FirmReports({ userRole }: FirmReportsProps) {
   const [selectedReport, setSelectedReport] = useState<'overview' | 'financial' | 'productivity' | 'cases'>('overview');
@@ -118,107 +95,160 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     });
   }, [data]);
 
-  const exportCsv = () => {
+  const exportWorkbook = async () => {
     if (!data) return;
 
-    // export a simple multi-sheet style using section headers
-    const lines: string[] = [];
+    const orderedTeamRows = (data.team || [])
+      .slice()
+      .sort((a, b) => {
+        const idx = (label?: string) => {
+          if (!label) return ROLE_ORDER.length + 1;
+          const i = ROLE_ORDER.indexOf(label);
+          return i === -1 ? ROLE_ORDER.length + 1 : i;
+        };
+        const ia = idx(a.earningRoleLabel || a.role || '');
+        const ib = idx(b.earningRoleLabel || b.role || '');
+        if (ia !== ib) return ia - ib;
+        return (b.activeCases || 0) - (a.activeCases || 0);
+      });
 
-    lines.push(`Firm Reports`);
-    lines.push(`From,${data.range.from}`);
-    lines.push(`To,${data.range.to}`);
-    lines.push('');
+    const summaryMilestones = [
+      ['Early', data.team.reduce((s, m) => s + (m.earlyTasks || 0), 0), 0],
+      ['On Time', data.team.reduce((s, m) => s + (m.onTimeTasks || 0), 0), 0],
+      ['Late', data.team.reduce((s, m) => s + (m.lateTasks || 0), 0), 0],
+      ['Overdue', data.team.reduce((s, m) => s + (m.overdueTasks || 0), 0), 0],
+    ].map(([label, value, _]) => {
+      const total = data.team.reduce(
+        (s, m) => s + (m.excellentTasks || 0) + (m.goodTasks || 0) + (m.delayedTasks || 0) + (m.riskTasks || 0),
+        0
+      );
+      const totalAlt = data.team.reduce(
+        (s, m) => s + (m.earlyTasks || 0) + (m.onTimeTasks || 0) + (m.lateTasks || 0) + (m.overdueTasks || 0),
+        0
+      );
+      const pct = totalAlt ? Number(value) / totalAlt : 0;
+      return [label, pct, Number(value)];
+    });
 
-    const kpiRow: Record<string, any> = {
-      activeCases: data.kpis.activeCases,
-      billableHours: data.kpis.billableHours,
-      billed: data.kpis.billed,
-      collected: data.kpis.collected,
-      outstanding: data.kpis.outstanding,
-      clientRelatedExpenses: data.kpis.clientRelatedExpenses || 0,
-    };
-
-    lines.push('KPIs');
-    lines.push(toCsv([kpiRow]));
-    lines.push('');
-
-    lines.push('Team Earnings');
-    // order team rows to follow ROLE_ORDER
-    const orderedForCsv = data.team
-      ? [...data.team].sort((a, b) => {
-          const idx = (label?: string) => {
-            if (!label) return ROLE_ORDER.length + 1;
-            const i = ROLE_ORDER.indexOf(label);
-            return i === -1 ? ROLE_ORDER.length + 1 : i;
+    const exportConfig = (() => {
+      switch (selectedReport) {
+        case 'financial':
+          return {
+            title: 'Financial Summary',
+            sections: [
+              {
+                title: 'Summary Banners',
+                headers: ['Metric Type', 'Value'],
+                rows: [
+                  ['Total Billed', data.kpis.billed],
+                  ['Total Collected', data.kpis.collected],
+                  ['Outstanding', data.kpis.outstanding],
+                  ['Client Expenses', data.kpis.clientRelatedExpenses || 0],
+                ],
+                currencyColumns: [2],
+              },
+              {
+                title: 'Expense Types / Petty Cash Ledger',
+                headers: ['Expense Item Type', 'Total Entries', 'Total Amount (RWF)', 'Reimbursable Client Portion (RWF)'],
+                rows: (data.expenseTypes || []).map((e) => [e.type, e.count, e.amount, e.clientRelatedAmount]),
+                currencyColumns: [3, 4],
+                summaryRow: ['Total', (data.expenseTypes || []).reduce((sum, e) => sum + (e.count || 0), 0), (data.expenseTypes || []).reduce((sum, e) => sum + (e.amount || 0), 0), (data.expenseTypes || []).reduce((sum, e) => sum + (e.clientRelatedAmount || 0), 0)],
+              },
+              {
+                title: 'Revenue by Practice Path (Billed)',
+                headers: ['Practice Path', 'Total Billed Amount (RWF)'],
+                rows: data.caseTypes.map((c) => [c.type, c.revenueBilled]),
+                currencyColumns: [2],
+              },
+            ],
           };
-          const ia = idx(a.earningRoleLabel || a.role || '');
-          const ib = idx(b.earningRoleLabel || b.role || '');
-          if (ia !== ib) return ia - ib;
-          return (b.activeCases || 0) - (a.activeCases || 0);
-        })
-      : [];
+        case 'productivity':
+          return {
+            title: 'Productivity Report',
+            sections: [
+              {
+                title: 'Productivity Summary',
+                headers: ['Milestone Type', 'Percentage (%)', 'Completed Tasks Count'],
+                rows: summaryMilestones,
+                percentColumns: [2],
+              },
+              {
+                title: 'Team Productivity Metrics',
+                headers: ['Team Member', 'Tasks Completed', 'Share', 'Fees Earned', 'Early', 'On Time', 'Late', 'Overdue', 'Deadline Score', 'Hours'],
+                rows: orderedTeamRows.map((member) => [
+                  member.name,
+                  member.tasksCompleted,
+                  member.earningSharePercent == null ? 0 : member.earningSharePercent / 100,
+                  member.earnedFees || 0,
+                  member.earlyTasks || 0,
+                  member.onTimeTasks || 0,
+                  member.lateTasks || 0,
+                  member.overdueTasks || 0,
+                  `Excellent: ${member.excellentTasks || 0} | Good: ${member.goodTasks || 0} | Delayed: ${member.delayedTasks || 0} | Risk: ${member.riskTasks || 0}`,
+                  member.billableHours,
+                ]),
+                currencyColumns: [4],
+                percentColumns: [3],
+                centerColumns: [2, 3, 4, 5, 6, 7, 8, 9],
+              },
+            ],
+          };
+        case 'cases':
+          return {
+            title: 'Case Analytics',
+            sections: [
+              {
+                title: 'Case Analytics by Practice Path',
+                headers: ['Practice Path', 'Active', 'Closed', 'Avg Duration', 'Revenue Billed'],
+                rows: data.caseTypes.map((c) => [c.type, c.active, c.closed, c.avgDurationDays ? `${c.avgDurationDays} days` : '—', c.revenueBilled]),
+                currencyColumns: [5],
+                centerColumns: [3],
+              },
+            ],
+          };
+        case 'overview':
+        default:
+          return {
+            title: 'Firm Overview',
+            sections: [
+              {
+                title: 'KPI Summary Blocks',
+                headers: ['Metric Type', 'Total Count'],
+                rows: [
+                  ['Active Cases', data.kpis.activeCases],
+                  ['Billed', data.kpis.billed],
+                  ['Collected', data.kpis.collected],
+                  ['Billable Hours', data.kpis.billableHours],
+                ],
+                currencyColumns: [2],
+              },
+              {
+                title: 'Team Performance',
+                headers: ['Team Member', 'Role', 'Active Cases', 'Tasks Completed', 'Share', 'Fees Earned', 'Gross Handled'],
+                rows: orderedTeamRows.map((member) => [
+                  member.name,
+                  member.role,
+                  member.activeCases,
+                  member.tasksCompleted,
+                  member.earningSharePercent == null ? 0 : member.earningSharePercent / 100,
+                  member.earnedFees || 0,
+                  member.grossFeesHandled || 0,
+                ]),
+                currencyColumns: [6, 7],
+                percentColumns: [5],
+              },
+              {
+                title: 'Case Distribution by Practice Path',
+                headers: ['Practice Path', 'Active Cases', 'Closed Cases'],
+                rows: data.caseTypes.map((c) => [c.type, c.active, c.closed]),
+              },
+            ],
+          };
+      }
+    })();
 
-    lines.push(
-      toCsv(
-        orderedForCsv.map((t) => ({
-          name: t.name,
-          role: t.role,
-          earningRoleLabel: t.earningRoleLabel || '',
-          earningSharePercent: t.earningSharePercent ?? '',
-          activeCases: t.activeCases,
-          tasksCompleted: t.tasksCompleted,
-          billableHours: t.billableHours,
-          grossFeesHandled: t.grossFeesHandled || 0,
-          earnedFees: t.earnedFees || 0,
-          firmRetainedEarnings: t.firmRetainedEarnings || 0,
-          earlyTasks: t.earlyTasks || 0,
-          onTimeTasks: t.onTimeTasks || 0,
-          lateTasks: t.lateTasks || 0,
-          overdueTasks: t.overdueTasks || 0,
-          excellentTasks: t.excellentTasks || 0,
-          goodTasks: t.goodTasks || 0,
-          delayedTasks: t.delayedTasks || 0,
-          riskTasks: t.riskTasks || 0,
-          averageTimeUsedPercent: t.averageTimeUsedPercent ?? '',
-        }))
-      )
-    );
-    lines.push('');
-
-    lines.push('');
-
-    lines.push('Practice Paths');
-    lines.push(
-      toCsv(
-        data.caseTypes.map((c) => ({
-          type: c.type,
-          active: c.active,
-          closed: c.closed,
-          avgDurationDays: c.avgDurationDays ?? '',
-          revenueBilled: c.revenueBilled,
-        }))
-      )
-    );
-    lines.push('');
-
-    lines.push('Payments');
-    lines.push(toCsv(data.months.map((m) => ({ month: m.month, collected: m.collected, billed: m.billed }))));
-    lines.push('');
-
-    lines.push('Expenses');
-    lines.push(
-      toCsv(
-        (data.expenseTypes || []).map((e) => ({
-          expenseType: e.type,
-          count: e.count,
-          totalAmount: e.amount,
-          clientRelatedAmount: e.clientRelatedAmount,
-        }))
-      )
-    );
-
-    const filename = `firm-reports_${data.range.from}_to_${data.range.to}.csv`;
-    downloadTextFile(filename, lines.join('\n'));
+    const filename = `${exportConfig.title.toLowerCase().replace(/\s+/g, '-')}_${data.range.from}_to_${data.range.to}`;
+    await downloadWorkbook(filename, [exportConfig]);
   };
 
   if (!canAccess(userRole)) {
@@ -259,12 +289,12 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             </select>
 
             <button
-              onClick={exportCsv}
+              onClick={() => void exportWorkbook()}
               disabled={!data || loading}
               className="inline-flex items-center px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-60"
             >
               <Download className="w-4 h-4 mr-2" />
-              Export Excel CSV
+              Export Active Report
             </button>
           </div>
         </div>
