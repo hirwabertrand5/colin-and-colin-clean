@@ -25,6 +25,7 @@ import adminEmailRoutes from './routes/adminEmail';
 import helpRoutes from './routes/help';
 import workflowRoutes from './routes/workflows';
 import prospectRoutes from './routes/prospect';
+import clientExperienceRoutes from './routes/clientExperience';
 const app = express();
 
 // ✅ Allow multiple dev origins + configurable CLIENT_URL
@@ -87,6 +88,7 @@ app.use('/api', dashboardRoutes);
 app.use('/api', adminEmailRoutes);
 app.use('/api', helpRoutes);
 app.use('/api/workflows', workflowRoutes);
+app.use('/api/client-experience', clientExperienceRoutes);
 // uploads
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 

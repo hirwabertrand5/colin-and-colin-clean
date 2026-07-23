@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, FileText, Receipt, ClipboardList, Briefcase, Circle, Trash2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Receipt, ClipboardList, Briefcase, Circle, Trash2 } from 'lucide-react';
 import usePageTitle from '../../hooks/usePageTitle';
 import { deleteProspect, getProspectById, Prospect } from '../../services/prospectService';
 import { getProspectFeedback, upsertProspectFeedback, ProspectFeedback as ProspectFeedbackModel } from '../../services/prospectFeedbackService';
+import { sendClientExperienceRequest } from '../../services/clientExperienceService';
+import AutomationCard from './AutomationCard';
+import ClientExperienceHeader from './ClientExperienceHeader';
+import ClientResponseCard from './ClientResponseCard';
+import ExperienceTimeline from './ExperienceTimeline';
+import FeedbackRequestCard from './FeedbackRequestCard';
+import FeedbackStatusCard from './FeedbackStatusCard';
+import InternalAssessmentCard from './InternalAssessmentCard';
 import ProspectForm from './ProspectForm';
 
 const STAGE_ORDER = [
@@ -24,7 +32,7 @@ const STAGE_ORDER = [
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'billing', label: 'Billing / Triggers' },
-  { id: 'feedback', label: 'Client Feedback' },
+  { id: 'feedback', label: 'Client Experience' },
 ] as const;
 
 type ProspectTab = (typeof TABS)[number]['id'];
@@ -74,6 +82,18 @@ const getDisplayName = (value?: string | { name?: string } | null) => {
   return value?.name || '—';
 };
 
+const formatDateValue = (value?: string | Date | null) => {
+  if (!value) return 'Data not available.';
+  const dateValue = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(dateValue.getTime())) return 'Data not available.';
+  return new Intl.DateTimeFormat('en', { year: 'numeric', month: 'short', day: 'numeric' }).format(dateValue);
+};
+
+const getDisplayText = (value?: string | null, fallback = 'Data not available.') => {
+  if (typeof value === 'string' && value.trim()) return value;
+  return fallback;
+};
+
 export default function ProspectWorkspace() {
   const { prospectId } = useParams();
   const navigate = useNavigate();
@@ -97,6 +117,9 @@ export default function ProspectWorkspace() {
     partnerApprovalStatus: 'Pending' as 'Pending' | 'Approved',
   });
   const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackRequestSending, setFeedbackRequestSending] = useState(false);
+  const [feedbackRequestSuccess, setFeedbackRequestSuccess] = useState(false);
+  const [feedbackRequestMessage, setFeedbackRequestMessage] = useState('');
 
   const loadProspect = async () => {
     if (!prospectId) return;
@@ -178,9 +201,7 @@ export default function ProspectWorkspace() {
     const prospectData = prospect as (Prospect & { completed_stages?: string[] }) | null;
     const rawCompletedStages = Array.isArray(prospectData?.completedStages)
       ? prospectData?.completedStages
-      : Array.isArray(prospectData?.completed_stages)
-        ? prospectData?.completed_stages
-        : [];
+      : [];
     const completedStages = (rawCompletedStages || []).filter((stage): stage is string => typeof stage === 'string');
 
     return STAGE_ORDER.map((stage) => ({
@@ -191,6 +212,42 @@ export default function ProspectWorkspace() {
   }, [prospect?.stage, prospect?.completedStages, prospect?.completed_stages]);
 
   const currentStageLabel = prospect?.stage || 'Inquiry';
+  const feedbackReceived = Boolean(feedback?.clientComment || feedback?.primaryReasonCategory || feedback?.primaryReasonDetail);
+  const surveyExpired = false;
+  const isAssessmentDisabled = !feedbackReceived && !surveyExpired;
+
+  const experienceStatus = useMemo(() => ({
+    currentStatus: feedbackReceived ? 'Client response received' : 'Awaiting client response',
+    surveyType: prospect?.stage === 'Non-Converted' ? 'Lost prospect feedback' : 'Prospect feedback',
+    surveyStatus: feedback?.feedbackEmailSentAt ? 'Sent' : 'Not sent',
+    requestCreated: feedback?.feedbackEmailSentAt ? formatDateValue(feedback.feedbackEmailSentAt) : 'Data not available.',
+    sent: feedback?.feedbackEmailSentAt ? formatDateValue(feedback.feedbackEmailSentAt) : 'Data not available.',
+    completed: feedbackReceived ? 'Completed' : 'Data not available.',
+    overallRisk: feedback?.partnerApprovalStatus === 'Approved' ? 'Normal' : feedbackReceived ? 'Monitor' : 'Normal',
+  }), [feedback, feedbackReceived, prospect?.stage]);
+
+  const timelineItems = useMemo(() => [
+    {
+      title: 'Prospect created',
+      detail: prospect?.createdAt ? `Recorded on ${formatDateValue(prospect.createdAt)}` : 'Data not available.',
+    },
+    {
+      title: 'Consultation scheduled',
+      detail: prospect?.dateReceived ? `Initial enquiry received on ${formatDateValue(prospect.dateReceived)}` : 'Data not available.',
+    },
+    {
+      title: 'Prospect marked non-converted',
+      detail: prospect?.stage === 'Non-Converted' ? `Current stage: ${prospect.stage}` : 'Pending conversion outcome update.',
+    },
+    {
+      title: 'Feedback request created',
+      detail: feedback?.feedbackEmailSentAt ? `Request logged on ${formatDateValue(feedback.feedbackEmailSentAt)}` : 'Pending client experience workflow initiation.',
+    },
+    {
+      title: 'Waiting for client response',
+      detail: feedbackReceived ? 'Client response captured for internal follow-up.' : 'Awaiting client response.',
+    },
+  ], [feedback, feedbackReceived, prospect?.createdAt, prospect?.dateReceived, prospect?.stage]);
 
   const handleFeedbackSave = async () => {
     if (!prospectId) return;
@@ -210,6 +267,43 @@ export default function ProspectWorkspace() {
       console.error('Failed to save prospect feedback', err);
     } finally {
       setFeedbackSaving(false);
+    }
+  };
+
+  const handleSendClientFeedback = async () => {
+    if (!prospect?.contact?.email) {
+      setFeedbackRequestMessage('A client email address is required before sending the survey.');
+      setFeedbackRequestSuccess(false);
+      return;
+    }
+
+    if (!prospectId) {
+      setFeedbackRequestMessage('The prospect context is missing.');
+      setFeedbackRequestSuccess(false);
+      return;
+    }
+
+    try {
+      setFeedbackRequestSending(true);
+      setFeedbackRequestSuccess(false);
+      setFeedbackRequestMessage('Preparing the feedback request...');
+
+      const response = await sendClientExperienceRequest({
+        clientId: prospect?._id,
+        clientType: 'prospect',
+        prospectId,
+        feedbackType: prospect?.stage === 'Non-Converted' ? 'Lost Prospect Feedback' : 'Prospect Feedback',
+        clientEmail: prospect.contact.email,
+      });
+
+      setFeedbackRequestSuccess(true);
+      setFeedbackRequestMessage(response?.requestNumber ? `Feedback request sent successfully. Request ${response.requestNumber}.` : 'Feedback request sent successfully.');
+    } catch (err: any) {
+      const message = err?.response?.data?.message || err?.message || 'The feedback request could not be sent.';
+      setFeedbackRequestSuccess(false);
+      setFeedbackRequestMessage(message);
+    } finally {
+      setFeedbackRequestSending(false);
     }
   };
 
@@ -495,127 +589,145 @@ export default function ProspectWorkspace() {
               )}
 
               {activeTab === 'feedback' && (
-                <div className="grid gap-6 lg:grid-cols-[1fr_0.95fr]">
+                <div className="space-y-6">
                   <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-6 dark:border-gray-700 dark:bg-gray-900/40">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-xl bg-blue-100 p-2 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                        <FileText className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Client response view</h2>
-                        <p className="text-sm text-slate-600 dark:text-slate-400">A read-only summary of the client’s feedback submission.</p>
-                      </div>
-                    </div>
-
-                    {feedbackLoading ? (
-                      <div className="mt-5 rounded-2xl border border-dashed border-gray-300 bg-white p-4 text-sm font-medium text-slate-600 dark:border-gray-700 dark:bg-gray-800 dark:text-slate-400">
-                        Loading client feedback status...
-                      </div>
-                    ) : feedback?.primaryReasonCategory || feedback?.primaryReasonDetail || feedback?.clientComment ? (
-                      <div className="mt-5 space-y-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-slate-700 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-slate-300">
-                        <div className="flex items-start justify-between gap-3">
-                          <span className="font-medium text-slate-500 dark:text-slate-400">Primary reason category</span>
-                          <span className="text-right font-semibold text-slate-900 dark:text-slate-100">{feedback?.primaryReasonCategory || '—'}</span>
-                        </div>
-                        <div className="flex items-start justify-between gap-3">
-                          <span className="font-medium text-slate-500 dark:text-slate-400">Reason detail</span>
-                          <span className="text-right font-semibold text-slate-900 dark:text-slate-100">{feedback?.primaryReasonDetail || '—'}</span>
-                        </div>
-                        <div>
-                          <div className="font-medium text-slate-500 dark:text-slate-400">Client comment</div>
-                          <div className="mt-2 rounded-xl bg-slate-50 p-3 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300">{feedback?.clientComment || 'No comment provided.'}</div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-5 rounded-2xl border border-dashed border-gray-300 bg-white p-4 text-sm font-medium text-slate-600 dark:border-gray-700 dark:bg-gray-800 dark:text-slate-400">
-                        Awaiting External Client Survey Response (Google Form)...
-                      </div>
-                    )}
+                    <ClientExperienceHeader title="Client experience workspace" subtitle="A professional view of the prospect journey, feedback request, and internal review." />
                   </div>
 
-                  <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-xl bg-amber-100 p-2 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                        <ClipboardList className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Internal management assessment</h2>
-                        <p className="text-sm text-slate-600 dark:text-slate-400">Use this layer to document the internal review and partner approval.</p>
-                      </div>
-                    </div>
+                  <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+                    <FeedbackStatusCard
+                      currentStatus={experienceStatus.currentStatus}
+                      surveyType={experienceStatus.surveyType}
+                      surveyStatus={experienceStatus.surveyStatus}
+                      requestCreated={experienceStatus.requestCreated}
+                      requestSent={experienceStatus.sent}
+                      completed={experienceStatus.completed}
+                      overallRisk={experienceStatus.overallRisk}
+                    />
+                    <FeedbackRequestCard
+                      surveyType={experienceStatus.surveyType}
+                      clientEmail={getDisplayText(prospect?.contact?.email, 'Data not available.')}
+                      surveyStatus={feedback?.feedbackEmailSentAt ? 'Sent' : 'Pending'}
+                      isSending={feedbackRequestSending}
+                      isSuccess={feedbackRequestSuccess}
+                      isDisabled={!prospect?.contact?.email}
+                      onSend={handleSendClientFeedback}
+                      helperText={feedbackRequestMessage || (feedbackRequestSuccess ? 'Feedback request sent successfully.' : feedbackRequestSending ? 'Preparing the client experience request...' : 'Send a branded feedback request to the client.')}
+                    />
+                  </div>
 
-                    {prospect?.isActive !== false ? (
-                      <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-300">
-                        Feedback portal triggers automatically when a prospect is marked as Non-Converted.
+                  <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+                    {feedbackLoading ? (
+                      <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-4 text-sm font-medium text-slate-600 dark:border-gray-700 dark:bg-gray-800 dark:text-slate-400">
+                        Loading client experience status...
                       </div>
-                    ) : null}
+                    ) : (
+                      <ClientResponseCard
+                        surveyStatus={feedbackReceived ? 'Waiting for client response' : 'Waiting'}
+                        submittedDate={feedback?.feedbackEmailSentAt ? formatDateValue(feedback.feedbackEmailSentAt) : 'Data not available.'}
+                        overallRating={feedback?.primaryReasonCategory ? getDisplayText(feedback.primaryReasonCategory, 'Data not available.') : 'Data not available.'}
+                        wouldRecommend={feedback?.primaryReasonDetail ? getDisplayText(feedback.primaryReasonDetail, 'Data not available.') : 'Data not available.'}
+                        wouldInstructAgain={feedback?.clientComment ? 'Yes' : 'Data not available.'}
+                        clientComments={feedback?.clientComment ? getDisplayText(feedback.clientComment, 'No response received.') : 'No response received.'}
+                      />
+                    )}
 
-                    <div className="mt-5 space-y-4">
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Completed by</label>
-                        <select value={feedbackForm.completedByRole} onChange={(event) => setFeedbackForm((prev) => ({ ...prev, completedByRole: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                          <option value="">Select role</option>
-                          <option value="Executive Administrator">Executive Administrator</option>
-                          <option value="Responsible Associate">Responsible Associate</option>
-                          <option value="Responsible Partner">Responsible Partner</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Category</label>
-                        <select value={feedbackForm.internalCategory} onChange={(event) => setFeedbackForm((prev) => ({ ...prev, internalCategory: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                          <option value="">Select category</option>
-                          <option value="Pricing & Commercial Issues">Pricing & Commercial Issues</option>
-                          <option value="Response & Service Issues">Response & Service Issues</option>
-                          <option value="Scope & Service Issues">Scope & Service Issues</option>
-                          <option value="Client Decision Issues">Client Decision Issues</option>
-                          <option value="Competitive Issues">Competitive Issues</option>
-                          <option value="Internal Firm Constraints">Internal Firm Constraints</option>
-                          <option value="Client Experience Issues">Client Experience Issues</option>
-                          <option value="Administrative Issues">Administrative Issues</option>
-                          <option value="Other">Other</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Was this loss avoidable?</label>
-                        <div className="flex gap-3">
-                          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                            <input type="radio" checked={feedbackForm.wasAvoidable === true} onChange={() => setFeedbackForm((prev) => ({ ...prev, wasAvoidable: true }))} /> Yes
-                          </label>
-                          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                            <input type="radio" checked={feedbackForm.wasAvoidable === false} onChange={() => setFeedbackForm((prev) => ({ ...prev, wasAvoidable: false }))} /> No
-                          </label>
+                    <InternalAssessmentCard
+                      completedBy={getDisplayText(feedbackForm.completedByRole, 'Data not available.')}
+                      category={getDisplayText(feedbackForm.internalCategory, 'Data not available.')}
+                      wasAvoidable={feedbackForm.wasAvoidable === true ? 'Yes' : feedbackForm.wasAvoidable === false ? 'No' : 'Data not available.'}
+                      conversionProbability={getDisplayText(feedbackForm.estimatedConversionProbability, 'Data not available.')}
+                      recommendations={getDisplayText(feedbackForm.firmImprovementNotes, 'Data not available.')}
+                      partnerApproval={getDisplayText(feedbackForm.partnerApprovalStatus, 'Pending')}
+                      isDisabled={isAssessmentDisabled}
+                    >
+                      {prospect?.isActive !== false ? (
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-300">
+                          Feedback portal triggers automatically when a prospect is marked as Non-Converted.
                         </div>
-                      </div>
+                      ) : null}
 
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Estimated probability of conversion</label>
-                        <input value={feedbackForm.estimatedConversionProbability} onChange={(event) => setFeedbackForm((prev) => ({ ...prev, estimatedConversionProbability: event.target.value }))} placeholder="e.g. 45%" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
-                      </div>
+                      <div className="mt-5 space-y-4">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Completed by</label>
+                          <select value={feedbackForm.completedByRole} onChange={(event) => setFeedbackForm((prev) => ({ ...prev, completedByRole: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                            <option value="">Select role</option>
+                            <option value="Executive Administrator">Executive Administrator</option>
+                            <option value="Responsible Associate">Responsible Associate</option>
+                            <option value="Responsible Partner">Responsible Partner</option>
+                          </select>
+                        </div>
 
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">What should the firm improve?</label>
-                        <textarea value={feedbackForm.firmImprovementNotes} onChange={(event) => setFeedbackForm((prev) => ({ ...prev, firmImprovementNotes: event.target.value }))} rows={4} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
-                      </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Category</label>
+                          <select value={feedbackForm.internalCategory} onChange={(event) => setFeedbackForm((prev) => ({ ...prev, internalCategory: event.target.value }))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                            <option value="">Select category</option>
+                            <option value="Pricing & Commercial Issues">Pricing & Commercial Issues</option>
+                            <option value="Response & Service Issues">Response & Service Issues</option>
+                            <option value="Scope & Service Issues">Scope & Service Issues</option>
+                            <option value="Client Decision Issues">Client Decision Issues</option>
+                            <option value="Competitive Issues">Competitive Issues</option>
+                            <option value="Internal Firm Constraints">Internal Firm Constraints</option>
+                            <option value="Client Experience Issues">Client Experience Issues</option>
+                            <option value="Administrative Issues">Administrative Issues</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
 
-                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Partner approval</div>
-                            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Required before the prospect can be formally closed as a non-converted history record.</div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Was this loss avoidable?</label>
+                          <div className="flex gap-3">
+                            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                              <input type="radio" checked={feedbackForm.wasAvoidable === true} onChange={() => setFeedbackForm((prev) => ({ ...prev, wasAvoidable: true }))} /> Yes
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                              <input type="radio" checked={feedbackForm.wasAvoidable === false} onChange={() => setFeedbackForm((prev) => ({ ...prev, wasAvoidable: false }))} /> No
+                            </label>
                           </div>
-                          <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{feedbackForm.partnerApprovalStatus}</span>
                         </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => setFeedbackForm((prev) => ({ ...prev, partnerApprovalStatus: 'Approved' }))} className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Mark approved</button>
-                          <button type="button" onClick={() => setFeedbackForm((prev) => ({ ...prev, partnerApprovalStatus: 'Pending' }))} className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Keep pending</button>
-                          <button type="button" onClick={() => { setFeedbackForm((prev) => ({ ...prev, partnerApprovalStatus: 'Approved' })); void handleFeedbackSave(); }} disabled={feedbackSaving} className="rounded-full bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300">
-                            {feedbackSaving ? 'Saving...' : 'Approve & Close Prospect'}
-                          </button>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Estimated probability of conversion</label>
+                          <input value={feedbackForm.estimatedConversionProbability} onChange={(event) => setFeedbackForm((prev) => ({ ...prev, estimatedConversionProbability: event.target.value }))} placeholder="e.g. 45%" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">What should the firm improve?</label>
+                          <textarea value={feedbackForm.firmImprovementNotes} onChange={(event) => setFeedbackForm((prev) => ({ ...prev, firmImprovementNotes: event.target.value }))} rows={4} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
+                        </div>
+
+                        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Partner approval</div>
+                              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Required before the prospect can be formally closed as a non-converted history record.</div>
+                            </div>
+                            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{feedbackForm.partnerApprovalStatus}</span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setFeedbackForm((prev) => ({ ...prev, partnerApprovalStatus: 'Approved' }))} className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Mark approved</button>
+                            <button type="button" onClick={() => setFeedbackForm((prev) => ({ ...prev, partnerApprovalStatus: 'Pending' }))} className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Keep pending</button>
+                            <button type="button" onClick={() => { setFeedbackForm((prev) => ({ ...prev, partnerApprovalStatus: 'Approved' })); void handleFeedbackSave(); }} disabled={feedbackSaving} className="rounded-full bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300">
+                              {feedbackSaving ? 'Saving...' : 'Approve & Close Prospect'}
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    </InternalAssessmentCard>
+                  </div>
+
+                  <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                    <ExperienceTimeline items={timelineItems} />
+                    <AutomationCard
+                      items={[
+                        'Automated survey requests',
+                        'Google Forms integration',
+                        'Email notifications',
+                        'Internal assessments',
+                        'Red flag detection',
+                        'Follow-up tasks',
+                      ]}
+                    />
                   </div>
                 </div>
               )}

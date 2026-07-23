@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, FileText, BarChart3, TrendingUp, Users } from 'lucide-react';
 import { UserRole } from '../../App';
-import { FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
+import { FirmReportDateBasis, FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
+import { getStaffUsers, User } from '../../services/userService';
 import usePageTitle from '../../hooks/usePageTitle';
 import { downloadWorkbook } from '../../utils/excelExport';
 
@@ -30,6 +31,11 @@ const ROLE_ORDER = [
 export default function FirmReports({ userRole }: FirmReportsProps) {
   const [selectedReport, setSelectedReport] = useState<'overview' | 'financial' | 'productivity' | 'cases'>('overview');
   const [dateRange, setDateRange] = useState<FirmReportRange>('monthly');
+  const [dateBasis, setDateBasis] = useState<FirmReportDateBasis>('invoiceDate');
+  const [teamMembers, setTeamMembers] = useState<User[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState<string | undefined>(undefined);
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   usePageTitle('Firm Reports');
   const [data, setData] = useState<FirmReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,9 +54,40 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     let mounted = true;
     (async () => {
       try {
+        const users = await getStaffUsers();
+        if (!mounted) return;
+        setTeamMembers(users);
+      } catch {
+        if (!mounted) return;
+        setTeamMembers([]);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [userRole]);
+
+  useEffect(() => {
+    if (!canAccess(userRole)) return;
+
+    if (dateRange === 'custom' && (!customFrom || !customTo)) {
+      setData(null);
+      return;
+    }
+
+    let mounted = true;
+    (async () => {
+      try {
         setLoading(true);
         setError('');
-        const resp = await getFirmReports({ range: dateRange });
+        const resp = await getFirmReports({
+          range: dateRange,
+          from: dateRange === 'custom' ? customFrom : undefined,
+          to: dateRange === 'custom' ? customTo : undefined,
+          basis: dateBasis,
+          teamMemberId: selectedMemberId,
+        });
         if (!mounted) return;
         setData(resp);
       } catch (e: any) {
@@ -66,7 +103,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     return () => {
       mounted = false;
     };
-  }, [userRole, dateRange]);
+  }, [userRole, dateRange, dateBasis, selectedMemberId, customFrom, customTo]);
 
   const firmStats = useMemo(() => {
     const k = data?.kpis;
@@ -271,7 +308,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               {loading
                 ? 'Loading…'
                 : data
-                  ? `Period: ${data.range.from} → ${data.range.to}`
+                  ? `Period: ${data.range.from} → ${data.range.to} (${data.dateBasis})`
                   : 'Comprehensive analytics and performance reports'}
             </p>
           </div>
@@ -282,10 +319,35 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               onChange={(e) => setDateRange(e.target.value as FirmReportRange)}
               className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
+              <option value="daily">Last Day</option>
               <option value="weekly">Last Week</option>
               <option value="monthly">Last Month</option>
               <option value="quarterly">Last Quarter</option>
               <option value="yearly">Last Year</option>
+              <option value="custom">Custom Range</option>
+            </select>
+
+            <select
+              value={dateBasis}
+              onChange={(e) => setDateBasis(e.target.value as FirmReportDateBasis)}
+              className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            >
+              <option value="invoiceDate">Invoice Date</option>
+              <option value="paymentDate">Payment Date</option>
+              <option value="taskDate">Task Completion Date</option>
+            </select>
+
+            <select
+              value={selectedMemberId || ''}
+              onChange={(e) => setSelectedMemberId(e.target.value || undefined)}
+              className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            >
+              <option value="">All team members</option>
+              {teamMembers.map((member) => (
+                <option key={member._id} value={member._id}>
+                  {member.name} ({member.role})
+                </option>
+              ))}
             </select>
 
             <button
@@ -303,6 +365,32 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
         {error && (
           <div className="mb-4 p-4 border border-red-200 bg-red-50 text-red-700 rounded">
             {error}
+          </div>
+        )}
+
+        {dateRange === 'custom' && (
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <label className="flex flex-col text-sm text-gray-700">
+              From
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="mt-1 px-3 py-2 border border-gray-300 rounded bg-white text-gray-900"
+              />
+            </label>
+            <label className="flex flex-col text-sm text-gray-700">
+              To
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="mt-1 px-3 py-2 border border-gray-300 rounded bg-white text-gray-900"
+              />
+            </label>
+            <div className="text-sm text-gray-500">
+              Use the custom range to compare exact date windows for the report.
+            </div>
           </div>
         )}
 

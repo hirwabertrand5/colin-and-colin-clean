@@ -7,8 +7,14 @@ import Invoice from '../models/invoiceModel';
 import TaskTimeLog from '../models/taskTimeLogModel';
 import User from '../models/userModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
+import ClientReport from '../models/clientReportModel';
+import Prospect from '../models/prospectModel';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+type DateBasis = 'invoiceDate' | 'paymentDate' | 'taskDate';
+
+type AgeingBucket = '0-30' | '30-60' | '60-90' | '90+';
 
 function computeRange(range?: string) {
   const to = new Date();
@@ -17,7 +23,8 @@ function computeRange(range?: string) {
   const from = new Date(to);
   const r = String(range || 'monthly').toLowerCase();
 
-  if (r === 'weekly') from.setDate(from.getDate() - 7);
+  if (r === 'daily') from.setDate(from.getDate());
+  else if (r === 'weekly') from.setDate(from.getDate() - 7);
   else if (r === 'quarterly') from.setMonth(from.getMonth() - 3);
   else if (r === 'yearly') from.setFullYear(from.getFullYear() - 1);
   else from.setMonth(from.getMonth() - 1); // monthly default
@@ -25,6 +32,43 @@ function computeRange(range?: string) {
   from.setHours(0, 0, 0, 0);
   return { from, to };
 }
+
+const normalizeBasis = (value?: string): DateBasis => {
+  const normalized = String(value || 'invoiceDate').trim().toLowerCase();
+  if (normalized === 'paymentdate' || normalized === 'payment_date') return 'paymentDate';
+  if (normalized === 'taskdate' || normalized === 'task_date') return 'taskDate';
+  return 'invoiceDate';
+};
+
+const getAgeingBuckets = (invoices: any[], referenceDate: Date) => {
+  const buckets: Record<AgeingBucket, number> = {
+    '0-30': 0,
+    '30-60': 0,
+    '60-90': 0,
+    '90+': 0,
+  };
+
+  for (const invoice of invoices) {
+    if (!invoice?.date) continue;
+    const invoiceDate = new Date(`${invoice.date}T00:00:00.000Z`);
+    if (!Number.isFinite(invoiceDate.getTime())) continue;
+    const diffMs = referenceDate.getTime() - invoiceDate.getTime();
+    if (diffMs < 0) continue;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const amount = Number(invoice.amount) || 0;
+    if (diffDays <= 30) buckets['0-30'] += amount;
+    else if (diffDays <= 60) buckets['30-60'] += amount;
+    else if (diffDays <= 90) buckets['60-90'] += amount;
+    else buckets['90+'] += amount;
+  }
+
+  return [
+    { label: '0–30 days', amount: buckets['0-30'], color: 'blue' },
+    { label: '30–60 days', amount: buckets['30-60'], color: 'green' },
+    { label: '60–90 days', amount: buckets['60-90'], color: 'yellow' },
+    { label: 'Over 90 days', amount: buckets['90+'], color: 'red' },
+  ];
+};
 
 const monthKey = (d: Date) => {
   const y = d.getFullYear();
@@ -93,7 +137,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
-    const { range, from, to } = req.query as any;
+    const { range, from, to, basis, teamMemberId } = req.query as any;
+    const dateBasis = normalizeBasis(basis);
 
     let fromDate: Date;
     let toDate: Date;
@@ -113,23 +158,51 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const fromISO = iso(fromDate);
     const toISO = iso(toDate);
 
+    const selectedMember = teamMemberId
+      ? await User.findById(teamMemberId).select('name role').lean()
+      : null;
+    const selectedMemberName = selectedMember ? String(selectedMember.name || '').trim() : null;
+
     // -----------------------------
     // KPIs
     // -----------------------------
-    // "Active" = anything not explicitly Closed
-    const activeCases = await Case.countDocuments({ status: { $ne: 'Closed' } });
+    const activeCases = selectedMemberName
+      ? await Case.countDocuments({ status: { $ne: 'Closed' }, assignedTo: selectedMemberName })
+      : await Case.countDocuments({ status: { $ne: 'Closed' } });
 
-    // Invoice date is stored as YYYY-MM-DD string, so string range works
-    const invoicesInRange = await Invoice.find({
-      date: { $gte: fromISO, $lte: toISO },
-    })
-      .select('amount status date caseId')
-      .lean();
+    const invoicesByInvoiceDateQuery = { date: { $gte: fromISO, $lte: toISO } };
+    const invoicesByPaymentDateQuery = { status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } };
+    const tasksByDateQuery = { status: 'Completed', completedAt: { $gte: fromDate, $lte: toDate } };
 
-    const billed = invoicesInRange.reduce((s: number, i: any) => s + (Number(i.amount) || 0), 0);
-    const collected = invoicesInRange
-      .filter((i: any) => i.status === 'Paid')
-      .reduce((s: number, i: any) => s + (Number(i.amount) || 0), 0);
+    const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, timeLogs, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
+      Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
+      Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
+      Task.find(tasksByDateQuery).select('assignee completedAt dueDate caseId createdAt').lean(),
+      TaskTimeLog.find({ loggedAt: { $gte: fromDate, $lte: toDate } }).select('userName hours').lean(),
+      User.find({ isActive: { $ne: false } }).select('name role').lean(),
+      Prospect.aggregate([
+        { $match: { createdAt: { $gte: fromDate, $lte: toDate }, createdBy: { $exists: true } } },
+        { $group: { _id: '$createdBy', count: { $sum: 1 } } },
+      ]),
+      ClientReport.aggregate([
+        { $match: { createdAt: { $gte: fromDate, $lte: toDate }, generatedByUserId: { $exists: true } } },
+        { $group: { _id: '$generatedByUserId', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const invoiceCaseIds = Array.from(new Set([...invoicesByInvoiceDate, ...invoicesByPaymentDate].map((inv: any) => String(inv.caseId || '')).filter(Boolean)));
+    const casesForInvoices = await Case.find({ _id: { $in: invoiceCaseIds } }).select('_id assignedTo').lean();
+    const caseAssignedTo = new Map((casesForInvoices as any[]).map((c) => [String(c._id), String(c.assignedTo || '').trim()]));
+
+    const baseInvoices = dateBasis === 'paymentDate' ? invoicesByPaymentDate : invoicesByInvoiceDate;
+    const selectedInvoices = selectedMemberName
+      ? baseInvoices.filter((inv: any) => caseAssignedTo.get(String(inv.caseId)) === selectedMemberName)
+      : baseInvoices;
+
+    const billed = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
+    const collected = dateBasis === 'paymentDate'
+      ? billed
+      : selectedInvoices.filter((inv: any) => inv.status === 'Paid').reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
     const outstanding = Math.max(0, billed - collected);
 
     const hoursAgg = await TaskTimeLog.aggregate([
@@ -138,34 +211,30 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     ]);
     const billableHours = Math.round((((hoursAgg?.[0]?.totalHours as number) || 0) * 10)) / 10;
 
-    // -----------------------------
-    // Team table (best-effort based on name strings)
-    // -----------------------------
-    const [casesAll, tasksCompleted, timeLogs, users] = await Promise.all([
-      Case.find().select('assignedTo status').lean(),
-      Task.find({
-        status: 'Completed',
-        completedAt: { $gte: fromDate, $lte: toDate },
-      })
-        .select('assignee completedAt dueDate caseId createdAt')
-        .lean(),
-      TaskTimeLog.find({
-        loggedAt: { $gte: fromDate, $lte: toDate },
-      })
-        .select('userName hours')
-        .lean(),
-      User.find({ isActive: { $ne: false } }).select('name role').lean(),
-    ]);
+    const ageingReport = getAgeingBuckets(
+      await Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO } }).select('amount date').lean(),
+      toDate
+    );
+
+    const qualityReviewAvailable = false;
+    const qualityReviewMessage = 'Quality review data unavailable - source not configured';
+    const taxDataAvailable = false;
+    const taxMessage = 'Tax data unavailable - source not configured';
 
     const roleByName = new Map(
       (users as any[]).map((u) => [String(u.name || '').trim(), String(u.role || '')])
     );
 
+    // -----------------------------
+    // Team table (best-effort based on name strings)
+    // -----------------------------
     const activeByName = new Map<string, number>();
-    for (const c of casesAll as any[]) {
+    const allCases = await Case.find().select('assignedTo status').lean();
+    for (const c of allCases as any[]) {
       const isActive = String(c.status || '').toLowerCase() !== 'closed';
       if (!isActive) continue;
       const name = String(c.assignedTo || '—').trim();
+      if (selectedMemberName && name !== selectedMemberName) continue;
       activeByName.set(name, (activeByName.get(name) || 0) + 1);
     }
 
@@ -178,8 +247,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const delayedByName = new Map<string, number>();
     const riskByName = new Map<string, number>();
     const usedPercentByName = new Map<string, number[]>();
-    const completedCaseIds = Array.from(new Set((tasksCompleted as any[]).map((t) => String(t.caseId)).filter(Boolean)));
-    const completedCases = await Case.find({ _id: { $in: completedCaseIds } })
+    const caseIds = Array.from(new Set((tasksCompleted as any[]).map((t) => String(t.caseId)).filter(Boolean)));
+    const completedCases = await Case.find({ _id: { $in: caseIds } })
       .select('_id workflowProgress.completedValue')
       .lean();
     const caseEarnedById = new Map(
@@ -194,8 +263,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const earnedByName = new Map<string, number>();
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
+
     for (const t of tasksCompleted as any[]) {
       const name = String(t.assignee || '—').trim();
+      if (selectedMemberName && name !== selectedMemberName) continue;
       completedTasksByName.set(name, (completedTasksByName.get(name) || 0) + 1);
       const due = new Date(`${t.dueDate}T23:59:59.999`);
       const completed = t.completedAt ? new Date(t.completedAt) : undefined;
@@ -221,12 +292,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       firmRetainedByName.set(name, (firmRetainedByName.get(name) || 0) + taskShare * (FIRM_RETAINED_PERCENT / 100));
     }
 
-    const overdueTasks = await Task.find({
-      status: { $ne: 'Completed' },
-      dueDate: { $lt: iso(new Date()) },
-    })
-      .select('assignee')
-      .lean();
+    const overdueFilter: any = { status: { $ne: 'Completed' } };
+    if (selectedMemberName) overdueFilter.assignee = selectedMemberName;
+    const overdueTasks = await Task.find(overdueFilter).select('assignee').lean();
     const overdueByName = new Map<string, number>();
     for (const t of overdueTasks as any[]) {
       const name = String(t.assignee || '—').trim();
@@ -236,20 +304,39 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const hoursByName = new Map<string, number>();
     for (const l of timeLogs as any[]) {
       const name = String(l.userName || '—').trim();
+      if (selectedMemberName && name !== selectedMemberName) continue;
       hoursByName.set(name, (hoursByName.get(name) || 0) + (Number(l.hours) || 0));
     }
+
+    const prospectCountsByUser = new Map<string, number>(
+      (prospectsByCreator as any[]).map((item) => [String(item._id), Number(item.count) || 0])
+    );
+    const reportCountsByUser = new Map<string, number>(
+      (reportsByGenerator as any[]).map((item) => [String(item._id), Number(item.count) || 0])
+    );
 
     const team = (users as any[])
       .map((u) => {
         const name = String(u.name || '—').trim();
         const roleShare = roleEarningShare(u.role);
+        const taskCount = completedTasksByName.get(name) || 0;
+        const prospectCount = prospectCountsByUser.get(String(u._id)) || 0;
+        const reportCount = reportCountsByUser.get(String(u._id)) || 0;
+        const assistantProductivity = roleShare.label.includes('Executive Assistant')
+          ? taskCount + prospectCount + reportCount
+          : taskCount;
+
         return {
+          id: String(u._id),
           name,
           role: u.role,
           earningRoleLabel: roleShare.label,
           earningSharePercent: roleShare.percent,
           activeCases: activeByName.get(name) || 0,
-          tasksCompleted: completedTasksByName.get(name) || 0,
+          tasksCompleted: assistantProductivity,
+          assistantTasksCompleted: taskCount,
+          prospectsCreated: prospectCount,
+          reportsGenerated: reportCount,
           billableHours: Math.round(((hoursByName.get(name) || 0) * 10)) / 10,
           earnedFees: Math.round((earnedByName.get(name) || 0) * 100) / 100,
           grossFeesHandled: Math.round((grossHandledByName.get(name) || 0) * 100) / 100,
@@ -269,19 +356,13 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           })(),
         };
       })
+      .filter((member) => !selectedMemberName || member.name === selectedMemberName)
       .sort((a, b) => b.activeCases - a.activeCases);
 
-    // -----------------------------
-    // Case analytics by type + revenue by type (in range)
-    // -----------------------------
+    const caseAnalyticsByPath = new Map<string, { type: string; active: number; closed: number; durationTotal: number; durationCount: number }>();
     const casesForAnalytics = await Case.find()
       .select('caseType matterType workflow legalServicePath status updatedAt createdAt')
       .lean();
-
-    const caseAnalyticsByPath = new Map<
-      string,
-      { type: string; active: number; closed: number; durationTotal: number; durationCount: number }
-    >();
     for (const c of casesForAnalytics as any[]) {
       const type = selectedPathLabel(c);
       const current = caseAnalyticsByPath.get(type) || {
@@ -305,18 +386,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       caseAnalyticsByPath.set(type, current);
     }
 
-    const caseIds = Array.from(
-      new Set((invoicesInRange as any[]).map((i) => String(i.caseId)).filter(Boolean))
-    );
-
-    const casesForInvoices = await Case.find({ _id: { $in: caseIds } })
-      .select('_id caseType matterType workflow legalServicePath')
-      .lean();
-
     const caseTypeById = new Map((casesForInvoices as any[]).map((c) => [String(c._id), selectedPathLabel(c)]));
-
     const revenueByType = new Map<string, number>();
-    for (const inv of invoicesInRange as any[]) {
+    for (const inv of invoicesByInvoiceDate as any[]) {
       const ct = caseTypeById.get(String(inv.caseId)) || 'Unknown';
       revenueByType.set(ct, (revenueByType.get(ct) || 0) + (Number(inv.amount) || 0));
     }
@@ -329,9 +401,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       revenueBilled: Math.round((revenueByType.get(row.type) || 0) * 100) / 100,
     })).sort((a, b) => a.type.localeCompare(b.type));
 
-    // Billing trend by month
     const monthsMap = new Map<string, { month: string; billed: number; collected: number }>();
-    for (const inv of invoicesInRange as any[]) {
+    for (const inv of invoicesByInvoiceDate as any[]) {
       const dt = new Date(inv.date);
       const key = monthKey(dt);
       const item = monthsMap.get(key) || { month: key, billed: 0, collected: 0 };
@@ -369,8 +440,24 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       }))
       .sort((a, b) => b.amount - a.amount);
 
+    const selectedMemberMetrics = selectedMemberName
+      ? {
+          name: selectedMemberName,
+          role: selectedMember?.role || 'Unknown',
+          tasksCompleted: completedTasksByName.get(selectedMemberName) || 0,
+          outstandingTasks: overdueByName.get(selectedMemberName) || 0,
+          revenueGenerated: billed,
+          paymentsReceived: collected,
+          outstandingBalance: outstanding,
+          feesEarned: Math.round((earnedByName.get(selectedMemberName) || 0) * 100) / 100,
+          qualityReviewStatus: qualityReviewMessage,
+        }
+      : null;
+
     return res.json({
       range: { from: fromISO, to: toISO },
+      dateBasis,
+      selectedMember: selectedMemberMetrics,
       kpis: {
         activeCases,
         billed,
@@ -378,7 +465,12 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         outstanding,
         billableHours,
         clientRelatedExpenses: Math.round(clientRelatedExpenses * 100) / 100,
+        taxDataAvailable,
+        taxMessage,
+        qualityReviewAvailable,
+        qualityReviewMessage,
       },
+      ageingReport,
       team,
       caseTypes,
       months,
