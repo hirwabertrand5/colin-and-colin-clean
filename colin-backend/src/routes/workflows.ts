@@ -29,9 +29,14 @@ const router = express.Router();
 const ADMIN_ROLES = [
   'managing_director',
   'managing_partner',
+  'executive_managing_partner',
   'senior_partner',
   'partner',
+  'executive_partner',
   'associate_partner',
+  'executive_associate_partner',
+  'senior_executive_assistant',
+  'originating_attorney',
   'executive_assistant',
 ];
 

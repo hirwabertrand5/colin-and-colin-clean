@@ -98,7 +98,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
     return cases.map((c, originalIndex) => ({
       c,
       originalIndex,
-      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''}`.toLowerCase(),
+      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''} ${c.assignedTo ?? ''} ${c.workflow ?? ''} ${c.matterType ?? ''} ${c.caseType ?? ''} ${c.workflowProgress?.currentStepTitle ?? ''} ${c.workflowProgress?.status ?? ''}`.toLowerCase(),
       createdAtMs: toMs(c.createdAt),
       workflowLabel: getCasePracticePath(c).toLowerCase(),
       currentStepLabel: String(c.workflowProgress?.currentStepTitle || '').toLowerCase(),

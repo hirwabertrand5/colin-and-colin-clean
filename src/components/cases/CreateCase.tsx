@@ -1083,7 +1083,7 @@ export default function CreateCase({
                       </div>
                     </div>
                     <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Planned value</div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Billed</div>
                       <div className="mt-2 text-sm font-semibold text-gray-900">
                         {plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Enter value'}
                       </div>
@@ -1187,7 +1187,7 @@ export default function CreateCase({
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="text-sm font-semibold text-gray-900 mb-3">Workflow settings</div>
               <div className="text-sm text-gray-600">
-                A workflow template automatically generates deadlines, step fees or ranges, and key actions. Billing uses only the negotiated planned value and the percentage of checked key actions.
+                A workflow template automatically generates deadlines, step fees or ranges, and key actions. Billing uses only the negotiated total billed value and the percentage of checked key actions.
               </div>
             </div>
           </div>

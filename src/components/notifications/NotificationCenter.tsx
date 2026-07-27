@@ -10,6 +10,7 @@ import {
   CheckSquare,
   ClipboardCheck,
   Clock,
+  Briefcase,
 } from 'lucide-react';
 
 import {
@@ -47,6 +48,8 @@ const iconForType = (type: string) => {
       return CheckSquare;
     case 'TASK_APPROVAL_REQUESTED':
       return ClipboardCheck;
+    case 'WORKFLOW_NOTIFICATION':
+      return Briefcase;
 
     case 'TASK_DUE_REMINDER':
       return Clock;
@@ -64,6 +67,7 @@ const priorityForType = (type: string, severity?: string) => {
 
   if (type === 'PETTY_CASH_LOW') return 'high';
   if (type === 'TASK_APPROVAL_REQUESTED') return 'high';
+  if (type === 'WORKFLOW_NOTIFICATION') return severity === 'critical' ? 'high' : 'medium';
 
   if (type === 'EVENT_REMINDER') return 'high';
   if (type === 'TASK_DUE_REMINDER') return 'medium';
@@ -219,6 +223,7 @@ export default function NotificationCenter() {
             { id: 'TASK_ASSIGNED', label: 'Task Assigned' },
             { id: 'TASK_APPROVAL_REQUESTED', label: 'Approval Requests' },
             { id: 'TASK_DUE_REMINDER', label: 'Task Due Reminders' },
+            { id: 'WORKFLOW_NOTIFICATION', label: 'Matter Requests' },
 
             // Events
             { id: 'EVENT_REMINDER', label: 'Event Reminders' },

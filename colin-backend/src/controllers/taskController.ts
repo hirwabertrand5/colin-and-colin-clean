@@ -9,6 +9,7 @@ import { writeAudit } from '../services/auditService';
 import TaskTimeLog from '../models/taskTimeLogModel';
 import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
 import { buildYearlySequence } from '../utils/counter';
+import { isPublicYellowCase } from '../utils/caseVisibility';
 
 const isAssociateLikeRole = (role?: string) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
@@ -125,12 +126,14 @@ const canAccessCaseId = async (req: AuthRequest, caseId: string) => {
 
   if (isAdminCaseRole(role)) return true;
 
+  const c: any = await Case.findById(caseId).select('assignedTo status workflowProgress workflowStartDate createdAt');
+  if (!c) return false;
+
+  if (isPublicYellowCase(c)) return true;
+
   if (isAssociateLikeRole(role)) {
     const me = (req.user?.name || '').trim();
     if (!me) return false;
-
-    const c: any = await Case.findById(caseId).select('assignedTo');
-    if (!c) return false;
 
     // rule 1: case assigned to associate
     if (String(c.assignedTo || '').trim() === me) return true;

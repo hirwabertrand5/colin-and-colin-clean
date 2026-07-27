@@ -94,8 +94,17 @@ export const extendWorkflowStepDeadline = async (
     },
     body: JSON.stringify({ extendDays, reason }),
   });
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to extend deadline');
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to amend deadline');
   return res.json();
+};
+
+export const amendWorkflowStepDeadline = async (
+  caseId: string,
+  stepKey: string,
+  amendDays: number,
+  reason?: string
+): Promise<WorkflowInstance> => {
+  return extendWorkflowStepDeadline(caseId, stepKey, amendDays, reason);
 };
 
 export const toggleWorkflowStepAction = async (

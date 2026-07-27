@@ -10,13 +10,19 @@ import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps } from '../utils/workflowCompute';
+import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
   role === 'managing_partner' ||
+  role === 'executive_managing_partner' ||
   role === 'senior_partner' ||
   role === 'partner' ||
+  role === 'executive_partner' ||
   role === 'associate_partner' ||
+  role === 'executive_associate_partner' ||
+  role === 'senior_executive_assistant' ||
+  role === 'originating_attorney' ||
   role === 'executive_assistant';
 const isAssociateLike = (role?: string) =>
   role === 'associate' ||
@@ -55,7 +61,7 @@ const previousActiveStatus = (status?: string) => {
   return normalized && normalized !== 'closed' ? status : 'In Progress';
 };
 
-export const updateCaseWorkflowProgress = async (c: any, inst: any) => {
+export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mongoose.ClientSession) => {
   const { plannedAmount, completedAmount, currency } = computeWorkflowMoney(inst);
   const nextDueAt = computeNextDueAt(inst);
   const currentStep = inst.currentStepKey
@@ -121,7 +127,26 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any) => {
     accruedUnbilled: actionCompletedAmount || 0,
   };
 
-  await c.save();
+  const urgencyColor = getCaseUrgencyColor(c);
+  if (urgencyColor !== 'yellow' && String(c?.takeRequestState?.status || '').trim().toLowerCase() !== 'idle') {
+    c.takeRequestState = {
+      ...(c.takeRequestState || {}),
+      status: 'idle',
+      requestId: undefined,
+      requestedByUserId: undefined,
+      requestedByName: undefined,
+      requestedByRole: undefined,
+      requestedAt: undefined,
+      lockExpiresAt: undefined,
+      claimedAt: undefined,
+      decisionByUserId: undefined,
+      decisionByName: undefined,
+      decisionReason: undefined,
+      lastUpdatedAt: new Date(),
+    };
+  }
+
+  await c.save(session ? { session } : undefined);
 };
 
 const completeStepInternal = async (req: AuthRequest, c: any, inst: any, stepKey: string) => {
@@ -244,6 +269,18 @@ const completeStepInternal = async (req: AuthRequest, c: any, inst: any, stepKey
   return inst;
 };
 
+const ensureInstanceStepActions = async (inst: any, step: any) => {
+  if (Array.isArray(step.actions) && step.actions.length > 0) return step.actions;
+
+  const t: any = await WorkflowTemplate.findById(inst.templateId).lean();
+  const templateStep = (t?.steps || []).find((x: any) => x.key === step.stepKey);
+  step.actions = (templateStep?.actions || []).map((text: any) => ({
+    text: String(text || '').trim(),
+    done: false,
+  }));
+  return step.actions;
+};
+
 const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   if (!isAssociateLike(req.user?.role)) return false;
 
@@ -339,8 +376,10 @@ export const getWorkflowForCase = async (req: AuthRequest, res: Response) => {
     if (!c) return res.status(404).json({ message: 'Case not found.' });
 
     if (!isAdmin(req.user?.role)) {
-      const allowed = await canAssociateLikeAccessCase(req, c);
-      if (!allowed) return res.status(403).json({ message: 'Forbidden.' });
+      if (!isPublicYellowCase(c)) {
+        const allowed = await canAssociateLikeAccessCase(req, c);
+        if (!allowed) return res.status(403).json({ message: 'Forbidden.' });
+      }
     }
 
     const inst: any = await WorkflowInstance.findOne({ caseId: new mongoose.Types.ObjectId(caseId) });
@@ -546,7 +585,7 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Extend a workflow step deadline (admin only)
+// Amend a workflow step deadline (admin only)
 export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
   try {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
@@ -571,9 +610,19 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     if (!step.dueAt) return res.status(400).json({ message: 'Step has no due date to extend.' });
     if (step.status === 'Completed') return res.status(400).json({ message: 'Cannot extend a completed step.' });
 
+    const shiftDate = (value?: Date) => {
+      if (!value) return undefined;
+      const next = new Date(value.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+      return Number.isFinite(next.getTime()) ? next : undefined;
+    };
+
+    const orderedSteps = (inst.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+    const currentIndex = orderedSteps.findIndex((s: any) => s.stepKey === stepKey);
+    const downstreamSteps = currentIndex >= 0 ? orderedSteps.slice(currentIndex + 1) : [];
+
     const oldDue = new Date(step.dueAt);
-    const newDue = new Date(oldDue.getTime() + dayOffset * 24 * 60 * 60 * 1000);
-    if (!Number.isFinite(newDue.getTime())) {
+    const newDue = shiftDate(oldDue);
+    if (!newDue || !Number.isFinite(newDue.getTime())) {
       return res.status(400).json({ message: 'Resulting due date is invalid.' });
     }
     step.dueAt = newDue;
@@ -586,6 +635,11 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       grantedBy: req.user?.name || 'System',
       grantedAt: new Date(),
     });
+
+    for (const downstream of downstreamSteps) {
+      if (downstream.startAt) downstream.startAt = shiftDate(downstream.startAt) || downstream.startAt;
+      if (downstream.dueAt) downstream.dueAt = shiftDate(downstream.dueAt) || downstream.dueAt;
+    }
 
     await inst.save();
     await updateCaseWorkflowProgress(c, inst);
@@ -602,7 +656,7 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
 
     res.json(inst);
   } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to extend deadline.' });
+    res.status(500).json({ message: e?.message || 'Failed to amend deadline.' });
   }
 };
 
@@ -620,7 +674,42 @@ export const addStep = async (req: AuthRequest, res: Response) => {
 
 export const addStepAction = async (req: AuthRequest, res: Response) => {
   try {
-    return res.status(501).json({ message: 'Not implemented: addStepAction' });
+    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
+
+    const { caseId, stepKey } = req.params as any;
+    const { text } = req.body || {};
+    const actionText = String(text || '').trim();
+    if (!actionText) {
+      return res.status(400).json({ message: 'Action text is required.' });
+    }
+
+    const c: any = await Case.findById(caseId);
+    if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+
+    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
+    if (!step) return res.status(404).json({ message: 'Step not found.' });
+    if (step.status === 'Completed') return res.status(400).json({ message: 'Cannot modify key actions on a completed step.' });
+
+    const actions = await ensureInstanceStepActions(inst, step);
+    actions.push({ text: actionText, done: false });
+
+    await inst.save();
+    await updateCaseWorkflowProgress(c, inst);
+
+    const actor = actorFromReq(req);
+    await writeAudit({
+      caseId: String(c._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'WORKFLOW_STEP_ACTION_ADDED',
+      message: 'Added workflow key action',
+      detail: `${stepKey} • ${actionText}`,
+    });
+
+    return res.json(inst);
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to add step action.' });
   }
@@ -644,7 +733,50 @@ export const deleteStep = async (req: AuthRequest, res: Response) => {
 
 export const updateStepAction = async (req: AuthRequest, res: Response) => {
   try {
-    return res.status(501).json({ message: 'Not implemented: updateStepAction' });
+    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
+
+    const { caseId, stepKey, index } = req.params as any;
+    const actionIndex = Number(index);
+    if (!Number.isInteger(actionIndex) || actionIndex < 0) {
+      return res.status(400).json({ message: 'Invalid action index.' });
+    }
+
+    const { text } = req.body || {};
+    const actionText = String(text || '').trim();
+    if (!actionText) {
+      return res.status(400).json({ message: 'Action text is required.' });
+    }
+
+    const c: any = await Case.findById(caseId);
+    if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+
+    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
+    if (!step) return res.status(404).json({ message: 'Step not found.' });
+    if (step.status === 'Completed') return res.status(400).json({ message: 'Cannot modify key actions on a completed step.' });
+
+    const actions = await ensureInstanceStepActions(inst, step);
+    const target = actions[actionIndex];
+    if (!target) return res.status(404).json({ message: 'Action not found.' });
+
+    target.text = actionText;
+
+    await inst.save();
+    await updateCaseWorkflowProgress(c, inst);
+
+    const actor = actorFromReq(req);
+    await writeAudit({
+      caseId: String(c._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'WORKFLOW_STEP_ACTION_UPDATED',
+      message: 'Updated workflow key action',
+      detail: `${stepKey} • ${actionText}`,
+    });
+
+    return res.json(inst);
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to update step action.' });
   }
@@ -652,7 +784,61 @@ export const updateStepAction = async (req: AuthRequest, res: Response) => {
 
 export const deleteStepAction = async (req: AuthRequest, res: Response) => {
   try {
-    return res.status(501).json({ message: 'Not implemented: deleteStepAction' });
+    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
+
+    const { caseId, stepKey, index } = req.params as any;
+    const actionIndex = Number(index);
+    if (!Number.isInteger(actionIndex) || actionIndex < 0) {
+      return res.status(400).json({ message: 'Invalid action index.' });
+    }
+
+    const c: any = await Case.findById(caseId);
+    if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+
+    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
+    if (!step) return res.status(404).json({ message: 'Step not found.' });
+    if (step.status === 'Completed') return res.status(400).json({ message: 'Cannot modify key actions on a completed step.' });
+
+    const actions = await ensureInstanceStepActions(inst, step);
+    if (actionIndex >= actions.length) {
+      return res.status(404).json({ message: 'Action not found.' });
+    }
+
+    const removed = actions.splice(actionIndex, 1)[0];
+
+    // If the step is now fully satisfied, keep workflow progress consistent.
+    const allDone = actions.length === 0 || actions.every((a: any) => a?.done === true);
+    if (allDone && step.status !== 'Completed') {
+      const updated = await completeStepInternal(req, c, inst, stepKey);
+      const actor = actorFromReq(req);
+      await writeAudit({
+        caseId: String(c._id),
+        actorName: actor.actorName,
+        ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+        action: 'WORKFLOW_STEP_ACTION_DELETED',
+        message: 'Deleted workflow key action',
+        detail: `${stepKey} • ${removed?.text || 'Action removed'}`,
+      });
+      return res.json(updated);
+    }
+
+    await inst.save();
+    await updateCaseWorkflowProgress(c, inst);
+
+    const actor = actorFromReq(req);
+    await writeAudit({
+      caseId: String(c._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'WORKFLOW_STEP_ACTION_DELETED',
+      message: 'Deleted workflow key action',
+      detail: `${stepKey} • ${removed?.text || 'Action removed'}`,
+    });
+
+    return res.json(inst);
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to delete step action.' });
   }

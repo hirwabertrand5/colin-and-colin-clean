@@ -43,6 +43,21 @@ export type ClientReportTemplate = {
   signatureName?: string;
 };
 
+export type TakeRequestState = {
+  status?: 'idle' | 'pending' | 'claimed';
+  requestId?: string;
+  requestedByUserId?: string;
+  requestedByName?: string;
+  requestedByRole?: string;
+  requestedAt?: string;
+  lockExpiresAt?: string;
+  claimedAt?: string;
+  decisionByUserId?: string;
+  decisionByName?: string;
+  decisionReason?: string;
+  lastUpdatedAt?: string;
+};
+
 export interface CaseData {
   _id?: string;
   caseNo: string;
@@ -94,6 +109,8 @@ export interface CaseData {
     plannedValue?: { amount?: number; currency?: string };
     completedValue?: { amount?: number; currency?: string };
   };
+
+  takeRequestState?: TakeRequestState;
 
   billingSettings?: {
     paymentMode?: 'prepaid' | 'postpaid';
@@ -162,6 +179,41 @@ export const deleteCase = async (caseId: string): Promise<void> => {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to delete case');
+};
+
+export const requestTakeCase = async (caseId: string) => {
+  const res = await fetch(`${API_URL}/cases/${caseId}/take-request`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to request matter');
+  return res.json();
+};
+
+export const approveTakeCaseRequest = async (caseId: string, requestId: string, reason?: string) => {
+  const res = await fetch(`${API_URL}/cases/${caseId}/take-request/${requestId}/approve`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to approve take request');
+  return res.json();
+};
+
+export const denyTakeCaseRequest = async (caseId: string, requestId: string, reason?: string) => {
+  const res = await fetch(`${API_URL}/cases/${caseId}/take-request/${requestId}/deny`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to deny take request');
+  return res.json();
 };
 
 export const getActiveCasesCount = async () => {

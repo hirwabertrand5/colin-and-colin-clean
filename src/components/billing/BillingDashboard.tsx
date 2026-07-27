@@ -171,9 +171,9 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
         <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h2 className="font-semibold text-gray-900">Planned Value Health</h2>
+              <h2 className="font-semibold text-gray-900">Total Billed Health</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Compares negotiated case value with case-linked petty cash spend and cleared workflow value.
+                Compares negotiated case value with case-linked petty cash spend and collected workflow value.
               </p>
             </div>
             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold text-white ${healthClass}`}>
@@ -188,7 +188,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
           </div>
           <div className="mt-5">
             <div className="mb-2 flex justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-              <span>Planned value spent</span>
+              <span>Total billed spent</span>
               <span>{loading ? '…' : `${valueHealth.spentRatio}%`}</span>
             </div>
             <div className="h-3 overflow-hidden rounded-full bg-gray-200">
@@ -196,8 +196,8 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
             </div>
           </div>
           <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div><div className="text-sm text-gray-500">Planned</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.planned)}</div></div>
-            <div><div className="text-sm text-gray-500">Cleared/Earned</div><div className="text-xl font-semibold text-green-700">{formatRwf(valueHealth.earned)}</div></div>
+            <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.planned)}</div></div>
+            <div><div className="text-sm text-gray-500">Total collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(valueHealth.earned)}</div></div>
             <div><div className="text-sm text-gray-500">Case Spend</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.spent)}</div></div>
             <div>
               <div className="text-sm text-gray-500">{valueHealth.margin >= 0 ? 'Profit Margin' : 'Loss'}</div>

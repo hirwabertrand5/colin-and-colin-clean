@@ -5,6 +5,9 @@ import {
   getCaseById,
   updateCase,
   deleteCase,
+  requestTakeCase,
+  approveTakeRequest,
+  denyTakeRequest,
 } from '../controllers/caseController.js';
 
 import { authenticate } from '../middleware/authMiddleware.js';
@@ -18,6 +21,9 @@ const router = express.Router();
  */
 router.get('/', authenticate, getAllCases);
 router.get('/:id', authenticate, getCaseById);
+router.post('/:id/take-request', authenticate, requestTakeCase);
+router.post('/:id/take-request/:requestId/approve', authenticate, approveTakeRequest);
+router.post('/:id/take-request/:requestId/deny', authenticate, denyTakeRequest);
 
 router.post('/', authenticate, createCase);
 router.put('/:id', authenticate, updateCase);

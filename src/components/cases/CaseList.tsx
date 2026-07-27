@@ -1,8 +1,8 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Search, Briefcase, ArrowUpDown } from 'lucide-react';
+import { Plus, Search, Briefcase, ArrowUpDown, ShieldQuestion, Loader2 } from 'lucide-react';
 import { UserRole } from '../../App';
-import { getAllCases, deleteCase, CaseData } from '../../services/caseService';
+import { getAllCases, deleteCase, CaseData, requestTakeCase } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
 import {
   formatDueCountdown,
@@ -18,6 +18,19 @@ interface CaseListProps {
 
 const isAssociateLike = (role: UserRole) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
+
+const isAdminLike = (role: UserRole) =>
+  role === 'managing_director' ||
+  role === 'managing_partner' ||
+  role === 'executive_managing_partner' ||
+  role === 'senior_partner' ||
+  role === 'partner' ||
+  role === 'executive_partner' ||
+  role === 'associate_partner' ||
+  role === 'executive_associate_partner' ||
+  role === 'senior_executive_assistant' ||
+  role === 'originating_attorney' ||
+  role === 'executive_assistant';
 
 type SortKey = 'nextDeadline' | 'createdAt' | 'caseNo' | 'parties' | 'assignedTo' | 'workflow' | 'currentStep';
 type SortDir = 'asc' | 'desc';
@@ -36,10 +49,20 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [requestingCaseId, setRequestingCaseId] = useState('');
 
   const assocLike = isAssociateLike(userRole);
-  const canManageCases = userRole === 'managing_director' || userRole === 'executive_assistant';
+  const canManageCases = isAdminLike(userRole);
   const entityLabel = isTemporaryClosedMode ? 'matters' : 'cases';
+  const currentUser = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || '{}') as { id?: string; _id?: string; name?: string; role?: string };
+    } catch {
+      return {};
+    }
+  }, []);
+  const now = Date.now();
 
   const deferredSearchTerm = useDeferredValue(searchTerm);
 
@@ -82,6 +105,27 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
       setError(err.message || 'Failed to delete case');
     }
   };
+
+  const handleRequestTakeCase = async (caseId?: string) => {
+    if (!caseId) return;
+    try {
+      setError('');
+      setStatusMessage('');
+      setRequestingCaseId(caseId);
+      await requestTakeCase(caseId);
+      await loadCases();
+      setStatusMessage('Request sent. Seniors have been notified for approval.');
+      window.setTimeout(() => setStatusMessage(''), 4000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to request matter');
+    } finally {
+      setRequestingCaseId('');
+    }
+  };
+
+  const isPendingLockActive = (c: CaseData) =>
+    String(c.takeRequestState?.status || '').toLowerCase() === 'pending' &&
+    (!c.takeRequestState?.lockExpiresAt || Date.parse(c.takeRequestState.lockExpiresAt) > now);
 
   const getDeadlinePillClassForCase = (c: CaseData) => {
     // Prefer current step due date when the current step exists and the case is not completed.
@@ -157,7 +201,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
     return cases.map((c, originalIndex) => ({
       c,
       originalIndex,
-      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''} ${c.assignedTo ?? ''}`.toLowerCase(),
+      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''} ${c.assignedTo ?? ''} ${c.workflow ?? ''} ${c.matterType ?? ''} ${c.caseType ?? ''} ${c.workflowProgress?.currentStepTitle ?? ''} ${c.workflowProgress?.status ?? ''}`.toLowerCase(),
       createdAtMs: toMs(c.createdAt),
       workflowLabel: getCasePracticePath(c).toLowerCase(),
       currentStepLabel: String(c.workflowProgress?.currentStepTitle || '').toLowerCase(),
@@ -236,13 +280,17 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-              {isTemporaryClosedMode ? 'Temporarily Closed Matters' : assocLike ? 'My Matters' : 'Practice Management'}
+              {isTemporaryClosedMode
+                ? 'Temporarily Closed Matters'
+                : assocLike
+                  ? 'My Matters & Urgent Matters'
+                  : 'Practice Management'}
             </h1>
             <p className="text-gray-600">
               {isTemporaryClosedMode
                 ? 'Matters that are paused temporarily and can be reactivated later'
                 : assocLike
-                  ? 'Matters assigned to you'
+                  ? 'Your assigned matters plus yellow urgent matters visible across the firm'
                   : 'Track firm-wide matters, assignments, and progress'}
             </p>
           </div>
@@ -311,6 +359,12 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
         </div>
       )}
 
+      {statusMessage && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+          {statusMessage}
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
@@ -348,7 +402,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                   </td>
                   <td className="px-6 py-5 text-sm font-medium text-gray-900">{item.caseNo}</td>
                   <td className="px-6 py-5 text-sm text-gray-900">{item.parties}</td>
-                  <td className="px-6 py-5 text-sm text-gray-700">{item.workflow || item.matterType || '—'}</td>
+                  <td className="px-6 py-5 text-sm text-gray-700">{item.workflow || item.matterType || item.caseType || '—'}</td>
 
                   <td className="px-6 py-5 text-sm text-gray-700">
                     {item.workflowProgress?.status === 'Completed'
@@ -381,10 +435,20 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                         {formatDueCountdown(item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt)}
                       </div>
                     ) : null}
+                    {isPendingLockActive(item) ? (
+                      <div className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
+                        Request pending
+                      </div>
+                    ) : null}
+                    {item.takeRequestState?.status === 'claimed' ? (
+                      <div className="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700">
+                        Claimed by approved requester
+                      </div>
+                    ) : null}
                     {item.workflowProgress?.currentStepExtension ? (
                       <div
                         className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
-                        title={item.workflowProgress.currentStepExtension.reason || 'Extension granted'}
+                        title={`Extension granted${item.workflowProgress.currentStepExtension.days ? ` ${item.workflowProgress.currentStepExtension.days > 0 ? `+${item.workflowProgress.currentStepExtension.days}` : item.workflowProgress.currentStepExtension.days}d` : ''}${item.workflowProgress.currentStepExtension.reason ? ` • ${item.workflowProgress.currentStepExtension.reason}` : ''}${item.workflowProgress.currentStepExtension.grantedBy ? ` • by ${item.workflowProgress.currentStepExtension.grantedBy}` : ''}${item.workflowProgress.currentStepExtension.newDueAt ? ` • due ${new Date(item.workflowProgress.currentStepExtension.newDueAt).toLocaleDateString()}` : ''}`}
                       >
                         Extension {item.workflowProgress.currentStepExtension.days && item.workflowProgress.currentStepExtension.days > 0 ? '+' : ''}
                         {item.workflowProgress.currentStepExtension.days || 0}d
@@ -393,9 +457,28 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                   </td>
 
                   <td className="px-6 py-5">
-                    <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">
-                      Open →
-                    </Link>
+                    <div className="flex flex-col items-start gap-2">
+                      <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">
+                        Open →
+                      </Link>
+
+                      {!canManageCases &&
+                        String(item.assignedTo || '').trim() !== String(currentUser.name || '').trim() &&
+                        item.takeRequestState?.status !== 'claimed' &&
+                        !isPendingLockActive(item) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleRequestTakeCase(item._id)}
+                            disabled={requestingCaseId === item._id}
+                            className="inline-flex items-center gap-2 rounded-full border border-gray-900 bg-gray-900 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {requestingCaseId === item._id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldQuestion className="w-3 h-3" />}
+                            Request to Take Case
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

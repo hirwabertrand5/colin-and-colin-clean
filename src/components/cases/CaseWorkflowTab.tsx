@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import { CalendarPlus } from 'lucide-react';
+import { CalendarPlus, Plus, Pencil, Trash2, X } from 'lucide-react';
 import {
   getWorkflowForCase,
   completeWorkflowStep,
   reopenWorkflowStep,
-  extendWorkflowStepDeadline,
+  amendWorkflowStepDeadline,
   toggleWorkflowStepAction,
+  addWorkflowStepAction,
+  updateWorkflowStepAction,
+  deleteWorkflowStepAction,
   WorkflowInstance,
 } from '../../services/workflowInstanceService';
 import { getWorkflowTemplateById, WorkflowTemplate } from '../../services/workflowService';
@@ -58,11 +61,18 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
   const [err, setErr] = useState('');
   const [busyKey, setBusyKey] = useState<string>('');
   const [template, setTemplate] = useState<WorkflowTemplate | null>(null);
+  const [actionEditor, setActionEditor] = useState<{
+    stepKey: string;
+    stepTitle: string;
+    mode: 'add' | 'edit';
+    index?: number;
+    text: string;
+  } | null>(null);
 
-  const canExtendDeadlines = canCompleteSteps;
-  const [extendOpenFor, setExtendOpenFor] = useState<string>('');
-  const [extendDate, setExtendDate] = useState<string>('');
-  const [extendReason, setExtendReason] = useState<string>('');
+  const canAmendDeadlines = canCompleteSteps;
+  const [amendOpenFor, setAmendOpenFor] = useState<string>('');
+  const [amendDate, setAmendDate] = useState<string>('');
+  const [amendReason, setAmendReason] = useState<string>('');
 
   const load = async () => {
     setLoading(true);
@@ -109,6 +119,54 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
     }
   };
 
+  const openAddAction = (stepKey: string, stepTitle: string) => {
+    setActionEditor({ stepKey, stepTitle, mode: 'add', text: '' });
+  };
+
+  const openEditAction = (stepKey: string, stepTitle: string, index: number, text: string) => {
+    setActionEditor({ stepKey, stepTitle, mode: 'edit', index, text });
+  };
+
+  const submitActionEditor = async () => {
+    if (!actionEditor) return;
+    const text = actionEditor.text.trim();
+    if (!text) {
+      setErr('Action text is required.');
+      return;
+    }
+
+    try {
+      setBusyKey(`${actionEditor.mode}:${actionEditor.stepKey}:${actionEditor.index ?? 'new'}`);
+      setErr('');
+      const updated =
+        actionEditor.mode === 'add'
+          ? await addWorkflowStepAction(caseId, actionEditor.stepKey, text)
+          : await updateWorkflowStepAction(caseId, actionEditor.stepKey, Number(actionEditor.index), { text });
+      setWf(updated);
+      await onWorkflowChanged?.();
+      setActionEditor(null);
+    } catch (e: any) {
+      setErr(e.message || 'Failed to save key action');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const removeAction = async (stepKey: string, index: number) => {
+    if (!window.confirm('Delete this key action?')) return;
+    try {
+      setBusyKey(`delete:${stepKey}:${index}`);
+      setErr('');
+      const updated = await deleteWorkflowStepAction(caseId, stepKey, index);
+      setWf(updated);
+      await onWorkflowChanged?.();
+    } catch (e: any) {
+      setErr(e.message || 'Failed to delete key action');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   const onCompleteStep = async (stepKey: string) => {
     if (!canCompleteSteps) return;
     try {
@@ -139,25 +197,25 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
     }
   };
 
-  const onExtendDeadline = async (stepKey: string) => {
-    if (!canExtendDeadlines) return;
+  const onAmendDeadline = async (stepKey: string) => {
+    if (!canAmendDeadlines) return;
     const step = wf?.steps?.find((x) => x.stepKey === stepKey);
     if (!step) {
       setErr('Step not found');
       return;
     }
     if (!step.dueAt) {
-      setErr('Step has no current due date to extend.');
+      setErr('Step has no current due date to amend.');
       return;
     }
-    if (!extendDate) {
+    if (!amendDate) {
       setErr('Please choose a new due date.');
       return;
     }
     try {
       const currentDueDate = formatDateInputValue(step.dueAt);
       const currentDueMs = dateInputValueToUtcMs(currentDueDate);
-      const selectedMs = dateInputValueToUtcMs(extendDate);
+      const selectedMs = dateInputValueToUtcMs(amendDate);
 
       if (!Number.isFinite(currentDueMs) || !Number.isFinite(selectedMs)) {
         setErr('Please choose a valid date.');
@@ -170,16 +228,16 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
         return;
       }
 
-      setBusyKey(`extend:${stepKey}`);
+      setBusyKey(`amend:${stepKey}`);
       setErr('');
-      const updated = await extendWorkflowStepDeadline(caseId, stepKey, days, extendReason);
+      const updated = await amendWorkflowStepDeadline(caseId, stepKey, days, amendReason);
       setWf(updated);
       await onWorkflowChanged?.();
-      setExtendOpenFor('');
-      setExtendDate('');
-      setExtendReason('');
+      setAmendOpenFor('');
+      setAmendDate('');
+      setAmendReason('');
     } catch (e: any) {
-      setErr(e.message || 'Failed to extend deadline');
+      setErr(e.message || 'Failed to amend deadline');
     } finally {
       setBusyKey('');
     }
@@ -268,6 +326,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
         }
 
         const keyActions = derivedActions || [];
+        const canManageActions = canCompleteSteps && s.status !== 'Completed';
 
         return (
         <div key={s.stepKey} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
@@ -298,7 +357,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                 {latestExtension ? (
                   <span
                     className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
-                    title={latestExtension.reason || 'Extension granted'}
+                    title={
+                      `Extension granted${latestExtension.days ? ` ${latestExtension.days > 0 ? `+${latestExtension.days}` : latestExtension.days}d` : ''}` +
+                      `${latestExtension.reason ? ` • ${latestExtension.reason}` : ''}` +
+                      `${latestExtension.grantedBy ? ` • by ${latestExtension.grantedBy}` : ''}` +
+                      `${latestExtension.newDueAt ? ` • due ${new Date(latestExtension.newDueAt).toLocaleDateString()}` : ''}`
+                    }
                   >
                     Extension granted: {latestExtension.days > 0 ? '+' : ''}
                     {latestExtension.days}d
@@ -326,23 +390,23 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                 ) : null}
               </div>
 
-              {canExtendDeadlines && s.status !== 'Completed' && (
+              {canAmendDeadlines && s.status !== 'Completed' && (
                 <button
                   type="button"
                   onClick={() => {
-                    if (extendOpenFor === s.stepKey) {
-                      setExtendOpenFor('');
-                      setExtendDate('');
-                  } else {
-                      setExtendOpenFor(s.stepKey);
-                      setExtendDate(formatDateInputValue(s.dueAt));
+                    if (amendOpenFor === s.stepKey) {
+                      setAmendOpenFor('');
+                      setAmendDate('');
+                    } else {
+                      setAmendOpenFor(s.stepKey);
+                      setAmendDate(formatDateInputValue(s.dueAt));
                     }
                   }}
                   className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded"
-                  title="Extend deadline"
+                  title="Amend deadline"
                 >
                   <CalendarPlus className="w-4 h-4" />
-                  Extend
+                  Amend
                 </button>
               )}
 
@@ -374,12 +438,24 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
           </div>
 
           {/* Key Actions section below the step header */}
-          {keyActions.length > 0 && (
+          {keyActions.length > 0 ? (
             <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-              <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide mb-2">Key Actions</div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Key Actions</div>
+                {canManageActions ? (
+                  <button
+                    type="button"
+                    onClick={() => openAddAction(s.stepKey, s.title)}
+                    className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add key action
+                  </button>
+                ) : null}
+              </div>
               <ul className="space-y-2">
                 {keyActions.map((action: any, idx: number) => {
-                  const isBusy = busyKey === `action:${s.stepKey}:${idx}`;
+                  const isBusy = busyKey === `action:${s.stepKey}:${idx}` || busyKey === `delete:${s.stepKey}:${idx}`;
                   const isDone = Boolean(action?.done);
                   const label = typeof action === 'string' ? action : String(action?.text || '');
                   return (
@@ -411,46 +487,85 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                           {isDone ? <span className="text-white text-xs">✓</span> : null}
                         </div>
                       )}
-                      <div className={`text-sm ${isDone ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-200'}`}>
+                      <div className={`min-w-0 flex-1 text-sm ${isDone ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-200'}`}>
                         {label}
                       </div>
+                      {canManageActions ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditAction(s.stepKey, s.title, idx, label)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                            title="Edit key action"
+                            disabled={busyKey === `edit:${s.stepKey}:${idx}`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAction(s.stepKey, idx)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-300 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-red-900/20"
+                            title="Delete key action"
+                            disabled={busyKey === `delete:${s.stepKey}:${idx}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : null}
                     </li>
                   );
                 })}
               </ul>
             </div>
-          )}
+          ) : canManageActions ? (
+            <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Key Actions</div>
+                <button
+                  type="button"
+                  onClick={() => openAddAction(s.stepKey, s.title)}
+                  className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add key action
+                </button>
+              </div>
+              <div className="rounded-lg border border-dashed border-gray-300 bg-white px-3 py-4 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+                No key actions configured for this step.
+              </div>
+            </div>
+          ) : null}
 
-          {extendOpenFor === s.stepKey && canExtendDeadlines ? (
+          {amendOpenFor === s.stepKey && canAmendDeadlines ? (
             <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
-              <div className="text-sm font-semibold text-gray-900">Extend deadline</div>
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">New due date</label>
-                    <input
-                      value={extendDate}
-                      onChange={(e) => setExtendDate(e.target.value)}
-                      type="date"
-                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Reason (optional)</label>
-                    <input
-                      value={extendReason}
-                      onChange={(e) => setExtendReason(e.target.value)}
-                      placeholder="e.g., Awaiting client documents"
-                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
-                    />
-                  </div>
+              <div className="text-sm font-semibold text-gray-900">Amend deadline</div>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">New due date</label>
+                  <input
+                    value={amendDate}
+                    onChange={(e) => setAmendDate(e.target.value)}
+                    type="date"
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                  />
                 </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Reason (optional)</label>
+                  <input
+                    value={amendReason}
+                    onChange={(e) => setAmendReason(e.target.value)}
+                    placeholder="e.g., Awaiting client documents"
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                  />
+                </div>
+              </div>
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    setExtendOpenFor('');
-                    setExtendDate('');
-                    setExtendReason('');
+                    setAmendOpenFor('');
+                    setAmendDate('');
+                    setAmendReason('');
                   }}
                   className="px-3 py-2 border border-gray-300 rounded text-gray-700 hover:bg-white"
                 >
@@ -458,11 +573,11 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                 </button>
                 <button
                   type="button"
-                  onClick={() => onExtendDeadline(s.stepKey)}
-                  disabled={busyKey === `extend:${s.stepKey}`}
+                  onClick={() => onAmendDeadline(s.stepKey)}
+                  disabled={busyKey === `amend:${s.stepKey}`}
                   className="px-3 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
                 >
-                  {busyKey === `extend:${s.stepKey}` ? 'Extending…' : 'Extend deadline'}
+                  {busyKey === `amend:${s.stepKey}` ? 'Amending…' : 'Amend deadline'}
                 </button>
               </div>
             </div>
@@ -501,6 +616,82 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
         </div>
         );
       })}
+
+      {actionEditor ? (
+        <div className="fixed inset-0 z-50 flex">
+          <button
+            type="button"
+            aria-label="Close key action editor"
+            className="absolute inset-0 bg-gray-900/50"
+            onClick={() => setActionEditor(null)}
+          />
+          <div className="relative ml-auto flex h-full w-full max-w-md flex-col bg-white shadow-2xl dark:bg-gray-900">
+            <div className="flex items-start justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
+                  {actionEditor.mode === 'add' ? 'Add key action' : 'Edit key action'}
+                </div>
+                <h3 className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">{actionEditor.stepTitle}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActionEditor(null)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
+                <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
+                  Action text
+                </label>
+                <textarea
+                  value={actionEditor.text}
+                  onChange={(e) => setActionEditor((curr) => (curr ? { ...curr, text: e.target.value } : curr))}
+                  rows={5}
+                  className="mt-2 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-0 focus:border-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                  placeholder="Enter a key action"
+                />
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {actionEditor.mode === 'add'
+                    ? 'This will append to the step’s key action list.'
+                    : 'Update the action text without changing its completion status.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 px-5 py-4 dark:border-gray-800">
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActionEditor(null)}
+                  className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitActionEditor}
+                  disabled={
+                    busyKey === `${actionEditor.mode}:${actionEditor.stepKey}:${actionEditor.index ?? 'new'}` ||
+                    !String(actionEditor.text || '').trim()
+                  }
+                  className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {busyKey === `${actionEditor.mode}:${actionEditor.stepKey}:${actionEditor.index ?? 'new'}`
+                    ? 'Saving…'
+                    : actionEditor.mode === 'add'
+                      ? 'Add key action'
+                      : 'Save changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

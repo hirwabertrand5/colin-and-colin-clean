@@ -107,6 +107,21 @@ export interface ICase extends Document {
     };
   };
 
+  takeRequestState?: {
+    status?: 'idle' | 'pending' | 'claimed';
+    requestId?: mongoose.Types.ObjectId;
+    requestedByUserId?: mongoose.Types.ObjectId;
+    requestedByName?: string;
+    requestedByRole?: string;
+    requestedAt?: Date;
+    lockExpiresAt?: Date;
+    claimedAt?: Date;
+    decisionByUserId?: mongoose.Types.ObjectId;
+    decisionByName?: string;
+    decisionReason?: string;
+    lastUpdatedAt?: Date;
+  };
+
   billingSettings?: {
     paymentMode?: 'prepaid' | 'postpaid';
     currency?: string;
@@ -261,6 +276,29 @@ const CaseSchema = new Schema<ICase>(
         },
       },
       default: {},
+    },
+
+    takeRequestState: {
+      type: {
+        status: {
+          type: String,
+          enum: ['idle', 'pending', 'claimed'],
+          default: 'idle',
+        },
+        requestId: { type: Schema.Types.ObjectId, ref: 'CaseTakeRequest' },
+        requestedByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
+        requestedByName: { type: String, trim: true },
+        requestedByRole: { type: String, trim: true },
+        requestedAt: { type: Date },
+        lockExpiresAt: { type: Date },
+        claimedAt: { type: Date },
+        decisionByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
+        decisionByName: { type: String, trim: true },
+        decisionReason: { type: String, trim: true },
+        lastUpdatedAt: { type: Date },
+      },
+      default: { status: 'idle' },
+      index: true,
     },
 
     billingSettings: {

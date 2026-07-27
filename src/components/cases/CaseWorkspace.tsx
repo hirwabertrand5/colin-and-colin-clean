@@ -18,9 +18,21 @@ import {
   Receipt,
   FolderTree,
   ChevronRight,
+  ShieldQuestion,
+  Loader2,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 import { getAuditForCase, AuditLogItem } from '../../services/auditService';
-import { getCaseById, CaseData, updateCase, deleteCase as deleteCaseRecord } from '../../services/caseService';
+import {
+  getCaseById,
+  CaseData,
+  updateCase,
+  deleteCase as deleteCaseRecord,
+  requestTakeCase,
+  approveTakeCaseRequest,
+  denyTakeCaseRequest,
+} from '../../services/caseService';
 import {
   getTasksForCase,
   addTaskToCase,
@@ -64,6 +76,7 @@ import {
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { getRoleSuggestions } from '../../constants/partyRoles';
 import { getCasePracticePath } from '../../utils/caseLabels';
+import { getUrgencyColorForDueDate } from '../../utils/workflowDeadline';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const BACKEND_URL = API_URL ? API_URL.replace(/\/api\/?$/, '') : '';
@@ -157,13 +170,33 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const navigate = useNavigate();
 
   const isRestrictedAssigneeRole = ['trainee_associate', 'intern'].includes(userRole);
-  const canManageCase = userRole === 'managing_director' || userRole === 'executive_assistant';
-  const canDeleteCase = userRole === 'managing_director' || userRole === 'executive_assistant';
-  const canAssignTasks =
-    userRole === 'managing_director' || userRole === 'executive_assistant' || userRole === 'associate';
-  const canManageBilling = userRole === 'managing_director' || userRole === 'executive_assistant';
-  const canManageCalendar = userRole === 'managing_director' || userRole === 'executive_assistant';
-  const canManageDocuments = userRole === 'managing_director' || userRole === 'executive_assistant';
+  const ADMIN_ROLES = [
+    'managing_director',
+    'managing_partner',
+    'executive_managing_partner',
+    'senior_partner',
+    'partner',
+    'executive_partner',
+    'associate_partner',
+    'executive_associate_partner',
+    'senior_executive_assistant',
+    'originating_attorney',
+    'executive_assistant',
+  ] as const;
+  const isAdminRole = ADMIN_ROLES.includes(userRole as any);
+  const canManageCase = isAdminRole;
+  const canDeleteCase = isAdminRole;
+  const canAssignTasks = isAdminRole || userRole === 'associate';
+  const canManageBilling = isAdminRole;
+  const canManageCalendar = isAdminRole;
+  const canManageDocuments = isAdminRole;
+  const currentUser = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || '{}') as { id?: string; _id?: string; name?: string; role?: string };
+    } catch {
+      return {};
+    }
+  }, []);
 
   // Case data
   const [caseData, setCaseData] = useState<CaseData | null>(null);
@@ -181,6 +214,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [workflowLoading, setWorkflowLoading] = useState(false);
   const [workflowError, setWorkflowError] = useState('');
   const [workflowNowTick, setWorkflowNowTick] = useState(0);
+  const [takeRequestBusy, setTakeRequestBusy] = useState(false);
+  const [takeDecisionBusy, setTakeDecisionBusy] = useState(false);
+  const [takeRequestNote, setTakeRequestNote] = useState('');
+  const [takeRequestError, setTakeRequestError] = useState('');
 
   // Workflow template (for stage-specific fees and SLA)
   const [workflowTemplate, setWorkflowTemplate] = useState<WorkflowTemplate | null>(null);
@@ -901,6 +938,73 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     }
   };
 
+  const currentMatterColor = useMemo(() => {
+    if (!caseData) return 'gray';
+    const due = caseData.workflowProgress?.currentStepDueAt || caseData.workflowProgress?.nextDueAt;
+    const start = caseData.workflowProgress?.currentStepStartAt || caseData.workflowStartDate || caseData.createdAt;
+    return getUrgencyColorForDueDate(due, start);
+  }, [caseData]);
+  const nowMs = Date.now();
+
+  const isYellowMatter = currentMatterColor === 'yellow';
+  const isCurrentAssignee = String(caseData?.assignedTo || '').trim() === String(currentUser.name || '').trim();
+  const takeRequestState = caseData?.takeRequestState;
+  const isPendingTakeRequest =
+    String(takeRequestState?.status || '').toLowerCase() === 'pending' &&
+    (!takeRequestState?.lockExpiresAt || Date.parse(takeRequestState.lockExpiresAt) > nowMs);
+  const isClaimedTakeRequest = String(takeRequestState?.status || '').toLowerCase() === 'claimed';
+  const canRequestTake = !canManageCase && isYellowMatter && !isCurrentAssignee && !isPendingTakeRequest && !isClaimedTakeRequest;
+  const canReviewTakeRequest = canManageCase && isPendingTakeRequest;
+
+  const refreshCaseAndWorkflow = async () => {
+    if (!caseData?._id) return;
+    try {
+      const latestCase = await getCaseById(caseData._id);
+      setCaseData(latestCase);
+    } catch {
+      // keep current state if refresh fails
+    }
+    try {
+      const latestWf = await getWorkflowForCase(caseData._id);
+      setWorkflowInstance(latestWf);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRequestTakeMatter = async () => {
+    if (!caseData?._id) return;
+    try {
+      setTakeRequestBusy(true);
+      setTakeRequestError('');
+      await requestTakeCase(caseData._id);
+      await refreshCaseAndWorkflow();
+    } catch (err: any) {
+      setTakeRequestError(err.message || 'Failed to send request');
+    } finally {
+      setTakeRequestBusy(false);
+    }
+  };
+
+  const handleDecision = async (decision: 'approve' | 'deny') => {
+    if (!caseData?._id || !takeRequestState?.requestId) return;
+    try {
+      setTakeDecisionBusy(true);
+      setTakeRequestError('');
+      if (decision === 'approve') {
+        await approveTakeCaseRequest(caseData._id, takeRequestState.requestId, takeRequestNote);
+      } else {
+        await denyTakeCaseRequest(caseData._id, takeRequestState.requestId, takeRequestNote);
+      }
+      setTakeRequestNote('');
+      await refreshCaseAndWorkflow();
+    } catch (err: any) {
+      setTakeRequestError(err.message || `Failed to ${decision} request`);
+    } finally {
+      setTakeDecisionBusy(false);
+    }
+  };
+
   // ----------------------------
   // Billing
   // ----------------------------
@@ -1331,6 +1435,76 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 gap-6">
           <div className="bg-white border border-gray-200 rounded-lg p-6">
+            {(canRequestTake || canReviewTakeRequest || isPendingTakeRequest || isClaimedTakeRequest) && (
+              <div className="mb-5 rounded-xl border border-gray-200 bg-slate-50 p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <ShieldQuestion className="w-4 h-4 text-slate-700" />
+                      <h3 className="font-semibold text-slate-900">Yellow Matter Request</h3>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {canReviewTakeRequest
+                        ? `${takeRequestState?.requestedByName || 'A user'} requested to take this matter.`
+                        : isPendingTakeRequest
+                          ? 'This matter has already been requested and is waiting for senior approval.'
+                          : isClaimedTakeRequest
+                            ? 'This matter has already been assigned through the yellow request flow.'
+                            : 'This yellow matter is visible to the firm and can be requested by available users.'}
+                    </p>
+                    {takeRequestError ? <p className="mt-2 text-sm font-medium text-red-600">{takeRequestError}</p> : null}
+                    {takeRequestState?.decisionReason ? (
+                      <p className="mt-2 text-xs text-slate-500">Latest decision note: {takeRequestState.decisionReason}</p>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-col gap-2 md:min-w-[280px]">
+                    {canRequestTake && (
+                      <button
+                        type="button"
+                        onClick={handleRequestTakeMatter}
+                        disabled={takeRequestBusy}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-900 bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {takeRequestBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldQuestion className="w-4 h-4" />}
+                        Request to Take Case
+                      </button>
+                    )}
+
+                    {canReviewTakeRequest && (
+                      <>
+                        <textarea
+                          value={takeRequestNote}
+                          onChange={(e) => setTakeRequestNote(e.target.value)}
+                          placeholder="Decision note (optional)"
+                          className="min-h-[96px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-slate-400"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleDecision('approve')}
+                            disabled={takeDecisionBusy}
+                            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {takeDecisionBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDecision('deny')}
+                            disabled={takeDecisionBusy}
+                            className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <XCircle className="w-4 h-4" />
+                            Deny
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="font-semibold text-gray-900">Workflow Checklist</h2>
@@ -2510,7 +2684,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Case Billing Value</h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  Billing is based on the negotiated planned value and the percentage of completed key actions.
+                  Billing is based on the negotiated total billed value and the percentage of completed key actions.
                 </p>
               </div>
 
@@ -2523,7 +2697,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
             <div className="mt-5">
               <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-                <span>Planned value used by case expenses</span>
+                <span>Total billed used by case expenses</span>
                 <span>{plannedExpenseRatio}%</span>
               </div>
               <div className="h-3 overflow-hidden rounded-full bg-gray-200">
@@ -2536,13 +2710,13 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
             <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Planned value</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Billed</div>
                 <div className="mt-2 text-lg font-semibold text-gray-900">
                   {billingCurrency} {Math.round(totalBilled).toLocaleString()}
                 </div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Earned / cleared fees</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total collected</div>
                 <div className="mt-2 text-lg font-semibold text-gray-900">
                   {billingCurrency} {Math.round(earnedFeeAmount).toLocaleString()}
                 </div>
@@ -3085,7 +3259,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Planned value (RWF)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Total Billed (RWF)</label>
                 <input
                   value={String(editCaseData.workflowProgress?.plannedValue?.amount ?? editCaseData.budget ?? '')}
                   onChange={(e) => {

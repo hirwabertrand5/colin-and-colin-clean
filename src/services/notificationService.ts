@@ -10,7 +10,8 @@ export type NotificationType =
   | 'TASK_ASSIGNED'
   | 'TASK_APPROVAL_REQUESTED'
   | 'TASK_DUE_REMINDER'
-  | 'EVENT_REMINDER';
+  | 'EVENT_REMINDER'
+  | 'WORKFLOW_NOTIFICATION';
 
 export interface AppNotification {
   _id: string;
