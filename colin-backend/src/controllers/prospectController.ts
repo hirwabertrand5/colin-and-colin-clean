@@ -215,9 +215,19 @@ const buildFeedbackEmailHtml = (prospectId: string) => {
   `;
 };
 
-const createMatterFromConvertedProspect = async (prospect: any, actorName: string) => {
+const createMatterFromTerminalProspect = async (
+  prospect: any,
+  actorName: string,
+  matterStatus: 'Active' | 'Closed'
+) => {
   if (!prospect) return null;
   if (prospect.convertedToMatters) {
+    if (prospect.isActive !== false) {
+      prospect.isActive = false;
+      prospect.engagementDate = prospect.engagementDate || new Date();
+      await prospect.save();
+    }
+
     return Case.findById(prospect.convertedToMatters).lean();
   }
 
@@ -239,13 +249,15 @@ const createMatterFromConvertedProspect = async (prospect: any, actorName: strin
       },
     ],
     assignedTo: assignee?.name || actorName || 'Unassigned',
-    status: 'Active',
+    status: matterStatus,
     priority: 'Medium',
     caseType: 'Transactional Cases',
     billingSettings: {
       paymentMode: 'postpaid',
       currency: prospect.estimatedMatterCurrency || 'RWF',
     },
+    matterTiming: matterStatus === 'Closed' ? 'historical' : 'new',
+    workflowAutomation: matterStatus !== 'Closed',
     onboarding: {
       conflictCheckStatus: prospect.conflictCheckStatus || 'Pending',
       conflictCheckedAt: prospect.conflictCheckDate,
@@ -254,11 +266,48 @@ const createMatterFromConvertedProspect = async (prospect: any, actorName: strin
 
   const savedCase = await newCase.save();
   prospect.convertedToMatters = savedCase._id;
-  prospect.stage = 'Converted';
+  prospect.stage = matterStatus === 'Closed' ? 'Non-Converted' : 'Converted';
   prospect.engagementDate = new Date();
+  prospect.isActive = false;
   await prospect.save();
 
   return savedCase;
+};
+
+const getMatterStatusForProspectStage = (stage?: string): 'Active' | 'Closed' | null => {
+  const normalized = cleanString(stage);
+  if (normalized === 'Converted') return 'Active';
+  if (normalized === 'Non-Converted') return 'Closed';
+  return null;
+};
+
+export const reconcileTerminalProspects = async () => {
+  const terminalProspects = await Prospect.find({
+    stage: { $in: terminalStages },
+  });
+
+  let reconciledCount = 0;
+
+  for (const prospect of terminalProspects) {
+    const matterStatus = getMatterStatusForProspectStage(prospect.stage);
+    if (!matterStatus) continue;
+
+    const linkedCaseExists = prospect.convertedToMatters ? await Case.exists({ _id: prospect.convertedToMatters }) : false;
+    if (!linkedCaseExists) {
+      await createMatterFromTerminalProspect(prospect, 'System', matterStatus);
+      reconciledCount += 1;
+      continue;
+    }
+
+    if (prospect.isActive !== false) {
+      prospect.isActive = false;
+      prospect.engagementDate = prospect.engagementDate || new Date();
+      await prospect.save();
+      reconciledCount += 1;
+    }
+  }
+
+  return reconciledCount;
 };
 
 const sendProspectFeedbackEmail = async (prospect: any) => {
@@ -285,10 +334,19 @@ export const getAllProspects = async (req: AuthRequest, res: Response) => {
 
     const { stage, assignedTo, isActive } = req.query;
     const filter: any = {};
+    const requestedStage = cleanString(stage);
+    const includeTerminal = String((req.query as any)?.includeTerminal || '').toLowerCase() === 'true';
 
-    if (stage) filter.stage = stage;
+    if (requestedStage && terminalStages.includes(requestedStage as any) && !includeTerminal) {
+      return res.json([]);
+    }
+
+    if (requestedStage) filter.stage = requestedStage;
+    if (!requestedStage && !includeTerminal) {
+      filter.stage = { $nin: terminalStages };
+    }
     if (assignedTo) filter.assignedTo = assignedTo;
-    if (isActive !== undefined) filter.isActive = isActive === 'true';
+    filter.isActive = isActive !== undefined ? isActive === 'true' : true;
 
     const prospects = await Prospect.find(filter)
       .populate('assignedTo', 'name email')
@@ -355,6 +413,13 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
     });
 
     const saved = await prospect.save();
+    if (terminalStages.includes(saved.stage as any)) {
+      await createMatterFromTerminalProspect(
+        saved,
+        req.user?.name || 'System',
+        saved.stage === 'Converted' ? 'Active' : 'Closed'
+      );
+    }
     const populated = await Prospect.findById(saved._id)
       .populate('assignedTo', 'name email')
       .populate('responsiblePartner', 'name email role')
@@ -409,7 +474,16 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
     const saved = await prospect.save();
 
     if (saved.stage === 'Converted' && !saved.convertedToMatters) {
-      await createMatterFromConvertedProspect(saved, req.user?.name || 'System');
+      await createMatterFromTerminalProspect(saved, req.user?.name || 'System', 'Active');
+    }
+
+    if (saved.stage === 'Non-Converted' && !saved.convertedToMatters) {
+      await createMatterFromTerminalProspect(saved, req.user?.name || 'System', 'Closed');
+    }
+
+    if (terminalStages.includes(saved.stage as any) && saved.isActive !== false) {
+      saved.isActive = false;
+      await saved.save();
     }
 
     if (shouldSendFeedbackEmail) {
@@ -467,7 +541,10 @@ export const getProspectStats = async (req: AuthRequest, res: Response) => {
 
     const stats = await Prospect.aggregate([
       {
-        $match: { isActive: true },
+        $match: {
+          isActive: true,
+          stage: { $nin: terminalStages },
+        },
       },
       {
         $group: {
@@ -507,10 +584,10 @@ export const getProspectStats = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Convert prospect to active matter
+ * Convert prospect to matter
  * - Creates a new Case from prospect data
  * - Links prospect to case via convertedToMatters
- * - Updates prospect stage to 'Converted'
+ * - Updates prospect stage to the corresponding terminal state
  */
 export const convertProspectToMatter = async (req: AuthRequest, res: Response) => {
   try {
@@ -540,7 +617,7 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
       return res.status(400).json({ message: 'Please record a conversion outcome before converting this prospect.' });
     }
 
-    const savedCase = await createMatterFromConvertedProspect(prospect, req.user?.name || 'System');
+    const savedCase = await createMatterFromTerminalProspect(prospect, req.user?.name || 'System', 'Active');
 
     return res.json({
       message: 'Prospect converted to matter successfully.',

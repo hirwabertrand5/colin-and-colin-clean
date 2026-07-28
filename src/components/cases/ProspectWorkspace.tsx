@@ -151,6 +151,16 @@ export default function ProspectWorkspace() {
   }, [prospectId]);
 
   useEffect(() => {
+    if (!prospect) return;
+    if (!prospect.convertedToMatters) return;
+
+    const stage = String(prospect.stage || '').trim().toLowerCase();
+    if (stage === 'converted' || stage === 'non-converted') {
+      navigate(`/matters/${prospect.convertedToMatters}`, { replace: true });
+    }
+  }, [navigate, prospect]);
+
+  useEffect(() => {
     const loadFeedback = async () => {
       if (!prospectId) return;
       try {

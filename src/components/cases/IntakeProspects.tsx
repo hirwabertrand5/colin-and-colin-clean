@@ -42,8 +42,6 @@ export default function IntakeProspects() {
     'Awaiting Client Decision',
     'Final Follow-Up',
     'Engagement',
-    'Converted',
-    'Non-Converted',
   ];
 
   useEffect(() => {

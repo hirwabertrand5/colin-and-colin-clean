@@ -36,7 +36,7 @@ export interface ICaseTakeRequest extends Document {
 
 const CaseTakeRequestSchema = new Schema<ICaseTakeRequest>(
   {
-    caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true, index: true },
+    caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true },
     requestNo: { type: String, required: true, trim: true, unique: true, index: true },
 
     requestedByUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
