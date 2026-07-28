@@ -216,6 +216,19 @@ export const denyTakeCaseRequest = async (caseId: string, requestId: string, rea
   return res.json();
 };
 
+export const setCaseOperationalStatus = async (caseId: string, status: 'Active' | 'Temporarily Closed'): Promise<CaseData> => {
+  const res = await fetch(`${API_URL}/cases/${caseId}/operational-status`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to update case status');
+  return res.json();
+};
+
 export const getActiveCasesCount = async () => {
   const res = await fetch(`${API_URL}/cases/stats/active`, {
     headers: { Authorization: `Bearer ${getToken()}` },

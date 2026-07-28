@@ -471,10 +471,10 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                             type="button"
                             onClick={() => handleRequestTakeCase(item._id)}
                             disabled={requestingCaseId === item._id}
-                            className="inline-flex items-center gap-2 rounded-full border border-gray-900 bg-gray-900 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex items-center gap-1.5 rounded-full border border-gray-900 bg-gray-900 px-2.5 py-1 text-[10px] font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {requestingCaseId === item._id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldQuestion className="w-3 h-3" />}
-                            Request to Take Case
+                            <span>Request</span>
                           </button>
                         </>
                       )}

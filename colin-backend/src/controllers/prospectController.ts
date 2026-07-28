@@ -76,6 +76,18 @@ const normalizePaymentMethod = (value: unknown) => {
   return ['Bank Transfer', 'Cash', 'Mobile Money', 'Cheque', 'Card', 'Mixed'].includes(cleaned) ? cleaned : undefined;
 };
 
+const normalizeCompletedStagesForStage = (value: unknown, stage?: string) => {
+  const stageIndex = validStages.indexOf(cleanString(stage));
+  if (stageIndex < 0) {
+    return Array.isArray(value)
+      ? value.filter((item: unknown): item is string => typeof item === 'string' && validStages.includes(item))
+      : [];
+  }
+
+  const ordered = validStages.slice(0, stageIndex + 1);
+  return ordered;
+};
+
 const getProspectPayload = (body: any, fallbackUserId?: string) => {
   const responsibleAssociate = cleanString(body.responsibleAssociate) || cleanString(body.assignedTo) || fallbackUserId || '';
   const responsiblePartner = cleanString(body.responsiblePartner);
@@ -95,9 +107,7 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
     estimatedMatterValue: toOptionalNumber(body.estimatedMatterValue),
     estimatedMatterCurrency: normalizeCurrency(body.estimatedMatterCurrency) || 'RWF',
     estimatedFeeValue: toOptionalNumber(body.estimatedFeeValue),
-    completedStages: Array.isArray(body.completedStages)
-      ? body.completedStages.filter((item: unknown): item is string => typeof item === 'string' && validStages.includes(item)).slice(0, validStages.length)
-      : [],
+    completedStages: normalizeCompletedStagesForStage(body.completedStages, stage),
     practiceArea: normalizePracticeArea(body.practiceArea),
     subPracticeActions: Array.isArray(body.subPracticeActions)
       ? body.subPracticeActions.map((item: unknown) => cleanString(item)).filter(Boolean)
@@ -203,6 +213,52 @@ const buildFeedbackEmailHtml = (prospectId: string) => {
       </div>
     </div>
   `;
+};
+
+const createMatterFromConvertedProspect = async (prospect: any, actorName: string) => {
+  if (!prospect) return null;
+  if (prospect.convertedToMatters) {
+    return Case.findById(prospect.convertedToMatters).lean();
+  }
+
+  const assigneeSource = prospect.responsibleAssociate || prospect.assignedTo;
+  const assignee = await User.findById(assigneeSource).select('name').lean();
+  const caseNo = await buildYearlySequence('case', 'CASE');
+
+  const newCase = new Case({
+    caseNo,
+    parties: prospect.parties || prospect.clientName,
+    description: prospect.inquiryDescription,
+    legalServicePath: prospect.legalServicePath || [],
+    clientContacts: [
+      {
+        name: prospect.contact.name,
+        email: prospect.contact.email || undefined,
+        phone: prospect.contact.phone || undefined,
+        isPrimary: true,
+      },
+    ],
+    assignedTo: assignee?.name || actorName || 'Unassigned',
+    status: 'Active',
+    priority: 'Medium',
+    caseType: 'Transactional Cases',
+    billingSettings: {
+      paymentMode: 'postpaid',
+      currency: prospect.estimatedMatterCurrency || 'RWF',
+    },
+    onboarding: {
+      conflictCheckStatus: prospect.conflictCheckStatus || 'Pending',
+      conflictCheckedAt: prospect.conflictCheckDate,
+    },
+  });
+
+  const savedCase = await newCase.save();
+  prospect.convertedToMatters = savedCase._id;
+  prospect.stage = 'Converted';
+  prospect.engagementDate = new Date();
+  await prospect.save();
+
+  return savedCase;
 };
 
 const sendProspectFeedbackEmail = async (prospect: any) => {
@@ -352,6 +408,10 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
 
     const saved = await prospect.save();
 
+    if (saved.stage === 'Converted' && !saved.convertedToMatters) {
+      await createMatterFromConvertedProspect(saved, req.user?.name || 'System');
+    }
+
     if (shouldSendFeedbackEmail) {
       await sendProspectFeedbackEmail(saved);
     }
@@ -480,45 +540,7 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
       return res.status(400).json({ message: 'Please record a conversion outcome before converting this prospect.' });
     }
 
-    const assigneeSource = prospect.responsibleAssociate || prospect.assignedTo;
-    const assignee = await User.findById(assigneeSource).select('name').lean();
-
-    // Create new case from prospect
-    const caseNo = await generateCaseNo();
-    const newCase = new Case({
-      caseNo,
-      parties: prospect.parties || prospect.clientName,
-      description: prospect.inquiryDescription,
-      legalServicePath: prospect.legalServicePath || [],
-      clientContacts: [
-        {
-          name: prospect.contact.name,
-          email: prospect.contact.email || undefined,
-          phone: prospect.contact.phone || undefined,
-          isPrimary: true,
-        },
-      ],
-      assignedTo: assignee?.name || req.user?.name || 'Unassigned',
-      status: 'Active',
-      priority: 'Medium',
-      caseType: 'Transactional Cases',
-      billingSettings: {
-        paymentMode: 'postpaid',
-        currency: prospect.estimatedMatterCurrency || 'RWF',
-      },
-      onboarding: {
-        conflictCheckStatus: prospect.conflictCheckStatus || 'Pending',
-        conflictCheckedAt: prospect.conflictCheckDate,
-      },
-    });
-
-    const savedCase = await newCase.save();
-
-    // Link prospect to case
-    prospect.convertedToMatters = savedCase._id;
-    prospect.stage = 'Converted';
-    prospect.engagementDate = new Date();
-    await prospect.save();
+    const savedCase = await createMatterFromConvertedProspect(prospect, req.user?.name || 'System');
 
     return res.json({
       message: 'Prospect converted to matter successfully.',
@@ -530,6 +552,3 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
     return res.status(500).json({ message: 'Failed to convert prospect to matter.' });
   }
 };
-
-// Helper function to generate case number
-const generateCaseNo = () => buildYearlySequence('case', 'CASE');

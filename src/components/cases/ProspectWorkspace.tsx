@@ -29,6 +29,17 @@ const STAGE_ORDER = [
   'Non-Converted',
 ];
 
+const normalizeCompletedStagesForStage = (stage?: Prospect['stage'], completedStages?: unknown) => {
+  const stageIndex = stage ? STAGE_ORDER.indexOf(stage) : -1;
+  if (stageIndex >= 0) {
+    return STAGE_ORDER.slice(0, stageIndex + 1);
+  }
+
+  return Array.isArray(completedStages)
+    ? completedStages.filter((item): item is string => typeof item === 'string' && STAGE_ORDER.includes(item))
+    : [];
+};
+
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'billing', label: 'Billing / Triggers' },
@@ -198,18 +209,14 @@ export default function ProspectWorkspace() {
 
   const milestoneItems = useMemo(() => {
     const currentStage = prospect?.stage || 'Inquiry';
-    const prospectData = prospect as (Prospect & { completed_stages?: string[] }) | null;
-    const rawCompletedStages = Array.isArray(prospectData?.completedStages)
-      ? prospectData?.completedStages
-      : [];
-    const completedStages = (rawCompletedStages || []).filter((stage): stage is string => typeof stage === 'string');
+    const completedStages = normalizeCompletedStagesForStage(prospect?.stage, prospect?.completedStages);
 
     return STAGE_ORDER.map((stage) => ({
       stage,
       completed: completedStages.includes(stage),
       active: stage === currentStage,
     }));
-  }, [prospect?.stage, prospect?.completedStages, prospect?.completed_stages]);
+  }, [prospect?.stage, prospect?.completedStages]);
 
   const currentStageLabel = prospect?.stage || 'Inquiry';
   const feedbackReceived = Boolean(feedback?.clientComment || feedback?.primaryReasonCategory || feedback?.primaryReasonDetail);

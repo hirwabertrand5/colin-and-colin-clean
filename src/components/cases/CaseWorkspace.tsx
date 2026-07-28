@@ -22,6 +22,8 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  PauseCircle,
+  PlayCircle,
 } from 'lucide-react';
 import { getAuditForCase, AuditLogItem } from '../../services/auditService';
 import {
@@ -32,6 +34,7 @@ import {
   requestTakeCase,
   approveTakeCaseRequest,
   denyTakeCaseRequest,
+  setCaseOperationalStatus,
 } from '../../services/caseService';
 import {
   getTasksForCase,
@@ -1005,6 +1008,18 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     }
   };
 
+  const handleOperationalStatusToggle = async () => {
+    if (!caseData?._id) return;
+    try {
+      setWorkflowError('');
+      const nextStatus = caseData.status === 'Temporarily Closed' ? 'Active' : 'Temporarily Closed';
+      const updated = await setCaseOperationalStatus(caseData._id, nextStatus as 'Active' | 'Temporarily Closed');
+      setCaseData(updated);
+    } catch (err: any) {
+      setWorkflowError(err?.message || 'Failed to update matter status');
+    }
+  };
+
   // ----------------------------
   // Billing
   // ----------------------------
@@ -1502,6 +1517,30 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                       </>
                     )}
                   </div>
+                </div>
+              </div>
+            )}
+            {canManageCase && String(caseData.status || '').toLowerCase() !== 'closed' && (
+              <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Matter Status</div>
+                    <div className="mt-1 text-sm text-gray-700">
+                      Current status: <span className="font-semibold">{caseData.status || 'Active'}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOperationalStatusToggle}
+                    className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                      caseData.status === 'Temporarily Closed'
+                        ? 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                        : 'border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    }`}
+                  >
+                    {caseData.status === 'Temporarily Closed' ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
+                    {caseData.status === 'Temporarily Closed' ? 'Reopen to Active' : 'Move to Temporarily Closed'}
+                  </button>
                 </div>
               </div>
             )}

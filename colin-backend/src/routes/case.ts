@@ -8,6 +8,7 @@ import {
   requestTakeCase,
   approveTakeRequest,
   denyTakeRequest,
+  setCaseOperationalStatus,
 } from '../controllers/caseController.js';
 
 import { authenticate } from '../middleware/authMiddleware.js';
@@ -24,6 +25,7 @@ router.get('/:id', authenticate, getCaseById);
 router.post('/:id/take-request', authenticate, requestTakeCase);
 router.post('/:id/take-request/:requestId/approve', authenticate, approveTakeRequest);
 router.post('/:id/take-request/:requestId/deny', authenticate, denyTakeRequest);
+router.post('/:id/operational-status', authenticate, setCaseOperationalStatus);
 
 router.post('/', authenticate, createCase);
 router.put('/:id', authenticate, updateCase);

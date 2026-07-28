@@ -2,10 +2,12 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import Case from '../models/caseModel';
 import Task from '../models/taskModel';
+import User from '../models/userModel';
 import CaseTakeRequest from '../models/caseTakeRequestModel';
 import { writeAudit } from '../services/auditService';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
+import { createNotification, findUserByAssigneeString } from '../services/notifyService';
+import { sendEmailResend } from '../services/emailResendService';
 
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
@@ -37,7 +39,23 @@ const isAssociateLikeRole = (role?: string) =>
   role === 'senior_associate' ||
   role === 'intern';
 
-const TAKE_REQUEST_APPROVER_ROLES = ['executive_assistant', 'managing_partner'] as const;
+const TAKE_REQUEST_AUDIENCE_ROLES = [
+  'managing_director',
+  'managing_partner',
+  'executive_managing_partner',
+  'senior_partner',
+  'partner',
+  'executive_partner',
+  'associate_partner',
+  'executive_associate_partner',
+  'senior_executive_assistant',
+  'executive_assistant',
+  'originating_attorney',
+  'associate',
+  'senior_associate',
+  'trainee_associate',
+  'intern',
+] as const;
 const TAKE_REQUEST_LOCK_MINUTES = 15;
 const takeRequestExpiry = () => new Date(Date.now() + TAKE_REQUEST_LOCK_MINUTES * 60 * 1000);
 
@@ -133,6 +151,41 @@ const buildTakeRequestNotificationHtml = (opts: {
       </p>
     </div>
   `;
+};
+
+const gatherTakeRequestRecipients = async (opts: {
+  assignedUserName?: string;
+  requesterId?: string;
+}) => {
+  const audienceUsers = await User.find({
+    role: { $in: TAKE_REQUEST_AUDIENCE_ROLES as unknown as string[] },
+    isActive: { $ne: false },
+  })
+    .select('_id email')
+    .lean();
+
+  const assignedUser = opts.assignedUserName
+    ? await findUserByAssigneeString(opts.assignedUserName)
+    : null;
+
+  const ids = new Set<string>();
+  const emails = new Set<string>();
+
+  for (const user of audienceUsers as any[]) {
+    if (String(user._id) === String(opts.requesterId || '')) continue;
+    ids.add(String(user._id));
+    if (user.email) emails.add(String(user.email).trim().toLowerCase());
+  }
+
+  if (assignedUser?._id && String(assignedUser._id) !== String(opts.requesterId || '')) {
+    ids.add(String(assignedUser._id));
+    if (assignedUser.email) emails.add(String(assignedUser.email).trim().toLowerCase());
+  }
+
+  return {
+    userIds: Array.from(ids),
+    emails: Array.from(emails),
+  };
 };
 
 export const getAllCases = async (req: AuthRequest, res: Response) => {
@@ -445,8 +498,10 @@ export const requestTakeCase = async (req: AuthRequest, res: Response) => {
       reviewUrl,
     });
 
-    const assignedUser: any = await findUserByAssigneeString(String(existingCase.assignedTo || '').trim());
-    const notifyStaffRoles = TAKE_REQUEST_APPROVER_ROLES as unknown as string[];
+    const recipients = await gatherTakeRequestRecipients({
+      assignedUserName: String(existingCase.assignedTo || '').trim(),
+      requesterId,
+    });
     const notificationPayload = {
       type: 'WORKFLOW_NOTIFICATION',
       title: 'Yellow matter request pending',
@@ -456,32 +511,19 @@ export const requestTakeCase = async (req: AuthRequest, res: Response) => {
       caseId,
     };
 
-    await notifyRoles({
-      roles: notifyStaffRoles,
-      category: 'approvals',
-      notification: notificationPayload,
-      email: {
-        subject: `Matter take request pending: ${existingCase.caseNo || 'Matter'}`,
-        html: reviewHtml,
-      },
-    });
-
-    const assignedUserRole = String(assignedUser?.role || '').trim();
-    const shouldNotifyAssignedUser =
-      assignedUser?._id &&
-      String(assignedUser._id) !== requesterId &&
-      !TAKE_REQUEST_APPROVER_ROLES.includes(assignedUserRole as (typeof TAKE_REQUEST_APPROVER_ROLES)[number]);
-
-    if (shouldNotifyAssignedUser) {
-      await notifyUsersById({
-        userIds: [String(assignedUser._id)],
-        category: 'approvals',
-        notification: notificationPayload,
-        email: {
-          subject: `Matter take request pending: ${existingCase.caseNo || 'Matter'}`,
-          html: reviewHtml,
-        },
+    if (recipients.userIds.length) {
+      await createNotification({
+        ...notificationPayload,
+        audienceUserIds: recipients.userIds,
       });
+    }
+
+    if (recipients.emails.length) {
+      await sendEmailResend(
+        recipients.emails,
+        `Matter take request pending: ${existingCase.caseNo || 'Matter'}`,
+        reviewHtml
+      );
     }
 
     return res.status(201).json({
@@ -635,22 +677,20 @@ const resolveTakeRequestDecision = async (req: AuthRequest, res: Response, decis
     `;
 
     if (requesterId) {
-      await notifyUsersById({
-        userIds: [requesterId],
-        category: 'approvals',
-        notification: {
-          type: 'WORKFLOW_NOTIFICATION',
-          title: outcomeTitle,
-          message: outcomeMessage,
-          severity: decision === 'Approved' ? 'info' : 'warning',
-          link: reviewUrl,
-          caseId,
-        },
-        email: {
-          subject: outcomeTitle,
-          html: emailHtml,
-        },
+      await createNotification({
+        type: 'WORKFLOW_NOTIFICATION',
+        title: outcomeTitle,
+        message: outcomeMessage,
+        severity: decision === 'Approved' ? 'info' : 'warning',
+        link: reviewUrl,
+        caseId,
+        audienceUserIds: [requesterId],
       });
+
+      const requesterUser = await User.findById(requesterId).select('email').lean();
+      if (requesterUser?.email) {
+        await sendEmailResend([String(requesterUser.email).trim().toLowerCase()], outcomeTitle, emailHtml);
+      }
     }
 
     return res.json({
@@ -670,6 +710,66 @@ export const approveTakeRequest = async (req: AuthRequest, res: Response) =>
 
 export const denyTakeRequest = async (req: AuthRequest, res: Response) =>
   resolveTakeRequestDecision(req, res, 'Denied');
+
+export const setCaseOperationalStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!isAdminCaseRole(req.user?.role)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
+
+    const caseId = String(req.params.id || '').trim();
+    const nextStatus = String((req.body as any)?.status || '').trim();
+    if (!caseId) return res.status(400).json({ message: 'Missing case id.' });
+    if (!['Active', 'Temporarily Closed'].includes(nextStatus)) {
+      return res.status(400).json({ message: 'Invalid status.' });
+    }
+
+    const existing: any = await Case.findById(caseId);
+    if (!existing) return res.status(404).json({ message: 'Case not found.' });
+
+    const workflowState = String(existing.workflowProgress?.status || '').trim();
+    if (workflowState === 'Completed' || String(existing.status || '').trim() === 'Closed') {
+      return res.status(400).json({ message: 'Closed matters cannot be moved to temporary status.' });
+    }
+
+    if (String(existing.status || '').trim() === nextStatus) {
+      return res.json(existing);
+    }
+
+    const previousStatus = String(existing.status || '').trim();
+    existing.status = nextStatus;
+    existing.takeRequestState = {
+      ...(existing.takeRequestState || {}),
+      status: 'idle',
+      requestId: undefined,
+      requestedByUserId: undefined,
+      requestedByName: undefined,
+      requestedByRole: undefined,
+      requestedAt: undefined,
+      lockExpiresAt: undefined,
+      claimedAt: undefined,
+      decisionByUserId: undefined,
+      decisionByName: undefined,
+      decisionReason: undefined,
+      lastUpdatedAt: new Date(),
+    };
+
+    await existing.save();
+
+    await writeAudit({
+      caseId,
+      ...(req.user?.id ? { actorUserId: String(req.user.id) } : {}),
+      actorName: req.user?.name || 'System',
+      action: 'CASE_UPDATED',
+      message: 'Updated operational matter status',
+      detail: `Status: ${previousStatus || '-'} → ${nextStatus}`,
+    });
+
+    return res.json(existing);
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message || 'Failed to update case status.' });
+  }
+};
 
 export const updateCase = async (req: AuthRequest, res: Response) => {
   try {
