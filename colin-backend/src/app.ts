@@ -26,6 +26,7 @@ import helpRoutes from './routes/help';
 import workflowRoutes from './routes/workflows';
 import prospectRoutes from './routes/prospect';
 import clientExperienceRoutes from './routes/clientExperience';
+import independentTaskRoutes from './routes/independentTasks';
 const app = express();
 
 // ✅ Allow multiple dev origins + configurable CLIENT_URL
@@ -89,6 +90,7 @@ app.use('/api', adminEmailRoutes);
 app.use('/api', helpRoutes);
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/client-experience', clientExperienceRoutes);
+app.use('/api', independentTaskRoutes);
 // uploads
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 

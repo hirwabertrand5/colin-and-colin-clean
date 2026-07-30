@@ -76,12 +76,14 @@ export const getAllProspects = async (filters?: {
   assignedTo?: string;
   isActive?: boolean;
   responsibleAssociate?: string;
+  includeTerminal?: boolean;
 }): Promise<Prospect[]> => {
   const params = new URLSearchParams();
   if (filters?.stage) params.append('stage', filters.stage);
   if (filters?.assignedTo) params.append('assignedTo', filters.assignedTo);
   if (filters?.isActive !== undefined) params.append('isActive', String(filters.isActive));
   if (filters?.responsibleAssociate) params.append('responsibleAssociate', filters.responsibleAssociate);
+  if (filters?.includeTerminal) params.append('includeTerminal', 'true');
   const response = await axios.get(`${API_BASE_URL}/prospects?${params}`, { headers: getAuthHeaders() });
   return response.data;
 };

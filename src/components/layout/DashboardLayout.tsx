@@ -53,16 +53,17 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
 
   const navigation: NavItem[] = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    {
-      name: 'Matters',
-      href: '/matters',
-      icon: Briefcase,
+      {
+        name: 'Matters',
+        href: '/matters',
+        icon: Briefcase,
       roles: ['managing_director', 'managing_partner', 'executive_managing_partner', 'senior_partner', 'partner', 'executive_partner', 'associate_partner', 'executive_associate_partner', 'senior_associate', 'senior_executive_assistant', 'associate', 'trainee_associate', 'executive_assistant', 'originating_attorney', 'intern'],
-      submenu: [
+        submenu: [
         { name: 'Intake & Prospects', href: '/matters/intake-prospects', icon: Users },
         { name: 'Active Matters', href: '/matters', icon: Briefcase, exact: true },
         { name: 'Temporarily Closed', href: '/matters/temporarily-closed', icon: Clock3 },
         { name: 'Closed Matters', href: '/matters/closed', icon: FolderTree },
+        { name: 'Independent Tasks', href: '/matters/independent-tasks', icon: CheckSquare },
       ],
     },
     { name: 'Tasks', href: '/tasks', icon: CheckSquare },
@@ -96,6 +97,12 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
 
   const hasAccess = (item: { roles?: string[] }) => !item.roles || item.roles.includes(user.role);
   const adminItems = adminNavigation.filter(hasAccess);
+
+  useEffect(() => {
+    if (location.pathname.startsWith('/matters')) {
+      setExpandedMenu('Matters');
+    }
+  }, [location.pathname]);
 
   const refreshUnreadCount = async () => {
     try {

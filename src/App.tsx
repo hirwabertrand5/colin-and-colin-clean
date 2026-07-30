@@ -11,6 +11,8 @@ import CreateCase from './components/cases/CreateCase';
 import CaseWorkspace from './components/cases/CaseWorkspace';
 import IntakeProspects from './components/cases/IntakeProspects';
 import ProspectWorkspace from './components/cases/ProspectWorkspace';
+import IndependentTaskModule from './components/independentTasks/IndependentTaskModule';
+import IndependentTaskDetail from './components/independentTasks/IndependentTaskDetail';
 import PublicFeedbackForm from './components/public/PublicFeedbackForm';
 import TaskBoard from './components/tasks/TaskBoard';
 import TaskDetail from './components/tasks/TaskDetail';
@@ -24,6 +26,7 @@ import UserManagement from './components/admin/UserManagement';
 import Settings from './components/admin/Settings';
 import PettyCashDashboard from './components/pettyCash/PettyCashDashboard';
 import { useAutoLogout } from './hooks/useAutoLogout';
+import { Toaster } from './components/ui/sonner';
 
 export type UserRole =
   | 'managing_director'
@@ -111,6 +114,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <Toaster />
       <Routes>
         {/* Public */}
         <Route path="/login" element={user ? <Navigate to="/" /> : <Login onLogin={handleLogin} />} />
@@ -142,6 +146,12 @@ function App() {
                   <Route path="/matters" element={<CaseList userRole={user.role} mode="active" />} />
                   <Route path="/matters/intake-prospects" element={<IntakeProspects />} />
                   <Route path="/matters/intake-prospects/:prospectId" element={<ProspectWorkspace />} />
+                  <Route path="/matters/independent-tasks" element={<IndependentTaskModule userRole={user.role} />} />
+                  <Route path="/matters/independent-tasks/:id" element={<IndependentTaskDetail userRole={user.role} />} />
+                  <Route
+                    path="/matters/closed/independent-tasks"
+                    element={<Navigate to="/matters/independent-tasks" replace />}
+                  />
                   <Route
                     path="/cases/temporarily-closed"
                     element={<CaseList userRole={user.role} mode="temporarilyClosed" />}

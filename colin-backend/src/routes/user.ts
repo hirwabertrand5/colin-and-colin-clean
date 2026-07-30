@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getAllUsers,
   getStaffUsers,
+  getAssignmentUsers,
   addUser,
   resetUserPassword,
   setUserActiveStatus,
@@ -36,6 +37,8 @@ router.get(
   ]),
   getStaffUsers
 );
+
+router.get('/assignment-options', authenticate, getAssignmentUsers);
 
 router.get('/', authenticate, authorize(USER_ADMIN_ROLES), getAllUsers);
 router.post('/', authenticate, authorize(USER_ADMIN_ROLES), addUser);

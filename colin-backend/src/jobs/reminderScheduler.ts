@@ -6,6 +6,7 @@ import Case from '../models/caseModel';
 import User from '../models/userModel';
 import NotificationPreferences from '../models/notificationPreferencesModel';
 import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
+import IndependentTask from '../modules/independentTasks/models/independentTaskModel';
 
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -27,6 +28,7 @@ const parseEventDateTime = (dateStr: string, timeStr: string) => {
 const hoursBetween = (a: Date, b: Date) => (b.getTime() - a.getTime()) / (1000 * 60 * 60);
 
 const uniq = <T>(arr: T[]) => Array.from(new Set(arr));
+const todayISO = (d = new Date()) => d.toISOString().slice(0, 10);
 
 /**
  * Runs reminder scans and creates notifications/emails.
@@ -76,6 +78,87 @@ export const runReminderScan = async () => {
         html: `<div style="font-family: Arial, sans-serif">
                 <p>This is a reminder that a task is due tomorrow.</p>
                 <p><b>${t.title || 'Task'}</b></p>
+                <p>Due date: ${t.dueDate}</p>
+              </div>`,
+      },
+    });
+  }
+
+  // -----------------------------
+  // Independent task reminders
+  // -----------------------------
+  const independentTasksDueTomorrow = await IndependentTask.find({
+    status: { $nin: ['Completed', 'Closed'] },
+    dueDate: tomorrowISO,
+  })
+    .select('_id taskNumber title dueDate assignee supervisor')
+    .lean();
+
+  for (const t of independentTasksDueTomorrow as any[]) {
+    const assignee = String(t.assignee || '').trim();
+    if (!assignee) continue;
+
+    const user = await findUserByAssigneeString(assignee);
+    if (!user?._id || user.isActive === false) continue;
+
+    const dedupeKey = `INDEPENDENT_TASK_DUE_24H:${String(t._id)}:${String(user._id)}:${tomorrowISO}`;
+
+    await notifyUsersById({
+      userIds: [String(user._id)],
+      category: 'deadlines',
+      notification: {
+        type: 'TASK_DUE_REMINDER',
+        title: 'Independent task due tomorrow',
+        message: `${t.taskNumber || 'Task'} • ${t.title || 'Task'} is due on ${t.dueDate}.`,
+        severity: 'warning',
+        taskId: String(t._id),
+        link: `/matters/independent-tasks/${t._id}`,
+        dedupeKey,
+      },
+      email: {
+        subject: `Reminder: Independent task due tomorrow — ${t.title || 'Task'}`,
+        html: `<div style="font-family: Arial, sans-serif">
+                <p>This is a reminder that an independent task is due tomorrow.</p>
+                <p><b>${t.taskNumber || 'Task'}</b> - ${t.title || 'Task'}</p>
+                <p>Due date: ${t.dueDate}</p>
+              </div>`,
+      },
+    });
+  }
+
+  const independentTasksOverdue = await IndependentTask.find({
+    status: { $nin: ['Completed', 'Closed'] },
+    dueDate: { $lt: todayISO(now) },
+  })
+    .select('_id taskNumber title dueDate assignee')
+    .lean();
+
+  for (const t of independentTasksOverdue as any[]) {
+    const assignee = String(t.assignee || '').trim();
+    if (!assignee) continue;
+
+    const user = await findUserByAssigneeString(assignee);
+    if (!user?._id || user.isActive === false) continue;
+
+    const dedupeKey = `INDEPENDENT_TASK_OVERDUE:${String(t._id)}:${String(user._id)}:${todayISO(now)}`;
+
+    await notifyUsersById({
+      userIds: [String(user._id)],
+      category: 'deadlines',
+      notification: {
+        type: 'TASK_DUE_REMINDER',
+        title: 'Independent task overdue',
+        message: `${t.taskNumber || 'Task'} • ${t.title || 'Task'} was due on ${t.dueDate}.`,
+        severity: 'critical',
+        taskId: String(t._id),
+        link: `/matters/independent-tasks/${t._id}`,
+        dedupeKey,
+      },
+      email: {
+        subject: `Overdue: Independent task — ${t.title || 'Task'}`,
+        html: `<div style="font-family: Arial, sans-serif">
+                <p>An independent task is overdue.</p>
+                <p><b>${t.taskNumber || 'Task'}</b> - ${t.title || 'Task'}</p>
                 <p>Due date: ${t.dueDate}</p>
               </div>`,
       },

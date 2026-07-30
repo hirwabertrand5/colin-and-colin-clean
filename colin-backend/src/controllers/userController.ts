@@ -55,6 +55,20 @@ export const getStaffUsers = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Assignment dropdown users for module-level selectors.
+export const getAssignmentUsers = async (_req: AuthRequest, res: Response) => {
+  try {
+    const users = await User.find(
+      { isActive: true },
+      'name email role isActive'
+    ).sort({ name: 1 });
+
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch assignment users.' });
+  }
+};
+
 // Add new user
 export const addUser = async (req: AuthRequest, res: Response) => {
   try {

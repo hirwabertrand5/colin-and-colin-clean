@@ -45,6 +45,15 @@ export const getStaffUsers = async (): Promise<User[]> => {
   return res.json();
 };
 
+export const getAssignmentUsers = async (): Promise<User[]> => {
+  const res = await fetch(`${API_URL}/users/assignment-options`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  handleAuthError(res);
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch assignment users');
+  return res.json();
+};
+
 export const addUser = async (userData: NewUserData): Promise<User> => {
   const res = await fetch(`${API_URL}/users`, {
     method: 'POST',

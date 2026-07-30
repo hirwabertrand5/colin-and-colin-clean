@@ -37,7 +37,7 @@ import { getBillingSummary, BillingSummary } from '../../services/billingService
 import { getAllTasks, TaskData } from '../../services/taskService';
 import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getRecentAuditFeed, AuditFeedItem } from '../../services/auditService';
-import { getAllProspects, getProspectStats, Prospect } from '../../services/prospectService';
+import { getAllProspects, Prospect } from '../../services/prospectService';
 import { listInvoices, Invoice } from '../../services/invoiceService';
 
 const formatRwfShort = (n: number) => {
@@ -67,6 +67,17 @@ const timeAgo = (isoDate: string) => {
   const days = Math.floor(hrs / 24);
   return `${days} day${days > 1 ? 's' : ''} ago`;
 };
+
+const normalizeProspectStage = (stage?: string) => String(stage || '').trim().toLowerCase().replace(/-/g, ' ');
+const normalizeOpportunitySource = (prospect: Prospect) =>
+  String(prospect.referralSource || prospect.enquirySource || '').trim() || 'Unspecified';
+const isTerminalProspect = (prospect: Prospect) => {
+  const stage = normalizeProspectStage(prospect.stage);
+  return stage === 'converted' || stage === 'non converted';
+};
+const isConvertedProspect = (prospect: Prospect) => normalizeProspectStage(prospect.stage) === 'converted';
+const isLostProspect = (prospect: Prospect) => normalizeProspectStage(prospect.stage) === 'non converted';
+const getProspectValue = (prospect: Prospect) => Number(prospect.estimatedFeeValue) || Number(prospect.estimatedMatterValue) || 0;
 
 function DashboardSection({
   title,
@@ -261,7 +272,6 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
   const [events, setEvents] = useState<FirmCalendarEvent[]>([]);
   const [auditFeed, setAuditFeed] = useState<AuditFeedItem[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
-  const [prospectStats, setProspectStats] = useState<Record<string, number> | null>(null);
   const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
 
   const today = useMemo(() => isoToday(), []);
@@ -275,15 +285,14 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
         setLoading(true);
         setError('');
 
-        const [casesResult, billingResult, tasksResult, eventsResult, feedResult, prospectsResult, statsResult, invoicesResult] =
+        const [casesResult, billingResult, tasksResult, eventsResult, feedResult, prospectsResult, invoicesResult] =
           await Promise.allSettled([
             getAllCases(),
             getBillingSummary(),
             getAllTasks({ approvalStatus: 'Pending' as any }),
             getFirmEvents({ from: today, to: next14Days, type: 'all' }),
             getRecentAuditFeed(8),
-            getAllProspects({ isActive: true }),
-            getProspectStats(),
+            getAllProspects({ includeTerminal: true }),
             listInvoices({ status: 'Pending' }),
           ]);
 
@@ -295,7 +304,6 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
         if (eventsResult.status === 'fulfilled') setEvents(eventsResult.value);
         if (feedResult.status === 'fulfilled') setAuditFeed(feedResult.value);
         if (prospectsResult.status === 'fulfilled') setProspects(prospectsResult.value);
-        if (statsResult.status === 'fulfilled') setProspectStats(statsResult.value);
         if (invoicesResult.status === 'fulfilled') setPendingInvoices(invoicesResult.value);
       } catch (e: any) {
         if (!mounted) return;
@@ -311,33 +319,43 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
     };
   }, [today, next14Days, roleLabel]);
 
-  const prospectStageTotals = useMemo(() => {
-    return Object.entries(prospectStats || {}).reduce<Record<string, number>>((acc, [key, value]) => {
-      acc[key] = Number(value) || 0;
-      return acc;
-    }, {});
-  }, [prospectStats]);
+  const totalOpportunitiesCount = prospects.length;
+  const convertedProspectsCount = useMemo(() => prospects.filter((prospect) => isConvertedProspect(prospect)).length, [prospects]);
+  const lostOpportunitiesCount = useMemo(() => prospects.filter((prospect) => isLostProspect(prospect)).length, [prospects]);
+  const openOpportunitiesCount = useMemo(() => prospects.filter((prospect) => !isTerminalProspect(prospect)).length, [prospects]);
+  const terminalOpportunityCount = convertedProspectsCount + lostOpportunitiesCount;
+  const conversionRate = terminalOpportunityCount > 0 ? Math.round((convertedProspectsCount / terminalOpportunityCount) * 100) : 0;
 
-  const activeProspectsCount = useMemo(() => {
-    return Object.values(prospectStageTotals).reduce((sum, value) => sum + value, 0);
-  }, [prospectStageTotals]);
+  const sourceBreakdown = useMemo(() => {
+    const palette = ['#0f172a', '#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626'];
+    const map = new Map<string, { label: string; total: number; converted: number; lost: number; open: number; value: number }>();
 
-  const convertedProspectsCount = prospectStageTotals.Converted || 0;
-  const lostOpportunitiesCount = prospectStageTotals['Non-Converted'] || 0;
-  const conversionRate = activeProspectsCount > 0 ? Math.round((convertedProspectsCount / activeProspectsCount) * 100) : 0;
+    prospects.forEach((prospect) => {
+      const label = normalizeOpportunitySource(prospect);
+      const row = map.get(label) || {
+        label,
+        total: 0,
+        converted: 0,
+        lost: 0,
+        open: 0,
+        value: 0,
+      };
+      const value = getProspectValue(prospect);
+      row.total += 1;
+      row.value += value;
+      if (isConvertedProspect(prospect)) row.converted += 1;
+      else if (isLostProspect(prospect)) row.lost += 1;
+      else row.open += 1;
+      map.set(label, row);
+    });
 
-  const referralSourceData = useMemo(() => {
-    const totals = prospects.reduce<Record<string, number>>((acc, prospect) => {
-      const source = prospect.referralSource?.trim() || 'Unspecified';
-      const value = Number(prospect.estimatedFeeValue) || Number(prospect.estimatedMatterValue) || 0;
-      acc[source] = (acc[source] || 0) + value;
-      return acc;
-    }, {});
-
-    return Object.entries(totals)
-      .map(([label, value]) => ({ label, value, color: '#4f46e5' }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
+    return Array.from(map.values())
+      .sort((a, b) => b.total - a.total || b.value - a.value)
+      .slice(0, 6)
+      .map((item, index) => ({
+        ...item,
+        color: palette[index % palette.length],
+      }));
   }, [prospects]);
 
   const activeMattersCount = useMemo(() => {
@@ -400,23 +418,27 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
 
   const dashboardData = useMemo(() => ({
     businessDevelopment: {
-      activeProspects: {
-        value: activeProspectsCount,
-        trend: activeProspectsCount > 0 ? `${activeProspectsCount} active pipeline items` : 'No active prospects yet',
-        positive: true,
+      totalOpportunities: {
+        value: totalOpportunitiesCount,
+        detail: 'All prospect records in the system',
       },
-      conversionRate: {
-        value: `${conversionRate}%`,
-        trend: `${convertedProspectsCount} converted`,
-        positive: conversionRate >= 50,
-        progress: conversionRate,
+      openOpportunities: {
+        value: openOpportunitiesCount,
+        detail: 'Prospects still in the pipeline',
+      },
+      convertedOpportunities: {
+        value: convertedProspectsCount,
+        detail: terminalOpportunityCount > 0 ? `${conversionRate}% of closed opportunities converted` : 'No converted matters yet',
       },
       lostOpportunities: {
         value: lostOpportunitiesCount,
-        trend: lostOpportunitiesCount > 0 ? `${lostOpportunitiesCount} lost or closed out` : 'No lost opportunities recorded',
-        positive: false,
+        detail: lostOpportunitiesCount > 0 ? 'Terminal prospects marked Non-Converted' : 'No lost opportunities recorded',
       },
-      referralSources: referralSourceData.length > 0 ? referralSourceData : [],
+      conversionRate: {
+        value: `${conversionRate}%`,
+        detail: terminalOpportunityCount > 0 ? `${convertedProspectsCount} converted / ${lostOpportunitiesCount} lost` : 'Awaiting closed opportunity data',
+      },
+      sourceBreakdown: sourceBreakdown.length > 0 ? sourceBreakdown : [],
     },
     operations: {
       activeMatters: { value: activeMattersCount, detail: 'Current active matters in the system' },
@@ -456,14 +478,17 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
       ...(missedDeadlinesCount > 0 ? [`${missedDeadlinesCount} deadlines are overdue.`] : []),
       ...(pendingInvoiceCount > 0 ? [`${pendingInvoiceCount} invoices remain pending.`] : []),
       ...(pendingReviewCount > 0 ? [`${pendingReviewCount} matters require partner review.`] : []),
-      ...(activeProspectsCount > 0 ? [`Prospect conversion rate currently stands at ${conversionRate}%.`] : []),
+      ...(terminalOpportunityCount > 0 ? [`Prospect conversion rate currently stands at ${conversionRate}%.`] : []),
+      ...(sourceBreakdown[0] ? [`Top opportunity source: ${sourceBreakdown[0].label}.`] : []),
     ],
   }), [
-    activeProspectsCount,
+    totalOpportunitiesCount,
+    openOpportunitiesCount,
     conversionRate,
     convertedProspectsCount,
     lostOpportunitiesCount,
-    referralSourceData,
+    terminalOpportunityCount,
+    sourceBreakdown,
     activeMattersCount,
     upcomingEvents,
     missedDeadlinesCount,
@@ -521,43 +546,73 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
       </div>
 
       <DashboardSection title="Business Development" description="Growth pipeline and client acquisition momentum" icon={Briefcase}>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <KPICard title="Active Prospects" value={dashboardData.businessDevelopment.activeProspects.value} detail="Total active prospects" icon={Handshake} tone="indigo">
-            <div className="mt-3 flex items-center text-sm text-emerald-600">
-              <TrendingUp className="mr-1 h-4 w-4" />
-              {dashboardData.businessDevelopment.activeProspects.trend}
-            </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <KPICard
+            title="Total Opportunities"
+            value={dashboardData.businessDevelopment.totalOpportunities.value}
+            detail={dashboardData.businessDevelopment.totalOpportunities.detail}
+            icon={Handshake}
+            tone="indigo"
+          >
+            <div className="mt-3 text-sm text-gray-600">All recorded prospects, including terminal outcomes</div>
           </KPICard>
 
-          <KPICard title="Conversion Rate" value={dashboardData.businessDevelopment.conversionRate.value} detail="Performance against target" icon={Target} tone="green">
-            <div className="mt-4">
-              <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
-                <span>Conversion progress</span>
-                <span>{dashboardData.businessDevelopment.conversionRate.progress}%</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-gray-100">
-                <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${dashboardData.businessDevelopment.conversionRate.progress}%` }} />
-              </div>
-            </div>
+          <KPICard
+            title="Open Opportunities"
+            value={dashboardData.businessDevelopment.openOpportunities.value}
+            detail={dashboardData.businessDevelopment.openOpportunities.detail}
+            icon={Briefcase}
+            tone="slate"
+          >
+            <div className="mt-3 text-sm text-gray-600">Still active in the pipeline</div>
+          </KPICard>
+
+          <KPICard
+            title="Converted Opportunities"
+            value={dashboardData.businessDevelopment.convertedOpportunities.value}
+            detail={dashboardData.businessDevelopment.convertedOpportunities.detail}
+            icon={Target}
+            tone="green"
+          >
             <div className="mt-3 flex items-center text-sm text-emerald-600">
               <ArrowUpRight className="mr-1 h-4 w-4" />
-              {dashboardData.businessDevelopment.conversionRate.trend}
+              Conversion rate {dashboardData.businessDevelopment.conversionRate.value}
             </div>
           </KPICard>
 
-          <KPICard title="Lost Opportunities" value={dashboardData.businessDevelopment.lostOpportunities.value} detail="Client losses tracked this quarter" icon={AlertTriangle} tone="amber">
+          <KPICard
+            title="Lost Opportunities"
+            value={dashboardData.businessDevelopment.lostOpportunities.value}
+            detail={dashboardData.businessDevelopment.lostOpportunities.detail}
+            icon={AlertTriangle}
+            tone="amber"
+          >
             <div className="mt-3 flex items-center text-sm text-rose-600">
               <ArrowDownRight className="mr-1 h-4 w-4" />
-              {dashboardData.businessDevelopment.lostOpportunities.trend}
+              Closed-out prospects and non-conversions
             </div>
           </KPICard>
 
-          <ChartCard title="Revenue by Referral Source" subtitle="Current mix of inbound revenue">
+          <KPICard
+            title="Conversion Rate"
+            value={dashboardData.businessDevelopment.conversionRate.value}
+            detail={dashboardData.businessDevelopment.conversionRate.detail}
+            icon={Target}
+            tone="green"
+          >
+            <div className="mt-3 rounded border border-dashed border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+              Based on converted vs. lost terminal opportunities
+            </div>
+          </KPICard>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <ChartCard title="Opportunity Sources" subtitle="Converted, lost, and open prospects by source">
             <div className="h-48">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dashboardData.businessDevelopment.referralSources}>
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                    {dashboardData.businessDevelopment.referralSources.map((entry) => (
+                <BarChart data={dashboardData.businessDevelopment.sourceBreakdown}>
+                  <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+                    {dashboardData.businessDevelopment.sourceBreakdown.map((entry) => (
                       <Cell key={entry.label} fill={entry.color} />
                     ))}
                   </Bar>
@@ -565,16 +620,52 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
               </ResponsiveContainer>
             </div>
             <div className="mt-3 space-y-2">
-              {dashboardData.businessDevelopment.referralSources.map((item) => (
-                <div key={item.label} className="flex items-center justify-between text-sm text-gray-600">
+              {dashboardData.businessDevelopment.sourceBreakdown.map((item) => (
+                <div key={item.label} className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
                   <span className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
                     {item.label}
                   </span>
-                  <span className="font-medium text-gray-900">{formatRwfShort(item.value)}</span>
+                  <span className="font-medium text-gray-900">
+                    {item.total} total • {item.open} open • {item.converted} converted • {item.lost} lost
+                  </span>
                 </div>
               ))}
             </div>
+          </ChartCard>
+
+          <ChartCard title="Source Performance" subtitle="How each source is converting">
+            {dashboardData.businessDevelopment.sourceBreakdown.length > 0 ? (
+              <div className="space-y-3">
+                {dashboardData.businessDevelopment.sourceBreakdown.map((item) => {
+                  const terminal = item.converted + item.lost;
+                  const sourceRate = terminal > 0 ? Math.round((item.converted / terminal) * 100) : 0;
+                  return (
+                    <div key={item.label} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <div className="font-medium text-gray-900">{item.label}</div>
+                          <div className="text-xs text-gray-500">
+                            {item.total} opportunities • {item.open} open
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-gray-900">{sourceRate}% converted</div>
+                          <div className="text-xs text-gray-500">{formatRwfShort(item.value)}</div>
+                        </div>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-200">
+                        <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${sourceRate}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded border border-dashed border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+                No prospect source data available yet.
+              </div>
+            )}
           </ChartCard>
         </div>
       </DashboardSection>
