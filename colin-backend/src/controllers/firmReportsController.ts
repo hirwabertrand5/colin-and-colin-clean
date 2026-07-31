@@ -415,12 +415,24 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const expensesInRange = await PettyCashExpense.find({
       date: { $gte: fromISO, $lte: toISO },
     })
-      .select('amount category chargeType title date caseNoSnapshot partiesSnapshot')
+      .select('amount refundAmount category chargeType title date caseNoSnapshot partiesSnapshot')
       .lean();
 
     const clientRelatedExpenses = (expensesInRange as any[])
       .filter((expense) => expense.chargeType === 'client')
-      .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+      .reduce((sum, expense) => {
+        const gross = Number(expense.amount) || 0;
+        const refunded = Number(expense.refundAmount) || 0;
+        return sum + Math.max(0, gross - refunded);
+      }, 0);
+
+    const firmOperatingExpenses = (expensesInRange as any[])
+      .filter((expense) => expense.chargeType !== 'client')
+      .reduce((sum, expense) => {
+        const gross = Number(expense.amount) || 0;
+        const refunded = Number(expense.refundAmount) || 0;
+        return sum + Math.max(0, gross - refunded);
+      }, 0);
 
     const expenseTypeMap = new Map<string, { type: string; amount: number; count: number; clientRelatedAmount: number }>();
     for (const expense of expensesInRange as any[]) {
@@ -465,6 +477,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         outstanding,
         billableHours,
         clientRelatedExpenses: Math.round(clientRelatedExpenses * 100) / 100,
+        firmOperatingExpenses: Math.round(firmOperatingExpenses * 100) / 100,
         taxDataAvailable,
         taxMessage,
         qualityReviewAvailable,

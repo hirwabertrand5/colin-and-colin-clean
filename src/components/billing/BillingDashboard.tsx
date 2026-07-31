@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { DollarSign, TrendingUp, TrendingDown, Receipt } from 'lucide-react';
 import { UserRole } from '../../App';
 import { getBillingSummary, BillingSummary } from '../../services/billingService';
-import { getRecentInvoices, InvoiceWithCase } from '../../services/invoiceService';
+import { getRecentInvoices, listInvoices, InvoiceWithCase } from '../../services/invoiceService';
 import { getAllCases, CaseData } from '../../services/caseService';
 import { listPettyCashFunds, listExpensesForFund, PettyCashExpense } from '../../services/pettyCashService';
 import usePageTitle from '../../hooks/usePageTitle';
@@ -17,13 +17,25 @@ const formatRwf = (n: number) => `RWF ${Math.round(n).toLocaleString('en-US')}`;
 const canAccessBilling = (role: UserRole) =>
   role === 'managing_director' || role === 'executive_assistant';
 
+const parseAmount = (value: unknown) => {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/[^\d.-]/g, '');
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
 export default function BillingDashboard({ userRole }: BillingDashboardProps) {
   const navigate = useNavigate();
 
   const [summary, setSummary] = useState<BillingSummary | null>(null);
   const [recent, setRecent] = useState<InvoiceWithCase[]>([]);
+  const [allInvoices, setAllInvoices] = useState<InvoiceWithCase[]>([]);
   const [cases, setCases] = useState<CaseData[]>([]);
-  const [caseExpenses, setCaseExpenses] = useState<PettyCashExpense[]>([]);
+  const [allExpenses, setAllExpenses] = useState<PettyCashExpense[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   usePageTitle('Billing & Finance');
@@ -40,9 +52,10 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
         setError('');
 
         // Overall summary: do NOT pass from/to; backend defaults to last 6 months
-        const [s, r, allCases, funds] = await Promise.all([
+        const [s, r, invoices, allCases, funds] = await Promise.all([
           getBillingSummary(),
           getRecentInvoices(5),
+          listInvoices(),
           getAllCases(),
           listPettyCashFunds().catch(() => []),
         ]);
@@ -53,8 +66,9 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
         if (!mounted) return;
         setSummary(s);
         setRecent(r);
+        setAllInvoices(invoices);
         setCases(allCases);
-        setCaseExpenses(expenses.filter((expense) => expense.chargeType === 'client' && expense.caseId));
+        setAllExpenses(expenses);
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message || 'Failed to load billing dashboard.');
@@ -70,12 +84,13 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
   }, [userRole, navigate]);
 
   const stats = useMemo(() => {
-    const billed = summary?.billed ?? 0;
-    const collected = summary?.collected ?? 0;
-    const outstanding = summary?.outstanding ?? Math.max(0, billed - collected);
-    const collectionRate =
-      summary?.collectionRate ??
-      (billed > 0 ? Math.round((collected / billed) * 100) : 0);
+    const billed = allInvoices.reduce((sum, invoice) => sum + parseAmount(invoice.amount), 0);
+    const collected = allInvoices.reduce(
+      (sum, invoice) => sum + (invoice.status === 'Paid' ? parseAmount(invoice.amount) : 0),
+      0
+    );
+    const outstanding = Math.max(0, billed - collected);
+    const collectionRate = billed > 0 ? Math.round((collected / billed) * 100) : 0;
 
     return [
       { label: 'Total Billed', value: formatRwf(billed), change: '', trend: 'up' as const, icon: DollarSign },
@@ -83,7 +98,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
       { label: 'Outstanding', value: formatRwf(outstanding), change: '', trend: outstanding > 0 ? ('down' as const) : ('up' as const), icon: TrendingDown },
       { label: 'Billable Hours', value: String(summary?.billableHours ?? 0), change: `${collectionRate}% collected`, trend: 'up' as const, icon: DollarSign },
     ];
-  }, [summary]);
+  }, [allInvoices, summary?.billableHours]);
 
   const maxValue = useMemo(() => {
     const months = summary?.months || [];
@@ -91,16 +106,62 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
     return Math.max(1, Math.ceil(max * 1.1));
   }, [summary?.months]);
 
+  const isExpenseInSummaryRange = (expense: PettyCashExpense) => {
+    if (!summary?.from || !summary?.to) return true;
+    const date = String(expense.date || '').slice(0, 10);
+    return date >= summary.from.slice(0, 10) && date <= summary.to.slice(0, 10);
+  };
+
   const valueHealth = useMemo(() => {
-    const planned = cases.reduce((sum, item) => sum + (Number(item.workflowProgress?.plannedValue?.amount) || 0), 0);
-    const earned = cases.reduce((sum, item) => sum + (Number(item.workflowProgress?.completedValue?.amount) || 0), 0);
-    const spent = caseExpenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-    const remaining = planned - spent;
-    const spentRatio = planned > 0 ? Math.round((spent / planned) * 100) : 0;
-    const margin = earned - spent;
-    const color = planned > 0 && spent > planned ? 'red' : spentRatio >= 85 ? 'red' : spentRatio >= 65 ? 'yellow' : 'green';
-    return { planned, earned, spent, remaining, spentRatio, margin, color };
-  }, [caseExpenses, cases]);
+    const contractValue = cases.reduce((sum, item) => {
+      const plannedValue = parseAmount(item.workflowProgress?.plannedValue?.amount);
+      const budgetValue = parseAmount(item.budget);
+      return sum + (plannedValue > 0 ? plannedValue : budgetValue);
+    }, 0);
+    const totalBilled = allInvoices.reduce((sum, invoice) => sum + parseAmount(invoice.amount), 0);
+    const collected = allInvoices.reduce(
+      (sum, invoice) => sum + (invoice.status === 'Paid' ? parseAmount(invoice.amount) : 0),
+      0
+    );
+    const outstanding = Math.max(0, totalBilled - collected);
+    const directMatterCosts = allExpenses
+      .filter((expense) => expense.chargeType === 'client' && Boolean(expense.caseId) && isExpenseInSummaryRange(expense))
+      .reduce((sum, item) => {
+        const gross = parseAmount(item.amount);
+        const refunded = parseAmount(item.refundAmount);
+        return sum + Math.max(0, gross - refunded);
+      }, 0);
+    const firmOperatingExpenses = allExpenses
+      .filter((expense) => expense.chargeType !== 'client' && isExpenseInSummaryRange(expense))
+      .reduce((sum, item) => {
+        const gross = parseAmount(item.amount);
+        const refunded = parseAmount(item.refundAmount);
+        return sum + Math.max(0, gross - refunded);
+      }, 0);
+    const grossProfit = collected - directMatterCosts;
+    const grossProfitMargin = collected > 0 ? Math.round((grossProfit / collected) * 100) : 0;
+    const directMatterCostRatio = contractValue > 0 ? Math.round((directMatterCosts / contractValue) * 100) : 0;
+    const color =
+      contractValue > 0 && directMatterCosts > contractValue
+        ? 'red'
+        : directMatterCostRatio >= 85
+          ? 'red'
+          : directMatterCostRatio >= 65
+            ? 'yellow'
+            : 'green';
+    return {
+      contractValue,
+      totalBilled,
+      collected,
+      outstanding,
+      directMatterCosts,
+      firmOperatingExpenses,
+      grossProfit,
+      grossProfitMargin,
+      directMatterCostRatio,
+      color,
+    };
+  }, [allExpenses, allInvoices, cases, summary?.from, summary?.to]);
 
   const healthClass =
     valueHealth.color === 'red'
@@ -113,6 +174,32 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
     status === 'Paid'
       ? 'bg-green-100 text-green-700'
       : 'bg-yellow-400 text-black';
+
+  const firmFinancialSummary = useMemo(() => {
+    const totalContractValue = valueHealth.contractValue;
+    const totalBilled = valueHealth.totalBilled;
+    const collected = valueHealth.collected;
+    const outstanding = valueHealth.outstanding;
+    const directMatterCosts = valueHealth.directMatterCosts;
+    const firmOperatingExpenses = valueHealth.firmOperatingExpenses;
+    const grossProfit = valueHealth.grossProfit;
+    const grossProfitMargin = valueHealth.grossProfitMargin;
+    const netProfit = grossProfit - firmOperatingExpenses;
+    const netProfitMargin = collected > 0 ? Math.round((netProfit / collected) * 100) : 0;
+
+    return {
+      totalContractValue,
+      totalBilled,
+      collected,
+      outstanding,
+      directMatterCosts,
+      grossProfit,
+      grossProfitMargin,
+      firmOperatingExpenses,
+      netProfit,
+      netProfitMargin,
+    };
+  }, [valueHealth]);
 
   if (!canAccessBilling(userRole)) return null;
 
@@ -171,13 +258,13 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
         <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h2 className="font-semibold text-gray-900">Total Billed Health</h2>
+              <h2 className="font-semibold text-gray-900">Matter Financial Summary</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Compares negotiated case value with case-linked petty cash spend and collected workflow value.
+                Uses real case, invoice, and petty cash data to show contract value, billed revenue, collections, and matter costs.
               </p>
             </div>
             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold text-white ${healthClass}`}>
-              {valueHealth.spent > valueHealth.planned && valueHealth.planned > 0
+              {valueHealth.directMatterCosts > valueHealth.contractValue && valueHealth.contractValue > 0
                 ? 'Plan exceeded'
                 : valueHealth.color === 'red'
                   ? 'Low remaining value'
@@ -188,21 +275,75 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
           </div>
           <div className="mt-5">
             <div className="mb-2 flex justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-              <span>Total billed spent</span>
-              <span>{loading ? '…' : `${valueHealth.spentRatio}%`}</span>
+              <span>Direct matter costs vs contract value</span>
+              <span>{loading ? '…' : `${valueHealth.directMatterCostRatio}%`}</span>
             </div>
             <div className="h-3 overflow-hidden rounded-full bg-gray-200">
-              <div className={`h-3 rounded-full ${healthClass}`} style={{ width: `${Math.min(100, valueHealth.spentRatio)}%` }} />
+              <div className={`h-3 rounded-full ${healthClass}`} style={{ width: `${Math.min(100, valueHealth.directMatterCostRatio)}%` }} />
             </div>
           </div>
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.planned)}</div></div>
-            <div><div className="text-sm text-gray-500">Total collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(valueHealth.earned)}</div></div>
-            <div><div className="text-sm text-gray-500">Case Spend</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.spent)}</div></div>
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div><div className="text-sm text-gray-500">Contract Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.contractValue)}</div></div>
+            <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.totalBilled)}</div></div>
+            <div><div className="text-sm text-gray-500">Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(valueHealth.collected)}</div></div>
+            <div><div className="text-sm text-gray-500">Outstanding</div><div className="text-xl font-semibold text-amber-700">{formatRwf(valueHealth.outstanding)}</div></div>
+            <div><div className="text-sm text-gray-500">Direct Matter Costs</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.directMatterCosts)}</div></div>
             <div>
-              <div className="text-sm text-gray-500">{valueHealth.margin >= 0 ? 'Profit Margin' : 'Loss'}</div>
-              <div className={`text-xl font-semibold ${valueHealth.margin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {formatRwf(Math.abs(valueHealth.margin))}
+              <div className="text-sm text-gray-500">Gross Profit</div>
+              <div className={`text-xl font-semibold ${valueHealth.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {formatRwf(valueHealth.grossProfit)}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500">Gross Profit Margin %</div>
+              <div className={`text-xl font-semibold ${valueHealth.grossProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {valueHealth.grossProfitMargin}%
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-900">Firm Financial Summary</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Adds firm-level profitability using the internal expense ledger as the operating-cost source.
+              </p>
+            </div>
+            <span className="inline-flex rounded-full bg-gray-900 px-3 py-1 text-xs font-semibold text-white">
+              Internal expense ledger
+            </span>
+          </div>
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div><div className="text-sm text-gray-500">Total Contract Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalContractValue)}</div></div>
+            <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalBilled)}</div></div>
+            <div><div className="text-sm text-gray-500">Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(firmFinancialSummary.collected)}</div></div>
+            <div><div className="text-sm text-gray-500">Outstanding</div><div className="text-xl font-semibold text-amber-700">{formatRwf(firmFinancialSummary.outstanding)}</div></div>
+            <div><div className="text-sm text-gray-500">Direct Matter Costs</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.directMatterCosts)}</div></div>
+            <div>
+              <div className="text-sm text-gray-500">Gross Profit</div>
+              <div className={`text-xl font-semibold ${firmFinancialSummary.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {formatRwf(firmFinancialSummary.grossProfit)}
+              </div>
+            </div>
+            <div><div className="text-sm text-gray-500">Firm Operating Expenses</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.firmOperatingExpenses)}</div></div>
+            <div>
+              <div className="text-sm text-gray-500">Net Profit</div>
+              <div className={`text-xl font-semibold ${firmFinancialSummary.netProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {formatRwf(firmFinancialSummary.netProfit)}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500">Gross Profit Margin %</div>
+              <div className={`text-xl font-semibold ${firmFinancialSummary.grossProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {firmFinancialSummary.grossProfitMargin}%
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-gray-500">Net Profit Margin %</div>
+              <div className={`text-xl font-semibold ${firmFinancialSummary.netProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {firmFinancialSummary.netProfitMargin}%
               </div>
             </div>
           </div>

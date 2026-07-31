@@ -25,6 +25,7 @@ export type FirmReportResponse = {
     outstanding: number;
     billableHours: number;
     clientRelatedExpenses?: number;
+    firmOperatingExpenses?: number;
     taxDataAvailable: boolean;
     taxMessage: string;
     qualityReviewAvailable: boolean;
