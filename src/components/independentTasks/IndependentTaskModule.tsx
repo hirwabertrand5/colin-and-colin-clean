@@ -16,7 +16,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Sparkles,
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -29,14 +28,18 @@ import {
   getIndependentTaskDashboard,
   IndependentTask,
   IndependentTaskDashboard,
-  IndependentTaskPriority,
   IndependentTaskStatus,
   listIndependentTasks,
   transitionIndependentTask,
   updateIndependentTask,
 } from '../../services/independentTaskService';
 import usePageTitle from '../../hooks/usePageTitle';
-import { formatDueCountdown, getDeadlinePillClass } from '../../utils/workflowDeadline';
+import {
+  formatDueCountdown,
+  getDeadlinePillClass,
+  getDueRemainingRatio,
+  getPerformanceZoneFromUsedRatio,
+} from '../../utils/workflowDeadline';
 
 const TASK_STATUSES: IndependentTaskStatus[] = [
   'Created',
@@ -48,8 +51,6 @@ const TASK_STATUSES: IndependentTaskStatus[] = [
   'Completed',
   'Closed',
 ];
-
-const TASK_PRIORITIES: IndependentTaskPriority[] = ['Low', 'Medium', 'High', 'Critical'];
 
 const WORKFLOW_PRIMARY_TRANSITIONS: Record<IndependentTaskStatus, IndependentTaskStatus | null> = {
   Created: 'Assigned',
@@ -90,13 +91,6 @@ const statusClasses: Record<IndependentTaskStatus, string> = {
   Closed: 'bg-gray-900 text-white border-gray-900',
 };
 
-const priorityClasses: Record<IndependentTaskPriority, string> = {
-  Low: 'bg-green-50 text-green-700 border-green-100',
-  Medium: 'bg-yellow-50 text-yellow-800 border-yellow-100',
-  High: 'bg-red-50 text-red-700 border-red-100',
-  Critical: 'bg-rose-600 text-white border-rose-600',
-};
-
 type TaskForm = {
   taskNumber: string;
   title: string;
@@ -105,7 +99,6 @@ type TaskForm = {
   relatedClient: string;
   assignee: string;
   supervisor: string;
-  priority: IndependentTaskPriority;
   startDate: string;
   dueDate: string;
 };
@@ -118,7 +111,6 @@ const emptyForm = (): TaskForm => ({
   relatedClient: '',
   assignee: '',
   supervisor: '',
-  priority: 'Medium',
   startDate: new Date().toISOString().slice(0, 10),
   dueDate: '',
 });
@@ -151,12 +143,11 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | IndependentTaskStatus>('all');
-  const [priorityFilter, setPriorityFilter] = useState<'all' | IndependentTaskPriority>('all');
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [supervisorFilter, setSupervisorFilter] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
-  const [sortBy, setSortBy] = useState<'dueDate' | 'createdAt' | 'priority' | 'status' | 'taskNumber'>('dueDate');
+  const [sortBy, setSortBy] = useState<'dueDate' | 'createdAt' | 'status' | 'taskNumber'>('dueDate');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const [showModal, setShowModal] = useState(false);
@@ -199,7 +190,6 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
       const data = await listIndependentTasks({
         q: deferredSearch,
         status: statusFilter,
-        priority: priorityFilter,
         assignee: assigneeFilter || undefined,
         supervisor: supervisorFilter || undefined,
         page,
@@ -227,7 +217,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   useEffect(() => {
     loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deferredSearch, statusFilter, priorityFilter, assigneeFilter, supervisorFilter, page, limit, sortBy, sortDir]);
+  }, [deferredSearch, statusFilter, assigneeFilter, supervisorFilter, page, limit, sortBy, sortDir]);
 
   const matterOptions = useMemo(
     () =>
@@ -256,6 +246,30 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     [users]
   );
 
+  const getDeadlineUsage = (task: Pick<IndependentTask, 'startDate' | 'dueDate'>) => {
+    const dueAt = task.dueDate ? `${task.dueDate}T23:59:59.999` : undefined;
+    const ratio = getDueRemainingRatio(task.startDate, dueAt);
+    if (ratio === undefined) {
+      return { usedPercent: undefined as number | undefined, zone: 'untracked' as const };
+    }
+    const usedPercent = Math.max(0, Math.min(100, Math.round((1 - ratio) * 100)));
+    return {
+      usedPercent,
+      zone: getPerformanceZoneFromUsedRatio(usedPercent / 100),
+    };
+  };
+
+  const deadlineDashboardItems = useMemo(() => {
+    const source = dashboard?.upcomingDeadlines || [];
+    return source.slice(0, 5).map((task) => {
+      const metrics = getDeadlineUsage(task);
+      return {
+        ...task,
+        ...metrics,
+      };
+    });
+  }, [dashboard?.upcomingDeadlines]);
+
   const counts = dashboard?.summary;
 
   const openCreate = () => {
@@ -274,7 +288,6 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
       relatedClient: task.relatedClient || '',
       assignee: task.assignee || '',
       supervisor: task.supervisor || '',
-      priority: task.priority || 'Medium',
       startDate: task.startDate || new Date().toISOString().slice(0, 10),
       dueDate: task.dueDate || '',
     });
@@ -305,7 +318,6 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
         relatedClient: form.relatedClient || undefined,
         assignee: form.assignee,
         supervisor: form.supervisor,
-        priority: form.priority,
         startDate: form.startDate,
         dueDate: form.dueDate,
       };
@@ -340,7 +352,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
 
   const exportCsv = () => {
     const rows = [
-      ['Task Number', 'Title', 'Related Matter', 'Related Client', 'Assignee', 'Supervisor', 'Priority', 'Status', 'Due Date', 'Created Date'],
+      ['Task Number', 'Title', 'Related Matter', 'Related Client', 'Assignee', 'Supervisor', 'Deadline Used %', 'Status', 'Due Date', 'Created Date'],
       ...tasks.map((task) => [
         task.taskNumber || '',
         task.title || '',
@@ -348,7 +360,10 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
         task.relatedClient || '',
         task.assignee || '',
         task.supervisor || '',
-        task.priority || '',
+        (() => {
+          const deadline = getDeadlineUsage(task);
+          return typeof deadline.usedPercent === 'number' ? `${deadline.usedPercent}%` : '';
+        })(),
         task.status || '',
         task.dueDate || '',
         task.createdAt ? new Date(task.createdAt).toLocaleDateString() : '',
@@ -515,7 +530,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
             </button>
           </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-6">
+          <div className="mt-4 grid gap-3 lg:grid-cols-5">
             <div className="relative lg:col-span-2">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
@@ -541,22 +556,6 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
               {TASK_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {status}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={priorityFilter}
-              onChange={(e) => {
-                setPage(1);
-                setPriorityFilter(e.target.value as any);
-              }}
-              className="rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-            >
-              <option value="all">All Priorities</option>
-              {TASK_PRIORITIES.map((priority) => (
-                <option key={priority} value={priority}>
-                  {priority}
                 </option>
               ))}
             </select>
@@ -623,10 +622,11 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                    <th className="px-4 py-3">#</th>
                     <th className="px-4 py-3">Task</th>
                     <th className="px-4 py-3">Matter</th>
                     <th className="px-4 py-3">Assignee</th>
-                    <th className="px-4 py-3">Priority</th>
+                    <th className="px-4 py-3">Deadline</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Due</th>
                     <th className="px-4 py-3 text-right">Actions</th>
@@ -635,17 +635,19 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {tasks.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-500">
+                      <td colSpan={8} className="px-4 py-12 text-center text-sm text-gray-500">
                         <CheckCircle2 className="mx-auto mb-2 h-5 w-5 text-gray-300" />
                         No independent tasks found.
                       </td>
                     </tr>
                   ) : (
-                    tasks.map((task) => {
+                    tasks.map((task, index) => {
                       const next = nextStatus(task.status);
                       const isClosed = task.status === 'Closed';
+                      const rowNumber = (page - 1) * limit + index + 1;
                       return (
                         <tr key={task._id} className="align-top">
+                          <td className="px-4 py-4 text-sm font-medium text-gray-500">{rowNumber}</td>
                           <td className="px-4 py-4">
                             <div className="font-medium text-gray-900">{task.title}</div>
                             <div className="text-xs text-gray-500">{task.taskNumber}</div>
@@ -659,20 +661,57 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                             <div className="text-xs text-gray-500">Supervisor: {task.supervisor}</div>
                           </td>
                           <td className="px-4 py-4">
-                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${priorityClasses[task.priority]}`}>
-                              {task.priority}
-                            </span>
+                            {(() => {
+                              const deadline = getDeadlineUsage(task);
+                              const deadlinePillClass = getDeadlinePillClass(`${task.dueDate}T23:59:59.999`, task.startDate);
+                              const usageLabel =
+                                deadline.zone === 'excellent'
+                                  ? 'Excellent pace'
+                                  : deadline.zone === 'good'
+                                    ? 'On track'
+                                    : deadline.zone === 'delayed'
+                                      ? 'Watch closely'
+                                      : deadline.zone === 'risk'
+                                        ? 'At risk'
+                                        : 'Untracked';
+
+                              return (
+                                <div className="space-y-2">
+                                  <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${deadlinePillClass}`}>
+                                    {formatDueCountdown(`${task.dueDate}T23:59:59.999`)}
+                                  </span>
+                                  <div className="space-y-1">
+                                    <div className="flex items-center justify-between text-xs text-gray-500">
+                                      <span>{usageLabel}</span>
+                                      <span>{typeof deadline.usedPercent === 'number' ? `${deadline.usedPercent}% used` : 'No timeline'}</span>
+                                    </div>
+                                    <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+                                      <div
+                                        className={`h-2 rounded-full ${
+                                          deadline.zone === 'excellent'
+                                            ? 'bg-sky-500'
+                                            : deadline.zone === 'good'
+                                              ? 'bg-emerald-500'
+                                              : deadline.zone === 'delayed'
+                                                ? 'bg-amber-500'
+                                                : deadline.zone === 'risk'
+                                                  ? 'bg-rose-500'
+                                                  : 'bg-gray-400'
+                                        }`}
+                                        style={{ width: `${deadline.usedPercent ?? 0}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="px-4 py-4">
                             <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClasses[task.status]}`}>
                               {task.status}
                             </span>
                           </td>
-                          <td className="px-4 py-4">
-                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getDeadlinePillClass(`${task.dueDate}T23:59:59.999`, task.createdAt)}`}>
-                              {formatDueCountdown(`${task.dueDate}T23:59:59.999`)}
-                            </span>
-                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-600">{task.dueDate}</td>
                           <td className="px-4 py-4">
                             <div className="flex justify-end gap-2">
                               <Link
@@ -698,7 +737,6 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                                       onClick={() => handleTransitionQuick(task)}
                                       className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
                                     >
-                                      <Sparkles className="h-3.5 w-3.5" />
                                       {transitionButtonLabel(task)}
                                     </button>
                                   )}
@@ -766,16 +804,79 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
 
         <div className="space-y-4">
           <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h3 className="text-lg font-semibold text-gray-900">Priority Distribution</h3>
-            <div className="mt-4 space-y-3">
-              {dashboard?.priorityDistribution?.map((item) => (
-                <div key={item.priority} className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">{item.priority}</span>
-                  <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-sm font-medium text-gray-900">
-                    {item.count}
-                  </span>
+            <h3 className="text-lg font-semibold text-gray-900">Deadline Health</h3>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-[0.14em] text-gray-500">Overdue</div>
+                <div className="mt-2 text-2xl font-semibold text-rose-700">{counts?.overdueTasks || 0}</div>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-[0.14em] text-gray-500">Due Today</div>
+                <div className="mt-2 text-2xl font-semibold text-amber-700">{dashboard?.tasksDueToday?.length || 0}</div>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-[0.14em] text-gray-500">Open</div>
+                <div className="mt-2 text-2xl font-semibold text-sky-700">{counts?.openTasks || 0}</div>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-[0.14em] text-gray-500">Completed</div>
+                <div className="mt-2 text-2xl font-semibold text-emerald-700">{counts?.completed || 0}</div>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {deadlineDashboardItems.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-3 text-sm text-gray-500">
+                  No upcoming deadlines.
                 </div>
-              ))}
+              ) : (
+                deadlineDashboardItems.map((task) => {
+                  const usageLabel =
+                    task.zone === 'excellent'
+                      ? 'Excellent pace'
+                      : task.zone === 'good'
+                        ? 'On track'
+                        : task.zone === 'delayed'
+                          ? 'Watch closely'
+                          : task.zone === 'risk'
+                            ? 'At risk'
+                            : 'Untracked';
+
+                  return (
+                    <div key={task._id} className="rounded-2xl border border-gray-200 bg-white p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">{task.title}</div>
+                          <div className="text-xs text-gray-500">{task.taskNumber}</div>
+                        </div>
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getDeadlinePillClass(`${task.dueDate}T23:59:59.999`, task.startDate)}`}>
+                          {formatDueCountdown(`${task.dueDate}T23:59:59.999`)}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                        <span>{usageLabel}</span>
+                        <span>{typeof task.usedPercent === 'number' ? `${task.usedPercent}% used` : 'No timeline'}</span>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+                        <div
+                          className={`h-2 rounded-full ${
+                            task.zone === 'excellent'
+                              ? 'bg-sky-500'
+                              : task.zone === 'good'
+                                ? 'bg-emerald-500'
+                                : task.zone === 'delayed'
+                                  ? 'bg-amber-500'
+                                  : task.zone === 'risk'
+                                    ? 'bg-rose-500'
+                                    : 'bg-gray-400'
+                          }`}
+                          style={{ width: `${task.usedPercent ?? 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -954,32 +1055,15 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                   </div>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">Priority</label>
-                    <select
-                      value={form.priority}
-                      onChange={(e) => setForm((prev) => ({ ...prev, priority: e.target.value as IndependentTaskPriority }))}
-                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-                      disabled={saving}
-                    >
-                      {TASK_PRIORITIES.map((priority) => (
-                        <option key={priority} value={priority}>
-                          {priority}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">Start Date</label>
-                    <input
-                      type="date"
-                      value={form.startDate}
-                      onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))}
-                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-                      disabled={saving}
-                    />
-                  </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Start Date</label>
+                  <input
+                    type="date"
+                    value={form.startDate}
+                    onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))}
+                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+                    disabled={saving}
+                  />
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Due Date</label>

@@ -69,6 +69,7 @@ import {
   deleteInvoice,
   Invoice,
 } from '../../services/invoiceService';
+import { getAssignmentUsers } from '../../services/userService';
 import { listExpensesForCase, PettyCashExpense } from '../../services/pettyCashService';
 import { getWorkflowForCase, WorkflowInstance, completeWorkflowStep } from '../../services/workflowInstanceService';
 import {
@@ -93,8 +94,6 @@ type NewDocForm = {
 };
 
 const eventTypes = ['Deadline', 'Court', 'Meeting', 'Other'];
-const ASSOCIATE_ASSIGNABLE_ROLES = ['trainee_associate', 'intern'];
-
 const STAGE_ORDER = [
   'On Boarding',
   'Under Submission',
@@ -230,10 +229,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [staffError, setStaffError] = useState('');
-  const assignableStaffUsers =
-    canAssignTasks && userRole === 'associate'
-      ? staffUsers.filter((u) => ASSOCIATE_ASSIGNABLE_ROLES.includes(u.role))
-      : staffUsers;
 
   // Tasks
   const [tasks, setTasks] = useState<TaskData[]>([]);
@@ -249,7 +244,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     Omit<TaskData, '_id' | 'caseId' | 'createdAt' | 'updatedAt'> & { description?: string }
   >({
     title: '',
-    priority: 'Medium',
     status: 'Not Started',
     workflowStage: 'Assigned',
     assignee: '',
@@ -619,24 +613,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         setStaffLoading(true);
         setStaffError('');
 
-        const token = getToken();
-        const res = await fetch(`${API_URL}/users/staff`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-
-        if (res.status === 401) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          navigate('/login');
-          return;
-        }
-
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || 'Failed to fetch staff users');
-        }
-
-        const data = (await res.json()) as StaffUser[];
+        const data = await getAssignmentUsers();
         setStaffUsers(Array.isArray(data) ? data : []);
       } catch (e: any) {
         setStaffError(e?.message || 'Failed to fetch staff users');
@@ -685,7 +662,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       setShowAddTask(false);
       setNewTask({
         title: '',
-        priority: 'Medium',
         status: 'Not Started',
         workflowStage: 'Assigned',
         assignee: '',
@@ -1858,18 +1834,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority Level</label>
-                  <select
-                    value={newTask.priority}
-                    onChange={(e) => setNewTask((t) => ({ ...t, priority: e.target.value as any }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded"
-                  >
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
-                  </select>
-                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1883,7 +1847,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     required
                   >
                     <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
-                    {assignableStaffUsers.map((u) => (
+                    {staffUsers.map((u) => (
                       <option key={u._id} value={u.name}>
                         {u.name} ({u.role.replace(/_/g, ' ')})
                       </option>
@@ -2038,18 +2002,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority Level</label>
-                  <select
-                    value={editTask.priority}
-                    onChange={(e) => setEditTask((t) => (t ? { ...t, priority: e.target.value as any } : t))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded"
-                  >
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
-                  </select>
-                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2063,7 +2015,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     required
                   >
                     <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
-                    {assignableStaffUsers.map((u) => (
+                    {staffUsers.map((u) => (
                       <option key={u._id} value={u.name}>
                         {u.name} ({u.role.replace(/_/g, ' ')})
                       </option>

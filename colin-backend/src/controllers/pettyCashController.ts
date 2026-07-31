@@ -296,9 +296,7 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
         expensePayload.createdByUserId = new mongoose.Types.ObjectId(actor.actorUserId);
       }
 
-      const createdExpenses = await PettyCashExpense.create([expensePayload], { session });
-      const expense = createdExpenses[0];
-      if (!expense) throw new Error('EXPENSE_CREATE_FAILED');
+      const expense = await new PettyCashExpense(expensePayload).save({ session });
 
       fund.spentAmount = Number(fund.spentAmount) + amt;
       fund.remainingAmount = Number(fund.remainingAmount) - amt;

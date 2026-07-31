@@ -386,12 +386,8 @@ export const independentTaskService = {
           taskDoc.lastActionByUserId = userId;
         }
 
-        const doc = await IndependentTask.create(
-          [taskDoc],
-          { session }
-        );
-        created = doc[0];
-        await IndependentTaskHistory.create(
+        created = await new IndependentTask(taskDoc).save({ session });
+        await IndependentTaskHistory.insertMany(
           [
             {
               taskId: created._id,
@@ -410,7 +406,7 @@ export const independentTaskService = {
               ...(req.user?.id ? { actorUserId: new mongoose.Types.ObjectId(req.user.id) } : {}),
             },
           ],
-          { session }
+          { session, ordered: true }
         );
       });
       await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_CREATED', 'Independent task created', `${taskNumber} • ${title}`));

@@ -475,7 +475,7 @@ export const requestTakeCase = async (req: AuthRequest, res: Response) => {
       };
       if (req.user?.email) requestDoc.requestedByEmail = String(req.user.email).trim().toLowerCase();
 
-      createdRequest = (await CaseTakeRequest.create([requestDoc], { session }))[0];
+      createdRequest = await new CaseTakeRequest(requestDoc).save({ session });
 
       await writeAudit({
         caseId,
