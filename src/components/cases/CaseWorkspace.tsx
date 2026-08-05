@@ -1197,65 +1197,13 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       const updatedWf = await getWorkflowForCase(id);
       setWorkflowInstance(updatedWf);
 
-      // Reload case to reflect workflowProgress + billing buckets updates
+      // Reload case to reflect the backend billing buckets and workflow progress updates
       try {
         const updatedCase = await getCaseById(id);
         setCaseData(updatedCase);
       } catch {
         // ignore
       }
-      
-      // Calculate stage-based billing value using template fees
-      let completedValueAmount = 0;
-      let nextDeadline = '';
-      
-      if (workflowTemplate) {
-        // Find the current stage in the template
-        const currentStageInTemplate = workflowTemplate.stages.find(s => s.key === stageKey);
-        
-        // Calculate completed value by summing fees of completed stages
-        const stageIndex = STAGE_ORDER.findIndex(s => s === stageKey);
-        for (let i = 0; i <= stageIndex; i++) {
-          const stage = workflowTemplate.stages.find(s => s.key === STAGE_ORDER[i]);
-          if (stage?.fee) {
-            completedValueAmount += stage.fee.amount || 0;
-          }
-        }
-        
-        // Calculate next deadline based on SLA
-        if (currentStageInTemplate?.sla) {
-          const slaDays = currentStageInTemplate.sla.days || 30;
-          const deadline = new Date();
-          deadline.setDate(deadline.getDate() + slaDays);
-          nextDeadline = deadline.toISOString().split('T')[0];
-        }
-      } else {
-        // Fallback to equal division if no template
-        const stageIndex = STAGE_ORDER.findIndex(s => s === stageKey);
-        const totalBudget = parseBudgetToNumber(caseData.budget);
-        const stageValue = stageIndex >= 0 ? Math.round(totalBudget / STAGE_ORDER.length) : 0;
-        completedValueAmount = (stageIndex + 1) * stageValue;
-      }
-      
-      // Update case with new billing progress and deadline
-      const updatedCase = await updateCase(caseData._id, {
-        ...caseData,
-        workflowProgress: {
-          ...caseData.workflowProgress,
-          currentStepKey: updatedWf.currentStepKey,
-          nextDueAt: nextDeadline || caseData.workflowProgress?.nextDueAt,
-          plannedValue: {
-            amount: workflowTemplate?.stages.reduce((sum, s) => sum + (s.fee?.amount || 0), 0) || parseBudgetToNumber(caseData.budget),
-            currency: 'RWF'
-          },
-          completedValue: {
-            amount: completedValueAmount,
-            currency: 'RWF'
-          }
-        }
-      });
-      
-      setCaseData(updatedCase);
     } catch (err: any) {
       setWorkflowError(err.message || 'Failed to complete stage');
     } finally {
@@ -2673,9 +2621,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
           <div className="bg-white border border-gray-200 rounded-xl p-6">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Case Billing Value</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Matter Financial Status</h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  Billing is based on the negotiated total billed value and the percentage of completed key actions.
+                  Billing is based on the negotiated planned value and the percentage of checked key actions.
                 </p>
               </div>
 
@@ -2688,7 +2636,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
             <div className="mt-5">
               <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-                <span>Total billed used by case expenses</span>
+                <span>Direct matter costs vs negotiated planned value</span>
                 <span>{plannedExpenseRatio}%</span>
               </div>
               <div className="h-3 overflow-hidden rounded-full bg-gray-200">
@@ -2701,34 +2649,34 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
             <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Billed</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Negotiated Planned Value</div>
                 <div className="mt-2 text-lg font-semibold text-gray-900">
                   {billingCurrency} {Math.round(totalBilled).toLocaleString()}
                 </div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total collected</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Collected</div>
                 <div className="mt-2 text-lg font-semibold text-gray-900">
                   {billingCurrency} {Math.round(earnedFeeAmount).toLocaleString()}
                 </div>
                 <div className="mt-2 text-xs text-gray-500">Auto-updated from checked key actions.</div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Case expenses</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Direct Matter Costs</div>
                 <div className="mt-2 text-lg font-semibold text-gray-900">
                   {billingCurrency} {Math.round(caseExpenseTotal).toLocaleString()}
                 </div>
-                <div className="mt-2 text-xs text-gray-500">Petty cash linked to this case.</div>
+                <div className="mt-2 text-xs text-gray-500">Petty cash linked to this matter.</div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">
-                  {marginAmount >= 0 ? 'Profit margin' : 'Loss'}
+                  {marginAmount >= 0 ? 'Gross Profit' : 'Loss'}
                 </div>
                 <div className={`mt-2 text-lg font-semibold ${marginAmount >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                   {billingCurrency} {Math.abs(Math.round(marginAmount)).toLocaleString()}
                 </div>
                 <div className="mt-2 text-xs text-gray-500">
-                  Earned fees minus case expenses.
+                  Total collected minus direct matter costs.
                 </div>
               </div>
             </div>
@@ -2737,11 +2685,11 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
           {/* Summary */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <span className="text-gray-500 text-sm mb-2 block">Planned Value</span>
+              <span className="text-gray-500 text-sm mb-2 block">Negotiated Planned Value</span>
               <span className="text-3xl font-bold text-gray-900">{formatRwf(totalBilled)}</span>
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <span className="text-gray-500 text-sm mb-2 block">Total Paid</span>
+              <span className="text-gray-500 text-sm mb-2 block">Invoice Payments Received</span>
               <span className="text-3xl font-bold text-green-600">{formatRwf(totalPaid)}</span>
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-6">
@@ -3250,7 +3198,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Total Billed (RWF)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Negotiated Planned Value (RWF)</label>
                 <input
                   value={String(editCaseData.workflowProgress?.plannedValue?.amount ?? editCaseData.budget ?? '')}
                   onChange={(e) => {

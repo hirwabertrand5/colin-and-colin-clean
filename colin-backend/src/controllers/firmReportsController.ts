@@ -9,6 +9,11 @@ import User from '../models/userModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
+import {
+  getCollectedValueFromProgress,
+  getDirectMatterCost,
+  getNegotiatedPlannedValue,
+} from '../utils/financialMetrics';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -190,20 +195,57 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       ]),
     ]);
 
-    const invoiceCaseIds = Array.from(new Set([...invoicesByInvoiceDate, ...invoicesByPaymentDate].map((inv: any) => String(inv.caseId || '')).filter(Boolean)));
-    const casesForInvoices = await Case.find({ _id: { $in: invoiceCaseIds } }).select('_id assignedTo').lean();
-    const caseAssignedTo = new Map((casesForInvoices as any[]).map((c) => [String(c._id), String(c.assignedTo || '').trim()]));
+    const basisCaseIds = Array.from(
+      new Set(
+        (dateBasis === 'paymentDate'
+          ? invoicesByPaymentDate
+          : dateBasis === 'taskDate'
+            ? tasksCompleted
+            : invoicesByInvoiceDate
+        )
+          .map((item: any) => String(item.caseId || ''))
+          .filter(Boolean)
+      )
+    );
+
+    const mattersForFinance = basisCaseIds.length
+      ? await Case.find({ _id: { $in: basisCaseIds } })
+          .select('_id assignedTo budget updatedAt workflowProgress billingSettings')
+          .lean()
+      : [];
+    const casesForInvoices = await Case.find({ _id: { $in: Array.from(new Set([...invoicesByInvoiceDate, ...invoicesByPaymentDate].map((inv: any) => String(inv.caseId || '')).filter(Boolean))) } })
+      .select('_id assignedTo')
+      .lean();
+
+    const selectedMatters = selectedMemberName
+      ? (mattersForFinance as any[]).filter((matter) => String(matter.assignedTo || '').trim() === selectedMemberName)
+      : (mattersForFinance as any[]);
+    const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
 
     const baseInvoices = dateBasis === 'paymentDate' ? invoicesByPaymentDate : invoicesByInvoiceDate;
-    const selectedInvoices = selectedMemberName
-      ? baseInvoices.filter((inv: any) => caseAssignedTo.get(String(inv.caseId)) === selectedMemberName)
-      : baseInvoices;
+    const selectedInvoices = baseInvoices.filter((inv: any) => selectedMatterIds.has(String(inv.caseId)));
 
+    const contractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getNegotiatedPlannedValue(matter), 0);
+    const collected = selectedMatters.reduce((sum: number, matter: any) => sum + getCollectedValueFromProgress(matter), 0);
     const billed = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
-    const collected = dateBasis === 'paymentDate'
-      ? billed
-      : selectedInvoices.filter((inv: any) => inv.status === 'Paid').reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
-    const outstanding = Math.max(0, billed - collected);
+    const outstanding = Math.max(0, contractValue - collected);
+    const directMatterCosts = (await PettyCashExpense.find({
+      date: { $gte: fromISO, $lte: toISO },
+      chargeType: 'client',
+      caseId: { $in: Array.from(selectedMatterIds) },
+    })
+      .select('amount refundAmount chargeType caseId')
+      .lean()).reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
+    const selectedMatterOperatingExpenses = (await PettyCashExpense.find({
+      date: { $gte: fromISO, $lte: toISO },
+      chargeType: { $ne: 'client' },
+    })
+      .select('amount refundAmount chargeType caseId')
+      .lean()).reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
+    const grossProfit = collected - directMatterCosts;
+    const grossProfitMargin = collected > 0 ? Math.round((grossProfit / collected) * 100) : 0;
+    const netProfit = grossProfit - selectedMatterOperatingExpenses;
+    const netProfitMargin = collected > 0 ? Math.round((netProfit / collected) * 100) : 0;
 
     const hoursAgg = await TaskTimeLog.aggregate([
       { $match: { loggedAt: { $gte: fromDate, $lte: toDate } } },
@@ -248,12 +290,12 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const riskByName = new Map<string, number>();
     const usedPercentByName = new Map<string, number[]>();
     const caseIds = Array.from(new Set((tasksCompleted as any[]).map((t) => String(t.caseId)).filter(Boolean)));
-    const completedCases = await Case.find({ _id: { $in: caseIds } })
-      .select('_id workflowProgress.completedValue')
-      .lean();
-    const caseEarnedById = new Map(
-      (completedCases as any[]).map((c) => [String(c._id), Number(c.workflowProgress?.completedValue?.amount) || 0])
-    );
+    const paidInvoicesByCaseId = new Map<string, number>();
+    for (const inv of invoicesByPaymentDate as any[]) {
+      const caseId = String(inv.caseId || '');
+      if (!caseId) continue;
+      paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
+    }
     const completedTaskCountByCase = new Map<string, number>();
     for (const t of tasksCompleted as any[]) {
       const caseId = String(t.caseId || '');
@@ -285,11 +327,13 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         usedPercentByName.set(name, [...(usedPercentByName.get(name) || []), perf.usedPercent]);
       }
       const caseId = String(t.caseId || '');
-      const taskShare = (caseEarnedById.get(caseId) || 0) / Math.max(1, completedTaskCountByCase.get(caseId) || 1);
+      const casePaymentAmount = paidInvoicesByCaseId.get(caseId) || 0;
+      const taskShare = casePaymentAmount / Math.max(1, completedTaskCountByCase.get(caseId) || 1);
       const roleShare = roleEarningShare(roleByName.get(name));
       grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + taskShare);
-      earnedByName.set(name, (earnedByName.get(name) || 0) + taskShare * (roleShare.percent / 100));
-      firmRetainedByName.set(name, (firmRetainedByName.get(name) || 0) + taskShare * (FIRM_RETAINED_PERCENT / 100));
+      const earnedShare = taskShare * (roleShare.percent / 100);
+      earnedByName.set(name, (earnedByName.get(name) || 0) + earnedShare);
+      firmRetainedByName.set(name, (firmRetainedByName.get(name) || 0) + Math.max(0, taskShare - earnedShare));
     }
 
     const overdueFilter: any = { status: { $ne: 'Completed' } };
@@ -338,7 +382,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           prospectsCreated: prospectCount,
           reportsGenerated: reportCount,
           billableHours: Math.round(((hoursByName.get(name) || 0) * 10)) / 10,
+          invoicePaymentsReceived: Math.round((grossHandledByName.get(name) || 0) * 100) / 100,
           earnedFees: Math.round((earnedByName.get(name) || 0) * 100) / 100,
+          revenueAttributed: Math.round((earnedByName.get(name) || 0) * 100) / 100,
           grossFeesHandled: Math.round((grossHandledByName.get(name) || 0) * 100) / 100,
           firmRetainedEarnings: Math.round((firmRetainedByName.get(name) || 0) * 100) / 100,
           earlyTasks: earlyByName.get(name) || 0,
@@ -407,7 +453,13 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const key = monthKey(dt);
       const item = monthsMap.get(key) || { month: key, billed: 0, collected: 0 };
       item.billed += Number(inv.amount) || 0;
-      if (inv.status === 'Paid') item.collected += Number(inv.amount) || 0;
+      monthsMap.set(key, item);
+    }
+    for (const matter of selectedMatters as any[]) {
+      const dt = matter.updatedAt ? new Date(matter.updatedAt) : toDate;
+      const key = monthKey(dt);
+      const item = monthsMap.get(key) || { month: key, billed: 0, collected: 0 };
+      item.collected += getCollectedValueFromProgress(matter);
       monthsMap.set(key, item);
     }
     const months = Array.from(monthsMap.values()).sort((a, b) => a.month.localeCompare(b.month));
@@ -419,20 +471,12 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .lean();
 
     const clientRelatedExpenses = (expensesInRange as any[])
-      .filter((expense) => expense.chargeType === 'client')
-      .reduce((sum, expense) => {
-        const gross = Number(expense.amount) || 0;
-        const refunded = Number(expense.refundAmount) || 0;
-        return sum + Math.max(0, gross - refunded);
-      }, 0);
+      .filter((expense) => expense.chargeType === 'client' && (!selectedMemberName || selectedMatterIds.has(String(expense.caseId || ''))))
+      .reduce((sum, expense) => sum + getDirectMatterCost(expense), 0);
 
     const firmOperatingExpenses = (expensesInRange as any[])
       .filter((expense) => expense.chargeType !== 'client')
-      .reduce((sum, expense) => {
-        const gross = Number(expense.amount) || 0;
-        const refunded = Number(expense.refundAmount) || 0;
-        return sum + Math.max(0, gross - refunded);
-      }, 0);
+      .reduce((sum, expense) => sum + getDirectMatterCost(expense), 0);
 
     const expenseTypeMap = new Map<string, { type: string; amount: number; count: number; clientRelatedAmount: number }>();
     for (const expense of expensesInRange as any[]) {
@@ -458,8 +502,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           role: selectedMember?.role || 'Unknown',
           tasksCompleted: completedTasksByName.get(selectedMemberName) || 0,
           outstandingTasks: overdueByName.get(selectedMemberName) || 0,
-          revenueGenerated: billed,
-          paymentsReceived: collected,
+          revenueGenerated: Math.round((grossHandledByName.get(selectedMemberName) || 0) * 100) / 100,
+          paymentsReceived: Math.round(
+            selectedMatters.reduce((sum, matter: any) => sum + (paidInvoicesByCaseId.get(String(matter._id)) || 0), 0) * 100
+          ) / 100,
           outstandingBalance: outstanding,
           feesEarned: Math.round((earnedByName.get(selectedMemberName) || 0) * 100) / 100,
           qualityReviewStatus: qualityReviewMessage,
@@ -472,12 +518,18 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       selectedMember: selectedMemberMetrics,
       kpis: {
         activeCases,
+        contractValue: Math.round(contractValue * 100) / 100,
         billed,
         collected,
         outstanding,
+        directMatterCosts: Math.round(directMatterCosts * 100) / 100,
+        grossProfit: Math.round(grossProfit * 100) / 100,
+        grossProfitMargin,
+        firmOperatingExpenses: Math.round(firmOperatingExpenses * 100) / 100,
+        netProfit: Math.round(netProfit * 100) / 100,
+        netProfitMargin,
         billableHours,
         clientRelatedExpenses: Math.round(clientRelatedExpenses * 100) / 100,
-        firmOperatingExpenses: Math.round(firmOperatingExpenses * 100) / 100,
         taxDataAvailable,
         taxMessage,
         qualityReviewAvailable,

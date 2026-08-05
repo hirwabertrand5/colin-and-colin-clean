@@ -20,12 +20,18 @@ export type FirmReportResponse = {
   } | null;
   kpis: {
     activeCases: number;
+    contractValue?: number;
     billed: number;
     collected: number;
     outstanding: number;
+    directMatterCosts?: number;
+    grossProfit?: number;
+    grossProfitMargin?: number;
+    firmOperatingExpenses?: number;
+    netProfit?: number;
+    netProfitMargin?: number;
     billableHours: number;
     clientRelatedExpenses?: number;
-    firmOperatingExpenses?: number;
     taxDataAvailable: boolean;
     taxMessage: string;
     qualityReviewAvailable: boolean;
@@ -44,9 +50,13 @@ export type FirmReportResponse = {
     prospectsCreated?: number;
     reportsGenerated?: number;
     billableHours: number;
+    invoicePaymentsReceived?: number;
     earnedFees?: number;
     grossFeesHandled?: number;
     firmRetainedEarnings?: number;
+    revenueAttributed?: number;
+    contributionMargin?: number;
+    contributionRatio?: number;
     earlyTasks?: number;
     onTimeTasks?: number;
     lateTasks?: number;

@@ -1,7 +1,14 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
+import Case from '../models/caseModel';
 import Invoice from '../models/invoiceModel';
+import PettyCashExpense from '../models/pettyCashExpenseModel';
 import TaskTimeLog from '../models/taskTimeLogModel';
+import {
+  getCollectedValueFromProgress,
+  getDirectMatterCost,
+  getNegotiatedPlannedValue,
+} from '../utils/financialMetrics';
 
 const toISODate = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -27,34 +34,75 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
     const fromStr = toISODate(fromDate);
     const toStr = toISODate(toDate);
 
-    const invoices = await Invoice.find({ date: { $gte: fromStr, $lte: toStr } })
-      .sort({ date: 1 })
-      .lean();
+    const [invoices, matters, expenses] = await Promise.all([
+      Invoice.find({ date: { $gte: fromStr, $lte: toStr } })
+        .sort({ date: 1 })
+        .lean(),
+      Case.find({ updatedAt: { $gte: fromDate, $lte: toDate } })
+        .select('_id budget updatedAt workflowProgress billingSettings')
+        .lean(),
+      PettyCashExpense.find({ date: { $gte: fromStr, $lte: toStr } })
+        .select('amount refundAmount chargeType caseId')
+        .lean(),
+    ]);
 
     const billed = invoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
-    const collected = invoices.filter(i => i.status === 'Paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
-    const outstanding = Math.max(0, billed - collected);
-    const collectionRate = billed > 0 ? Math.round((collected / billed) * 100) : 0;
+    const contractValue = matters.reduce((s, matter: any) => s + getNegotiatedPlannedValue(matter), 0);
+    const collected = matters.reduce((s, matter: any) => s + getCollectedValueFromProgress(matter), 0);
+    const directMatterCosts = expenses
+      .filter((expense: any) => expense.chargeType === 'client' && Boolean(expense.caseId))
+      .reduce((s, expense: any) => s + getDirectMatterCost(expense), 0);
+    const firmOperatingExpenses = expenses
+      .filter((expense: any) => expense.chargeType !== 'client')
+      .reduce((s, expense: any) => s + getDirectMatterCost(expense), 0);
+    const grossProfit = collected - directMatterCosts;
+    const grossProfitMargin = collected > 0 ? Math.round((grossProfit / collected) * 100) : 0;
+    const netProfit = grossProfit - firmOperatingExpenses;
+    const netProfitMargin = collected > 0 ? Math.round((netProfit / collected) * 100) : 0;
+    const outstanding = Math.max(0, contractValue - collected);
+    const collectionRate = contractValue > 0 ? Math.round((collected / contractValue) * 100) : 0;
     const hoursAgg = await TaskTimeLog.aggregate([
       { $match: { loggedAt: { $gte: fromDate, $lte: toDate } } },
       { $group: { _id: null, totalHours: { $sum: '$hours' } } },
     ]);
     const billableHours = Math.round((((hoursAgg?.[0]?.totalHours as number) || 0) * 10)) / 10;
 
-    // monthly trend
+    // monthly trend: invoices drive billed, matters drive collected
     const map = new Map<string, { month: string; billed: number; collected: number }>();
     for (const inv of invoices) {
       const dt = new Date(inv.date);
       const key = monthKey(dt);
       const item = map.get(key) || { month: key, billed: 0, collected: 0 };
       item.billed += Number(inv.amount) || 0;
-      if (inv.status === 'Paid') item.collected += Number(inv.amount) || 0;
+      map.set(key, item);
+    }
+    for (const matter of matters as any[]) {
+      const dt = matter.updatedAt ? new Date(matter.updatedAt) : toDate;
+      const key = monthKey(dt);
+      const item = map.get(key) || { month: key, billed: 0, collected: 0 };
+      item.collected += getCollectedValueFromProgress(matter);
       map.set(key, item);
     }
 
     const months = Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
 
-    res.json({ from: fromStr, to: toStr, billed, collected, outstanding, collectionRate, billableHours, months });
+    res.json({
+      from: fromStr,
+      to: toStr,
+      billed,
+      collected,
+      contractValue,
+      outstanding,
+      collectionRate,
+      billableHours,
+      directMatterCosts,
+      firmOperatingExpenses,
+      grossProfit,
+      grossProfitMargin,
+      netProfit,
+      netProfitMargin,
+      months,
+    });
   } catch {
     res.status(500).json({ message: 'Failed to fetch billing summary.' });
   }

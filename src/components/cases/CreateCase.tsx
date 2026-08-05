@@ -1022,7 +1022,7 @@ export default function CreateCase({
                     inputMode="numeric"
                   />
                   <p className="text-xs text-gray-500 mt-2">
-                    This is the negotiated case value. Earned fees are calculated from checked key actions.
+                    This is the negotiated case value. Collected value is calculated from checked key actions.
                   </p>
                 </div>
                 <div>
@@ -1083,7 +1083,7 @@ export default function CreateCase({
                       </div>
                     </div>
                     <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Billed</div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Negotiated Planned Value</div>
                       <div className="mt-2 text-sm font-semibold text-gray-900">
                         {plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Enter value'}
                       </div>
@@ -1099,7 +1099,7 @@ export default function CreateCase({
                         <div className="h-2 rounded-full bg-gray-900" style={{ width: `${actionProgressPercent}%` }} />
                       </div>
                       <div className="mt-2 text-xs text-gray-600">
-                        Earned preview: <span className="font-semibold text-gray-900">{formatCurrency(previewEarnedValue, plannedValueCurrency)}</span>
+                        Collected preview: <span className="font-semibold text-gray-900">{formatCurrency(previewEarnedValue, plannedValueCurrency)}</span>
                       </div>
                     </div>
                   </div>
@@ -1187,7 +1187,7 @@ export default function CreateCase({
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="text-sm font-semibold text-gray-900 mb-3">Workflow settings</div>
               <div className="text-sm text-gray-600">
-                A workflow template automatically generates deadlines, step fees or ranges, and key actions. Billing uses only the negotiated total billed value and the percentage of checked key actions.
+                A workflow template automatically generates deadlines, step fees or ranges, and key actions. Billing uses only the negotiated planned value and the percentage of checked key actions.
               </div>
             </div>
           </div>
@@ -1211,7 +1211,7 @@ export default function CreateCase({
                   ['Estimated completion', workflowSummary?.completionDate ? workflowSummary.completionDate.toLocaleDateString() : 'TBD'],
                   ['Negotiated planned value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
                   ['Key action progress', `${checkedActionCount}/${orderedActionRefs.length} actions checked (${actionProgressPercent}%)`],
-                  ['Earned fees preview', formatCurrency(previewEarnedValue, plannedValueCurrency)],
+                  ['Collected preview', formatCurrency(previewEarnedValue, plannedValueCurrency)],
                 ].map(([k, v]) => (
                   <div key={k} className="grid grid-cols-3 gap-4 py-3 border-b border-gray-200">
                     <span className="text-sm text-gray-600">{k}:</span>

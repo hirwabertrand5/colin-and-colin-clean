@@ -28,6 +28,27 @@ const parseAmount = (value: unknown) => {
   return 0;
 };
 
+const getMatterCollectedAmount = (item: CaseData) => {
+  const completed = parseAmount(item.workflowProgress?.completedValue?.amount);
+  if (completed > 0) return completed;
+
+  const planned = parseAmount(item.workflowProgress?.plannedValue?.amount);
+  const budget = parseAmount(item.budget);
+  const base = planned > 0 ? planned : budget;
+  const percent = Number(item.workflowProgress?.percent) || 0;
+  if (base > 0 && percent > 0) {
+    return Math.round((base * percent) / 100);
+  }
+
+  return Number(item.billingSettings?.accruedUnbilled) || 0;
+};
+
+const isExpenseInRange = (expense: PettyCashExpense, from?: string, to?: string) => {
+  if (!from || !to) return true;
+  const date = String(expense.date || '').slice(0, 10);
+  return date >= from.slice(0, 10) && date <= to.slice(0, 10);
+};
+
 export default function BillingDashboard({ userRole }: BillingDashboardProps) {
   const navigate = useNavigate();
 
@@ -84,33 +105,31 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
   }, [userRole, navigate]);
 
   const stats = useMemo(() => {
+    const contractValue = cases.reduce((sum, item) => {
+      const plannedValue = parseAmount(item.workflowProgress?.plannedValue?.amount);
+      const budgetValue = parseAmount(item.budget);
+      return sum + (plannedValue > 0 ? plannedValue : budgetValue);
+    }, 0);
     const billed = allInvoices.reduce((sum, invoice) => sum + parseAmount(invoice.amount), 0);
-    const collected = allInvoices.reduce(
-      (sum, invoice) => sum + (invoice.status === 'Paid' ? parseAmount(invoice.amount) : 0),
-      0
-    );
-    const outstanding = Math.max(0, billed - collected);
-    const collectionRate = billed > 0 ? Math.round((collected / billed) * 100) : 0;
+    const collected = cases.reduce((sum, item) => sum + getMatterCollectedAmount(item), 0);
+    const directMatterCosts = allExpenses
+      .filter((expense) => expense.chargeType === 'client' && Boolean(expense.caseId) && isExpenseInRange(expense, summary?.from, summary?.to))
+      .reduce((sum, item) => sum + Math.max(0, parseAmount(item.amount) - parseAmount(item.refundAmount)), 0);
+    const grossProfit = collected - directMatterCosts;
 
     return [
-      { label: 'Total Billed', value: formatRwf(billed), change: '', trend: 'up' as const, icon: DollarSign },
-      { label: 'Collected', value: formatRwf(collected), change: '', trend: 'up' as const, icon: TrendingUp },
-      { label: 'Outstanding', value: formatRwf(outstanding), change: '', trend: outstanding > 0 ? ('down' as const) : ('up' as const), icon: TrendingDown },
-      { label: 'Billable Hours', value: String(summary?.billableHours ?? 0), change: `${collectionRate}% collected`, trend: 'up' as const, icon: DollarSign },
+      { label: 'Negotiated Planned Value', value: formatRwf(contractValue), change: '', trend: 'up' as const, icon: DollarSign },
+      { label: 'Total Billed', value: formatRwf(billed), change: '', trend: 'up' as const, icon: TrendingUp },
+      { label: 'Total Collected', value: formatRwf(collected), change: '', trend: 'up' as const, icon: TrendingUp },
+      { label: 'Gross Profit', value: formatRwf(grossProfit), change: '', trend: grossProfit >= 0 ? ('up' as const) : ('down' as const), icon: TrendingDown },
     ];
-  }, [allInvoices, summary?.billableHours]);
+  }, [allExpenses, allInvoices, cases]);
 
   const maxValue = useMemo(() => {
     const months = summary?.months || [];
     const max = months.reduce((m, x) => Math.max(m, x.billed, x.collected), 0);
     return Math.max(1, Math.ceil(max * 1.1));
   }, [summary?.months]);
-
-  const isExpenseInSummaryRange = (expense: PettyCashExpense) => {
-    if (!summary?.from || !summary?.to) return true;
-    const date = String(expense.date || '').slice(0, 10);
-    return date >= summary.from.slice(0, 10) && date <= summary.to.slice(0, 10);
-  };
 
   const valueHealth = useMemo(() => {
     const contractValue = cases.reduce((sum, item) => {
@@ -119,27 +138,18 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
       return sum + (plannedValue > 0 ? plannedValue : budgetValue);
     }, 0);
     const totalBilled = allInvoices.reduce((sum, invoice) => sum + parseAmount(invoice.amount), 0);
-    const collected = allInvoices.reduce(
-      (sum, invoice) => sum + (invoice.status === 'Paid' ? parseAmount(invoice.amount) : 0),
-      0
-    );
-    const outstanding = Math.max(0, totalBilled - collected);
+    const collected = cases.reduce((sum, item) => sum + getMatterCollectedAmount(item), 0);
+    const outstanding = Math.max(0, contractValue - collected);
     const directMatterCosts = allExpenses
-      .filter((expense) => expense.chargeType === 'client' && Boolean(expense.caseId) && isExpenseInSummaryRange(expense))
-      .reduce((sum, item) => {
-        const gross = parseAmount(item.amount);
-        const refunded = parseAmount(item.refundAmount);
-        return sum + Math.max(0, gross - refunded);
-      }, 0);
+      .filter((expense) => expense.chargeType === 'client' && Boolean(expense.caseId) && isExpenseInRange(expense, summary?.from, summary?.to))
+      .reduce((sum, item) => sum + Math.max(0, parseAmount(item.amount) - parseAmount(item.refundAmount)), 0);
     const firmOperatingExpenses = allExpenses
-      .filter((expense) => expense.chargeType !== 'client' && isExpenseInSummaryRange(expense))
-      .reduce((sum, item) => {
-        const gross = parseAmount(item.amount);
-        const refunded = parseAmount(item.refundAmount);
-        return sum + Math.max(0, gross - refunded);
-      }, 0);
+      .filter((expense) => expense.chargeType !== 'client' && isExpenseInRange(expense, summary?.from, summary?.to))
+      .reduce((sum, item) => sum + Math.max(0, parseAmount(item.amount) - parseAmount(item.refundAmount)), 0);
     const grossProfit = collected - directMatterCosts;
     const grossProfitMargin = collected > 0 ? Math.round((grossProfit / collected) * 100) : 0;
+    const netProfit = grossProfit - firmOperatingExpenses;
+    const netProfitMargin = collected > 0 ? Math.round((netProfit / collected) * 100) : 0;
     const directMatterCostRatio = contractValue > 0 ? Math.round((directMatterCosts / contractValue) * 100) : 0;
     const color =
       contractValue > 0 && directMatterCosts > contractValue
@@ -158,6 +168,8 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
       firmOperatingExpenses,
       grossProfit,
       grossProfitMargin,
+      netProfit,
+      netProfitMargin,
       directMatterCostRatio,
       color,
     };
@@ -184,8 +196,8 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
     const firmOperatingExpenses = valueHealth.firmOperatingExpenses;
     const grossProfit = valueHealth.grossProfit;
     const grossProfitMargin = valueHealth.grossProfitMargin;
-    const netProfit = grossProfit - firmOperatingExpenses;
-    const netProfitMargin = collected > 0 ? Math.round((netProfit / collected) * 100) : 0;
+    const netProfit = valueHealth.netProfit;
+    const netProfitMargin = valueHealth.netProfitMargin;
 
     return {
       totalContractValue,
@@ -258,9 +270,9 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
         <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h2 className="font-semibold text-gray-900">Matter Financial Summary</h2>
+              <h2 className="font-semibold text-gray-900">Matter Financial Status</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Uses real case, invoice, and petty cash data to show contract value, billed revenue, collections, and matter costs.
+                Uses real case, invoice, and petty cash data to show negotiated planned value, billed revenue, total collected, and direct matter costs.
               </p>
             </div>
             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold text-white ${healthClass}`}>
@@ -283,9 +295,9 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
             </div>
           </div>
           <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div><div className="text-sm text-gray-500">Contract Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.contractValue)}</div></div>
+            <div><div className="text-sm text-gray-500">Negotiated Planned Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.contractValue)}</div></div>
             <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.totalBilled)}</div></div>
-            <div><div className="text-sm text-gray-500">Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(valueHealth.collected)}</div></div>
+            <div><div className="text-sm text-gray-500">Total Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(valueHealth.collected)}</div></div>
             <div><div className="text-sm text-gray-500">Outstanding</div><div className="text-xl font-semibold text-amber-700">{formatRwf(valueHealth.outstanding)}</div></div>
             <div><div className="text-sm text-gray-500">Direct Matter Costs</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.directMatterCosts)}</div></div>
             <div>
@@ -306,7 +318,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
         <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h2 className="font-semibold text-gray-900">Firm Financial Summary</h2>
+              <h2 className="font-semibold text-gray-900">Firm Financial Status</h2>
               <p className="text-sm text-gray-500 mt-1">
                 Adds firm-level profitability using the internal expense ledger as the operating-cost source.
               </p>
@@ -316,9 +328,9 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
             </span>
           </div>
           <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div><div className="text-sm text-gray-500">Total Contract Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalContractValue)}</div></div>
+            <div><div className="text-sm text-gray-500">Negotiated Planned Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalContractValue)}</div></div>
             <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalBilled)}</div></div>
-            <div><div className="text-sm text-gray-500">Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(firmFinancialSummary.collected)}</div></div>
+            <div><div className="text-sm text-gray-500">Total Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(firmFinancialSummary.collected)}</div></div>
             <div><div className="text-sm text-gray-500">Outstanding</div><div className="text-xl font-semibold text-amber-700">{formatRwf(firmFinancialSummary.outstanding)}</div></div>
             <div><div className="text-sm text-gray-500">Direct Matter Costs</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.directMatterCosts)}</div></div>
             <div>
@@ -419,7 +431,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
                       <span className="ml-1 font-medium text-gray-900">{formatRwf(m.billed)}</span>
                     </div>
                     <div>
-                      <span className="text-gray-500">Collected:</span>
+                      <span className="text-gray-500">Total Collected:</span>
                       <span className="ml-1 font-medium text-green-700">{formatRwf(m.collected)}</span>
                     </div>
                   </div>
@@ -455,7 +467,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
                         <div
                           className="flex-1 bg-green-600 rounded-t"
                           style={{ height: `${collectedHeight}%`, alignSelf: 'flex-end' }}
-                          title={`Collected: ${formatRwf(data.collected)}`}
+                          title={`Total Collected: ${formatRwf(data.collected)}`}
                         />
                       </div>
                       <div className="text-xs text-gray-600 mt-1">{data.month.slice(5)}</div>
@@ -471,7 +483,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-green-600 rounded" />
-                  <span className="text-sm text-gray-600">Collected</span>
+                  <span className="text-sm text-gray-600">Total Collected</span>
                 </div>
               </div>
             </>

@@ -379,8 +379,8 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                   'Current Step',
                   'Assigned To',
                   'Date Created',
-                  'Billing Value',
-                  'Fees Cleared',
+                  'Negotiated Planned Value',
+                  'Collected Value',
                   'Next Deadline',
                   'Actions',
                 ].map((header) => (
