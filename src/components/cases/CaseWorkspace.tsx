@@ -1113,7 +1113,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   );
   const plannedRemainingAfterExpenses = totalBilled - caseExpenseTotal;
   const plannedExpenseRatio = totalBilled > 0 ? Math.round((caseExpenseTotal / totalBilled) * 100) : 0;
-  const marginAmount = earnedFeeAmount - caseExpenseTotal;
+  const marginAmount = totalPaid - caseExpenseTotal;
   const billingHealth =
     totalBilled > 0 && caseExpenseTotal > totalBilled
       ? 'loss'
@@ -2655,7 +2655,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 </div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Collected</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Progress Value</div>
                 <div className="mt-2 text-lg font-semibold text-gray-900">
                   {billingCurrency} {Math.round(earnedFeeAmount).toLocaleString()}
                 </div>
@@ -2676,7 +2676,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   {billingCurrency} {Math.abs(Math.round(marginAmount)).toLocaleString()}
                 </div>
                 <div className="mt-2 text-xs text-gray-500">
-                  Total collected minus direct matter costs.
+                  Collected minus direct matter costs.
                 </div>
               </div>
             </div>
@@ -2689,7 +2689,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               <span className="text-3xl font-bold text-gray-900">{formatRwf(totalBilled)}</span>
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <span className="text-gray-500 text-sm mb-2 block">Invoice Payments Received</span>
+              <span className="text-gray-500 text-sm mb-2 block">Total Collected</span>
               <span className="text-3xl font-bold text-green-600">{formatRwf(totalPaid)}</span>
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-6">

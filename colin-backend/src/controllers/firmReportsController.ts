@@ -226,7 +226,12 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const selectedInvoices = baseInvoices.filter((inv: any) => selectedMatterIds.has(String(inv.caseId)));
 
     const contractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getNegotiatedPlannedValue(matter), 0);
-    const collected = selectedMatters.reduce((sum: number, matter: any) => sum + getCollectedValueFromProgress(matter), 0);
+    const progressValue = selectedMatters.reduce((sum: number, matter: any) => sum + getCollectedValueFromProgress(matter), 0);
+    const collected = invoicesByPaymentDate.reduce((sum: number, inv: any) => {
+      const caseId = String(inv.caseId || '');
+      if (selectedMemberName && !selectedMatterIds.has(caseId)) return sum;
+      return sum + (Number(inv.amount) || 0);
+    }, 0);
     const billed = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
     const outstanding = Math.max(0, contractValue - collected);
     const directMatterCosts = (await PettyCashExpense.find({
@@ -455,11 +460,12 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       item.billed += Number(inv.amount) || 0;
       monthsMap.set(key, item);
     }
-    for (const matter of selectedMatters as any[]) {
-      const dt = matter.updatedAt ? new Date(matter.updatedAt) : toDate;
+    for (const inv of invoicesByPaymentDate as any[]) {
+      if (selectedMemberName && !selectedMatterIds.has(String(inv.caseId || ''))) continue;
+      const dt = inv.updatedAt ? new Date(inv.updatedAt) : toDate;
       const key = monthKey(dt);
       const item = monthsMap.get(key) || { month: key, billed: 0, collected: 0 };
-      item.collected += getCollectedValueFromProgress(matter);
+      item.collected += Number(inv.amount) || 0;
       monthsMap.set(key, item);
     }
     const months = Array.from(monthsMap.values()).sort((a, b) => a.month.localeCompare(b.month));
@@ -521,6 +527,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         contractValue: Math.round(contractValue * 100) / 100,
         billed,
         collected,
+        progressValue: Math.round(progressValue * 100) / 100,
         outstanding,
         directMatterCosts: Math.round(directMatterCosts * 100) / 100,
         grossProfit: Math.round(grossProfit * 100) / 100,

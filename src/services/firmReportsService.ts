@@ -23,6 +23,7 @@ export type FirmReportResponse = {
     contractValue?: number;
     billed: number;
     collected: number;
+    progressValue?: number;
     outstanding: number;
     directMatterCosts?: number;
     grossProfit?: number;

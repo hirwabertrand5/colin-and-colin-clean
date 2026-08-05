@@ -34,9 +34,12 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
     const fromStr = toISODate(fromDate);
     const toStr = toISODate(toDate);
 
-    const [invoices, matters, expenses] = await Promise.all([
+    const [invoices, paidInvoices, matters, expenses] = await Promise.all([
       Invoice.find({ date: { $gte: fromStr, $lte: toStr } })
         .sort({ date: 1 })
+        .lean(),
+      Invoice.find({ status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } })
+        .select('amount date caseId updatedAt')
         .lean(),
       Case.find({ updatedAt: { $gte: fromDate, $lte: toDate } })
         .select('_id budget updatedAt workflowProgress billingSettings')
@@ -48,7 +51,8 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
 
     const billed = invoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const contractValue = matters.reduce((s, matter: any) => s + getNegotiatedPlannedValue(matter), 0);
-    const collected = matters.reduce((s, matter: any) => s + getCollectedValueFromProgress(matter), 0);
+    const progressValue = matters.reduce((s, matter: any) => s + getCollectedValueFromProgress(matter), 0);
+    const collected = paidInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const directMatterCosts = expenses
       .filter((expense: any) => expense.chargeType === 'client' && Boolean(expense.caseId))
       .reduce((s, expense: any) => s + getDirectMatterCost(expense), 0);
@@ -67,7 +71,7 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
     ]);
     const billableHours = Math.round((((hoursAgg?.[0]?.totalHours as number) || 0) * 10)) / 10;
 
-    // monthly trend: invoices drive billed, matters drive collected
+    // monthly trend: invoices drive billed, paid invoices drive collected
     const map = new Map<string, { month: string; billed: number; collected: number }>();
     for (const inv of invoices) {
       const dt = new Date(inv.date);
@@ -76,11 +80,11 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
       item.billed += Number(inv.amount) || 0;
       map.set(key, item);
     }
-    for (const matter of matters as any[]) {
-      const dt = matter.updatedAt ? new Date(matter.updatedAt) : toDate;
+    for (const inv of paidInvoices as any[]) {
+      const dt = inv.updatedAt ? new Date(inv.updatedAt) : toDate;
       const key = monthKey(dt);
       const item = map.get(key) || { month: key, billed: 0, collected: 0 };
-      item.collected += getCollectedValueFromProgress(matter);
+      item.collected += Number(inv.amount) || 0;
       map.set(key, item);
     }
 
@@ -91,6 +95,7 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
       to: toStr,
       billed,
       collected,
+      progressValue,
       contractValue,
       outstanding,
       collectionRate,

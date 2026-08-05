@@ -252,7 +252,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               },
               {
                 title: 'Team Productivity Metrics',
-                headers: ['#', 'Team Member', 'Tasks Completed', 'Share', 'Invoice Payments Received', 'Revenue Attributed', 'Early', 'On Time', 'Late', 'Overdue', 'Deadline Score', 'Hours'],
+                headers: ['#', 'Team Member', 'Tasks Completed', 'Share', 'Total Collected', 'Revenue Attributed', 'Early', 'On Time', 'Late', 'Overdue', 'Deadline Score', 'Hours'],
                 rows: numberedProductivityRows,
                 currencyColumns: [5, 6],
                 percentColumns: [4],
@@ -294,7 +294,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               },
               {
                 title: 'Team Performance',
-                headers: ['#', 'Team Member', 'Role', 'Active Cases', 'Tasks Completed', 'Share', 'Invoice Payments Received', 'Revenue Attributed', 'Gross Fees Handled', 'Firm Retained Earnings', 'Billable Hours'],
+                headers: ['#', 'Team Member', 'Role', 'Active Cases', 'Tasks Completed', 'Share', 'Total Collected', 'Revenue Attributed', 'Gross Fees Handled', 'Firm Retained Earnings', 'Billable Hours'],
                 rows: numberedOverviewTeamRows,
                 currencyColumns: [7, 8, 9, 10],
                 percentColumns: [6],
@@ -478,7 +478,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Active cases</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tasks completed</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Share</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Invoice payments received</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Total Collected</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Revenue attributed</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Gross fees handled</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Firm retained earnings</th>
@@ -487,7 +487,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {orderedTeam.map((member, index) => (
-                      <tr key={member.name} className="hover:bg-gray-50">
+                      <tr key={member.id || member.name} className="hover:bg-gray-50">
                         <td className="px-5 py-4 text-sm text-gray-500">{index + 1}</td>
                         <td className="px-5 py-4 text-sm font-medium text-gray-900">{member.name}</td>
                         <td className="px-5 py-4 text-sm text-gray-600">{member.role}</td>
@@ -681,14 +681,15 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             {!data ? (
               <div className="text-gray-500">No data.</div>
             ) : (
-              <table className="w-full">
+              <div className="overflow-x-auto">
+                <table className="min-w-[1200px] w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Team Member</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tasks Completed</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Share</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Invoice Payments Received</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Total Collected</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Revenue Attributed</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Early</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">On Time</th>
@@ -700,7 +701,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {orderedTeam.map((member, index) => (
-                    <tr key={member.name}>
+                    <tr key={member.id || member.name}>
                       <td className="px-4 py-3 text-sm text-gray-500">{index + 1}</td>
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">{member.name}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{member.tasksCompleted}</td>
@@ -726,7 +727,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
             )}
           </div>
         </div>

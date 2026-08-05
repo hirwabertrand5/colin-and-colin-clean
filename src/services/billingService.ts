@@ -6,6 +6,7 @@ export type BillingSummary = {
   to: string;
   billed: number;
   collected: number;
+  progressValue?: number;
   contractValue?: number;
   outstanding: number;
   collectionRate: number;

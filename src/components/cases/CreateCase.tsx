@@ -1022,7 +1022,7 @@ export default function CreateCase({
                     inputMode="numeric"
                   />
                   <p className="text-xs text-gray-500 mt-2">
-                    This is the negotiated case value. Collected value is calculated from checked key actions.
+                    This is the negotiated case value. Progress value is calculated from checked key actions.
                   </p>
                 </div>
                 <div>
