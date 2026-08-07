@@ -250,7 +250,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const supervisorUsers = useMemo(
     () =>
       staffUsers.filter((u) =>
-        ['associate', 'executive_assistant', 'managing_partner'].includes(String(u.role || '').toLowerCase())
+        ['associate', 'executive_assistant', 'managing_partner', 'managing_director'].includes(String(u.role || '').toLowerCase())
       ),
     [staffUsers]
   );

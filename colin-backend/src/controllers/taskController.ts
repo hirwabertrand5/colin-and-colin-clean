@@ -15,7 +15,7 @@ const isAssociateLikeRole = (role?: string) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
 const isAssociateAssignableRole = (role?: string) => role === 'trainee_associate' || role === 'intern';
 const isTaskSupervisorRole = (role?: string) =>
-  role === 'associate' || role === 'executive_assistant' || role === 'managing_partner';
+  role === 'associate' || role === 'executive_assistant' || role === 'managing_partner' || role === 'managing_director';
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
   actorUserId: req.user?.id as string | undefined,
@@ -145,7 +145,7 @@ const assertSupervisorAllowed = async (supervisorValue: unknown) => {
   }
 
   if (!isTaskSupervisorRole(supervisorUser.role)) {
-    throw new Error('Supervisor must be an Associate, Executive Assistant, or Managing Partner.');
+    throw new Error('Supervisor must be an Associate, Executive Assistant, Managing Partner, or Managing Director.');
   }
 };
 
@@ -171,19 +171,19 @@ const canAccessCaseId = async (req: AuthRequest, caseId: string) => {
 
   if (isPublicYellowCase(c)) return true;
 
-  if (isAssociateLikeRole(role)) {
-    const me = (req.user?.name || '').trim();
-    if (!me) return false;
+  const meName = normalizeIdentity(req.user?.name);
+  const meEmail = normalizeIdentity(req.user?.email);
+  if (!meName && !meEmail) return false;
 
-    // rule 1: case assigned to associate
-    if (String(c.assignedTo || '').trim() === me) return true;
+  const assignedTo = normalizeIdentity(c.assignedTo);
+  if (assignedTo && (assignedTo === meName || assignedTo === meEmail)) return true;
 
-    // rule 2: associate has at least one task in this case
-    const hasTask = await Task.exists({ caseId, assignee: me });
-    return Boolean(hasTask);
-  }
-
-  return false;
+  const tasks = await Task.find({ caseId }).select('assignee supervisor').lean();
+  return tasks.some((task: any) => {
+    const assignee = normalizeIdentity(task?.assignee);
+    const supervisor = normalizeIdentity(task?.supervisor);
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
+  });
 };
 
 // --------------------
