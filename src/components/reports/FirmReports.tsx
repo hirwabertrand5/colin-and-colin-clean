@@ -16,6 +16,19 @@ const fmtMoney = (n: number) =>
   `RWF ${Math.round((Number(n) || 0) * 100) / 100}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 const pickMoney = (...values: Array<number | undefined | null>) => values.find((value) => value !== undefined && value !== null) ?? 0;
 const withRowNumbers = (rows: Array<Array<unknown>>) => rows.map((row, index) => [index + 1, ...row]);
+const fmtPercent = (value?: number | null) => (value == null ? '—' : `${Math.round((Number(value) || 0) * 10) / 10}%`);
+const fmtDateTime = (value?: string | null) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
 const ROLE_ORDER = [
   'Intern',
   'Trainee Associate',
@@ -38,6 +51,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
   const [selectedMemberId, setSelectedMemberId] = useState<string | undefined>(undefined);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  const [refreshToken, setRefreshToken] = useState(0);
   usePageTitle('Firm Reports');
   const [data, setData] = useState<FirmReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -105,7 +119,16 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     return () => {
       mounted = false;
     };
-  }, [userRole, dateRange, dateBasis, selectedMemberId, customFrom, customTo]);
+  }, [userRole, dateRange, dateBasis, selectedMemberId, customFrom, customTo, refreshToken]);
+
+  useEffect(() => {
+    const onTaskReportUpdated = () => {
+      setRefreshToken((n) => n + 1);
+    };
+
+    window.addEventListener('task-report-updated', onTaskReportUpdated as EventListener);
+    return () => window.removeEventListener('task-report-updated', onTaskReportUpdated as EventListener);
+  }, []);
 
   const firmStats = useMemo(() => {
     const k = data?.kpis;
@@ -151,24 +174,18 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
         return (b.activeCases || 0) - (a.activeCases || 0);
       });
 
-    const summaryMilestones = [
-      ['Early', data.team.reduce((s, m) => s + (m.earlyTasks || 0), 0), 0],
-      ['On Time', data.team.reduce((s, m) => s + (m.onTimeTasks || 0), 0), 0],
-      ['Late', data.team.reduce((s, m) => s + (m.lateTasks || 0), 0), 0],
-      ['Overdue', data.team.reduce((s, m) => s + (m.overdueTasks || 0), 0), 0],
-    ].map(([label, value, _]) => {
-      const total = data.team.reduce(
-        (s, m) => s + (m.excellentTasks || 0) + (m.goodTasks || 0) + (m.delayedTasks || 0) + (m.riskTasks || 0),
-        0
-      );
-      const totalAlt = data.team.reduce(
-        (s, m) => s + (m.earlyTasks || 0) + (m.onTimeTasks || 0) + (m.lateTasks || 0) + (m.overdueTasks || 0),
-        0
-      );
-      const pct = totalAlt ? Number(value) / totalAlt : 0;
-      return [label, pct, Number(value)];
-    });
-    const numberedSummaryMilestones = withRowNumbers(summaryMilestones);
+    const productivityRows = [...(data.productivityRows || [])].sort((a, b) =>
+      String(b.completedAt || '').localeCompare(String(a.completedAt || ''))
+    );
+    const productivitySummary = data.productivitySummary;
+    const productivitySummaryRows = withRowNumbers([
+      ['Completed Tasks', String(productivitySummary?.completedTasks ?? productivityRows.length)],
+      ['Total Task Fee', fmtMoney(productivitySummary?.totalTaskFee ?? productivityRows.reduce((sum, row) => sum + (row.taskFee || 0), 0))],
+      ['Total Fee Earned', fmtMoney(productivitySummary?.totalFeeEarned ?? productivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0))],
+      ['Pending Quality Scores', String(productivitySummary?.pendingQualityScores ?? productivityRows.filter((row) => row.qualityScore == null).length)],
+      ['Average Quality Score', productivitySummary?.averageQualityScore == null ? '—' : `${productivitySummary.averageQualityScore}%`],
+      ['Average Timeliness Score', productivitySummary?.averageTimelinessScore == null ? '—' : `${productivitySummary.averageTimelinessScore}%`],
+    ]);
     const numberedOverviewTeamRows = withRowNumbers(
       orderedTeamRows.map((member) => [
         member.name,
@@ -184,18 +201,17 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
       ])
     );
     const numberedProductivityRows = withRowNumbers(
-      orderedTeamRows.map((member) => [
-        member.name,
-        member.tasksCompleted,
-        member.earningSharePercent == null ? 0 : member.earningSharePercent / 100,
-        pickMoney(member.invoicePaymentsReceived, member.grossFeesHandled),
-        pickMoney(member.revenueAttributed, member.earnedFees),
-        member.earlyTasks || 0,
-        member.onTimeTasks || 0,
-        member.lateTasks || 0,
-        member.overdueTasks || 0,
-        `Excellent: ${member.excellentTasks || 0} | Good: ${member.goodTasks || 0} | Delayed: ${member.delayedTasks || 0} | Risk: ${member.riskTasks || 0}`,
-        member.billableHours,
+      productivityRows.map((row) => [
+        fmtDateTime(row.completedAt),
+        row.staff,
+        row.matter,
+        row.task,
+        row.taskFee || 0,
+        `${row.tpaPercent || 0}%`,
+        row.timelinessScore == null ? '—' : `${row.timelinessScore}%`,
+        row.qualityScore == null ? '—' : `${row.qualityScore}%`,
+        row.formula,
+        row.feeEarned == null ? '—' : row.feeEarned,
       ])
     );
     const numberedCaseTypes = withRowNumbers(
@@ -246,17 +262,16 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             sections: [
               {
                 title: 'Productivity Summary',
-                headers: ['#', 'Milestone Type', 'Percentage (%)', 'Completed Tasks Count'],
-                rows: numberedSummaryMilestones,
-                percentColumns: [3],
+                headers: ['#', 'Metric', 'Value'],
+                rows: productivitySummaryRows,
               },
               {
-                title: 'Team Productivity Metrics',
-                headers: ['#', 'Team Member', 'Tasks Completed', 'Share', 'Total Collected', 'Revenue Attributed', 'Early', 'On Time', 'Late', 'Overdue', 'Deadline Score', 'Hours'],
+                title: 'Task Productivity Metrics',
+                headers: ['#', 'Date & Time', 'Staff', 'Matter', 'Task', 'Task Fee', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned'],
                 rows: numberedProductivityRows,
-                currencyColumns: [5, 6],
-                percentColumns: [4],
-                centerColumns: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+                currencyColumns: [6, 11],
+                percentColumns: [7, 8, 9],
+                centerColumns: [2, 6, 7, 8, 9, 11],
               },
             ],
           };
@@ -661,94 +676,84 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             {!data ? (
               <div className="text-gray-500">No data.</div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
-                {[
-                  ['Early', data.team.reduce((s, m) => s + (m.earlyTasks || 0), 0), 'bg-sky-600 bg-blue-600'],
-                  ['On Time', data.team.reduce((s, m) => s + (m.onTimeTasks || 0), 0), 'bg-green-600'],
-                  ['Late', data.team.reduce((s, m) => s + (m.lateTasks || 0), 0), 'bg-yellow-500'],
-                  ['Overdue', data.team.reduce((s, m) => s + (m.overdueTasks || 0), 0), 'bg-red-600'],
-                ].map(([label, value, color]) => {
-                  const total = data.team.reduce(
-                    (s, m) =>
-                      s +
-                      (m.excellentTasks || 0) +
-                      (m.goodTasks || 0) +
-                      (m.delayedTasks || 0) +
-                      (m.riskTasks || 0),
-                    0
-                  );
-                  const totalAlt = data.team.reduce(
-                    (s, m) => s + (m.earlyTasks || 0) + (m.onTimeTasks || 0) + (m.lateTasks || 0) + (m.overdueTasks || 0),
-                    0
-                  );
-                  const pct = totalAlt ? Math.round((Number(value) / totalAlt) * 100) : 0;
-                  return (
-                    <div key={String(label)} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <span className={`h-2.5 w-2.5 rounded-full ${color}`} />
-                        {label}
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold text-gray-900">{pct}%</div>
-                      <div className="text-xs text-gray-500">{String(value)} completed tasks</div>
-                    </div>
-                  );
-                })}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mt-4">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Completed Tasks</div>
+                  <div className="mt-2 text-2xl font-semibold text-gray-900">
+                    {data.productivitySummary?.completedTasks ?? data.productivityRows?.length ?? 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Task Fee</div>
+                  <div className="mt-2 text-2xl font-semibold text-gray-900">
+                    {fmtMoney(data.productivitySummary?.totalTaskFee ?? (data.productivityRows || []).reduce((s, r) => s + (r.taskFee || 0), 0))}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Fee Earned</div>
+                  <div className="mt-2 text-2xl font-semibold text-green-700">
+                    {fmtMoney(data.productivitySummary?.totalFeeEarned ?? (data.productivityRows || []).reduce((s, r) => s + (r.feeEarned || 0), 0))}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Pending Quality Scores</div>
+                  <div className="mt-2 text-2xl font-semibold text-amber-700">
+                    {data.productivitySummary?.pendingQualityScores ?? (data.productivityRows || []).filter((r) => r.qualityScore == null).length}
+                  </div>
+                </div>
               </div>
             )}
           </div>
 
           <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Team Productivity Metrics</h2>
+            <h2 className="font-semibold text-gray-900 mb-4">Task Productivity Metrics</h2>
 
             {!data ? (
               <div className="text-gray-500">No data.</div>
+            ) : (data.productivityRows || []).length === 0 ? (
+              <div className="text-gray-500">No completed tasks for this period.</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="min-w-[1200px] w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Team Member</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tasks Completed</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Share</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Total Collected</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Revenue Attributed</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Early</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">On Time</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Late</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Overdue</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Deadline Score</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Hours</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {orderedTeam.map((member, index) => (
-                    <tr key={member.id || member.name}>
-                      <td className="px-4 py-3 text-sm text-gray-500">{index + 1}</td>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{member.name}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{member.tasksCompleted}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{member.earningSharePercent ?? 0}%</td>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{fmtMoney(member.invoicePaymentsReceived || member.grossFeesHandled || 0)}</td>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{fmtMoney(pickMoney(member.revenueAttributed, member.earnedFees))}</td>
-                      <td className="px-4 py-3 text-sm text-sky-700 text-blue-700">{member.earlyTasks || 0}</td>
-                      <td className="px-4 py-3 text-sm text-green-700">{member.onTimeTasks || 0}</td>
-                      <td className="px-4 py-3 text-sm text-yellow-700" style={{ color: '#b45309' }}>{member.lateTasks || 0}</td>
-                      <td className="px-4 py-3 text-sm text-red-700">{member.overdueTasks || 0}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">
-                        <div className="flex gap-1.5 flex-wrap">
-                          <span className="rounded-full bg-sky-600 bg-blue-600 px-2 py-0.5 text-xs text-white">{member.excellentTasks || 0}</span>
-                          <span className="rounded-full bg-green-600 px-2 py-0.5 text-xs text-white">{member.goodTasks || 0}</span>
-                          <span className="rounded-full bg-yellow-500 px-2 py-0.5 text-xs text-yellow-900">{member.delayedTasks || 0}</span>
-                          <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs text-white">{member.riskTasks || 0}</span>
-                        </div>
-                        <div className="mt-1 text-xs text-gray-500">
-                          Avg used: {member.averageTimeUsedPercent == null ? '—' : `${member.averageTimeUsedPercent}%`}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{member.billableHours}</td>
+                <table className="min-w-[1400px] w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Date / Time</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Staff</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Matter</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Task</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Task Fee</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">TPA</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Timeliness Score</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Quality Score</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Formula</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Fee Earned</th>
                     </tr>
-                  ))}
-                </tbody>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {(data.productivityRows || []).map((row, index) => (
+                      <tr key={row.id || `${row.staff}-${row.completedAt}-${index}`} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-500">{index + 1}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{fmtDateTime(row.completedAt)}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.staff}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{row.matter}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{row.task}</td>
+                        <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">{fmtMoney(row.taskFee)}</td>
+                        <td className="px-4 py-3 text-sm text-center text-gray-700">{fmtPercent(row.tpaPercent)}</td>
+                        <td className="px-4 py-3 text-sm text-center text-gray-700">
+                          {row.timelinessScore == null ? '—' : `${row.timelinessScore}%`}
+                          <div className="text-[11px] text-gray-500">{row.timelinessScore == null ? '—' : row.timelinessStatus}</div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-center text-gray-700">
+                          {row.qualityScore == null ? '—' : `${row.qualityScore}%`}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700 max-w-[360px] break-words">{row.formula}</td>
+                        <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
+                          {row.feeEarned == null ? '—' : fmtMoney(row.feeEarned)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>
               </div>
             )}

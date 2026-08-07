@@ -68,6 +68,7 @@ export interface TaskData {
   closedAt?: string;
   approvedBy?: string;
   approvalComment?: string;
+  qualityScore?: number | null;
 
   estimatedHours?: number;
   assignedBy?: string;

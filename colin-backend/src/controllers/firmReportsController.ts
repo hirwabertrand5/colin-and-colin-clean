@@ -86,9 +86,8 @@ const selectedPathLabel = (c: any) => {
   const selected = path
     .map((item: any) => String(item?.label || '').trim())
     .filter(Boolean);
-  // Use only the last path item
   return selected.length
-    ? selected[selected.length - 1]
+    ? selected.join(' / ')
     : String(c?.matterType || c?.workflow || c?.caseType || 'Unclassified');
 };
 
@@ -97,32 +96,140 @@ type PerformanceZone = 'excellent' | 'good' | 'delayed' | 'risk';
 const roleEarningShare = (role?: string) => {
   const normalized = String(role || '').toLowerCase();
   const shares: Record<string, { label: string; percent: number }> = {
-    managing_director: { label: 'Managing Partner / Executive Managing Partner', percent: 8 },
+    managing_director: { label: 'Managing Partner / Executive Managing Partner', percent: 10 },
     intern: { label: 'Intern', percent: 1 },
     trainee_associate: { label: 'Trainee Associate', percent: 3 },
-    associate: { label: 'Associate / Executive Assistant', percent: 6 },
-    executive_assistant: { label: 'Associate / Executive Assistant', percent: 6 },
-    senior_associate: { label: 'Senior Associate / Senior Executive Assistant', percent: 10 },
-    senior_executive_assistant: { label: 'Senior Associate / Senior Executive Assistant', percent: 10 },
-    associate_partner: { label: 'Associate Partner / Executive Associate Partner', percent: 12 },
-    executive_associate_partner: { label: 'Associate Partner / Executive Associate Partner', percent: 12 },
+    associate: { label: 'Associate', percent: 5 },
+    executive_assistant: { label: 'Executive Assistant', percent: 5 },
+    senior_associate: { label: 'Senior Associate', percent: 6 },
+    senior_executive_assistant: { label: 'Senior Executive Assistant', percent: 6 },
+    associate_partner: { label: 'Associate Partner', percent: 8 },
+    executive_associate_partner: { label: 'Executive Associate Partner', percent: 8 },
     partner: { label: 'Partner / Executive Partner', percent: 8 },
     executive_partner: { label: 'Partner / Executive Partner', percent: 8 },
-    managing_partner: { label: 'Managing Partner / Executive Managing Partner', percent: 8 },
-    executive_managing_partner: { label: 'Managing Partner / Executive Managing Partner', percent: 8 },
-    senior_partner: { label: 'Senior Partner / Executive Partner / Originating Attorney', percent: 12 },
-    originating_attorney: { label: 'Senior Partner / Executive Partner / Originating Attorney', percent: 12 },
+    managing_partner: { label: 'Managing Partner / Executive Managing Partner', percent: 10 },
+    executive_managing_partner: { label: 'Managing Partner / Executive Managing Partner', percent: 10 },
+    senior_partner: { label: 'Senior Partner / Executive Partner / Originating Attorney', percent: 8 },
+    originating_attorney: { label: 'Senior Partner / Executive Partner / Originating Attorney', percent: 8 },
   };
   return shares[normalized] || { label: 'Firm Retained Earnings', percent: FIRM_RETAINED_PERCENT };
 };
 
 const FIRM_RETAINED_PERCENT = 40;
 
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const parseTaskDate = (value: any, endOfDay = false) => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const isoDateOnly = /^\d{4}-\d{2}-\d{2}$/;
+  if (isoDateOnly.test(raw)) {
+    const parsed = new Date(`${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
+
+const TASK_TPA_SHARES: Record<string, number> = {
+  intern: 1,
+  trainee_associate: 3,
+  associate: 5,
+  executive_assistant: 5,
+  senior_associate: 6,
+  senior_executive_assistant: 6,
+  partner: 8,
+  executive_partner: 8,
+  associate_partner: 8,
+  executive_associate_partner: 8,
+  senior_partner: 8,
+  originating_attorney: 8,
+  managing_partner: 10,
+  executive_managing_partner: 10,
+  managing_director: 10,
+};
+
+const getTaskParticipationAllocation = (role?: string) => {
+  const normalized = String(role || '').toLowerCase();
+  return TASK_TPA_SHARES[normalized] ?? 0;
+};
+
+const getTaskProgressPercent = (task: any) => {
+  const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
+  const total = checklist.length;
+  const completed = checklist.filter((item: any) => Boolean(item?.completed)).length;
+  if (total > 0) {
+    return {
+      completed,
+      total,
+      percent: Math.round((completed / total) * 100),
+    };
+  }
+
+  return {
+    completed: 0,
+    total: 0,
+    percent: String(task?.status || '').toLowerCase() === 'completed' ? 100 : 0,
+  };
+};
+
+const getTimelinessScore = (task: any) => {
+  const taskStatus = String(task?.status || '').toLowerCase();
+  const assignedAt = parseTaskDate(task?.startDate) || parseTaskDate(task?.createdAt) || parseTaskDate(task?.updatedAt) || parseTaskDate(task?.completedAt);
+  const completedAt = parseTaskDate(task?.completedAt) || parseTaskDate(task?.updatedAt) || parseTaskDate(task?.createdAt);
+  const dueAt = parseTaskDate(task?.dueDate, true);
+  const hasValidDates =
+    assignedAt != null &&
+    completedAt != null &&
+    dueAt != null &&
+    Number.isFinite(assignedAt.getTime()) &&
+    Number.isFinite(completedAt.getTime()) &&
+    Number.isFinite(dueAt.getTime());
+
+  if (!hasValidDates) {
+    return taskStatus === 'completed'
+      ? {
+        consumedPercent: 100,
+        score: 0,
+        status: 'Late' as const,
+      }
+      : null;
+  }
+
+  const totalMs = dueAt.getTime() - assignedAt.getTime();
+  const usedMs = completedAt.getTime() - assignedAt.getTime();
+  if (!Number.isFinite(totalMs) || !Number.isFinite(usedMs) || totalMs <= 0) {
+    return {
+      consumedPercent: 100,
+      score: 0,
+      status: 'Late' as const,
+    };
+  }
+
+  const consumedPercent = Math.round((usedMs / totalMs) * 1000) / 10;
+  let timelinessStatus: 'Excellent' | 'Good' | 'Warning' | 'Poor' | 'Late' = 'Late';
+  if (consumedPercent <= 25) timelinessStatus = 'Excellent';
+  else if (consumedPercent <= 50) timelinessStatus = 'Good';
+  else if (consumedPercent <= 75) timelinessStatus = 'Warning';
+  else if (consumedPercent <= 100) timelinessStatus = 'Poor';
+
+  return {
+    consumedPercent: Math.max(0, consumedPercent),
+    score: consumedPercent > 100 ? 0 : Math.max(0, Math.round(100 - consumedPercent)),
+    status: timelinessStatus,
+  };
+};
+
 const getPerformanceZone = (task: any): { zone: PerformanceZone; usedPercent: number } | null => {
-  if (!task?.createdAt || !task?.completedAt || !task?.dueDate) return null;
-  const assignedAt = new Date(task.createdAt);
-  const completedAt = new Date(task.completedAt);
-  const dueAt = new Date(`${task.dueDate}T23:59:59.999`);
+  const assignedAt = parseTaskDate(task?.startDate) || parseTaskDate(task?.createdAt);
+  const completedAt = parseTaskDate(task?.completedAt);
+  const dueAt = parseTaskDate(task?.dueDate, true);
+  if (!assignedAt || !completedAt || !dueAt) return null;
   const totalMs = dueAt.getTime() - assignedAt.getTime();
   const usedMs = completedAt.getTime() - assignedAt.getTime();
   if (!Number.isFinite(totalMs) || !Number.isFinite(usedMs) || totalMs <= 0) return null;
@@ -182,7 +289,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, timeLogs, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
       Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
-      Task.find(tasksByDateQuery).select('assignee completedAt dueDate caseId createdAt').lean(),
+      Task.find(tasksByDateQuery).select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt checklist qualityScore').lean(),
       TaskTimeLog.find({ loggedAt: { $gte: fromDate, $lte: toDate } }).select('userName hours').lean(),
       User.find({ isActive: { $ne: false } }).select('name role').lean(),
       Prospect.aggregate([
@@ -206,6 +313,13 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .lean();
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
+    const taskCaseIds = Array.from(new Set((tasksCompleted as any[]).map((task) => String(task.caseId || '')).filter(Boolean)));
+    const taskCases = taskCaseIds.length
+      ? await Case.find({ _id: { $in: taskCaseIds } })
+        .select('_id caseNo parties budget workflowProgress billingSettings matterType workflow legalServicePath')
+        .lean()
+      : [];
+    const taskCaseMap = new Map((taskCases as any[]).map((matter) => [String(matter._id), matter]));
 
     const baseInvoices = dateBasis === 'paymentDate' ? invoicesByPaymentDate : invoicesByInvoiceDate;
     const selectedInvoices = baseInvoices.filter((inv: any) => selectedMatterIds.has(String(inv.caseId)));
@@ -437,6 +551,73 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       revenueBilled: Math.round((revenueByType.get(row.type) || 0) * 100) / 100,
     })).sort((a, b) => a.type.localeCompare(b.type));
 
+    const productivityRows = (tasksCompleted as any[])
+      .filter((task) => !selectedMemberName || String(task.assignee || '').trim() === selectedMemberName)
+      .map((task) => {
+        const staffName = String(task.assignee || '—').trim();
+        const role = String(roleByName.get(staffName) || '').trim();
+        const tpaPercent = getTaskParticipationAllocation(role);
+        const matter = taskCaseMap.get(String(task.caseId || ''));
+        const matterLabel = matter
+          ? String(matter.caseNo || matter.parties || matter.matterType || matter.workflow || '—')
+          : '—';
+        const progress = getTaskProgressPercent(task);
+        const contractValue = getNegotiatedPlannedValue(matter);
+        const workflowPercent = Number(matter?.workflowProgress?.percent) || 0;
+        const taskFee = Math.round((contractValue * (workflowPercent / 100)) * 100) / 100;
+        const timeliness = getTimelinessScore(task);
+        const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Number(task.qualityScore) : null;
+        const feeEarned =
+          qualityScore == null || !timeliness
+            ? null
+            : Math.round((taskFee * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100)) * 100) / 100;
+
+        return {
+          id: String(task._id),
+          completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
+          staff: staffName,
+          role,
+          matter: matterLabel,
+          task: String(task.title || 'Task'),
+          taskFee,
+          tpaPercent,
+          timelinessScore: timeliness ? timeliness.score : null,
+          timelinessConsumedPercent: timeliness ? Math.round(timeliness.consumedPercent * 10) / 10 : null,
+          qualityScore,
+          formula:
+            qualityScore == null
+              ? 'Pending quality score'
+              : !timeliness
+                ? 'Pending timeliness score'
+                : `${Math.round(taskFee * 100) / 100} × ${tpaPercent}% × ${timeliness.score}% × ${qualityScore}%`,
+          feeEarned,
+          keyActionsCompleted: progress.completed,
+          keyActionsTotal: progress.total,
+          taskProgressPercent: progress.percent,
+          timelinessStatus: timeliness ? timeliness.status : 'Late',
+        };
+      })
+      .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
+
+    const productivitySummary = {
+      completedTasks: productivityRows.length,
+      totalTaskFee: Math.round(productivityRows.reduce((sum, row) => sum + (row.taskFee || 0), 0) * 100) / 100,
+      totalFeeEarned: Math.round(
+        productivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0) * 100
+      ) / 100,
+      pendingQualityScores: productivityRows.filter((row) => row.qualityScore == null).length,
+      averageQualityScore: (() => {
+        const scored = productivityRows.filter((row) => row.qualityScore != null);
+        if (!scored.length) return null;
+        return Math.round((scored.reduce((sum, row) => sum + (row.qualityScore || 0), 0) / scored.length) * 10) / 10;
+      })(),
+      averageTimelinessScore: (() => {
+        const scored = productivityRows.filter((row) => row.timelinessScore != null);
+        if (!scored.length) return null;
+        return Math.round((scored.reduce((sum, row) => sum + (row.timelinessScore || 0), 0) / scored.length) * 10) / 10;
+      })(),
+    };
+
     const monthsMap = new Map<string, { month: string; billed: number; collected: number }>();
     for (const inv of invoicesByInvoiceDate as any[]) {
       const dt = new Date(inv.date);
@@ -533,6 +714,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       },
       ageingReport,
       team,
+      productivitySummary,
+      productivityRows,
       caseTypes,
       months,
       expenseTypes,

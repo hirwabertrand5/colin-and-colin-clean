@@ -113,6 +113,21 @@ interface CaseWorkspaceProps {
 
 const formatRwf = (value: number) => `RWF ${Math.round(value).toLocaleString('en-US')}`;
 
+const parseCaseTaskDate = (value?: string) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parsed = new Date(`${raw}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
+
+const getTaskDateRangeIssue = (startDate?: string, dueDate?: string) => {
+  if (!startDate || !dueDate) return '';
+  const start = parseCaseTaskDate(startDate);
+  const due = parseCaseTaskDate(dueDate);
+  if (!start || !due) return 'Please enter valid start and due dates.';
+  return due.getTime() < start.getTime() ? 'Due date cannot be earlier than start date.' : '';
+};
+
 const parseBudgetToNumber = (budget: unknown): number => {
   if (budget === null || budget === undefined) return 0;
   if (typeof budget === 'number') return budget;
@@ -229,6 +244,13 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [staffError, setStaffError] = useState('');
+  const supervisorUsers = useMemo(
+    () =>
+      staffUsers.filter((u) =>
+        ['associate', 'executive_assistant', 'managing_partner'].includes(String(u.role || '').toLowerCase())
+      ),
+    [staffUsers]
+  );
 
   // Tasks
   const [tasks, setTasks] = useState<TaskData[]>([]);
@@ -268,6 +290,14 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         suggestedTaskDeadline ? ` • due ${suggestedTaskDeadline}` : ''
       }`
     : 'No active workflow deadline is available yet.';
+  const newTaskDateWarning = useMemo(
+    () => getTaskDateRangeIssue(newTask.startDate, newTask.dueDate),
+    [newTask.startDate, newTask.dueDate]
+  );
+  const editTaskDateWarning = useMemo(
+    () => getTaskDateRangeIssue(editTask?.startDate, editTask?.dueDate),
+    [editTask?.startDate, editTask?.dueDate]
+  );
 
   const openAddTaskModal = () => {
     setNewTask((task) => ({
@@ -656,6 +686,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       setTasksError('You do not have permission to assign tasks.');
       return;
     }
+    if (newTaskDateWarning) {
+      setTasksError(newTaskDateWarning);
+      return;
+    }
 
     try {
       await addTaskToCase(caseData._id, { ...newTask, caseId: caseData._id });
@@ -685,6 +719,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
     if (!canAssignTasks) {
       setTasksError('You do not have permission to edit tasks here.');
+      return;
+    }
+    if (editTaskDateWarning) {
+      setTasksError(editTaskDateWarning);
       return;
     }
 
@@ -1770,7 +1808,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     required
                   >
                     <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
-                    {staffUsers.map((u) => (
+                    {supervisorUsers.map((u) => (
                       <option key={u._id} value={u.name}>
                         {u.name} ({u.role.replace(/_/g, ' ')})
                       </option>
@@ -1788,7 +1826,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     required
                   >
                     <option value="">{staffLoading ? 'Loading...' : 'Select supervisor'}</option>
-                    {staffUsers.map((u) => (
+                    {supervisorUsers.map((u) => (
                       <option key={u._id} value={u.name}>
                         {u.name} ({u.role.replace(/_/g, ' ')})
                       </option>
@@ -1834,6 +1872,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <p className="text-xs text-gray-500">{taskTimingSummary}</p>
+              {newTaskDateWarning && <p className="text-xs font-medium text-red-600">{newTaskDateWarning}</p>}
 
               <div className="hidden">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Initial Status</label>
@@ -1938,7 +1977,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     required
                   >
                     <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
-                    {staffUsers.map((u) => (
+                    {supervisorUsers.map((u) => (
                       <option key={u._id} value={u.name}>
                         {u.name} ({u.role.replace(/_/g, ' ')})
                       </option>
@@ -1956,7 +1995,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     required
                   >
                     <option value="">{staffLoading ? 'Loading...' : 'Select supervisor'}</option>
-                    {staffUsers.map((u) => (
+                    {supervisorUsers.map((u) => (
                       <option key={u._id} value={u.name}>
                         {u.name} ({u.role.replace(/_/g, ' ')})
                       </option>
@@ -2002,6 +2041,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <p className="text-xs text-gray-500">{taskTimingSummary}</p>
+              {editTaskDateWarning && <p className="text-xs font-medium text-red-600">{editTaskDateWarning}</p>}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>

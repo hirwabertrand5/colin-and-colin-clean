@@ -43,6 +43,33 @@ export type FirmReportResponse = {
     qualityReviewMessage: string;
   };
   ageingReport: Array<{ label: string; amount: number; color: string }>;
+  productivitySummary?: {
+    completedTasks: number;
+    totalTaskFee: number;
+    totalFeeEarned: number;
+    pendingQualityScores: number;
+    averageQualityScore: number | null;
+    averageTimelinessScore: number | null;
+  };
+  productivityRows?: Array<{
+    id: string;
+    completedAt: string | null;
+    staff: string;
+    role: string;
+    matter: string;
+    task: string;
+    taskFee: number;
+    tpaPercent: number;
+    timelinessScore: number | null;
+    timelinessConsumedPercent: number | null;
+    qualityScore: number | null;
+    formula: string;
+    feeEarned: number | null;
+    keyActionsCompleted: number;
+    keyActionsTotal: number;
+    taskProgressPercent: number;
+    timelinessStatus: string;
+  }>;
   team: Array<{
     id: string;
     name: string;

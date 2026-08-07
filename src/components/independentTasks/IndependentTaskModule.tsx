@@ -246,6 +246,22 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     [users]
   );
 
+  const supervisorOptions = useMemo(
+    () =>
+      users
+        .slice()
+        .filter((user) => ['associate', 'executive_assistant', 'managing_partner'].includes(String(user.role || '').toLowerCase()))
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+        .map((user) => ({
+          value: user.name || '',
+          label: [user.name, user.email, user.role ? user.role.replace(/_/g, ' ') : '']
+            .filter(Boolean)
+            .join(' • '),
+        }))
+        .filter((user) => Boolean(user.value)),
+    [users]
+  );
+
   const getDeadlineUsage = (task: Pick<IndependentTask, 'startDate' | 'dueDate'>) => {
     const dueAt = task.dueDate ? `${task.dueDate}T23:59:59.999` : undefined;
     const ratio = getDueRemainingRatio(task.startDate, dueAt);
@@ -587,7 +603,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
               disabled={lookupLoading}
             >
               <option value="">{lookupLoading ? 'Loading users...' : 'All Supervisors'}</option>
-              {userOptions.map((user) => (
+              {supervisorOptions.map((user) => (
                 <option key={`supervisor-${user.value}`} value={user.value}>
                   {user.label}
                 </option>
@@ -1046,7 +1062,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                       disabled={saving || lookupLoading}
                     >
                       <option value="">{lookupLoading ? 'Loading users...' : 'Select supervisor'}</option>
-                      {userOptions.map((user) => (
+                      {supervisorOptions.map((user) => (
                         <option key={`form-supervisor-${user.value}`} value={user.value}>
                           {user.label}
                         </option>

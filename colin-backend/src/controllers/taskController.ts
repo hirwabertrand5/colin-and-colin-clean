@@ -14,6 +14,8 @@ import { isPublicYellowCase } from '../utils/caseVisibility';
 const isAssociateLikeRole = (role?: string) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
 const isAssociateAssignableRole = (role?: string) => role === 'trainee_associate' || role === 'intern';
+const isTaskSupervisorRole = (role?: string) =>
+  role === 'associate' || role === 'executive_assistant' || role === 'managing_partner';
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
   actorUserId: req.user?.id as string | undefined,
@@ -70,6 +72,24 @@ const normalizeTaskStartDate = (value: unknown) => {
 
 const normalizeTaskDueDate = (value: unknown) => String(value || '').trim();
 
+const parseTaskDateOnly = (value: unknown) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parsed = new Date(`${raw}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
+
+const assertTaskDateRange = (startDate: unknown, dueDate: unknown) => {
+  const start = parseTaskDateOnly(startDate);
+  const due = parseTaskDateOnly(dueDate);
+  if (!start || !due) {
+    throw new Error('Start date and due date must be valid.');
+  }
+  if (due.getTime() < start.getTime()) {
+    throw new Error('Due date cannot be earlier than start date.');
+  }
+};
+
 const canCoordinateTasksForCase = async (req: AuthRequest, caseId: string) => {
   if (isAdminCaseRole(req.user?.role)) return true;
   if (req.user?.role === 'associate') return canAccessCaseId(req, caseId);
@@ -84,7 +104,8 @@ const canManageTask = async (req: AuthRequest, task: any) => {
 
 const canAccessTask = async (req: AuthRequest, task: any) => {
   if (await canManageTask(req, task)) return true;
-  return task.assignee === req.user?.name;
+  const me = String(req.user?.name || '').trim();
+  return task.assignee === me || task.supervisor === me;
 };
 
 const assertAssigneeAllowed = async (req: AuthRequest, assigneeValue: unknown) => {
@@ -106,6 +127,20 @@ const assertAssigneeAllowed = async (req: AuthRequest, assigneeValue: unknown) =
 
   if (!isAssociateAssignableRole(assigneeUser.role)) {
     throw new Error('Associates can assign tasks only to junior associates and interns.');
+  }
+};
+
+const assertSupervisorAllowed = async (supervisorValue: unknown) => {
+  const supervisor = String(supervisorValue || '').trim();
+  if (!supervisor) throw new Error('Supervisor is required.');
+
+  const supervisorUser: any = await findUserByAssigneeString(supervisor);
+  if (!supervisorUser || supervisorUser.isActive === false) {
+    throw new Error('Selected supervisor was not found.');
+  }
+
+  if (!isTaskSupervisorRole(supervisorUser.role)) {
+    throw new Error('Supervisor must be an Associate, Executive Assistant, or Managing Partner.');
   }
 };
 
@@ -192,11 +227,17 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
     if (!assignee) return res.status(400).json({ message: 'Assignee is required.' });
     if (!supervisor) return res.status(400).json({ message: 'Supervisor is required.' });
     if (!dueDate) return res.status(400).json({ message: 'Due date is required.' });
+    try {
+      assertTaskDateRange(startDate, dueDate);
+    } catch (err: any) {
+      return res.status(400).json({ message: err?.message || 'Invalid task date range.' });
+    }
     if (relatedStage === 'Closed') {
       return res.status(400).json({ message: 'A task cannot be created directly as Closed.' });
     }
 
     await assertAssigneeAllowed(req, assignee);
+    await assertSupervisorAllowed(supervisor);
 
     const caseRecord: any = await Case.findById(caseId).select('parties caseNo').lean();
     const taskNo = String(req.body?.taskNo || '').trim() || (await generateTaskNo());
@@ -287,16 +328,23 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
     const { q, status, priority, approvalStatus, workflowStage } = req.query as any;
 
     const filter: any = {};
+    const andFilters: any[] = [];
 
-    // Visibility: non-MD sees only own tasks (MVP using name)
-    if (req.user?.role === 'associate') {
-      const me = (req.user?.name || '').trim();
-      const ownedCaseIds = await Case.find({ assignedTo: me }).distinct('_id');
-      const caseIdsFromAssignedTasks = await Task.distinct('caseId', { assignee: me });
-      const visibleCaseIds = [...new Set([...ownedCaseIds, ...caseIdsFromAssignedTasks].map(String))];
-      filter.caseId = { $in: visibleCaseIds.map((value) => new mongoose.Types.ObjectId(value)) };
-    } else if (req.user?.role !== 'managing_director') {
-      filter.assignee = req.user?.name;
+    // Visibility: non-MD sees own tasks and tasks they supervise
+    if (req.user?.role !== 'managing_director') {
+      const me = String(req.user?.name || '').trim();
+      if (!me) {
+        return res.json([]);
+      }
+
+      const visibility: any = { $or: [{ assignee: me }, { supervisor: me }] };
+      if (req.user?.role === 'associate') {
+        const ownedCaseIds = await Case.find({ assignedTo: me }).distinct('_id');
+        const caseIdsFromTasks = await Task.distinct('caseId', { $or: [{ assignee: me }, { supervisor: me }] });
+        const visibleCaseIds = [...new Set([...ownedCaseIds, ...caseIdsFromTasks].map(String))];
+        visibility.caseId = { $in: visibleCaseIds.map((value) => new mongoose.Types.ObjectId(value)) };
+      }
+      andFilters.push(visibility);
     }
 
     if (status && status !== 'all') filter.status = status;
@@ -306,8 +354,10 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
 
     if (q && String(q).trim()) {
       const regex = new RegExp(String(q).trim(), 'i');
-      filter.$or = [{ title: regex }, { assignee: regex }, { supervisor: regex }, { taskNo: regex }, { relatedClient: regex }];
+      andFilters.push({ $or: [{ title: regex }, { assignee: regex }, { supervisor: regex }, { taskNo: regex }, { relatedClient: regex }] });
     }
+
+    if (andFilters.length) filter.$and = andFilters;
 
     const tasks = await Task.find(filter).sort({ dueDate: 1, createdAt: -1 });
     res.json(tasks);
@@ -347,20 +397,22 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
 
     const canManage = await canManageTask(req, before);
     const isAssignee = before.assignee === req.user?.name;
+    const isSupervisor = String(before.supervisor || '').trim() === String(req.user?.name || '').trim();
+    const attemptedKeys = Object.keys(req.body || {}).filter((key) => req.body?.[key] !== undefined);
+    const qualityOnlyUpdate = attemptedKeys.length > 0 && attemptedKeys.every((key) => key === 'qualityScore');
 
-    if (!canManage && !isAssignee) {
+    if (!canManage && !isAssignee && !isSupervisor) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
     if (!canManage) {
-      const attemptedKeys = Object.keys(req.body || {}).filter((key) => req.body?.[key] !== undefined);
-      const allowedSelfServiceKeys = ['status', 'workflowStage'];
+      const allowedSelfServiceKeys = isSupervisor ? ['qualityScore'] : ['status', 'workflowStage'];
       if (attemptedKeys.some((key) => !allowedSelfServiceKeys.includes(key))) {
-        return res.status(403).json({ message: 'You can only update task status.' });
+        return res.status(403).json({ message: isSupervisor ? 'Supervisors can only update quality score.' : 'You can only update task status.' });
       }
     }
 
-    if (isApprovedLocked(before)) {
+    if (isApprovedLocked(before) && !qualityOnlyUpdate) {
       return res.status(403).json({ message: 'This task is approved and locked (read-only).' });
     }
 
@@ -375,6 +427,21 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
     if (Object.prototype.hasOwnProperty.call(updates, 'supervisor') && !String(updates.supervisor || '').trim()) {
       return res.status(400).json({ message: 'Supervisor is required.' });
     }
+    if (Object.prototype.hasOwnProperty.call(updates, 'supervisor')) {
+      await assertSupervisorAllowed(updates.supervisor);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'qualityScore')) {
+      if (updates.qualityScore === null || updates.qualityScore === undefined || updates.qualityScore === '') {
+        updates.qualityScore = null;
+      } else {
+      const score = Number(updates.qualityScore);
+      if (!Number.isFinite(score) || score < 0 || score > 100) {
+        return res.status(400).json({ message: 'Quality score must be between 0 and 100.' });
+      }
+      updates.qualityScore = Math.round(score);
+      }
+    }
 
     if (Object.prototype.hasOwnProperty.call(updates, 'dueDate')) {
       updates.dueDate = normalizeTaskDueDate(updates.dueDate);
@@ -385,6 +452,15 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
 
     if (Object.prototype.hasOwnProperty.call(updates, 'startDate')) {
       updates.startDate = normalizeTaskStartDate(updates.startDate);
+    }
+
+    try {
+      assertTaskDateRange(
+        Object.prototype.hasOwnProperty.call(updates, 'startDate') ? updates.startDate : before.startDate,
+        Object.prototype.hasOwnProperty.call(updates, 'dueDate') ? updates.dueDate : before.dueDate
+      );
+    } catch (err: any) {
+      return res.status(400).json({ message: err?.message || 'Invalid task date range.' });
     }
 
     const hasWorkflowStage = Object.prototype.hasOwnProperty.call(updates, 'workflowStage');
@@ -480,6 +556,8 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
       changes.push(`Assignee: ${before.assignee || '-'} → ${req.body.assignee}`);
     if (req.body.supervisor && req.body.supervisor !== before.supervisor)
       changes.push(`Supervisor: ${before.supervisor || '-'} → ${req.body.supervisor}`);
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'qualityScore') && req.body.qualityScore !== before.qualityScore)
+      changes.push(`Quality: ${before.qualityScore ?? '-'} → ${req.body.qualityScore}`);
     if (req.body.dueDate && req.body.dueDate !== before.dueDate)
       changes.push(`Due: ${before.dueDate || '-'} → ${req.body.dueDate}`);
     if (req.body.startDate && req.body.startDate !== before.startDate)
@@ -752,7 +830,7 @@ export const addChecklistItem = async (req: AuthRequest, res: Response) => {
 
     if (isApprovedLocked(task)) return res.status(403).json({ message: 'Task is approved and locked.' });
 
-    if (req.user?.role !== 'managing_director' && task.assignee !== req.user?.name) {
+    if (req.user?.role !== 'managing_director' && task.assignee !== req.user?.name && task.supervisor !== req.user?.name) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 

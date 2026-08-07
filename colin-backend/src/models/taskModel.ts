@@ -46,6 +46,7 @@ export interface ITask extends Document {
 
   approvedBy?: string;
   approvalComment?: string;
+  qualityScore?: number;
 
   estimatedHours?: number;
 
@@ -126,6 +127,7 @@ const TaskSchema = new Schema<ITask>(
 
     approvedBy: { type: String },
     approvalComment: { type: String },
+    qualityScore: { type: Number, min: 0, max: 100, default: null },
 
     estimatedHours: { type: Number, min: 0 },
 

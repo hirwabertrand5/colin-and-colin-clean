@@ -119,6 +119,8 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   // Checklist
   const [newChecklistItem, setNewChecklistItem] = useState('');
   const [checklistLoading, setChecklistLoading] = useState(false);
+  const [qualityScoreDraft, setQualityScoreDraft] = useState('');
+  const [qualityScoreLoading, setQualityScoreLoading] = useState(false);
 
   // Update status modal
   const [showWorkflowModal, setShowWorkflowModal] = useState(false);
@@ -149,6 +151,25 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     if (isManagingDirector) return true;
     return currentUser?.name && task.assignee === currentUser.name;
   }, [task, isManagingDirector, currentUser, isApprovedLocked]);
+
+  const isTaskSupervisor = useMemo(() => {
+    if (!task || !currentUser?.name) return false;
+    return String(task.supervisor || '').trim() === String(currentUser.name || '').trim();
+  }, [task, currentUser?.name]);
+
+  const canToggleChecklist = useMemo(() => {
+    if (!task) return false;
+    if (isApprovedLocked) return false;
+    if (isManagingDirector) return true;
+    const me = String(currentUser?.name || '').trim();
+    return Boolean(me && (task.assignee === me || String(task.supervisor || '').trim() === me));
+  }, [task, isManagingDirector, currentUser?.name, isApprovedLocked]);
+
+  const canSetQualityScore = useMemo(() => {
+    if (!task) return false;
+    if (isApprovedLocked && task.qualityScore == null) return true;
+    return Boolean(isManagingDirector || currentUser?.role === 'executive_assistant' || isTaskSupervisor);
+  }, [task, isManagingDirector, currentUser?.role, isTaskSupervisor, isApprovedLocked]);
 
   const relatedCaseLabel = useMemo(() => {
     if (!caseData) return '—';
@@ -230,6 +251,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     try {
       const t = await getTaskById(id);
       setTask(t);
+      setQualityScoreDraft(t.qualityScore == null ? '' : String(t.qualityScore));
 
       const [c, docs, audit, time] = await Promise.all([
         getCaseById(t.caseId),
@@ -381,6 +403,33 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
       setError(err.message || 'Failed to delete checklist item');
     } finally {
       setChecklistLoading(false);
+    }
+  };
+
+  const saveQualityScore = async () => {
+    if (!task?._id) return;
+    const trimmed = qualityScoreDraft.trim();
+    if (!trimmed) {
+      setError('Please enter a quality score between 0 and 100.');
+      return;
+    }
+
+    const score = Number(trimmed);
+    if (!Number.isFinite(score) || score < 0 || score > 100) {
+      setError('Quality score must be between 0 and 100.');
+      return;
+    }
+
+    try {
+      setQualityScoreLoading(true);
+      setError('');
+      await updateTask(task._id, { qualityScore: Math.round(score) });
+      await loadAll();
+      window.dispatchEvent(new CustomEvent('task-report-updated', { detail: { taskId: task._id } }));
+    } catch (err: any) {
+      setError(err.message || 'Failed to update quality score');
+    } finally {
+      setQualityScoreLoading(false);
     }
   };
 
@@ -772,7 +821,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                       type="checkbox"
                       checked={item.completed}
                       onChange={() => onToggleChecklist(item._id)}
-                      disabled={!canWorkOnTask || checklistLoading}
+                      disabled={!canToggleChecklist || checklistLoading}
                       className="w-4 h-4 rounded border-gray-300"
                     />
                     <span
@@ -797,6 +846,51 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                 ))
               )}
             </div>
+          </div>
+
+          {/* Quality Score */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="font-semibold text-gray-900">Quality Score</h2>
+                <p className="text-sm text-gray-500">
+                  {isTaskSupervisor || isManagingDirector || currentUser?.role === 'executive_assistant'
+                    ? 'Assigned supervisors can update this score.'
+                    : 'Supervisor review score.'}
+                </p>
+              </div>
+              <div className="text-lg font-semibold text-gray-900">
+                {task.qualityScore == null ? '—' : `${task.qualityScore}%`}
+              </div>
+            </div>
+
+            {canSetQualityScore ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={qualityScoreDraft}
+                  onChange={(e) => setQualityScoreDraft(e.target.value)}
+                  placeholder="Enter 0-100"
+                  className="w-full sm:max-w-[180px] px-3 py-2 border border-gray-300 rounded"
+                  disabled={qualityScoreLoading}
+                />
+                <button
+                  type="button"
+                  onClick={saveQualityScore}
+                  disabled={qualityScoreLoading}
+                  className="inline-flex items-center justify-center px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
+                >
+                  {qualityScoreLoading ? 'Saving…' : 'Save Quality Score'}
+                </button>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-600">
+                {task.qualityScore == null ? 'Not yet scored.' : 'Read only.'}
+              </div>
+            )}
           </div>
 
           {/* Case Documents */}

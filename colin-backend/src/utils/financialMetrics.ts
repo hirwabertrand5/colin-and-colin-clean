@@ -36,12 +36,14 @@ export const parseMoneyValue = (value: unknown): number => {
 };
 
 export const getNegotiatedPlannedValue = (matter: CaseLike): number => {
+  if (!matter) return 0;
   const planned = parseMoneyValue(matter.workflowProgress?.plannedValue?.amount);
   if (planned > 0) return planned;
   return parseMoneyValue(matter.budget);
 };
 
 export const getCollectedValueFromProgress = (matter: CaseLike): number => {
+  if (!matter) return 0;
   const completed = parseMoneyValue(matter.workflowProgress?.completedValue?.amount);
   if (completed > 0) return completed;
 
@@ -62,4 +64,3 @@ export const getDirectMatterCost = (expense: ExpenseLike): number => {
 };
 
 export const isCaseLinkedExpense = (expense: ExpenseLike) => Boolean(expense.caseId);
-
