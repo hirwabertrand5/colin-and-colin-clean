@@ -105,7 +105,6 @@ router.post(
 router.patch(
   '/cases/:caseId/steps/:stepKey/actions/:index/toggle',
   authenticate,
-  authorize(ADMIN_ROLES),
   toggleStepAction
 );
 

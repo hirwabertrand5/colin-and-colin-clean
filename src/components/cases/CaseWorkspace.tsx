@@ -113,6 +113,8 @@ interface CaseWorkspaceProps {
 
 const formatRwf = (value: number) => `RWF ${Math.round(value).toLocaleString('en-US')}`;
 
+const normalizeIdentity = (value?: string) => String(value || '').trim().toLowerCase();
+
 const parseCaseTaskDate = (value?: string) => {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -261,6 +263,19 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [editTask, setEditTask] = useState<TaskData | null>(null);
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalLoading, setApprovalLoading] = useState(false);
+
+  const canWorkOnWorkflowActions = useMemo(() => {
+    if (!caseData?._id) return false;
+    if (canManageCase) return true;
+    const meName = normalizeIdentity(currentUser?.name);
+    const meEmail = normalizeIdentity(currentUser?.email);
+    if (!meName && !meEmail) return false;
+    return tasks.some((task) => {
+      const taskAssignee = normalizeIdentity(task.assignee);
+      const taskSupervisor = normalizeIdentity(task.supervisor);
+      return [taskAssignee, taskSupervisor].some((value) => value && (value === meName || value === meEmail));
+    });
+  }, [caseData?._id, canManageCase, currentUser?.email, currentUser?.name, tasks]);
 
   const [newTask, setNewTask] = useState<
     Omit<TaskData, '_id' | 'caseId' | 'createdAt' | 'updatedAt'> & { description?: string }
@@ -1500,6 +1515,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               <CaseWorkflowTab
                 caseId={caseData._id}
                 canCompleteSteps={canManageCase}
+                canToggleActions={canWorkOnWorkflowActions}
                 canUpload={true}
                 onWorkflowChanged={async () => {
                   if (!caseData._id) return;

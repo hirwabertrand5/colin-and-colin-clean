@@ -35,6 +35,8 @@ const actorFromReq = (req: AuthRequest) => ({
   actorUserId: req.user?.id as string | undefined,
 });
 
+const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
+
 const computeWorkflowMoney = (inst: any) => {
   const plannedAmount = (inst.steps || []).reduce(
     (sum: number, s: any) => sum + (typeof s.feeAmount === 'number' ? s.feeAmount : 0),
@@ -294,6 +296,19 @@ const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   return Boolean(hasTask);
 };
 
+const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) => {
+  const meName = normalizeIdentity(req.user?.name);
+  const meEmail = normalizeIdentity(req.user?.email);
+  if (!meName && !meEmail) return false;
+
+  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor').lean();
+  return tasks.some((task: any) => {
+    const assignee = normalizeIdentity(task?.assignee);
+    const supervisor = normalizeIdentity(task?.supervisor);
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
+  });
+};
+
 // ---------- Templates ----------
 export const listActiveTemplates = async (req: AuthRequest, res: Response) => {
   try {
@@ -378,7 +393,9 @@ export const getWorkflowForCase = async (req: AuthRequest, res: Response) => {
     if (!isAdmin(req.user?.role)) {
       if (!isPublicYellowCase(c)) {
         const allowed = await canAssociateLikeAccessCase(req, c);
-        if (!allowed) return res.status(403).json({ message: 'Forbidden.' });
+        if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
+          return res.status(403).json({ message: 'Forbidden.' });
+        }
       }
     }
 
@@ -523,6 +540,13 @@ export const completeStep = async (req: AuthRequest, res: Response) => {
 
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!isAdmin(req.user?.role)) {
+      const allowed = await canAssociateLikeAccessCase(req, c);
+      if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
+    }
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
@@ -863,8 +887,6 @@ export const fixCaseWorkflowMismatches = async (req: AuthRequest, res: Response)
 // Toggle a key action checkbox (admin only)
 export const toggleStepAction = async (req: AuthRequest, res: Response) => {
   try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
     const { caseId, stepKey, index } = req.params as any;
     const actionIndex = Number(index);
     if (!Number.isInteger(actionIndex) || actionIndex < 0) {
@@ -873,6 +895,13 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
 
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!isAdmin(req.user?.role)) {
+      const allowed = await canAssociateLikeAccessCase(req, c);
+      if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
+    }
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });

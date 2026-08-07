@@ -70,23 +70,43 @@ const isTakeRequestExpired = (c: any) => {
 };
 const canTakeRequestAccess = (c: any) => isPublicYellowCase(c) && !isTakeRequestClaimed(c);
 
+const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
+
 const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   if (!isAssociateLikeRole(req.user?.role)) return false;
 
   if (isPublicYellowCase(foundCase)) return true;
 
-  const me = (req.user?.name || '').trim();
-  if (!me) return false;
+  const meName = normalizeIdentity(req.user?.name);
+  const meEmail = normalizeIdentity(req.user?.email);
+  if (!meName && !meEmail) return false;
 
-  const assignedTo = String(foundCase.assignedTo || '').trim();
-  if (assignedTo && assignedTo === me) return true;
+  const assignedTo = normalizeIdentity(foundCase.assignedTo);
+  if (assignedTo && (assignedTo === meName || assignedTo === meEmail)) return true;
 
-  const hasTask = await Task.exists({
-    caseId: foundCase._id,
-    assignee: me,
+  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor').lean();
+  return tasks.some((task: any) => {
+    const assignee = normalizeIdentity(task?.assignee);
+    const supervisor = normalizeIdentity(task?.supervisor);
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
   });
+};
 
-  return Boolean(hasTask);
+const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) => {
+  const meName = normalizeIdentity(req.user?.name);
+  const meEmail = normalizeIdentity(req.user?.email);
+  if (!meName && !meEmail) return false;
+
+  if (normalizeIdentity(foundCase.assignedTo) && [meName, meEmail].includes(normalizeIdentity(foundCase.assignedTo))) {
+    return true;
+  }
+
+  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor').lean();
+  return tasks.some((task: any) => {
+    const assignee = normalizeIdentity(task?.assignee);
+    const supervisor = normalizeIdentity(task?.supervisor);
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
+  });
 };
 
 const parseMoney = (value: unknown): number => {
@@ -374,6 +394,10 @@ export const getCaseById = async (req: AuthRequest, res: Response) => {
     if (isAssociateLikeRole(req.user?.role)) {
       const allowed = await canAssociateLikeAccessCase(req, foundCase);
       if (allowed) return res.json(foundCase);
+    }
+
+    if (await canTaskContributorAccessCase(req, foundCase)) {
+      return res.json(foundCase);
     }
 
     if (isPublicYellowCase(foundCase)) return res.json(foundCase);

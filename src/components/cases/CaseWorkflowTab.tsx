@@ -21,6 +21,7 @@ import {
 type Props = {
   caseId: string;
   canCompleteSteps: boolean;
+  canToggleActions: boolean;
   canUpload: boolean;
   onWorkflowChanged?: () => void | Promise<void>;
 };
@@ -54,7 +55,7 @@ const dateInputValueToUtcMs = (value: string) => {
   return Date.UTC(year, month - 1, day);
 };
 
-export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, onWorkflowChanged }: Props) {
+export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged }: Props) {
   void canUpload;
   const [wf, setWf] = useState<WorkflowInstance | null>(null);
   const [loading, setLoading] = useState(false);
@@ -105,7 +106,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
   }, [caseId]);
 
   const toggleAction = async (stepKey: string, index: number) => {
-    if (!canCompleteSteps) return;
+    if (!canToggleActions) return;
     try {
       setBusyKey(`action:${stepKey}:${index}`);
       setErr('');
@@ -327,6 +328,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
 
         const keyActions = derivedActions || [];
         const canManageActions = canCompleteSteps && s.status !== 'Completed';
+        const canToggleStepActions = canToggleActions || canCompleteSteps;
 
         return (
         <div key={s.stepKey} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
@@ -460,7 +462,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canUpload, o
                   const label = typeof action === 'string' ? action : String(action?.text || '');
                   return (
                     <li key={idx} className="flex items-start gap-3">
-                      {canCompleteSteps ? (
+                      {canToggleStepActions ? (
                         <button
                           type="button"
                           onClick={() => toggleAction(s.stepKey, idx)}
