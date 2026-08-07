@@ -1095,49 +1095,24 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     }
   };
 
-  const totalBilled = useMemo(() => getPlannedAmount(caseData), [caseData]);
-  const totalPaid = useMemo(
-    () => invoices.filter((i) => i.status === 'Paid').reduce((sum, i) => sum + (Number(i.amount) || 0), 0),
+  const contractValue = useMemo(() => getPlannedAmount(caseData), [caseData]);
+  const totalBilled = useMemo(
+    () => invoices.reduce((sum, invoice) => sum + (Number(invoice.amount) || 0), 0),
     [invoices]
   );
-  const outstanding = useMemo(() => Math.max(0, totalBilled - totalPaid), [totalBilled, totalPaid]);
+  const collected = useMemo(
+    () => invoices.filter((invoice) => invoice.status === 'Paid').reduce((sum, invoice) => sum + (Number(invoice.amount) || 0), 0),
+    [invoices]
+  );
   const billingCurrency = getPlannedCurrency(caseData);
-  const earnedFeeAmount =
-    typeof caseData?.workflowProgress?.completedValue?.amount === 'number'
-      ? caseData.workflowProgress.completedValue.amount
-      : Number(caseData?.billingSettings?.accruedUnbilled) || 0;
   const workflowPercent = Number(caseData?.workflowProgress?.percent) || 0;
   const caseExpenseTotal = useMemo(
     () => caseExpenses.reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0),
     [caseExpenses]
   );
-  const plannedRemainingAfterExpenses = totalBilled - caseExpenseTotal;
-  const plannedExpenseRatio = totalBilled > 0 ? Math.round((caseExpenseTotal / totalBilled) * 100) : 0;
-  const marginAmount = totalPaid - caseExpenseTotal;
-  const billingHealth =
-    totalBilled > 0 && caseExpenseTotal > totalBilled
-      ? 'loss'
-      : totalBilled > 0 && plannedExpenseRatio >= 85
-        ? 'red'
-        : totalBilled > 0 && plannedExpenseRatio >= 65
-          ? 'yellow'
-          : 'green';
-  const billingHealthClass =
-    billingHealth === 'loss' || billingHealth === 'red'
-      ? 'bg-red-600'
-      : billingHealth === 'yellow'
-        ? 'bg-yellow-400'
-        : 'bg-green-600';
-  const billingHealthBadgeClass =
-    billingHealth === 'yellow' ? 'bg-yellow-400 text-black' : `${billingHealthClass} text-white`;
-  const billingHealthText =
-    billingHealth === 'loss'
-      ? 'Loss risk'
-      : billingHealth === 'red'
-        ? 'Low remaining value'
-        : billingHealth === 'yellow'
-          ? 'Watch spend'
-          : 'Healthy';
+  const grossProfit = collected - caseExpenseTotal;
+  const grossProfitMargin = collected > 0 ? Math.round((grossProfit / collected) * 100) : 0;
+  const formatBillingAmount = (amount: number) => `${billingCurrency} ${Math.round(amount).toLocaleString('en-US')}`;
 
   const handleDeleteInvoice = async (invoiceId: string) => {
     if (!window.confirm('Are you sure you want to delete this invoice?')) return;
@@ -2619,82 +2594,42 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       {activeTab === 'billing' && (
         <div className="space-y-6">
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Matter Financial Status</h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Billing is based on the negotiated planned value and the percentage of checked key actions.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${billingHealthBadgeClass}`}>
-                  {billingHealthText}
-                </span>
-              </div>
+            <div className="flex flex-col gap-2">
+              <h3 className="text-lg font-semibold text-gray-900">Billing</h3>
+              <p className="text-sm text-gray-500">
+                Contract Value, Total Billed, Collected, Direct Matter Costs, Gross Profit, Gross Profit Margin (%)
+              </p>
             </div>
 
-            <div className="mt-5">
-              <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-                <span>Direct matter costs vs negotiated planned value</span>
-                <span>{plannedExpenseRatio}%</span>
-              </div>
-              <div className="h-3 overflow-hidden rounded-full bg-gray-200">
-                <div
-                  className={`h-3 rounded-full ${billingHealthClass}`}
-                  style={{ width: `${Math.min(100, Math.max(0, plannedExpenseRatio))}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Negotiated Planned Value</div>
-                <div className="mt-2 text-lg font-semibold text-gray-900">
-                  {billingCurrency} {Math.round(totalBilled).toLocaleString()}
-                </div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Contract Value</div>
+                <div className="mt-2 text-lg font-semibold text-gray-900">{formatBillingAmount(contractValue)}</div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Progress Value</div>
-                <div className="mt-2 text-lg font-semibold text-gray-900">
-                  {billingCurrency} {Math.round(earnedFeeAmount).toLocaleString()}
-                </div>
-                <div className="mt-2 text-xs text-gray-500">Auto-updated from checked key actions.</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Billed</div>
+                <div className="mt-2 text-lg font-semibold text-gray-900">{formatBillingAmount(totalBilled)}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Collected</div>
+                <div className="mt-2 text-lg font-semibold text-green-700">{formatBillingAmount(collected)}</div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Direct Matter Costs</div>
-                <div className="mt-2 text-lg font-semibold text-gray-900">
-                  {billingCurrency} {Math.round(caseExpenseTotal).toLocaleString()}
-                </div>
-                <div className="mt-2 text-xs text-gray-500">Petty cash linked to this matter.</div>
+                <div className="mt-2 text-lg font-semibold text-gray-900">{formatBillingAmount(caseExpenseTotal)}</div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">
-                  {marginAmount >= 0 ? 'Gross Profit' : 'Loss'}
-                </div>
-                <div className={`mt-2 text-lg font-semibold ${marginAmount >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                  {billingCurrency} {Math.abs(Math.round(marginAmount)).toLocaleString()}
-                </div>
-                <div className="mt-2 text-xs text-gray-500">
-                  Collected minus direct matter costs.
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Gross Profit</div>
+                <div className={`mt-2 text-lg font-semibold ${grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  {formatBillingAmount(grossProfit)}
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <span className="text-gray-500 text-sm mb-2 block">Negotiated Planned Value</span>
-              <span className="text-3xl font-bold text-gray-900">{formatRwf(totalBilled)}</span>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <span className="text-gray-500 text-sm mb-2 block">Total Collected</span>
-              <span className="text-3xl font-bold text-green-600">{formatRwf(totalPaid)}</span>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <span className="text-gray-500 text-sm mb-2 block">Outstanding</span>
-              <span className="text-3xl font-bold text-yellow-600">{formatRwf(outstanding)}</span>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Gross Profit Margin (%)</div>
+                <div className={`mt-2 text-lg font-semibold ${grossProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  {grossProfitMargin}%
+                </div>
+              </div>
             </div>
           </div>
 

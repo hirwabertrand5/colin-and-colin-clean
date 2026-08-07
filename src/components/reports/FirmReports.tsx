@@ -111,9 +111,9 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     const k = data?.kpis;
     return [
       { label: 'Active Cases', value: k ? String(k.activeCases) : '—' },
-      { label: 'Negotiated Planned Value', value: k ? fmtMoney(k.contractValue ?? k.billed) : '—' },
-      { label: 'Total Collected', value: k ? fmtMoney(k.collected) : '—' },
-      { label: 'Net Profit', value: k ? fmtMoney(k.netProfit ?? 0) : '—' },
+      { label: 'Total Contract Value', value: k ? fmtMoney(k.totalContractValue ?? k.contractValue ?? k.billed) : '—' },
+      { label: 'Total Billed', value: k ? fmtMoney(k.totalBilled ?? k.billed) : '—' },
+      { label: 'Total Collected', value: k ? fmtMoney(k.totalCollected ?? k.collected) : '—' },
     ];
   }, [data]);
 
@@ -213,14 +213,14 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                 headers: ['#', 'Metric Type', 'Value'],
                 rows: [
                   ...withRowNumbers([
-                    ['Negotiated Planned Value', data.kpis.contractValue ?? data.kpis.billed],
-                    ['Total Billed', data.kpis.billed],
-                    ['Total Collected', data.kpis.collected],
-                    ['Outstanding', data.kpis.outstanding],
-                    ['Direct Matter Costs', pickMoney(data.kpis.directMatterCosts, data.kpis.clientRelatedExpenses)],
+                    ['Total Contract Value', data.kpis.totalContractValue ?? data.kpis.contractValue ?? data.kpis.billed],
+                    ['Total Billed', data.kpis.totalBilled ?? data.kpis.billed],
+                    ['Total Collected', data.kpis.totalCollected ?? data.kpis.collected],
+                    ['Total Direct Matter Costs', pickMoney(data.kpis.totalDirectMatterCosts, data.kpis.directMatterCosts, data.kpis.clientRelatedExpenses)],
                     ['Gross Profit', data.kpis.grossProfit ?? 0],
                     ['Firm Operating Expenses', data.kpis.firmOperatingExpenses || 0],
                     ['Net Profit', data.kpis.netProfit ?? 0],
+                    ['Net Profit Margin (%)', `${data.kpis.netProfitMargin ?? 0}%`],
                   ]),
                 ],
                 currencyColumns: [3],
@@ -284,9 +284,9 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                 rows: [
                   ...withRowNumbers([
                     ['Active Cases', data.kpis.activeCases],
-                    ['Negotiated Planned Value', data.kpis.contractValue ?? data.kpis.billed],
-                    ['Billed', data.kpis.billed],
-                    ['Total Collected', data.kpis.collected],
+                    ['Total Contract Value', data.kpis.totalContractValue ?? data.kpis.contractValue ?? data.kpis.billed],
+                    ['Total Billed', data.kpis.totalBilled ?? data.kpis.billed],
+                    ['Total Collected', data.kpis.totalCollected ?? data.kpis.collected],
                     ['Net Profit', data.kpis.netProfit ?? 0],
                   ]),
                 ],
@@ -553,36 +553,58 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             {!data ? (
               <div className="text-gray-500">No data.</div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                <div>
-                  <div className="text-sm text-gray-600 mb-2">Negotiated Planned Value</div>
-                  <div className="text-3xl font-semibold text-gray-900 mb-1">{fmtMoney(data.kpis.contractValue ?? data.kpis.billed)}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600 mb-2">Total Billed</div>
-                  <div className="text-3xl font-semibold text-gray-900 mb-1">{fmtMoney(data.kpis.billed)}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600 mb-2">Total Collected</div>
-                  <div className="text-3xl font-semibold text-green-700 mb-1">{fmtMoney(data.kpis.collected)}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-600 mb-2">Direct Matter Costs</div>
-                  <div className="text-3xl font-semibold text-red-700 mb-1">
-                    {fmtMoney(pickMoney(data.kpis.directMatterCosts, data.kpis.clientRelatedExpenses))}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Contract Value</div>
+                  <div className="mt-2 text-lg font-semibold text-gray-900">
+                    {fmtMoney(data.kpis.totalContractValue ?? data.kpis.contractValue ?? data.kpis.billed)}
                   </div>
                 </div>
-                <div>
-                  <div className="text-sm text-gray-600 mb-2">Gross Profit</div>
-                  <div className="text-3xl font-semibold text-emerald-700 mb-1">{fmtMoney(data.kpis.grossProfit ?? 0)}</div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Billed</div>
+                  <div className="mt-2 text-lg font-semibold text-gray-900">
+                    {fmtMoney(data.kpis.totalBilled ?? data.kpis.billed)}
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm text-gray-600 mb-2">Firm Operating Expenses</div>
-                  <div className="text-3xl font-semibold text-gray-900 mb-1">{fmtMoney(data.kpis.firmOperatingExpenses || 0)}</div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Collected</div>
+                  <div className="mt-2 text-lg font-semibold text-green-700">
+                    {fmtMoney(data.kpis.totalCollected ?? data.kpis.collected)}
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm text-gray-600 mb-2">Net Profit</div>
-                  <div className="text-3xl font-semibold text-emerald-700 mb-1">{fmtMoney(data.kpis.netProfit ?? 0)}</div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Direct Matter Costs</div>
+                  <div className="mt-2 text-lg font-semibold text-red-700">
+                    {fmtMoney(pickMoney(data.kpis.totalDirectMatterCosts, data.kpis.directMatterCosts, data.kpis.clientRelatedExpenses))}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Gross Profit</div>
+                  <div
+                    className={`mt-2 text-lg font-semibold ${(data.kpis.grossProfit ?? 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}
+                  >
+                    {fmtMoney(data.kpis.grossProfit ?? 0)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Firm Operating Expenses</div>
+                  <div className="mt-2 text-lg font-semibold text-gray-900">{fmtMoney(data.kpis.firmOperatingExpenses || 0)}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Net Profit</div>
+                  <div
+                    className={`mt-2 text-lg font-semibold ${(data.kpis.netProfit ?? 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}
+                  >
+                    {fmtMoney(data.kpis.netProfit ?? 0)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Net Profit Margin (%)</div>
+                  <div
+                    className={`mt-2 text-lg font-semibold ${(data.kpis.netProfitMargin ?? 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}
+                  >
+                    {`${data.kpis.netProfitMargin ?? 0}%`}
+                  </div>
                 </div>
               </div>
             )}

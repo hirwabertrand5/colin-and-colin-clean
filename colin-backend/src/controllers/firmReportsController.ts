@@ -195,62 +195,47 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       ]),
     ]);
 
-    const basisCaseIds = Array.from(
-      new Set(
-        (dateBasis === 'paymentDate'
-          ? invoicesByPaymentDate
-          : dateBasis === 'taskDate'
-            ? tasksCompleted
-            : invoicesByInvoiceDate
-        )
-          .map((item: any) => String(item.caseId || ''))
-          .filter(Boolean)
-      )
-    );
-
-    const mattersForFinance = basisCaseIds.length
-      ? await Case.find({ _id: { $in: basisCaseIds } })
-          .select('_id assignedTo budget updatedAt workflowProgress billingSettings')
-          .lean()
-      : [];
     const casesForInvoices = await Case.find({ _id: { $in: Array.from(new Set([...invoicesByInvoiceDate, ...invoicesByPaymentDate].map((inv: any) => String(inv.caseId || '')).filter(Boolean))) } })
       .select('_id assignedTo')
       .lean();
 
-    const selectedMatters = selectedMemberName
-      ? (mattersForFinance as any[]).filter((matter) => String(matter.assignedTo || '').trim() === selectedMemberName)
-      : (mattersForFinance as any[]);
+    const financialMatters = await Case.find(
+      selectedMemberName ? { assignedTo: selectedMemberName } : {}
+    )
+      .select('_id assignedTo budget updatedAt workflowProgress billingSettings')
+      .lean();
+    const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
 
     const baseInvoices = dateBasis === 'paymentDate' ? invoicesByPaymentDate : invoicesByInvoiceDate;
     const selectedInvoices = baseInvoices.filter((inv: any) => selectedMatterIds.has(String(inv.caseId)));
 
-    const contractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getNegotiatedPlannedValue(matter), 0);
+    const totalContractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getNegotiatedPlannedValue(matter), 0);
     const progressValue = selectedMatters.reduce((sum: number, matter: any) => sum + getCollectedValueFromProgress(matter), 0);
-    const collected = invoicesByPaymentDate.reduce((sum: number, inv: any) => {
+    const totalCollected = invoicesByPaymentDate.reduce((sum: number, inv: any) => {
       const caseId = String(inv.caseId || '');
       if (selectedMemberName && !selectedMatterIds.has(caseId)) return sum;
       return sum + (Number(inv.amount) || 0);
     }, 0);
-    const billed = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
-    const outstanding = Math.max(0, contractValue - collected);
-    const directMatterCosts = (await PettyCashExpense.find({
+    const totalBilled = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
+    const outstanding = Math.max(0, totalContractValue - totalCollected);
+    const totalDirectMatterCosts = (await PettyCashExpense.find({
       date: { $gte: fromISO, $lte: toISO },
       chargeType: 'client',
       caseId: { $in: Array.from(selectedMatterIds) },
     })
       .select('amount refundAmount chargeType caseId')
       .lean()).reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
-    const selectedMatterOperatingExpenses = (await PettyCashExpense.find({
+    const firmOperatingExpenses = (await PettyCashExpense.find({
       date: { $gte: fromISO, $lte: toISO },
       chargeType: { $ne: 'client' },
     })
       .select('amount refundAmount chargeType caseId')
       .lean()).reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
-    const grossProfit = collected - directMatterCosts;
-    const grossProfitMargin = collected > 0 ? Math.round((grossProfit / collected) * 100) : 0;
-    const netProfit = grossProfit - selectedMatterOperatingExpenses;
-    const netProfitMargin = collected > 0 ? Math.round((netProfit / collected) * 100) : 0;
+    const grossProfit = totalCollected - totalDirectMatterCosts;
+    const grossProfitMargin = totalCollected > 0 ? Math.round((grossProfit / totalCollected) * 100) : 0;
+    const netProfit = grossProfit - firmOperatingExpenses;
+    const netProfitMargin = totalCollected > 0 ? Math.round((netProfit / totalCollected) * 100) : 0;
 
     const hoursAgg = await TaskTimeLog.aggregate([
       { $match: { loggedAt: { $gte: fromDate, $lte: toDate } } },
@@ -480,7 +465,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .filter((expense) => expense.chargeType === 'client' && (!selectedMemberName || selectedMatterIds.has(String(expense.caseId || ''))))
       .reduce((sum, expense) => sum + getDirectMatterCost(expense), 0);
 
-    const firmOperatingExpenses = (expensesInRange as any[])
+    const firmOperatingExpensesInRange = (expensesInRange as any[])
       .filter((expense) => expense.chargeType !== 'client')
       .reduce((sum, expense) => sum + getDirectMatterCost(expense), 0);
 
@@ -504,18 +489,18 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const selectedMemberMetrics = selectedMemberName
       ? {
-          name: selectedMemberName,
-          role: selectedMember?.role || 'Unknown',
-          tasksCompleted: completedTasksByName.get(selectedMemberName) || 0,
-          outstandingTasks: overdueByName.get(selectedMemberName) || 0,
-          revenueGenerated: Math.round((grossHandledByName.get(selectedMemberName) || 0) * 100) / 100,
-          paymentsReceived: Math.round(
-            selectedMatters.reduce((sum, matter: any) => sum + (paidInvoicesByCaseId.get(String(matter._id)) || 0), 0) * 100
-          ) / 100,
-          outstandingBalance: outstanding,
-          feesEarned: Math.round((earnedByName.get(selectedMemberName) || 0) * 100) / 100,
-          qualityReviewStatus: qualityReviewMessage,
-        }
+        name: selectedMemberName,
+        role: selectedMember?.role || 'Unknown',
+        tasksCompleted: completedTasksByName.get(selectedMemberName) || 0,
+        outstandingTasks: overdueByName.get(selectedMemberName) || 0,
+        revenueGenerated: Math.round((grossHandledByName.get(selectedMemberName) || 0) * 100) / 100,
+        paymentsReceived: Math.round(
+          selectedMatters.reduce((sum, matter: any) => sum + (paidInvoicesByCaseId.get(String(matter._id)) || 0), 0) * 100
+        ) / 100,
+        outstandingBalance: outstanding,
+        feesEarned: Math.round((earnedByName.get(selectedMemberName) || 0) * 100) / 100,
+        qualityReviewStatus: qualityReviewMessage,
+      }
       : null;
 
     return res.json({
@@ -524,15 +509,19 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       selectedMember: selectedMemberMetrics,
       kpis: {
         activeCases,
-        contractValue: Math.round(contractValue * 100) / 100,
-        billed,
-        collected,
+        totalContractValue: Math.round(totalContractValue * 100) / 100,
+        contractValue: Math.round(totalContractValue * 100) / 100,
+        totalBilled: Math.round(totalBilled * 100) / 100,
+        billed: Math.round(totalBilled * 100) / 100,
+        totalCollected: Math.round(totalCollected * 100) / 100,
+        collected: Math.round(totalCollected * 100) / 100,
         progressValue: Math.round(progressValue * 100) / 100,
         outstanding,
-        directMatterCosts: Math.round(directMatterCosts * 100) / 100,
+        totalDirectMatterCosts: Math.round(totalDirectMatterCosts * 100) / 100,
+        directMatterCosts: Math.round(totalDirectMatterCosts * 100) / 100,
         grossProfit: Math.round(grossProfit * 100) / 100,
         grossProfitMargin,
-        firmOperatingExpenses: Math.round(firmOperatingExpenses * 100) / 100,
+          firmOperatingExpenses: Math.round(firmOperatingExpensesInRange * 100) / 100,
         netProfit: Math.round(netProfit * 100) / 100,
         netProfitMargin,
         billableHours,

@@ -20,11 +20,15 @@ export type FirmReportResponse = {
   } | null;
   kpis: {
     activeCases: number;
+    totalContractValue?: number;
     contractValue?: number;
+    totalBilled?: number;
     billed: number;
+    totalCollected?: number;
     collected: number;
     progressValue?: number;
     outstanding: number;
+    totalDirectMatterCosts?: number;
     directMatterCosts?: number;
     grossProfit?: number;
     grossProfitMargin?: number;
