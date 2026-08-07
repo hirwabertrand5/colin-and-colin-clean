@@ -246,6 +246,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [staffError, setStaffError] = useState('');
+  const assigneeUsers = staffUsers;
   const supervisorUsers = useMemo(
     () =>
       staffUsers.filter((u) =>
@@ -1824,7 +1825,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     required
                   >
                     <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
-                    {supervisorUsers.map((u) => (
+                    {assigneeUsers.map((u) => (
                       <option key={u._id} value={u.name}>
                         {u.name} ({u.role.replace(/_/g, ' ')})
                       </option>
@@ -1993,7 +1994,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     required
                   >
                     <option value="">{staffLoading ? 'Loading...' : 'Select assignee'}</option>
-                    {supervisorUsers.map((u) => (
+                    {assigneeUsers.map((u) => (
                       <option key={u._id} value={u.name}>
                         {u.name} ({u.role.replace(/_/g, ' ')})
                       </option>

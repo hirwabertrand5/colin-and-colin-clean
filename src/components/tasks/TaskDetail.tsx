@@ -78,6 +78,8 @@ const getWorkflowStageColor = (stage: string) => {
   }
 };
 
+const normalizeIdentity = (value?: string | null) => String(value || '').trim().toLowerCase();
+
 export default function TaskDetail({ userRole }: TaskDetailProps) {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -149,21 +151,31 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     if (!task) return false;
     if (isApprovedLocked) return false;
     if (isManagingDirector) return true;
-    return currentUser?.name && task.assignee === currentUser.name;
-  }, [task, isManagingDirector, currentUser, isApprovedLocked]);
+    const meName = normalizeIdentity(currentUser?.name);
+    const meEmail = normalizeIdentity(currentUser?.email);
+    const assignee = normalizeIdentity(task.assignee);
+    const supervisor = normalizeIdentity(task.supervisor);
+    return Boolean([assignee, supervisor].some((value) => value && (value === meName || value === meEmail)));
+  }, [task, isManagingDirector, currentUser?.email, currentUser?.name, isApprovedLocked]);
 
   const isTaskSupervisor = useMemo(() => {
-    if (!task || !currentUser?.name) return false;
-    return String(task.supervisor || '').trim() === String(currentUser.name || '').trim();
-  }, [task, currentUser?.name]);
+    if (!task) return false;
+    const meName = normalizeIdentity(currentUser?.name);
+    const meEmail = normalizeIdentity(currentUser?.email);
+    const supervisor = normalizeIdentity(task.supervisor);
+    return Boolean(supervisor && (supervisor === meName || supervisor === meEmail));
+  }, [task, currentUser?.email, currentUser?.name]);
 
   const canToggleChecklist = useMemo(() => {
     if (!task) return false;
     if (isApprovedLocked) return false;
     if (isManagingDirector) return true;
-    const me = String(currentUser?.name || '').trim();
-    return Boolean(me && (task.assignee === me || String(task.supervisor || '').trim() === me));
-  }, [task, isManagingDirector, currentUser?.name, isApprovedLocked]);
+    const meName = normalizeIdentity(currentUser?.name);
+    const meEmail = normalizeIdentity(currentUser?.email);
+    const assignee = normalizeIdentity(task.assignee);
+    const supervisor = normalizeIdentity(task.supervisor);
+    return Boolean([assignee, supervisor].some((value) => value && (value === meName || value === meEmail)));
+  }, [task, isManagingDirector, currentUser?.email, currentUser?.name, isApprovedLocked]);
 
   const canSetQualityScore = useMemo(() => {
     if (!task) return false;

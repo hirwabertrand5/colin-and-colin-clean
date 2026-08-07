@@ -32,6 +32,8 @@ const withActor = (req: AuthRequest) => {
 const isAdminCaseRole = (role?: string) =>
   role === 'managing_director' || role === 'executive_assistant';
 
+const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
+
 const TASK_WORKFLOW_STAGES = [
   'Created',
   'Assigned',
@@ -104,8 +106,11 @@ const canManageTask = async (req: AuthRequest, task: any) => {
 
 const canAccessTask = async (req: AuthRequest, task: any) => {
   if (await canManageTask(req, task)) return true;
-  const me = String(req.user?.name || '').trim();
-  return task.assignee === me || task.supervisor === me;
+  const meName = normalizeIdentity(req.user?.name);
+  const meEmail = normalizeIdentity(req.user?.email);
+  const assignee = normalizeIdentity(task.assignee);
+  const supervisor = normalizeIdentity(task.supervisor);
+  return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
 };
 
 const assertAssigneeAllowed = async (req: AuthRequest, assigneeValue: unknown) => {
@@ -830,7 +835,7 @@ export const addChecklistItem = async (req: AuthRequest, res: Response) => {
 
     if (isApprovedLocked(task)) return res.status(403).json({ message: 'Task is approved and locked.' });
 
-    if (req.user?.role !== 'managing_director' && task.assignee !== req.user?.name && task.supervisor !== req.user?.name) {
+    if (!(await canAccessTask(req, task))) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
@@ -864,7 +869,7 @@ export const toggleChecklistItem = async (req: AuthRequest, res: Response) => {
 
     if (isApprovedLocked(task)) return res.status(403).json({ message: 'Task is approved and locked.' });
 
-    if (req.user?.role !== 'managing_director' && task.assignee !== req.user?.name) {
+    if (!(await canAccessTask(req, task))) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
@@ -900,7 +905,7 @@ export const deleteChecklistItem = async (req: AuthRequest, res: Response) => {
 
     if (isApprovedLocked(task)) return res.status(403).json({ message: 'Task is approved and locked.' });
 
-    if (req.user?.role !== 'managing_director' && task.assignee !== req.user?.name) {
+    if (!(await canAccessTask(req, task))) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
@@ -938,7 +943,7 @@ export const getTimeLogsForTask = async (req: AuthRequest, res: Response) => {
     const task: any = await Task.findById(taskId);
     if (!task) return res.status(404).json({ message: 'Task not found.' });
 
-    if (req.user?.role !== 'managing_director' && task.assignee !== req.user?.name) {
+    if (!(await canAccessTask(req, task))) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
@@ -968,7 +973,7 @@ export const addTimeLogToTask = async (req: AuthRequest, res: Response) => {
 
     if (isApprovedLocked(task)) return res.status(403).json({ message: 'Task is approved and locked.' });
 
-    if (req.user?.role !== 'managing_director' && task.assignee !== req.user?.name) {
+    if (!(await canAccessTask(req, task))) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
