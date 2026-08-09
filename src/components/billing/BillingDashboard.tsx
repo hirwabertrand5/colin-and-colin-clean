@@ -104,36 +104,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
     };
   }, [userRole, navigate]);
 
-  const stats = useMemo(() => {
-    const contractValue =
-      summary?.contractValue ??
-      cases.reduce((sum, item) => {
-        const plannedValue = parseAmount(item.workflowProgress?.plannedValue?.amount);
-        const budgetValue = parseAmount(item.budget);
-        return sum + (plannedValue > 0 ? plannedValue : budgetValue);
-      }, 0);
-    const billed = summary?.billed ?? allInvoices.reduce((sum, invoice) => sum + parseAmount(invoice.amount), 0);
-    const progressValue =
-      summary?.progressValue ??
-      cases.reduce((sum, item) => sum + getMatterProgressValue(item), 0);
-    const collected =
-      summary?.collected ??
-      allInvoices.filter((invoice) => invoice.status === 'Paid').reduce((sum, invoice) => sum + parseAmount(invoice.amount), 0);
-    const directMatterCosts =
-      summary?.directMatterCosts ??
-      allExpenses
-        .filter((expense) => expense.chargeType === 'client' && Boolean(expense.caseId) && isExpenseInRange(expense, summary?.from, summary?.to))
-        .reduce((sum, item) => sum + Math.max(0, parseAmount(item.amount) - parseAmount(item.refundAmount)), 0);
-    const grossProfit = summary?.grossProfit ?? collected - directMatterCosts;
-
-    return [
-      { label: 'Negotiated Planned Value', value: formatRwf(contractValue), change: '', trend: 'up' as const, icon: DollarSign },
-      { label: 'Total Billed', value: formatRwf(billed), change: '', trend: 'up' as const, icon: TrendingUp },
-      { label: 'Progress Value', value: formatRwf(progressValue), change: '', trend: 'up' as const, icon: TrendingUp },
-      { label: 'Total Collected', value: formatRwf(collected), change: '', trend: 'up' as const, icon: TrendingUp },
-      { label: 'Gross Profit', value: formatRwf(grossProfit), change: '', trend: grossProfit >= 0 ? ('up' as const) : ('down' as const), icon: TrendingDown },
-    ];
-  }, [allExpenses, allInvoices, cases, summary]);
+  
 
   const maxValue = useMemo(() => {
     const months = summary?.months || [];
@@ -235,6 +206,20 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
     };
   }, [valueHealth]);
 
+  // KPI cards should reflect the firm's financial summary (same source as Firm Reports)
+  const stats = useMemo(() => {
+    return [
+      { label: 'Total Contract Value', value: formatRwf(firmFinancialSummary.totalContractValue) },
+      { label: 'Total Billed', value: formatRwf(firmFinancialSummary.totalBilled) },
+      { label: 'Total Collected', value: formatRwf(firmFinancialSummary.collected) },
+      { label: 'Total Direct Matter Costs', value: formatRwf(firmFinancialSummary.directMatterCosts) },
+      { label: 'Gross Profit', value: formatRwf(firmFinancialSummary.grossProfit) },
+      { label: 'Firm Operating Expenses', value: formatRwf(firmFinancialSummary.firmOperatingExpenses) },
+      { label: 'Net Profit', value: formatRwf(firmFinancialSummary.netProfit) },
+      { label: 'Net Profit Margin (%)', value: `${firmFinancialSummary.netProfitMargin}%` },
+    ];
+  }, [firmFinancialSummary]);
+
   if (!canAccessBilling(userRole)) return null;
 
   return (
@@ -262,81 +247,17 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-          const TrendIcon = stat.trend === 'up' ? TrendingUp : TrendingDown;
-
-          return (
-            <div key={stat.label} className="bg-white border border-gray-200 rounded-lg p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                  <Icon className="w-5 h-5 text-gray-700" />
-                </div>
-                <div className={`flex items-center text-xs ${stat.trend === 'up' ? 'text-green-600' : 'text-red-600'}`}>
-                  <TrendIcon className="w-3 h-3 mr-1" />
-                  {stat.change || '—'}
-                </div>
-              </div>
-              <div className="text-2xl font-semibold text-gray-900 mb-1">
-                {loading ? '…' : stat.value}
-              </div>
-              <div className="text-sm text-gray-600">{stat.label}</div>
-            </div>
-          );
-        })}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {stats.map((stat) => (
+          <div key={stat.label} className="bg-white border border-gray-200 rounded-lg p-5">
+            <div className="text-sm text-gray-600 mb-2">{stat.label}</div>
+            <div className="text-2xl font-semibold text-gray-900">{loading ? '…' : stat.value}</div>
+          </div>
+        ))}
       </div>
 
       {/* Bottom Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h2 className="font-semibold text-gray-900">Matter Financial Status</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                Uses real case, invoice, and petty cash data to show negotiated planned value, billed revenue, progress value, total collected, and direct matter costs.
-              </p>
-            </div>
-            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold text-white ${healthClass}`}>
-              {valueHealth.directMatterCosts > valueHealth.contractValue && valueHealth.contractValue > 0
-                ? 'Plan exceeded'
-                : valueHealth.color === 'red'
-                  ? 'Low remaining value'
-                  : valueHealth.color === 'yellow'
-                    ? 'Watch spend'
-                    : 'Healthy'}
-            </span>
-          </div>
-          <div className="mt-5">
-            <div className="mb-2 flex justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-              <span>Direct matter costs vs contract value</span>
-              <span>{loading ? '…' : `${valueHealth.directMatterCostRatio}%`}</span>
-            </div>
-            <div className="h-3 overflow-hidden rounded-full bg-gray-200">
-              <div className={`h-3 rounded-full ${healthClass}`} style={{ width: `${Math.min(100, valueHealth.directMatterCostRatio)}%` }} />
-            </div>
-          </div>
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div><div className="text-sm text-gray-500">Negotiated Planned Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.contractValue)}</div></div>
-            <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.totalBilled)}</div></div>
-            <div><div className="text-sm text-gray-500">Progress Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.progressValue || 0)}</div></div>
-            <div><div className="text-sm text-gray-500">Total Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(valueHealth.collected)}</div></div>
-            <div><div className="text-sm text-gray-500">Outstanding</div><div className="text-xl font-semibold text-amber-700">{formatRwf(valueHealth.outstanding)}</div></div>
-            <div><div className="text-sm text-gray-500">Direct Matter Costs</div><div className="text-xl font-semibold text-gray-900">{formatRwf(valueHealth.directMatterCosts)}</div></div>
-            <div>
-              <div className="text-sm text-gray-500">Gross Profit</div>
-              <div className={`text-xl font-semibold ${valueHealth.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {formatRwf(valueHealth.grossProfit)}
-              </div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Gross Profit Margin %</div>
-              <div className={`text-xl font-semibold ${valueHealth.grossProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {valueHealth.grossProfitMargin}%
-              </div>
-            </div>
-          </div>
-        </div>
 
         <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -351,7 +272,7 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
             </span>
           </div>
           <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div><div className="text-sm text-gray-500">Negotiated Planned Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalContractValue)}</div></div>
+            <div><div className="text-sm text-gray-500">Total Contract Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalContractValue)}</div></div>
             <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalBilled)}</div></div>
             <div><div className="text-sm text-gray-500">Total Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(firmFinancialSummary.collected)}</div></div>
             <div><div className="text-sm text-gray-500">Outstanding</div><div className="text-xl font-semibold text-amber-700">{formatRwf(firmFinancialSummary.outstanding)}</div></div>
@@ -370,13 +291,13 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
               </div>
             </div>
             <div>
-              <div className="text-sm text-gray-500">Gross Profit Margin %</div>
+              <div className="text-sm text-gray-500">Gross Profit Margin (%)</div>
               <div className={`text-xl font-semibold ${firmFinancialSummary.grossProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                 {firmFinancialSummary.grossProfitMargin}%
               </div>
             </div>
             <div>
-              <div className="text-sm text-gray-500">Net Profit Margin %</div>
+              <div className="text-sm text-gray-500">Net Profit Margin (%)</div>
               <div className={`text-xl font-semibold ${firmFinancialSummary.netProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                 {firmFinancialSummary.netProfitMargin}%
               </div>
