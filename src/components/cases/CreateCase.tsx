@@ -350,7 +350,7 @@ export default function CreateCase({
         throw new Error('Missing workflow template. Please select a workflow template.');
       }
       if (plannedValueAmount <= 0) {
-        throw new Error('Enter the negotiated planned value before creating the case.');
+        throw new Error('Enter the contract value before creating the case.');
       }
 
       const finalParties = partiesStructured ? partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') : formData.parties;
@@ -988,7 +988,7 @@ export default function CreateCase({
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Negotiated Planned Value *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Contract Value *</label>
                   <input
                     value={formData.workflowProgress?.plannedValue?.amount ?? ''}
                     onChange={(e) => {
@@ -1022,7 +1022,7 @@ export default function CreateCase({
                     inputMode="numeric"
                   />
                   <p className="text-xs text-gray-500 mt-2">
-                    This is the negotiated case value. Progress value is calculated from checked key actions.
+                    This is the contract value. Progress value is calculated from checked key actions.
                   </p>
                 </div>
                 <div>
@@ -1083,7 +1083,7 @@ export default function CreateCase({
                       </div>
                     </div>
                     <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Negotiated Planned Value</div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Contract Value</div>
                       <div className="mt-2 text-sm font-semibold text-gray-900">
                         {plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Enter value'}
                       </div>
@@ -1187,7 +1187,7 @@ export default function CreateCase({
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="text-sm font-semibold text-gray-900 mb-3">Workflow settings</div>
               <div className="text-sm text-gray-600">
-                A workflow template automatically generates deadlines, step fees or ranges, and key actions. Billing uses only the negotiated planned value and the percentage of checked key actions.
+                A workflow template automatically generates deadlines, step fees or ranges, and key actions. Billing uses only the contract value and the percentage of checked key actions.
               </div>
             </div>
           </div>
@@ -1209,7 +1209,7 @@ export default function CreateCase({
                   ['Workflow Start Date', formData.workflowStartDate || 'Not set'],
                   ['Next expected deadline', workflowSummary?.nextDueAt ? workflowSummary.nextDueAt.toLocaleDateString() : 'TBD'],
                   ['Estimated completion', workflowSummary?.completionDate ? workflowSummary.completionDate.toLocaleDateString() : 'TBD'],
-                  ['Negotiated planned value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
+                  ['Contract value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
                   ['Key action progress', `${checkedActionCount}/${orderedActionRefs.length} actions checked (${actionProgressPercent}%)`],
                   ['Collected preview', formatCurrency(previewEarnedValue, plannedValueCurrency)],
                 ].map(([k, v]) => (

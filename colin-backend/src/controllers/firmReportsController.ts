@@ -12,7 +12,7 @@ import Prospect from '../models/prospectModel';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
-  getNegotiatedPlannedValue,
+  getContractValue,
 } from '../utils/financialMetrics';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -324,7 +324,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const baseInvoices = dateBasis === 'paymentDate' ? invoicesByPaymentDate : invoicesByInvoiceDate;
     const selectedInvoices = baseInvoices.filter((inv: any) => selectedMatterIds.has(String(inv.caseId)));
 
-    const totalContractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getNegotiatedPlannedValue(matter), 0);
+    const totalContractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getContractValue(matter), 0);
     const progressValue = selectedMatters.reduce((sum: number, matter: any) => sum + getCollectedValueFromProgress(matter), 0);
     const totalCollected = invoicesByPaymentDate.reduce((sum: number, inv: any) => {
       const caseId = String(inv.caseId || '');

@@ -379,7 +379,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                   'Current Step',
                   'Assigned To',
                   'Date Created',
-                  'Negotiated Planned Value',
+                  'Contract Value',
                   'Collected Value',
                   'Next Deadline',
                   'Actions',

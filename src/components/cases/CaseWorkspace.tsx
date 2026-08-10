@@ -3190,7 +3190,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Negotiated Planned Value (RWF)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Contract Value (RWF)</label>
                 <input
                   value={String(editCaseData.workflowProgress?.plannedValue?.amount ?? editCaseData.budget ?? '')}
                   onChange={(e) => {

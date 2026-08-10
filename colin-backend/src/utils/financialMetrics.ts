@@ -35,7 +35,7 @@ export const parseMoneyValue = (value: unknown): number => {
   return 0;
 };
 
-export const getNegotiatedPlannedValue = (matter: CaseLike): number => {
+export const getContractValue = (matter: CaseLike): number => {
   if (!matter) return 0;
   const planned = parseMoneyValue(matter.workflowProgress?.plannedValue?.amount);
   if (planned > 0) return planned;
@@ -47,7 +47,7 @@ export const getCollectedValueFromProgress = (matter: CaseLike): number => {
   const completed = parseMoneyValue(matter.workflowProgress?.completedValue?.amount);
   if (completed > 0) return completed;
 
-  const planned = getNegotiatedPlannedValue(matter);
+  const planned = getContractValue(matter);
   const percent = Number(matter.workflowProgress?.percent) || 0;
   if (planned > 0 && percent > 0) {
     return Math.round((planned * percent) / 100);

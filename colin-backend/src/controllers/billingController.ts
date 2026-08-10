@@ -7,7 +7,7 @@ import TaskTimeLog from '../models/taskTimeLogModel';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
-  getNegotiatedPlannedValue,
+  getContractValue,
 } from '../utils/financialMetrics';
 
 const toISODate = (d: Date) => d.toISOString().slice(0, 10);
@@ -50,7 +50,7 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
     ]);
 
     const billed = invoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
-    const contractValue = matters.reduce((s, matter: any) => s + getNegotiatedPlannedValue(matter), 0);
+    const contractValue = matters.reduce((s, matter: any) => s + getContractValue(matter), 0);
     const progressValue = matters.reduce((s, matter: any) => s + getCollectedValueFromProgress(matter), 0);
     const collected = paidInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const directMatterCosts = expenses
