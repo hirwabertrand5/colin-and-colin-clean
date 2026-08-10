@@ -574,6 +574,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           qualityScore == null || !timeliness
             ? null
             : Math.round((taskFeeCollected * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100)) * 100) / 100;
+        const roundedTaskFeeCollected = Math.round(taskFeeCollected * 100) / 100;
+        const roundedFeeEarned = feeEarned == null ? null : Math.round(feeEarned * 100) / 100;
 
         return {
           id: String(task._id),
@@ -593,7 +595,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
               ? 'Pending quality score'
               : !timeliness
                 ? 'Pending timeliness score'
-                : `${Math.round(collectedFee * 100) / 100} x ${taskProgressPercent}% = ${Math.round(taskFeeCollected * 100) / 100}`,
+                : `${roundedTaskFeeCollected} x ${tpaPercent}% x ${timeliness.score}% x ${qualityScore}% = ${roundedFeeEarned}`,
           feeEarned,
           keyActionsCompleted: progressCompleted,
           keyActionsTotal: progressTotal,
