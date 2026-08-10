@@ -562,15 +562,20 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           ? String(matter.caseNo || matter.parties || matter.matterType || matter.workflow || '—')
           : '—';
         const progress = getTaskProgressPercent(task);
-        const contractValue = getNegotiatedPlannedValue(matter);
-        const workflowPercent = Number(matter?.workflowProgress?.percent) || 0;
-        const taskFee = Math.round((contractValue * (workflowPercent / 100)) * 100) / 100;
+        const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
+        const workflowPercentValue = matter?.workflowProgress?.percent;
+        const workflowPercent =
+          workflowPercentValue === null || workflowPercentValue === undefined
+            ? progress.percent || 0
+            : Number(workflowPercentValue) || 0;
+        const taskProgressPercent = workflowPercent;
+        const taskFeeCollected = Math.round((collectedFee * (taskProgressPercent / 100)) * 100) / 100;
         const timeliness = getTimelinessScore(task);
         const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Number(task.qualityScore) : null;
         const feeEarned =
           qualityScore == null || !timeliness
             ? null
-            : Math.round((taskFee * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100)) * 100) / 100;
+            : Math.round((taskFeeCollected * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100)) * 100) / 100;
 
         return {
           id: String(task._id),
@@ -579,7 +584,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           role,
           matter: matterLabel,
           task: String(task.title || 'Task'),
-          taskFee,
+          taskFeeCollected,
+          taskFee: taskFeeCollected,
           tpaPercent,
           timelinessScore: timeliness ? timeliness.score : null,
           timelinessConsumedPercent: timeliness ? Math.round(timeliness.consumedPercent * 10) / 10 : null,
@@ -589,11 +595,11 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
               ? 'Pending quality score'
               : !timeliness
                 ? 'Pending timeliness score'
-                : `${Math.round(taskFee * 100) / 100} × ${tpaPercent}% × ${timeliness.score}% × ${qualityScore}%`,
+                : `${Math.round(collectedFee * 100) / 100} x ${taskProgressPercent}% = ${Math.round(taskFeeCollected * 100) / 100}`,
           feeEarned,
           keyActionsCompleted: progress.completed,
           keyActionsTotal: progress.total,
-          taskProgressPercent: progress.percent,
+          taskProgressPercent,
           timelinessStatus: timeliness ? timeliness.status : 'Late',
         };
       })
@@ -601,7 +607,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const productivitySummary = {
       completedTasks: productivityRows.length,
-      totalTaskFee: Math.round(productivityRows.reduce((sum, row) => sum + (row.taskFee || 0), 0) * 100) / 100,
+      totalTaskFeeCollected: Math.round(productivityRows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0) * 100) / 100,
+      totalTaskFee: Math.round(productivityRows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0) * 100) / 100,
       totalFeeEarned: Math.round(
         productivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0) * 100
       ) / 100,

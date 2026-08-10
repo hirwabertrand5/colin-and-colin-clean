@@ -140,6 +140,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     ];
   }, [data]);
 
+  const selectedMemberSummary = data?.selectedMember || null;
+
   const orderedTeam = useMemo(() => {
     if (!data?.team) return [];
     const idx = (label?: string) => {
@@ -180,7 +182,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     const productivitySummary = data.productivitySummary;
     const productivitySummaryRows = withRowNumbers([
       ['Completed Tasks', String(productivitySummary?.completedTasks ?? productivityRows.length)],
-      ['Total Task Fee', fmtMoney(productivitySummary?.totalTaskFee ?? productivityRows.reduce((sum, row) => sum + (row.taskFee || 0), 0))],
+      ['Task Fee Collected', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? productivitySummary?.totalTaskFee ?? productivityRows.reduce((sum, row) => sum + ((row.taskFeeCollected ?? row.taskFee) || 0), 0))],
       ['Total Fee Earned', fmtMoney(productivitySummary?.totalFeeEarned ?? productivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0))],
       ['Pending Quality Scores', String(productivitySummary?.pendingQualityScores ?? productivityRows.filter((row) => row.qualityScore == null).length)],
       ['Average Quality Score', productivitySummary?.averageQualityScore == null ? '—' : `${productivitySummary.averageQualityScore}%`],
@@ -206,7 +208,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
         row.staff,
         row.matter,
         row.task,
-        row.taskFee || 0,
+        (row.taskFeeCollected ?? row.taskFee) || 0,
         `${row.tpaPercent || 0}%`,
         row.timelinessScore == null ? '—' : `${row.timelinessScore}%`,
         row.qualityScore == null ? '—' : `${row.qualityScore}%`,
@@ -267,7 +269,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               },
               {
                 title: 'Task Productivity Metrics',
-                headers: ['#', 'Date & Time', 'Staff', 'Matter', 'Task', 'Task Fee', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned'],
+                headers: ['#', 'Date & Time', 'Staff', 'Matter', 'Task', 'Task Fee Collected', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned'],
                 rows: numberedProductivityRows,
                 currencyColumns: [6, 11],
                 percentColumns: [7, 8, 9],
@@ -684,11 +686,23 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                   </div>
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Task Fee</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Task Fee Collected</div>
                   <div className="mt-2 text-2xl font-semibold text-gray-900">
-                    {fmtMoney(data.productivitySummary?.totalTaskFee ?? (data.productivityRows || []).reduce((s, r) => s + (r.taskFee || 0), 0))}
+                    {fmtMoney(data.productivitySummary?.totalTaskFeeCollected ?? data.productivitySummary?.totalTaskFee ?? (data.productivityRows || []).reduce((s, r) => s + ((r.taskFeeCollected ?? r.taskFee) || 0), 0))}
                   </div>
                 </div>
+                {selectedMemberSummary && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Selected Member Earned</div>
+                    <div className="mt-2 text-2xl font-semibold text-green-700">
+                      {fmtMoney(selectedMemberSummary.feesEarned || 0)}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      {selectedMemberSummary.name}
+                      {selectedMemberSummary.role ? ` - ${selectedMemberSummary.role}` : ''}
+                    </div>
+                  </div>
+                )}
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Total Fee Earned</div>
                   <div className="mt-2 text-2xl font-semibold text-green-700">
@@ -722,7 +736,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Staff</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Matter</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Task</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Task Fee</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Task Fee Collected</th>
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">TPA</th>
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Timeliness Score</th>
                       <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Quality Score</th>
@@ -738,7 +752,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.staff}</td>
                         <td className="px-4 py-3 text-sm text-gray-700">{row.matter}</td>
                         <td className="px-4 py-3 text-sm text-gray-700">{row.task}</td>
-                        <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">{fmtMoney(row.taskFee)}</td>
+                        <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">{fmtMoney(row.taskFeeCollected ?? row.taskFee)}</td>
                         <td className="px-4 py-3 text-sm text-center text-gray-700">{fmtPercent(row.tpaPercent)}</td>
                         <td className="px-4 py-3 text-sm text-center text-gray-700">
                           {row.timelinessScore == null ? '—' : `${row.timelinessScore}%`}

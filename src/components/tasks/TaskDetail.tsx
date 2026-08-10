@@ -17,6 +17,7 @@ import { UserRole } from '../../App';
 import {
   getTaskById,
   TaskData,
+  TaskChecklistItem,
   submitTaskForApproval,
   approveTask,
   rejectTask,
@@ -32,8 +33,14 @@ import {
 } from '../../services/taskService';
 
 import { getCaseById, CaseData } from '../../services/caseService';
+import { getInvoicesForCase, Invoice } from '../../services/invoiceService';
 import { getDocumentsForCase, CaseDocument } from '../../services/documentService';
 import { getAuditForCase, AuditLogItem } from '../../services/auditService';
+import {
+  getWorkflowForCase,
+  toggleWorkflowStepAction,
+  WorkflowInstance,
+} from '../../services/workflowInstanceService';
 
 import {
   listTaskAttachments,
@@ -80,12 +87,23 @@ const getWorkflowStageColor = (stage: string) => {
 
 const normalizeIdentity = (value?: string | null) => String(value || '').trim().toLowerCase();
 
+type DerivedChecklistItem = {
+  id: string;
+  item: string;
+  completed: boolean;
+  stepKey?: string;
+  stepTitle?: string;
+  actionIndex?: number;
+};
+
 export default function TaskDetail({ userRole }: TaskDetailProps) {
   const { id } = useParams();
   const navigate = useNavigate();
 
   const [task, setTask] = useState<TaskData | null>(null);
   const [caseData, setCaseData] = useState<CaseData | null>(null);
+  const [workflowInstance, setWorkflowInstance] = useState<WorkflowInstance | null>(null);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [documents, setDocuments] = useState<CaseDocument[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
 
@@ -188,6 +206,11 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     return caseData.parties || caseData.caseNo || '—';
   }, [caseData]);
 
+  const billingCurrency = useMemo(
+    () => caseData?.billingSettings?.currency || caseData?.workflowProgress?.plannedValue?.currency || 'RWF',
+    [caseData?.billingSettings?.currency, caseData?.workflowProgress?.plannedValue?.currency]
+  );
+
   const workflowStage = useMemo(
     () => task?.workflowStage || inferWorkflowStageFromStatus(task?.status),
     [task?.workflowStage, task?.status]
@@ -209,12 +232,56 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     !isApprovedLocked &&
     task.approvalStatus === 'Pending';
 
-  const completionPercentage = useMemo(() => {
-    const list = task?.checklist || [];
-    if (!list.length) return 0;
-    const done = list.filter((c) => c.completed).length;
-    return Math.round((done / list.length) * 100);
-  }, [task?.checklist]);
+  const workflowChecklistItems = useMemo<DerivedChecklistItem[]>(() => {
+    if (!workflowInstance?.steps?.length) return [];
+
+    return workflowInstance.steps.flatMap((step) =>
+      (step.actions || []).map((action, actionIndex) => ({
+        id: `${step.stepKey}-${actionIndex}`,
+        item: action.text,
+        completed: Boolean(action.done),
+        stepKey: step.stepKey,
+        stepTitle: step.title,
+        actionIndex,
+      }))
+    );
+  }, [workflowInstance]);
+
+  const manualChecklistItems = task?.checklist || [];
+
+  const checklistCompletionPercentage = useMemo(() => {
+    if (workflowChecklistItems.length > 0) {
+      const done = workflowChecklistItems.filter((c) => c.completed).length;
+      return Math.round((done / workflowChecklistItems.length) * 100);
+    }
+
+    if (!manualChecklistItems.length) return 0;
+    const done = manualChecklistItems.filter((c) => c.completed).length;
+    return Math.round((done / manualChecklistItems.length) * 100);
+  }, [manualChecklistItems, workflowChecklistItems]);
+
+  const workflowProgressPercentage = useMemo(() => {
+    const caseWorkflowPercent = caseData?.workflowProgress?.percent;
+    if (caseWorkflowPercent !== null && caseWorkflowPercent !== undefined) {
+      const parsed = Number(caseWorkflowPercent);
+      return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+    }
+
+    return checklistCompletionPercentage;
+  }, [caseData?.workflowProgress?.percent, checklistCompletionPercentage]);
+
+  const matterCollectedFee = useMemo(() => {
+    const paidInvoices = invoices.filter((invoice) => invoice.status === 'Paid');
+    return paidInvoices.reduce((sum, invoice) => sum + (Number(invoice.amount) || 0), 0);
+  }, [invoices]);
+
+  const taskFeeCollected = useMemo(
+    () => Math.round((matterCollectedFee * workflowProgressPercentage) / 100),
+    [matterCollectedFee, workflowProgressPercentage]
+  );
+
+  const formatMoney = (amount: number) =>
+    `${billingCurrency} ${Math.round((Number(amount) || 0) * 100) / 100}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -274,12 +341,22 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
       setCaseData(c);
       setDocuments(docs);
+      setWorkflowInstance(null);
+      setInvoices([]);
 
       // ✅ Only show latest 6 activity logs
       setAuditLogs((audit || []).slice(0, 6));
 
       setTimeLogs(time.logs);
       setTotalHours(time.totalHours);
+
+      const [workflowResult, invoicesResult] = await Promise.allSettled([
+        getWorkflowForCase(t.caseId),
+        getInvoicesForCase(t.caseId),
+      ]);
+
+      setWorkflowInstance(workflowResult.status === 'fulfilled' ? workflowResult.value : null);
+      setInvoices(invoicesResult.status === 'fulfilled' ? invoicesResult.value : []);
 
       await loadAttachments(id);
     } catch (err: any) {
@@ -376,12 +453,34 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   // --------------------
   // Checklist
   // --------------------
-  const onToggleChecklist = async (itemId: string) => {
+  const refreshWorkflowContext = async (caseId: string) => {
+    const [workflowResult, invoicesResult] = await Promise.allSettled([
+      getWorkflowForCase(caseId),
+      getInvoicesForCase(caseId),
+    ]);
+
+    if (workflowResult.status === 'fulfilled') {
+      setWorkflowInstance(workflowResult.value);
+    }
+
+    if (invoicesResult.status === 'fulfilled') {
+      setInvoices(invoicesResult.value);
+    }
+  };
+
+  const onToggleChecklist = async (item: DerivedChecklistItem | TaskChecklistItem) => {
     if (!task?._id) return;
     try {
       setChecklistLoading(true);
-      const updated = await toggleChecklistItem(task._id, itemId);
-      setTask(updated);
+      if (workflowChecklistItems.length > 0 && caseData?._id && 'stepKey' in item && item.stepKey && typeof item.actionIndex === 'number') {
+        await toggleWorkflowStepAction(caseData._id, item.stepKey, item.actionIndex);
+        await refreshWorkflowContext(task.caseId);
+      } else if ('_id' in item) {
+        const updated = await toggleChecklistItem(task._id, item._id);
+        setTask(updated);
+      }
+
+      window.dispatchEvent(new CustomEvent('task-report-updated', { detail: { taskId: task._id } }));
     } catch (err: any) {
       setError(err.message || 'Failed to update checklist');
     } finally {
@@ -790,74 +889,122 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
           {/* Checklist */}
           <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-gray-900">Task Checklist</h2>
-              <span className="text-sm text-gray-600">{completionPercentage}% Complete</span>
+            <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+              <div>
+                <h2 className="font-semibold text-gray-900">Task Checklist</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {workflowChecklistItems.length > 0
+                    ? 'Auto-synced from the workflow key actions.'
+                    : 'Manual checklist for tasks without workflow actions.'}
+                </p>
+              </div>
+              <span className="text-sm text-gray-600">{workflowProgressPercentage}% Complete</span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-4">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Workflow Progress</div>
+                <div className="mt-2 text-lg font-semibold text-gray-900">{workflowProgressPercentage}%</div>
+                <div className="text-xs text-gray-500">Checked key actions from the workflow</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Collected</div>
+                <div className="mt-2 text-lg font-semibold text-gray-900">{formatMoney(matterCollectedFee)}</div>
+                <div className="text-xs text-gray-500">Total paid on this matter</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Task Fee Collected</div>
+                <div className="mt-2 text-lg font-semibold text-green-700">{formatMoney(taskFeeCollected)}</div>
+                <div className="text-xs text-gray-500">Collected x workflow progress</div>
+              </div>
             </div>
 
             <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-4">
-              <div
-                className="h-full bg-gray-800 transition-all"
-                style={{ width: `${completionPercentage}%` }}
-              />
+              <div className="h-full bg-gray-800 transition-all" style={{ width: `${workflowProgressPercentage}%` }} />
             </div>
 
-            <div className="flex gap-2 mb-4">
-              <input
-                value={newChecklistItem}
-                onChange={(e) => setNewChecklistItem(e.target.value)}
-                placeholder="Add checklist item..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded"
-                disabled={!canWorkOnTask || checklistLoading}
-              />
-              <button
-                type="button"
-                onClick={onAddChecklistItem}
-                disabled={!canWorkOnTask || checklistLoading || !newChecklistItem.trim()}
-                className="px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
-              >
-                Add
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {(task.checklist || []).length === 0 ? (
-                <div className="text-sm text-gray-500">No checklist items yet.</div>
-              ) : (
-                task.checklist!.map((item) => (
-                  <div
-                    key={item._id}
-                    className="flex items-center gap-3 py-2 hover:bg-gray-50 rounded px-2"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={item.completed}
-                      onChange={() => onToggleChecklist(item._id)}
-                      disabled={!canToggleChecklist || checklistLoading}
-                      className="w-4 h-4 rounded border-gray-300"
-                    />
-                    <span
-                      className={`text-sm flex-1 ${
-                        item.completed ? 'line-through text-gray-500' : 'text-gray-900'
-                      }`}
-                    >
-                      {item.item}
-                    </span>
-
-                    {canWorkOnTask && (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteChecklistItem(item._id)}
-                        className="text-xs text-red-600 hover:text-red-800"
-                        disabled={checklistLoading}
-                      >
-                        Delete
-                      </button>
-                    )}
+            {workflowChecklistItems.length > 0 ? (
+              <div className="space-y-2">
+                {workflowChecklistItems.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-gray-200 px-3 py-2 hover:bg-gray-50">
+                    <label className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={item.completed}
+                        onChange={() => onToggleChecklist(item)}
+                        disabled={!canToggleChecklist || checklistLoading}
+                        className="mt-1 h-4 w-4 rounded border-gray-300"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`text-sm font-medium ${item.completed ? 'text-gray-500' : 'text-gray-900'}`}>
+                            {item.item}
+                          </span>
+                          {item.completed && (
+                            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-700">
+                              Checked
+                            </span>
+                          )}
+                        </div>
+                        {item.stepTitle && <div className="mt-1 text-xs text-gray-500">{item.stepTitle}</div>}
+                      </div>
+                    </label>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2 mb-4">
+                  <input
+                    value={newChecklistItem}
+                    onChange={(e) => setNewChecklistItem(e.target.value)}
+                    placeholder="Add checklist item..."
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded"
+                    disabled={!canWorkOnTask || checklistLoading}
+                  />
+                  <button
+                    type="button"
+                    onClick={onAddChecklistItem}
+                    disabled={!canWorkOnTask || checklistLoading || !newChecklistItem.trim()}
+                    className="px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
+                  >
+                    Add
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {manualChecklistItems.length === 0 ? (
+                    <div className="text-sm text-gray-500">No checklist items yet.</div>
+                  ) : (
+                    manualChecklistItems.map((item) => (
+                      <div key={item._id} className="flex items-center gap-3 py-2 hover:bg-gray-50 rounded px-2">
+                        <input
+                          type="checkbox"
+                          checked={item.completed}
+                          onChange={() => onToggleChecklist(item)}
+                          disabled={!canToggleChecklist || checklistLoading}
+                          className="w-4 h-4 rounded border-gray-300"
+                        />
+                        <span className={`text-sm flex-1 ${item.completed ? 'text-gray-500' : 'text-gray-900'}`}>
+                          {item.item}
+                        </span>
+
+                        {canWorkOnTask && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteChecklistItem(item._id)}
+                            className="text-xs text-red-600 hover:text-red-800"
+                            disabled={checklistLoading}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Quality Score */}

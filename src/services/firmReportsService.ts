@@ -45,6 +45,7 @@ export type FirmReportResponse = {
   ageingReport: Array<{ label: string; amount: number; color: string }>;
   productivitySummary?: {
     completedTasks: number;
+    totalTaskFeeCollected?: number;
     totalTaskFee: number;
     totalFeeEarned: number;
     pendingQualityScores: number;
@@ -58,6 +59,7 @@ export type FirmReportResponse = {
     role: string;
     matter: string;
     task: string;
+    taskFeeCollected?: number;
     taskFee: number;
     tpaPercent: number;
     timelinessScore: number | null;
