@@ -380,7 +380,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                   'Assigned To',
                   'Date Created',
                   'Contract Value',
-                  'Collected Value',
+                  'Task Fee',
                   'Next Deadline',
                   'Actions',
                 ].map((header) => (

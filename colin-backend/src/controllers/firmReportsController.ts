@@ -159,23 +159,24 @@ const getTaskParticipationAllocation = (role?: string) => {
   return TASK_TPA_SHARES[normalized] ?? 0;
 };
 
-const getTaskProgressPercent = (task: any) => {
+const getTaskChecklistCompletionPercent = (task: any) => {
   const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
   const total = checklist.length;
+  if (!total) return 0;
   const completed = checklist.filter((item: any) => Boolean(item?.completed)).length;
-  if (total > 0) {
-    return {
-      completed,
-      total,
-      percent: Math.round((completed / total) * 100),
-    };
+  return Math.round((completed / total) * 100);
+};
+
+const getTaskWorkflowProgressPercent = (matter: any, task: any) => {
+  const workflowPercentValue = matter?.workflowProgress?.percent;
+  if (workflowPercentValue !== null && workflowPercentValue !== undefined) {
+    const parsed = Number(workflowPercentValue);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, parsed);
+    }
   }
 
-  return {
-    completed: 0,
-    total: 0,
-    percent: String(task?.status || '').toLowerCase() === 'completed' ? 100 : 0,
-  };
+  return getTaskChecklistCompletionPercent(task);
 };
 
 const getTimelinessScore = (task: any) => {
@@ -561,14 +562,11 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         const matterLabel = matter
           ? String(matter.caseNo || matter.parties || matter.matterType || matter.workflow || '—')
           : '—';
-        const progress = getTaskProgressPercent(task);
+        const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
+        const progressCompleted = checklist.filter((item: any) => Boolean(item?.completed)).length;
+        const progressTotal = checklist.length;
         const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
-        const workflowPercentValue = matter?.workflowProgress?.percent;
-        const workflowPercent =
-          workflowPercentValue === null || workflowPercentValue === undefined
-            ? progress.percent || 0
-            : Number(workflowPercentValue) || 0;
-        const taskProgressPercent = workflowPercent;
+        const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
         const taskFeeCollected = Math.round((collectedFee * (taskProgressPercent / 100)) * 100) / 100;
         const timeliness = getTimelinessScore(task);
         const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Number(task.qualityScore) : null;
@@ -597,8 +595,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
                 ? 'Pending timeliness score'
                 : `${Math.round(collectedFee * 100) / 100} x ${taskProgressPercent}% = ${Math.round(taskFeeCollected * 100) / 100}`,
           feeEarned,
-          keyActionsCompleted: progress.completed,
-          keyActionsTotal: progress.total,
+          keyActionsCompleted: progressCompleted,
+          keyActionsTotal: progressTotal,
           taskProgressPercent,
           timelinessStatus: timeliness ? timeliness.status : 'Late',
         };
