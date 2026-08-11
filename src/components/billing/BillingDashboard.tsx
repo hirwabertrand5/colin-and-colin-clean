@@ -208,15 +208,19 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
 
   // KPI cards should reflect the firm's financial summary (same source as Firm Reports)
   const stats = useMemo(() => {
+    const profitTone = (value: number) => (value >= 0 ? 'text-green-700' : 'text-red-700');
+
     return [
-      { label: 'Total Contract Value', value: formatRwf(firmFinancialSummary.totalContractValue) },
-      { label: 'Total Billed', value: formatRwf(firmFinancialSummary.totalBilled) },
-      { label: 'Total Collected', value: formatRwf(firmFinancialSummary.collected) },
-      { label: 'Total Direct Matter Costs', value: formatRwf(firmFinancialSummary.directMatterCosts) },
-      { label: 'Gross Profit', value: formatRwf(firmFinancialSummary.grossProfit) },
-      { label: 'Firm Operating Expenses', value: formatRwf(firmFinancialSummary.firmOperatingExpenses) },
-      { label: 'Net Profit', value: formatRwf(firmFinancialSummary.netProfit) },
-      { label: 'Net Profit Margin (%)', value: `${firmFinancialSummary.netProfitMargin}%` },
+      { label: 'Total Contract Value', value: formatRwf(firmFinancialSummary.totalContractValue), valueClass: 'text-gray-900' },
+      { label: 'Total Billed', value: formatRwf(firmFinancialSummary.totalBilled), valueClass: 'text-gray-900' },
+      { label: 'Total Collected', value: formatRwf(firmFinancialSummary.collected), valueClass: 'text-green-700' },
+      { label: 'Outstanding', value: formatRwf(firmFinancialSummary.outstanding), valueClass: 'text-amber-700' },
+      { label: 'Total Direct Matter Costs', value: formatRwf(firmFinancialSummary.directMatterCosts), valueClass: 'text-red-700' },
+      { label: 'Gross Profit', value: formatRwf(firmFinancialSummary.grossProfit), valueClass: profitTone(firmFinancialSummary.grossProfit) },
+      { label: 'Gross Profit Margin (%)', value: `${firmFinancialSummary.grossProfitMargin}%`, valueClass: profitTone(firmFinancialSummary.grossProfitMargin) },
+      { label: 'Firm Operating Expenses', value: formatRwf(firmFinancialSummary.firmOperatingExpenses), valueClass: 'text-red-700' },
+      { label: 'Net Profit', value: formatRwf(firmFinancialSummary.netProfit), valueClass: profitTone(firmFinancialSummary.netProfit) },
+      { label: 'Net Profit Margin (%)', value: `${firmFinancialSummary.netProfitMargin}%`, valueClass: profitTone(firmFinancialSummary.netProfitMargin) },
     ];
   }, [firmFinancialSummary]);
 
@@ -251,60 +255,13 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
         {stats.map((stat) => (
           <div key={stat.label} className="bg-white border border-gray-200 rounded-lg p-5">
             <div className="text-sm text-gray-600 mb-2">{stat.label}</div>
-            <div className="text-2xl font-semibold text-gray-900">{loading ? '…' : stat.value}</div>
+            <div className={`text-2xl font-semibold ${loading ? 'text-gray-900' : stat.valueClass}`}>{loading ? '…' : stat.value}</div>
           </div>
         ))}
       </div>
 
       {/* Bottom Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h2 className="font-semibold text-gray-900">Firm Financial Status</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Adds firm-level profitability using the internal expense ledger as the operating-cost source.
-              </p>
-            </div>
-            <span className="inline-flex rounded-full bg-gray-900 px-3 py-1 text-xs font-semibold text-white">
-              Internal expense ledger
-            </span>
-          </div>
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <div><div className="text-sm text-gray-500">Total Contract Value</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalContractValue)}</div></div>
-            <div><div className="text-sm text-gray-500">Total Billed</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.totalBilled)}</div></div>
-            <div><div className="text-sm text-gray-500">Total Collected</div><div className="text-xl font-semibold text-green-700">{formatRwf(firmFinancialSummary.collected)}</div></div>
-            <div><div className="text-sm text-gray-500">Outstanding</div><div className="text-xl font-semibold text-amber-700">{formatRwf(firmFinancialSummary.outstanding)}</div></div>
-            <div><div className="text-sm text-gray-500">Direct Matter Costs</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.directMatterCosts)}</div></div>
-            <div>
-              <div className="text-sm text-gray-500">Gross Profit</div>
-              <div className={`text-xl font-semibold ${firmFinancialSummary.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {formatRwf(firmFinancialSummary.grossProfit)}
-              </div>
-            </div>
-            <div><div className="text-sm text-gray-500">Firm Operating Expenses</div><div className="text-xl font-semibold text-gray-900">{formatRwf(firmFinancialSummary.firmOperatingExpenses)}</div></div>
-            <div>
-              <div className="text-sm text-gray-500">Net Profit</div>
-              <div className={`text-xl font-semibold ${firmFinancialSummary.netProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {formatRwf(firmFinancialSummary.netProfit)}
-              </div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Gross Profit Margin (%)</div>
-              <div className={`text-xl font-semibold ${firmFinancialSummary.grossProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {firmFinancialSummary.grossProfitMargin}%
-              </div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Net Profit Margin (%)</div>
-              <div className={`text-xl font-semibold ${firmFinancialSummary.netProfitMargin >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {firmFinancialSummary.netProfitMargin}%
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Recent invoices (latest 5) */}
         <div className="bg-white border border-gray-200 rounded-lg">
           <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">

@@ -401,15 +401,36 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       if (!caseId) continue;
       paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
     }
-    const completedTaskCountByCase = new Map<string, number>();
-    for (const t of tasksCompleted as any[]) {
-      const caseId = String(t.caseId || '');
-      if (!caseId) continue;
-      completedTaskCountByCase.set(caseId, (completedTaskCountByCase.get(caseId) || 0) + 1);
-    }
     const earnedByName = new Map<string, number>();
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
+
+    const getTaskProductivityFinancials = (task: any) => {
+      const staffName = String(task.assignee || '—').trim();
+      const role = String(roleByName.get(staffName) || '').trim();
+      const tpaPercent = getTaskParticipationAllocation(role);
+      const matter = taskCaseMap.get(String(task.caseId || ''));
+      const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
+      const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
+      const taskFeeCollected = Math.round((collectedFee * (taskProgressPercent / 100)) * 100) / 100;
+      const timeliness = getTimelinessScore(task);
+      const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Number(task.qualityScore) : null;
+      const feeEarned =
+        qualityScore == null || !timeliness
+          ? null
+          : Math.round((taskFeeCollected * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100)) * 100) / 100;
+
+      return {
+        role,
+        tpaPercent,
+        matter,
+        taskFeeCollected,
+        taskProgressPercent,
+        timeliness,
+        qualityScore,
+        feeEarned,
+      };
+    };
 
     for (const t of tasksCompleted as any[]) {
       const name = String(t.assignee || '—').trim();
@@ -431,14 +452,13 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         if (perf.zone === 'risk') riskByName.set(name, (riskByName.get(name) || 0) + 1);
         usedPercentByName.set(name, [...(usedPercentByName.get(name) || []), perf.usedPercent]);
       }
-      const caseId = String(t.caseId || '');
-      const casePaymentAmount = paidInvoicesByCaseId.get(caseId) || 0;
-      const taskShare = casePaymentAmount / Math.max(1, completedTaskCountByCase.get(caseId) || 1);
-      const roleShare = roleEarningShare(roleByName.get(name));
-      grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + taskShare);
-      const earnedShare = taskShare * (roleShare.percent / 100);
-      earnedByName.set(name, (earnedByName.get(name) || 0) + earnedShare);
-      firmRetainedByName.set(name, (firmRetainedByName.get(name) || 0) + Math.max(0, taskShare - earnedShare));
+      const financials = getTaskProductivityFinancials(t);
+      grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + financials.taskFeeCollected);
+      earnedByName.set(name, (earnedByName.get(name) || 0) + (financials.feeEarned || 0));
+      firmRetainedByName.set(
+        name,
+        (firmRetainedByName.get(name) || 0) + Math.max(0, financials.taskFeeCollected - (financials.feeEarned || 0))
+      );
     }
 
     const overdueFilter: any = { status: { $ne: 'Completed' } };
@@ -556,51 +576,40 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .filter((task) => !selectedMemberName || String(task.assignee || '').trim() === selectedMemberName)
       .map((task) => {
         const staffName = String(task.assignee || '—').trim();
-        const role = String(roleByName.get(staffName) || '').trim();
-        const tpaPercent = getTaskParticipationAllocation(role);
-        const matter = taskCaseMap.get(String(task.caseId || ''));
-        const matterLabel = matter
-          ? String(matter.caseNo || matter.parties || matter.matterType || matter.workflow || '—')
+        const financials = getTaskProductivityFinancials(task);
+        const matterLabel = financials.matter
+          ? String(financials.matter.caseNo || financials.matter.parties || financials.matter.matterType || financials.matter.workflow || '—')
           : '—';
         const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
         const progressCompleted = checklist.filter((item: any) => Boolean(item?.completed)).length;
         const progressTotal = checklist.length;
-        const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
-        const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
-        const taskFeeCollected = Math.round((collectedFee * (taskProgressPercent / 100)) * 100) / 100;
-        const timeliness = getTimelinessScore(task);
-        const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Number(task.qualityScore) : null;
-        const feeEarned =
-          qualityScore == null || !timeliness
-            ? null
-            : Math.round((taskFeeCollected * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100)) * 100) / 100;
-        const roundedTaskFeeCollected = Math.round(taskFeeCollected * 100) / 100;
-        const roundedFeeEarned = feeEarned == null ? null : Math.round(feeEarned * 100) / 100;
+        const roundedTaskFeeCollected = Math.round(financials.taskFeeCollected * 100) / 100;
+        const roundedFeeEarned = financials.feeEarned == null ? null : Math.round(financials.feeEarned * 100) / 100;
 
         return {
           id: String(task._id),
           completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
           staff: staffName,
-          role,
+          role: financials.role,
           matter: matterLabel,
           task: String(task.title || 'Task'),
-          taskFeeCollected,
-          taskFee: taskFeeCollected,
-          tpaPercent,
-          timelinessScore: timeliness ? timeliness.score : null,
-          timelinessConsumedPercent: timeliness ? Math.round(timeliness.consumedPercent * 10) / 10 : null,
-          qualityScore,
+          taskFeeCollected: financials.taskFeeCollected,
+          taskFee: financials.taskFeeCollected,
+          tpaPercent: financials.tpaPercent,
+          timelinessScore: financials.timeliness ? financials.timeliness.score : null,
+          timelinessConsumedPercent: financials.timeliness ? Math.round(financials.timeliness.consumedPercent * 10) / 10 : null,
+          qualityScore: financials.qualityScore,
           formula:
-            qualityScore == null
+            financials.qualityScore == null
               ? 'Pending quality score'
-              : !timeliness
+              : !financials.timeliness
                 ? 'Pending timeliness score'
-                : `${roundedTaskFeeCollected} x ${tpaPercent}% x ${timeliness.score}% x ${qualityScore}% = ${roundedFeeEarned}`,
-          feeEarned,
+                : `${roundedTaskFeeCollected} x ${financials.tpaPercent}% x ${financials.timeliness.score}% x ${financials.qualityScore}% = ${roundedFeeEarned}`,
+          feeEarned: financials.feeEarned,
           keyActionsCompleted: progressCompleted,
           keyActionsTotal: progressTotal,
-          taskProgressPercent,
-          timelinessStatus: timeliness ? timeliness.status : 'Late',
+          taskProgressPercent: financials.taskProgressPercent,
+          timelinessStatus: financials.timeliness ? financials.timeliness.status : 'Late',
         };
       })
       .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));

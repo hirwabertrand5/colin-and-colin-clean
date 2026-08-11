@@ -79,6 +79,19 @@ const timeAgo = (isoDate: string) => {
   return `${days} day${days > 1 ? 's' : ''} ago`;
 };
 
+const formatActivityDateTime = (isoDate?: string) => {
+  if (!isoDate) return '-';
+  const d = new Date(isoDate);
+  if (!Number.isFinite(d.getTime())) return '-';
+  return d.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
 const normalizeProspectStage = (stage?: string) => String(stage || '').trim().toLowerCase().replace(/-/g, ' ');
 const normalizeOpportunitySource = (prospect: Prospect) =>
   String(prospect.referralSource || prospect.enquirySource || '').trim() || 'Unspecified';
@@ -238,7 +251,7 @@ function DashboardTable({
   );
 }
 
-function DashboardTimeline({ items }: { items: Array<{ title: string; detail: string; time: string }> }) {
+function DashboardTimeline({ items }: { items: Array<{ title: string; detail: string; time: string; actor: string; timestamp: string }> }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <div className="border-b border-gray-200 px-5 py-4 dark:border-gray-700">
@@ -255,6 +268,10 @@ function DashboardTimeline({ items }: { items: Array<{ title: string; detail: st
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.title}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">{item.time}</div>
+                </div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="font-medium text-gray-700 dark:text-gray-300">{item.actor}</span>
+                  <span> • {item.timestamp}</span>
                 </div>
                 <div className="mt-1 text-sm text-gray-600 dark:text-gray-400">{item.detail}</div>
               </div>
@@ -657,8 +674,13 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
     () =>
       (auditFeed || []).slice(0, 5).map((item) => ({
         title: item.message || 'System activity',
-        detail: item.detail || item.action || 'Activity recorded in the audit trail',
+        detail: [
+          item.detail || item.action || 'Activity recorded in the audit trail',
+          item.case ? `${item.case.caseNo} - ${item.case.parties}` : '',
+        ].filter(Boolean).join(' • '),
         time: item.createdAt ? timeAgo(item.createdAt) : '-',
+        actor: item.actorName || 'Unknown user',
+        timestamp: formatActivityDateTime(item.createdAt),
       })),
     [auditFeed]
   );
