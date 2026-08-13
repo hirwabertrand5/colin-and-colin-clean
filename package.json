@@ -68,7 +68,7 @@
       },
       "scripts": {
             "dev": "vite",
-            "build": "vite build"
+            "build": "vite build --configLoader runner"
       },
       "description": "This is a code bundle for Legal Operations Management Wireframe. The original project is available at https://www.figma.com/design/41k0cFQWd1Rz5FGSO3aifY/Legal-Operations-Management-Wireframe.",
       "main": "index.js",
