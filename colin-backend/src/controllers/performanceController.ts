@@ -1,8 +1,6 @@
 import { Response } from 'express';
-import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Task from '../models/taskModel';
-import TaskTimeLog from '../models/taskTimeLogModel';
 import User from '../models/userModel';
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
@@ -68,26 +66,6 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
   // limit to range using dueDate for "workload in period"
   const inRangeTasks = tasks.filter((t: any) => String(t.dueDate) >= from && String(t.dueDate) <= to);
 
-  const taskIds = inRangeTasks.map((t: any) => t._id);
-
-  // time logs in range by loggedAt date (more correct than per-task calls)
-  const logFilter: any = {
-    taskId: { $in: taskIds.map((id) => new mongoose.Types.ObjectId(String(id))) },
-    loggedAt: { $gte: new Date(from + 'T00:00:00.000Z'), $lte: new Date(to + 'T23:59:59.999Z') },
-  };
-  if (req.user?.role !== 'managing_director') {
-    logFilter.userName = req.user?.name || '';
-  }
-
-  const logs = await TaskTimeLog.find(logFilter).lean();
-
-  const hoursByTask = new Map<string, number>();
-  for (const l of logs as any[]) {
-    const key = String(l.taskId);
-    hoursByTask.set(key, (hoursByTask.get(key) || 0) + (Number(l.hours) || 0));
-  }
-  const hoursForTask = (taskId: any) => Number(hoursByTask.get(String(taskId)) || 0);
-
   const completed = inRangeTasks.filter((t: any) => t.status === 'Completed');
   const approved = inRangeTasks.filter((t: any) => t.requiresApproval && t.approvalStatus === 'Approved');
   const rejected = inRangeTasks.filter((t: any) => t.requiresApproval && t.approvalStatus === 'Rejected');
@@ -117,16 +95,20 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
 
   const onTimePct = completed.length ? Math.round((onTimeCount / completed.length) * 100) : 0;
 
-  const billableHours = logs.reduce((s: number, l: any) => s + (Number(l.hours) || 0), 0);
-
   // Monthly aggregates (by dueDate month)
-  const monthlyMap = new Map<string, { month: string; tasksCompleted: number; hours: number }>();
+  const monthlyMap = new Map<string, { month: string; tasksCompleted: number; tasksTotal: number; onTime: number; late: number }>();
   for (const t of inRangeTasks as any[]) {
     const dt = new Date(String(t.dueDate));
     const key = monthKey(dt);
-    const row = monthlyMap.get(key) || { month: key, tasksCompleted: 0, hours: 0 };
-    if (t.status === 'Completed') row.tasksCompleted += 1;
-    row.hours += hoursForTask(t._id);
+    const row = monthlyMap.get(key) || { month: key, tasksCompleted: 0, tasksTotal: 0, onTime: 0, late: 0 };
+    row.tasksTotal += 1;
+    if (t.status === 'Completed') {
+      row.tasksCompleted += 1;
+      const comp = t.completedAt ? new Date(t.completedAt) : null;
+      const compISO = comp && Number.isFinite(comp.getTime()) ? comp.toISOString().slice(0, 10) : '';
+      if (compISO && compISO <= String(t.dueDate)) row.onTime += 1;
+      else row.late += 1;
+    }
     monthlyMap.set(key, row);
   }
   const monthly = Array.from(monthlyMap.values()).sort((a, b) => a.month.localeCompare(b.month));
@@ -136,8 +118,7 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
   const byPriority = priorityLabels.map((label) => {
     const items = inRangeTasks.filter((t: any) => t.priority === label);
     const completedItems = items.filter((t: any) => t.status === 'Completed').length;
-    const hours = items.reduce((s: number, t: any) => s + hoursForTask(t._id), 0);
-    return { label, completed: completedItems, total: items.length, hours: Math.round(hours * 10) / 10 };
+    return { label, completed: completedItems, total: items.length };
   });
 
   // Breakdown by status
@@ -145,8 +126,7 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
   const byStatus = statusLabels.map((label) => {
     const items = inRangeTasks.filter((t: any) => t.status === label);
     const completedItems = items.filter((t: any) => t.status === 'Completed').length;
-    const hours = items.reduce((s: number, t: any) => s + hoursForTask(t._id), 0);
-    return { label, completed: completedItems, total: items.length, hours: Math.round(hours * 10) / 10 };
+    return { label, completed: completedItems, total: items.length };
   });
 
   // Weighted productivity: completed tasks weighted by priority, normalized
@@ -169,7 +149,6 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
     user: { name: userName },
     tasksCompleted: completed.length,
     tasksTotal: inRangeTasks.length,
-    billableHours: Math.round(billableHours * 10) / 10,
     onTimeCompletionPct: clamp(onTimePct, 0, 100),
     deadlineBreakdown: {
       ...deadlineBreakdown,
@@ -235,7 +214,6 @@ export const getTeamPerformance = async (req: AuthRequest, res: Response) => {
           rating: perf.rating.value,
           tasksCompleted: perf.tasksCompleted,
           tasksTotal: perf.tasksTotal,
-          billableHours: perf.billableHours,
           onTimeCompletionPct: perf.onTimeCompletionPct,
           approvals: perf.approvals,
           scores: {
@@ -247,11 +225,11 @@ export const getTeamPerformance = async (req: AuthRequest, res: Response) => {
       })
     );
 
-    // Rank: rating desc, then productivity desc, then hours desc
+    // Rank: rating desc, then productivity desc, then on-time completion desc
     rows.sort((a, b) => {
       if (b.rating !== a.rating) return b.rating - a.rating;
       if (b.scores.productivity !== a.scores.productivity) return b.scores.productivity - a.scores.productivity;
-      return (b.billableHours || 0) - (a.billableHours || 0);
+      return (b.onTimeCompletionPct || 0) - (a.onTimeCompletionPct || 0);
     });
 
     return res.json({ range: { from, to }, results: rows });

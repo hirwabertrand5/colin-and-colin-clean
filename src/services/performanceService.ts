@@ -7,7 +7,6 @@ export type PerformanceSummary = {
 
   tasksCompleted: number;
   tasksTotal: number;
-  billableHours: number;
   onTimeCompletionPct: number;
   deadlineBreakdown?: {
     early: number;
@@ -30,9 +29,9 @@ export type PerformanceSummary = {
     reliabilityScore: number;
   };
 
-  monthly: { month: string; tasksCompleted: number; hours: number }[];
-  byStatus: { label: string; completed: number; total: number; hours: number }[];
-  byPriority: { label: string; completed: number; total: number; hours: number }[];
+  monthly: { month: string; tasksCompleted: number; tasksTotal: number; onTime: number; late: number }[];
+  byStatus: { label: string; completed: number; total: number }[];
+  byPriority: { label: string; completed: number; total: number }[];
 };
 
 const apiGet = async <T>(path: string): Promise<T> => {
@@ -60,7 +59,6 @@ export type TeamPerformanceRow = {
   rating: number;
   tasksCompleted: number;
   tasksTotal: number;
-  billableHours: number;
   onTimeCompletionPct: number;
   approvals: { pending: number; approved: number; rejected: number; approvalRatePct: number };
   scores: { productivity: number; quality: number; reliability: number };

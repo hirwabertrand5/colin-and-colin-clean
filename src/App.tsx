@@ -100,9 +100,11 @@ function App() {
   const isManagingPartner =
     user?.role === 'managing_partner' ||
     user?.role === 'executive_managing_partner';
-  const isPartner =
+  const isManagementDashboardRole =
+    user?.role === 'managing_director' ||
     user?.role === 'managing_partner' ||
-    user?.role === 'executive_managing_partner' ||
+    user?.role === 'executive_managing_partner';
+  const isPartner =
     user?.role === 'senior_partner' ||
     user?.role === 'partner' ||
     user?.role === 'executive_partner' ||
@@ -131,12 +133,12 @@ function App() {
                   <Route
                     path="/"
                     element={
-                      (isMD || isPartner) ? (
+                      isManagementDashboardRole ? (
                         <ManagingPartnerDashboard userRole={user.role} />
                       ) : isExec ? (
                         <ExecutiveAssistantDashboard />
                       ) : (
-                        <AssociateDashboard />
+                        <AssociateDashboard userRole={user.role} />
                       )
                     }
                   />
