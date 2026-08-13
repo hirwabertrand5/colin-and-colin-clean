@@ -13,8 +13,6 @@ import {
   addChecklistItem,
   toggleChecklistItem,
   deleteChecklistItem,
-  getTimeLogsForTask,
-  addTimeLogToTask,
 } from '../controllers/taskController';
 
 const router = express.Router();
@@ -45,9 +43,5 @@ router.delete('/tasks/:taskId/checklist/:itemId', authenticate, deleteChecklistI
 router.post('/tasks/:taskId/submit', authenticate, submitTaskForApproval);
 router.post('/tasks/:taskId/approve', authenticate, authorize(TASK_APPROVAL_ROLES), approveTask);
 router.post('/tasks/:taskId/reject', authenticate, authorize(TASK_APPROVAL_ROLES), rejectTask);
-
-// time logs
-router.get('/tasks/:taskId/time-logs', authenticate, getTimeLogsForTask);
-router.post('/tasks/:taskId/time-logs', authenticate, addTimeLogToTask);
 
 export default router;

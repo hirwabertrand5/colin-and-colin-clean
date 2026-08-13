@@ -558,7 +558,7 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
   const grossProfit = Number(summary?.grossProfit ?? 0);
   const netProfit = Number(summary?.netProfit ?? 0);
   const profitabilityMargin = Number(summary?.netProfitMargin ?? summary?.grossProfitMargin ?? 0);
-  const billableHours = Number(summary?.billableHours ?? 0);
+  const outstandingValue = Number(summary?.outstanding ?? 0);
   const pendingInvoiceLabel = `${pendingInvoiceCount} pending invoice${pendingInvoiceCount === 1 ? '' : 's'}`;
 
   const operationalRows = useMemo(() => {
@@ -792,9 +792,9 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
             <div className="text-xs text-gray-500 dark:text-gray-400">Net profit margin from billing summary</div>
           </div>
           <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-            <div className="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Billable Hours</div>
-            <div className="mt-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{billableHours.toLocaleString('en-US', { maximumFractionDigits: 1 })}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">Time logs captured in the current period</div>
+            <div className="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Outstanding Value</div>
+            <div className="mt-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{formatRwfShort(outstandingValue)}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Uncollected contract value in the current period</div>
           </div>
         </div>
       </div>
@@ -947,7 +947,7 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
           <KPICard title="On-Time Completion Rate" value={`${onTimeCompletionRate}%`} detail="Completed on or before due date" icon={Clock} tone={onTimeCompletionRate >= 80 ? 'green' : 'amber'} to="/performance" />
           <KPICard title="Average Quality Score" value={averageQualityScore == null ? '-' : `${averageQualityScore}%`} detail="Average quality score across completed tasks" icon={Star} tone="indigo" to="/performance" />
           <KPICard title="Pending Reviews" value={String(pendingReviewCount)} detail="Work waiting on partner review or approval" icon={ClipboardCheck} tone="amber" to="/tasks" />
-          <KPICard title="Billable Hours" value={billableHours.toLocaleString('en-US', { maximumFractionDigits: 1 })} detail="Logged billable time in the current window" icon={Activity} tone="slate" to="/billing" />
+          <KPICard title="Outstanding Value" value={formatRwfShort(outstandingValue)} detail="Uncollected contract value in the current window" icon={Wallet} tone="amber" to="/billing" />
           <KPICard title="Overdue Tasks" value={String(overdueTasksCount)} detail="Tasks overdue across the firm" icon={AlertCircle} tone="red" to="/tasks" />
         </div>
 

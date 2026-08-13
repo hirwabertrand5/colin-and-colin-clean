@@ -4,7 +4,6 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import Case from '../models/caseModel';
 import Task from '../models/taskModel';
 import Invoice from '../models/invoiceModel';
-import TaskTimeLog from '../models/taskTimeLogModel';
 import User from '../models/userModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import ClientReport from '../models/clientReportModel';
@@ -287,11 +286,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const invoicesByPaymentDateQuery = { status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } };
     const tasksByDateQuery = { status: 'Completed', completedAt: { $gte: fromDate, $lte: toDate } };
 
-    const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, timeLogs, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
+    const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
       Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Task.find(tasksByDateQuery).select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt checklist qualityScore').lean(),
-      TaskTimeLog.find({ loggedAt: { $gte: fromDate, $lte: toDate } }).select('userName hours').lean(),
       User.find({ isActive: { $ne: false } }).select('name role').lean(),
       Prospect.aggregate([
         { $match: { createdAt: { $gte: fromDate, $lte: toDate }, createdBy: { $exists: true } } },
@@ -351,12 +349,6 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const grossProfitMargin = totalCollected > 0 ? Math.round((grossProfit / totalCollected) * 100) : 0;
     const netProfit = grossProfit - firmOperatingExpenses;
     const netProfitMargin = totalCollected > 0 ? Math.round((netProfit / totalCollected) * 100) : 0;
-
-    const hoursAgg = await TaskTimeLog.aggregate([
-      { $match: { loggedAt: { $gte: fromDate, $lte: toDate } } },
-      { $group: { _id: null, totalHours: { $sum: '$hours' } } },
-    ]);
-    const billableHours = Math.round((((hoursAgg?.[0]?.totalHours as number) || 0) * 10)) / 10;
 
     const ageingReport = getAgeingBuckets(
       await Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO } }).select('amount date').lean(),
@@ -470,13 +462,6 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       overdueByName.set(name, (overdueByName.get(name) || 0) + 1);
     }
 
-    const hoursByName = new Map<string, number>();
-    for (const l of timeLogs as any[]) {
-      const name = String(l.userName || '—').trim();
-      if (selectedMemberName && name !== selectedMemberName) continue;
-      hoursByName.set(name, (hoursByName.get(name) || 0) + (Number(l.hours) || 0));
-    }
-
     const prospectCountsByUser = new Map<string, number>(
       (prospectsByCreator as any[]).map((item) => [String(item._id), Number(item.count) || 0])
     );
@@ -506,7 +491,6 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           assistantTasksCompleted: taskCount,
           prospectsCreated: prospectCount,
           reportsGenerated: reportCount,
-          billableHours: Math.round(((hoursByName.get(name) || 0) * 10)) / 10,
           invoicePaymentsReceived: Math.round((grossHandledByName.get(name) || 0) * 100) / 100,
           earnedFees: Math.round((earnedByName.get(name) || 0) * 100) / 100,
           revenueAttributed: Math.round((earnedByName.get(name) || 0) * 100) / 100,
@@ -721,7 +705,6 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           firmOperatingExpenses: Math.round(firmOperatingExpensesInRange * 100) / 100,
         netProfit: Math.round(netProfit * 100) / 100,
         netProfitMargin,
-        billableHours,
         clientRelatedExpenses: Math.round(clientRelatedExpenses * 100) / 100,
         taxDataAvailable,
         taxMessage,

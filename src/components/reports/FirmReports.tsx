@@ -199,7 +199,6 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
         pickMoney(member.revenueAttributed, member.earnedFees),
         member.grossFeesHandled || 0,
         member.firmRetainedEarnings || 0,
-        member.billableHours,
       ])
     );
     const numberedProductivityRows = withRowNumbers(
@@ -311,7 +310,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               },
               {
                 title: 'Team Performance',
-                headers: ['#', 'Team Member', 'Role', 'Active Cases', 'Tasks Completed', 'Share', 'Total Collected', 'Revenue Attributed', 'Gross Fees Handled', 'Firm Retained Earnings', 'Billable Hours'],
+                headers: ['#', 'Team Member', 'Role', 'Active Cases', 'Tasks Completed', 'Share', 'Total Collected', 'Revenue Attributed', 'Gross Fees Handled', 'Firm Retained Earnings'],
                 rows: numberedOverviewTeamRows,
                 currencyColumns: [7, 8, 9, 10],
                 percentColumns: [6],
@@ -499,7 +498,6 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Revenue attributed</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Gross fees handled</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Firm retained earnings</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Billable hours</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
@@ -518,7 +516,6 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                         <td className="px-5 py-4 text-sm font-medium text-gray-900">{fmtMoney(pickMoney(member.revenueAttributed, member.earnedFees))}</td>
                         <td className="px-5 py-4 text-sm text-gray-600">{fmtMoney(member.grossFeesHandled || 0)}</td>
                         <td className="px-5 py-4 text-sm text-gray-600">{fmtMoney(member.firmRetainedEarnings || 0)}</td>
-                        <td className="px-5 py-4 text-sm text-gray-600">{member.billableHours}</td>
                       </tr>
                     ))}
                     

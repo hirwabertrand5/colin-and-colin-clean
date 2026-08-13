@@ -3,7 +3,6 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import Case from '../models/caseModel';
 import Invoice from '../models/invoiceModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
-import TaskTimeLog from '../models/taskTimeLogModel';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
@@ -65,11 +64,6 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
     const netProfitMargin = collected > 0 ? Math.round((netProfit / collected) * 100) : 0;
     const outstanding = Math.max(0, contractValue - collected);
     const collectionRate = contractValue > 0 ? Math.round((collected / contractValue) * 100) : 0;
-    const hoursAgg = await TaskTimeLog.aggregate([
-      { $match: { loggedAt: { $gte: fromDate, $lte: toDate } } },
-      { $group: { _id: null, totalHours: { $sum: '$hours' } } },
-    ]);
-    const billableHours = Math.round((((hoursAgg?.[0]?.totalHours as number) || 0) * 10)) / 10;
 
     // monthly trend: invoices drive billed, paid invoices drive collected
     const map = new Map<string, { month: string; billed: number; collected: number }>();
@@ -99,7 +93,6 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
       contractValue,
       outstanding,
       collectionRate,
-      billableHours,
       directMatterCosts,
       firmOperatingExpenses,
       grossProfit,

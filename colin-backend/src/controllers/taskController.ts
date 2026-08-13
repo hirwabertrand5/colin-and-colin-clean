@@ -6,7 +6,6 @@ import Case from '../models/caseModel';
 import User from '../models/userModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { writeAudit } from '../services/auditService';
-import TaskTimeLog from '../models/taskTimeLogModel';
 import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
 import { buildYearlySequence } from '../utils/counter';
 import { isPublicYellowCase } from '../utils/caseVisibility';
@@ -931,75 +930,3 @@ export const deleteChecklistItem = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// --------------------
-// Time Logs (locked after Approved)
-// --------------------
-
-export const getTimeLogsForTask = async (req: AuthRequest, res: Response) => {
-  try {
-    const { taskId } = req.params as any;
-    if (!taskId) return res.status(400).json({ message: 'Missing taskId' });
-
-    const task: any = await Task.findById(taskId);
-    if (!task) return res.status(404).json({ message: 'Task not found.' });
-
-    if (!(await canAccessTask(req, task))) {
-      return res.status(403).json({ message: 'Forbidden.' });
-    }
-
-    const logs = await TaskTimeLog.find({ taskId: new mongoose.Types.ObjectId(taskId) }).sort({ loggedAt: -1 });
-    const totalHours = logs.reduce((sum, l) => sum + (Number((l as any).hours) || 0), 0);
-
-    res.json({ logs, totalHours });
-  } catch {
-    res.status(500).json({ message: 'Failed to fetch time logs.' });
-  }
-};
-
-export const addTimeLogToTask = async (req: AuthRequest, res: Response) => {
-  try {
-    const { taskId } = req.params as any;
-    const { hours, note, loggedAt } = req.body || {};
-
-    if (!taskId) return res.status(400).json({ message: 'Missing taskId' });
-
-    const numHours = Number(hours);
-    if (!Number.isFinite(numHours) || numHours <= 0) {
-      return res.status(400).json({ message: 'hours must be a positive number' });
-    }
-
-    const task: any = await Task.findById(taskId);
-    if (!task) return res.status(404).json({ message: 'Task not found.' });
-
-    if (isApprovedLocked(task)) return res.status(403).json({ message: 'Task is approved and locked.' });
-
-    if (!(await canAccessTask(req, task))) {
-      return res.status(403).json({ message: 'Forbidden.' });
-    }
-
-    const payload: any = {
-      taskId: new mongoose.Types.ObjectId(taskId),
-      caseId: task.caseId,
-      userName: req.user?.name || 'System',
-      hours: numHours,
-      loggedAt: loggedAt ? new Date(loggedAt) : new Date(),
-    };
-
-    if (req.user?.id) payload.userId = new mongoose.Types.ObjectId(req.user.id);
-    if (note && String(note).trim()) payload.note = String(note).trim();
-
-    const log = await TaskTimeLog.create(payload);
-
-    await writeAudit({
-      caseId: String(task.caseId),
-      ...withActor(req),
-      action: 'TASK_UPDATED',
-      message: 'Logged hours',
-      detail: `${task.title || 'Task'} • ${numHours}h`,
-    });
-
-    res.status(201).json(log);
-  } catch {
-    res.status(500).json({ message: 'Failed to log hours.' });
-  }
-};

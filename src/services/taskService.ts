@@ -31,17 +31,6 @@ export type TaskChecklistItem = {
   completed: boolean;
 };
 
-export type TimeLog = {
-  _id: string;
-  taskId: string;
-  caseId: string;
-  userName: string;
-  hours: number;
-  note?: string;
-  loggedAt: string;
-  createdAt: string;
-};
-
 export interface TaskData {
   _id: string;
   caseId: string;
@@ -194,26 +183,5 @@ export const deleteChecklistItem = async (taskId: string, itemId: string): Promi
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to delete checklist item');
-  return res.json();
-};
-
-export const getTimeLogsForTask = async (
-  taskId: string
-): Promise<{ logs: TimeLog[]; totalHours: number }> => {
-  const res = await fetch(`${API_URL}/tasks/${taskId}/time-logs`, { headers: authHeaders() });
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch time logs');
-  return res.json();
-};
-
-export const addTimeLogToTask = async (
-  taskId: string,
-  payload: { hours: number; note?: string; loggedAt?: string }
-): Promise<TimeLog> => {
-  const res = await fetch(`${API_URL}/tasks/${taskId}/time-logs`, {
-    method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error((await res.json()).message || 'Failed to log hours');
   return res.json();
 };

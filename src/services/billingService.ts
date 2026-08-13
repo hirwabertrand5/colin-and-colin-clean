@@ -10,7 +10,6 @@ export type BillingSummary = {
   contractValue?: number;
   outstanding: number;
   collectionRate: number;
-  billableHours: number;
   directMatterCosts?: number;
   firmOperatingExpenses?: number;
   grossProfit?: number;

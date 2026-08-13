@@ -21,9 +21,6 @@ import {
   submitTaskForApproval,
   approveTask,
   rejectTask,
-  getTimeLogsForTask,
-  addTimeLogToTask,
-  TimeLog,
   addChecklistItem,
   toggleChecklistItem,
   deleteChecklistItem,
@@ -107,9 +104,6 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const [documents, setDocuments] = useState<CaseDocument[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
 
-  const [timeLogs, setTimeLogs] = useState<TimeLog[]>([]);
-  const [totalHours, setTotalHours] = useState<number>(0);
-
   // Task attachments
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [attLoading, setAttLoading] = useState(false);
@@ -129,12 +123,6 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const [approvalAction, setApprovalAction] = useState<'approve' | 'reject' | null>(null);
   const [comments, setComments] = useState('');
   const [approvalLoading, setApprovalLoading] = useState(false);
-
-  // Log hours modal
-  const [showLogHours, setShowLogHours] = useState(false);
-  const [hoursValue, setHoursValue] = useState<string>('');
-  const [hoursNote, setHoursNote] = useState<string>('');
-  const [hoursLoading, setHoursLoading] = useState(false);
 
   // Checklist
   const [newChecklistItem, setNewChecklistItem] = useState('');
@@ -332,11 +320,10 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
       setTask(t);
       setQualityScoreDraft(t.qualityScore == null ? '' : String(t.qualityScore));
 
-      const [c, docs, audit, time] = await Promise.all([
+      const [c, docs, audit] = await Promise.all([
         getCaseById(t.caseId),
         getDocumentsForCase(t.caseId),
         getAuditForCase(t.caseId),
-        getTimeLogsForTask(id),
       ]);
 
       setCaseData(c);
@@ -346,9 +333,6 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
       // ✅ Only show latest 6 activity logs
       setAuditLogs((audit || []).slice(0, 6));
-
-      setTimeLogs(time.logs);
-      setTotalHours(time.totalHours);
 
       const [workflowResult, invoicesResult] = await Promise.allSettled([
         getWorkflowForCase(t.caseId),
@@ -541,35 +525,6 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
       setError(err.message || 'Failed to update quality score');
     } finally {
       setQualityScoreLoading(false);
-    }
-  };
-
-  // --------------------
-  // Time logs
-  // --------------------
-  const openLogHours = () => {
-    setHoursValue('');
-    setHoursNote('');
-    setShowLogHours(true);
-  };
-
-  const submitHours = async () => {
-    if (!task?._id) return;
-    const num = Number(hoursValue);
-    if (!Number.isFinite(num) || num <= 0) {
-      setError('Hours must be a positive number.');
-      return;
-    }
-
-    try {
-      setHoursLoading(true);
-      await addTimeLogToTask(task._id, { hours: num, note: hoursNote });
-      setShowLogHours(false);
-      await loadAll();
-    } catch (err: any) {
-      setError(err.message || 'Failed to log hours');
-    } finally {
-      setHoursLoading(false);
     }
   };
 
@@ -1130,10 +1085,6 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                 <p className="font-medium text-gray-900">{completionDateLabel}</p>
               </div>
               <div>
-                <span className="text-gray-600">Actual Hours:</span>
-                <p className="font-medium text-gray-900">{totalHours.toFixed(1)}h</p>
-              </div>
-              <div>
                 <span className="text-gray-600">Created:</span>
                 <p className="font-medium text-gray-900">
                   {task.createdAt ? new Date(task.createdAt).toLocaleDateString() : '—'}
@@ -1184,15 +1135,6 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                 type="button"
               >
                 View Case Details
-              </button>
-
-              <button
-                className="w-full px-4 py-2 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                onClick={openLogHours}
-                type="button"
-                disabled={!canWorkOnTask}
-              >
-                Log Hours
               </button>
 
               <button
@@ -1257,26 +1199,6 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
             </div>
           </div>
 
-          {/* Time Logs list */}
-          <div className="bg-white border border-gray-200 rounded-lg p-5">
-            <h3 className="font-semibold text-gray-900 mb-4">Time Logs</h3>
-            <div className="space-y-3">
-              {timeLogs.length === 0 ? (
-                <div className="text-sm text-gray-500">No hours logged yet.</div>
-              ) : (
-                timeLogs.slice(0, 8).map((log) => (
-                  <div key={log._id} className="text-sm">
-                    <p className="font-medium text-gray-900">{log.userName}</p>
-                    <p className="text-gray-600">Logged {log.hours} hours</p>
-                    {log.note ? <p className="text-gray-500">{log.note}</p> : null}
-                    <p className="text-xs text-gray-400 mt-1">
-                      {new Date((log as any).loggedAt || (log as any).createdAt).toLocaleString()}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -1505,75 +1427,6 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
         </div>
       )}
 
-      {/* ✅ Log Hours Modal (same format) */}
-      {showLogHours && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-lg w-full flex flex-col" style={{ maxHeight: '90vh' }}>
-            {/* Header */}
-            <div className="p-6 border-b flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Log Hours</h3>
-              <button
-                type="button"
-                onClick={() => setShowLogHours(false)}
-                className="text-gray-500 hover:text-gray-700"
-                title="Close"
-                disabled={hoursLoading}
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto space-y-4 p-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Hours *</label>
-                <input
-                  value={hoursValue}
-                  onChange={(e) => setHoursValue(e.target.value)}
-                  placeholder="e.g. 2.5"
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                  inputMode="decimal"
-                  disabled={hoursLoading}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
-                <textarea
-                  value={hoursNote}
-                  onChange={(e) => setHoursNote(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                  disabled={hoursLoading}
-                />
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="p-6 border-t">
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowLogHours(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
-                  disabled={hoursLoading}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={submitHours}
-                  disabled={hoursLoading}
-                  className="flex-1 px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-60"
-                >
-                  {hoursLoading ? 'Saving...' : 'Log Hours'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

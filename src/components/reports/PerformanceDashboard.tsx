@@ -1,30 +1,34 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  TrendingUp,
-  CheckSquare,
-  Clock,
   Award,
   AlertTriangle,
   Calendar as CalendarIcon,
+  CheckSquare,
+  Clock,
+  Sparkles,
+  TrendingUp,
+  Users,
 } from 'lucide-react';
 
 import { UserRole } from '../../App';
-import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
+import usePageTitle from '../../hooks/usePageTitle';
 import { getAllTasks, TaskData } from '../../services/taskService';
+import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 
 interface PerformanceDashboardProps {
   userRole: UserRole;
 }
 
-type StatCard = {
+type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
+
+type MetricCard = {
   label: string;
   value: string;
-  target?: string;
   helper?: string;
   icon: React.ComponentType<any>;
-  color?: 'red';
-  trendText?: string; // right-side small indicator text
+  tone?: Tone;
+  pill?: string;
 };
 
 const canAccess = (role: UserRole) =>
@@ -38,8 +42,15 @@ const canAccess = (role: UserRole) =>
   role === 'partner' ||
   role === 'associate_partner' ||
   role === 'executive_assistant';
-  
+
 const isoToday = () => new Date().toISOString().slice(0, 10);
+
+const addDaysISO = (baseISO: string, days: number) => {
+  const d = new Date(`${baseISO}T00:00:00Z`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
 const startOfMonthISO = () => {
   const d = new Date();
   d.setDate(1);
@@ -64,6 +75,86 @@ const ratingLabel = (v?: number) => {
   }
 };
 
+const toneClasses: Record<Tone, { icon: string; text: string; chip: string; bar: string }> = {
+  slate: {
+    icon: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
+    text: 'text-gray-900 dark:text-gray-100',
+    chip: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
+    bar: 'bg-gray-700 dark:bg-gray-500',
+  },
+  green: {
+    icon: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+    text: 'text-emerald-700 dark:text-emerald-300',
+    chip: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+    bar: 'bg-emerald-600',
+  },
+  amber: {
+    icon: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+    text: 'text-amber-700 dark:text-amber-300',
+    chip: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+    bar: 'bg-amber-500',
+  },
+  red: {
+    icon: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+    text: 'text-rose-700 dark:text-rose-300',
+    chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+    bar: 'bg-rose-600',
+  },
+  blue: {
+    icon: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    text: 'text-blue-700 dark:text-blue-300',
+    chip: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    bar: 'bg-blue-600',
+  },
+  purple: {
+    icon: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+    text: 'text-purple-700 dark:text-purple-300',
+    chip: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+    bar: 'bg-purple-600',
+  },
+};
+
+function PageCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <div className="border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+        {subtitle ? <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{subtitle}</p> : null}
+      </div>
+      <div className="px-5 py-5">{children}</div>
+    </section>
+  );
+}
+
+function MetricTile({ metric, loading }: { metric: MetricCard; loading: boolean }) {
+  const Icon = metric.icon;
+  const tone = toneClasses[metric.tone || 'slate'];
+
+  return (
+    <div className="h-full rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${tone.icon}`}>
+          <Icon className="h-5 w-5" />
+        </div>
+        <div className={`text-xs font-medium ${loading ? 'text-gray-500 dark:text-gray-400' : tone.text}`}>
+          {loading ? '—' : metric.pill || 'Live'}
+        </div>
+      </div>
+      <div className={`text-2xl font-semibold ${tone.text}`}>{loading ? '…' : metric.value}</div>
+      <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">{metric.label}</div>
+      {metric.helper ? <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">{metric.helper}</div> : null}
+    </div>
+  );
+}
+
 export default function PerformanceDashboard({ userRole }: PerformanceDashboardProps) {
   const [data, setData] = useState<PerformanceSummary | null>(null);
   const [tasks, setTasks] = useState<TaskData[]>([]);
@@ -72,6 +163,8 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
 
   const today = useMemo(() => isoToday(), []);
   const monthStart = useMemo(() => startOfMonthISO(), []);
+
+  usePageTitle('My Performance');
 
   useEffect(() => {
     if (!canAccess(userRole)) return;
@@ -83,7 +176,6 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
         setError('');
 
         const [perf, myTasks] = await Promise.all([getMyPerformance(), getAllTasks()]);
-
         if (!mounted) return;
         setData(perf);
         setTasks(myTasks);
@@ -101,192 +193,183 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
     };
   }, [userRole]);
 
-  // --------------------------
-  // Workflow signals (based on tasks list)
-  // --------------------------
   const workflowSignals = useMemo(() => {
-    const isCompleted = (t: TaskData) => t.status === 'Completed';
-
-    const overdue = tasks.filter((t) => !isCompleted(t) && t.dueDate < today);
-
-    const dueSoon = tasks
-      .filter((t) => !isCompleted(t) && t.dueDate >= today)
+    const isCompleted = (task: TaskData) => task.status === 'Completed';
+    const openTasks = tasks.filter((task) => !isCompleted(task));
+    const overdue = openTasks
+      .filter((task) => task.dueDate && task.dueDate < today)
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    const dueSoon = openTasks
+      .filter((task) => task.dueDate && task.dueDate >= today && task.dueDate <= addDaysISO(today, 7))
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
       .slice(0, 5);
-
     const pendingApprovals = tasks.filter(
-      (t) => t.requiresApproval && t.approvalStatus === 'Pending'
+      (task) => task.requiresApproval && task.approvalStatus === 'Pending'
     );
-
-    // Keep best-effort fallback: completedAt -> updatedAt
-    const completedThisMonth = tasks.filter((t) => {
-      if (!isCompleted(t)) return false;
-      const updated = String((t as any).completedAt || t.updatedAt || '').slice(0, 10);
-      return updated && updated >= monthStart;
+    const awaitingReview = tasks.filter(
+      (task) => task.workflowStage === 'Awaiting Review' || task.approvalStatus === 'Pending'
+    );
+    const completed = tasks.filter((task) => isCompleted(task));
+    const completedThisMonth = completed.filter((task) => {
+      const completedAt = String(task.completedAt || task.updatedAt || '').slice(0, 10);
+      return completedAt && completedAt >= monthStart;
     });
+    const onTimeCompleted = completed.filter((task) => {
+      const completedAt = String(task.completedAt || task.updatedAt || '').slice(0, 10);
+      return completedAt && task.dueDate && completedAt <= task.dueDate;
+    }).length;
 
     return {
       totalTasks: tasks.length,
-      overdueCount: overdue.length,
-      overdueTop: overdue.sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 5),
+      openTasks: openTasks.length,
+      overdue,
       dueSoon,
-      pendingApprovalsCount: pendingApprovals.length,
+      pendingApprovals,
+      awaitingReview,
       completedThisMonthCount: completedThisMonth.length,
+      completionRate: tasks.length ? Math.round((completed.length / tasks.length) * 100) : 0,
+      onTimeRate: completed.length ? Math.round((onTimeCompleted / completed.length) * 100) : data?.onTimeCompletionPct ?? 0,
     };
-  }, [tasks, today, monthStart]);
+  }, [data?.onTimeCompletionPct, monthStart, tasks, today]);
 
-  // --------------------------
-  // Stats (reformatted UI like AssociateDashboard cards)
-  // --------------------------
-  const stats: StatCard[] = useMemo(() => {
+  const metrics = useMemo<MetricCard[]>(() => {
     const rating = data?.rating?.value;
-    const approvalRate = data?.approvals?.approvalRatePct ?? 0;
-    const rejected = data?.approvals?.rejected ?? 0;
-
+    const approvals = data?.approvals;
     const tasksCompleted = data?.tasksCompleted ?? 0;
     const tasksTotal = data?.tasksTotal ?? 0;
-
-    const billableHours = data?.billableHours ?? 0;
     const onTime = data?.onTimeCompletionPct ?? 0;
-    const deadlines = data?.deadlineBreakdown;
-
-    const hasAnyTasks = workflowSignals.totalTasks > 0;
+    const qualityScore = data?.rating?.qualityScore ?? 0;
+    const reliabilityScore = data?.rating?.reliabilityScore ?? 0;
 
     return [
       {
-        label: 'Rating (1–5)',
+        label: 'Rating',
         value: rating ? `${rating}/5` : '—',
-        helper: rating ? ratingLabel(rating) : '',
+        helper: rating ? ratingLabel(rating) : 'Waiting for a rating',
         icon: Award,
-        trendText: rating ? `${Math.round((rating / 5) * 100)}%` : '—',
+        tone: rating && rating >= 4 ? 'green' : rating === 3 ? 'amber' : 'slate',
+        pill: rating ? `${Math.round((rating / 5) * 100)}%` : '—',
       },
       {
         label: 'Tasks Completed',
         value: String(tasksCompleted),
-        helper: `In period: ${tasksTotal} total`,
+        helper: tasksTotal ? `Out of ${tasksTotal} tasks in period` : 'No tasks in this period',
         icon: CheckSquare,
-        trendText:
-          tasksTotal > 0 ? `${Math.round((tasksCompleted / Math.max(1, tasksTotal)) * 100)}%` : '—',
+        tone: 'blue',
+        pill: tasksTotal ? `${Math.round((tasksCompleted / Math.max(1, tasksTotal)) * 100)}%` : '—',
       },
       {
-        label: 'Billable Hours',
-        value: String(billableHours),
-        helper: 'From time logs (period)',
+        label: 'On-Time Completion',
+        value: `${onTime}%`,
+        helper: 'Completed on or before due date',
         icon: Clock,
-        trendText: billableHours ? 'MTD' : '—',
+        tone: onTime >= 80 ? 'green' : onTime >= 60 ? 'amber' : 'red',
+        pill: data?.deadlineBreakdown ? `${data.deadlineBreakdown.overdue} overdue` : 'Live',
       },
       {
         label: 'Approval Rate',
-        value: `${approvalRate}%`,
-        helper: `Rejected: ${rejected}`,
+        value: `${approvals?.approvalRatePct ?? 0}%`,
+        helper: `Approved: ${approvals?.approved ?? 0} • Rejected: ${approvals?.rejected ?? 0}`,
         icon: TrendingUp,
-        trendText: approvalRate ? `${approvalRate}%` : '—',
+        tone: approvals && approvals.approvalRatePct >= 80 ? 'green' : 'amber',
+        pill: `${approvals?.pending ?? 0} pending`,
       },
       {
-        label: 'On-time Completion',
-        value: `${onTime}%`,
-        helper: 'Completed vs due date',
-        icon: TrendingUp,
-        trendText: onTime ? `${onTime}%` : '—',
+        label: 'Quality Score',
+        value: `${qualityScore}%`,
+        helper: 'From approved quality reviews',
+        icon: Sparkles,
+        tone: qualityScore >= 80 ? 'green' : qualityScore >= 60 ? 'amber' : 'red',
+        pill: `${qualityScore}%`,
       },
       {
-        label: 'Early / On Time / Late',
-        value: deadlines ? `${deadlines.early}/${deadlines.onTime}/${deadlines.late}` : '—',
-        helper: 'Deadline behavior',
-        icon: CalendarIcon,
-        trendText: deadlines ? `${deadlines.overdue} overdue` : '—',
-        color: deadlines?.late || deadlines?.overdue ? 'red' : undefined,
+        label: 'Reliability Score',
+        value: `${reliabilityScore}%`,
+        helper: 'Blends timeliness and consistency',
+        icon: Users,
+        tone: reliabilityScore >= 80 ? 'green' : reliabilityScore >= 60 ? 'amber' : 'red',
+        pill: `${workflowSignals.overdue.length} overdue`,
       },
       {
-        label: 'Overdue Tasks',
-        value: hasAnyTasks ? String(workflowSignals.overdueCount) : '—',
-        helper: hasAnyTasks ? 'Should be 0' : '',
+        label: 'Open Tasks',
+        value: String(workflowSignals.openTasks),
+        helper: workflowSignals.dueSoon.length ? `${workflowSignals.dueSoon.length} due soon` : 'No deadlines in the next 7 days',
         icon: AlertTriangle,
-        color: workflowSignals.overdueCount ? 'red' : undefined,
-        trendText: hasAnyTasks ? (workflowSignals.overdueCount ? 'Action needed' : 'Healthy') : '—',
+        tone: workflowSignals.openTasks ? 'amber' : 'green',
+        pill: `${workflowSignals.completedThisMonthCount} this month`,
+      },
+      {
+        label: 'Pending Approvals',
+        value: String(workflowSignals.pendingApprovals.length),
+        helper: 'Waiting on partner or MD review',
+        icon: CalendarIcon,
+        tone: workflowSignals.pendingApprovals.length ? 'amber' : 'green',
+        pill: `${workflowSignals.awaitingReview.length} review`,
       },
     ];
-  }, [data, workflowSignals.totalTasks, workflowSignals.overdueCount]);
+  }, [data, workflowSignals]);
 
-  // --------------------------
-  // Trends & breakdowns
-  // --------------------------
-  const monthlyData = useMemo(() => {
-    return (data?.monthly || []).slice(-6).map((m) => ({
-      month: m.month,
-      tasks: m.tasksCompleted,
-      hours: m.hours,
-    }));
-  }, [data]);
+  const monthlyData = useMemo(
+    () =>
+      (data?.monthly || []).slice(-6).map((month) => ({
+        month: month.month,
+        tasksCompleted: month.tasksCompleted,
+        tasksTotal: month.tasksTotal,
+        onTime: month.onTime,
+        late: month.late,
+        completionRate: month.tasksTotal > 0 ? Math.round((month.tasksCompleted / month.tasksTotal) * 100) : 0,
+        onTimeRate: month.tasksCompleted > 0 ? Math.round((month.onTime / month.tasksCompleted) * 100) : 0,
+      })),
+    [data]
+  );
 
-  const tasksBreakdown = useMemo(() => {
-    const byPriority = data?.byPriority || [];
-    return byPriority.map((p) => ({
-      label: `Priority: ${p.label}`,
-      completed: p.completed,
-      total: p.total,
-      hours: p.hours,
-    }));
-  }, [data]);
+  const statusBreakdown = useMemo(
+    () =>
+      (data?.byStatus || []).map((item) => ({
+        label: item.label,
+        completed: item.completed,
+        total: item.total,
+        percent: item.total > 0 ? Math.round((item.completed / item.total) * 100) : 0,
+      })),
+    [data]
+  );
 
-  // --------------------------
-  // Achievements
-  // --------------------------
   const achievements = useMemo(() => {
-    const perf = data;
-    if (!perf) return [];
+    if (!data) return [];
+    const list: Array<{ title: string; description: string; icon: any; tone: Tone }> = [];
 
-    const completed = perf.tasksCompleted;
-    const total = perf.tasksTotal;
-    const hours = perf.billableHours;
-    const onTime = perf.onTimeCompletionPct;
-
-    const list: Array<{ title: string; description: string; icon: any; color: string }> = [];
-
-    if (perf.rating?.value) {
+    if (data.rating?.value) {
       list.push({
-        title: `Rating: ${perf.rating.value}/5 (${ratingLabel(perf.rating.value)})`,
-        description: `Productivity ${perf.rating.productivityScore}% • Quality ${perf.rating.qualityScore}% • Reliability ${perf.rating.reliabilityScore}%`,
+        title: `Rating ${data.rating.value}/5`,
+        description: `${ratingLabel(data.rating.value)} • Productivity ${data.rating.productivityScore}% • Quality ${data.rating.qualityScore}%`,
         icon: Award,
-        color:
-          perf.rating.value >= 4
-            ? 'bg-green-100 text-green-700'
-              : perf.rating.value >= 3
-              ? 'bg-yellow-400 text-black'
-              : 'bg-red-100 text-red-700',
+        tone: data.rating.value >= 4 ? 'green' : data.rating.value >= 3 ? 'amber' : 'red',
       });
     }
 
-    if (completed > 0) {
+    if (data.tasksCompleted > 0) {
       list.push({
-        title: `Completed ${completed} tasks`,
-        description: `Within ${perf.range.from} → ${perf.range.to}`,
+        title: `${data.tasksCompleted} tasks completed`,
+        description: `Across the selected period (${data.range.from} → ${data.range.to})`,
         icon: CheckSquare,
-        color: 'bg-blue-100 text-blue-700',
+        tone: 'blue',
       });
     }
 
-    if (hours > 0) {
+    if ((data.approvals?.approvalRatePct ?? 0) > 0) {
       list.push({
-        title: `${hours} hours logged`,
-        description: `Based on time logs in the selected period`,
-        icon: Clock,
-        color: 'bg-slate-100 text-slate-700',
+        title: `Approval rate ${data.approvals?.approvalRatePct ?? 0}%`,
+        description: `${data.approvals?.approved ?? 0} approved • ${data.approvals?.pending ?? 0} pending`,
+        icon: TrendingUp,
+        tone: data.approvals!.approvalRatePct >= 80 ? 'green' : 'amber',
       });
     }
 
     list.push({
-      title: `On-time completion: ${onTime}%`,
-      description: `Uses completedAt (backend) compared to due dates`,
-      icon: TrendingUp,
-      color: onTime >= 90 ? 'bg-green-100 text-green-700' : 'bg-yellow-400 text-black',
-    });
-
-    list.push({
-      title: `Task coverage`,
-      description: `${completed} completed out of ${total} tasks in the selected period`,
-      icon: Award,
-      color: 'bg-purple-100 text-purple-700',
+      title: `On-time completion ${data.onTimeCompletionPct}%`,
+      description: 'Computed from completedAt versus dueDate in the live task feed',
+      icon: Clock,
+      tone: data.onTimeCompletionPct >= 80 ? 'green' : 'amber',
     });
 
     return list.slice(0, 4);
@@ -294,294 +377,229 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
 
   if (!canAccess(userRole)) {
     return (
-      <div className="p-6 bg-white border border-gray-200 rounded">
-        <h1 className="text-xl font-semibold text-gray-900 mb-2">Access denied</h1>
-        <p className="text-gray-600">You do not have permission to view performance.</p>
+      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <h1 className="mb-2 text-xl font-semibold text-gray-900 dark:text-gray-100">Access denied</h1>
+        <p className="text-gray-600 dark:text-gray-300">You do not have permission to view performance.</p>
       </div>
     );
   }
 
   return (
-    <div>
-      {/* Page Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-1">My Performance</h1>
-        <p className="text-gray-600">
-          {loading
-            ? 'Loading…'
-            : data
-              ? `Period: ${data.range.from} → ${data.range.to}`
-              : 'Track your productivity and achievements'}
-        </p>
-      </div>
-
-      {error && (
-        <div className="mb-6 p-4 border border-red-200 bg-red-50 text-red-700 rounded">
-          {error}
-        </div>
-      )}
-
-      {/* Metrics Grid (match AssociateDashboard style) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-
-          return (
-            <div key={stat.label} className="bg-white border border-gray-200 rounded-lg p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div
-                  className={`w-10 h-10 ${
-                    stat.color === 'red' ? 'bg-red-100' : 'bg-gray-100'
-                  } rounded-lg flex items-center justify-center`}
-                >
-                  <Icon
-                    className={`w-5 h-5 ${
-                      stat.color === 'red' ? 'text-red-600' : 'text-gray-700'
-                    }`}
-                  />
-                </div>
-
-                <div className="flex items-center text-xs text-gray-500">
-                  <TrendingUp className="w-3 h-3 mr-1" />
-                  {loading ? '…' : stat.trendText || '—'}
-                </div>
-              </div>
-
-              <div className="text-2xl font-semibold text-gray-900 mb-1">
-                {loading ? '…' : stat.value}
-              </div>
-              <div className="text-sm text-gray-600">{stat.label}</div>
-
-              {stat.target ? (
-                <div className="mt-1 text-xs text-gray-500">Target: {stat.target}</div>
-              ) : null}
-
-              {stat.helper ? <div className="mt-2 text-xs text-gray-500">{stat.helper}</div> : null}
-
-              {!loading && stat.label === 'Overdue Tasks' && workflowSignals.overdueCount > 0 ? (
-                <div className="mt-2 text-xs text-red-600">
-                  {workflowSignals.overdueCount} overdue (attention)
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Body layout (same modules, rearranged as clean panels) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Monthly Trend */}
-        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
-          <h2 className="font-semibold text-gray-900 mb-4">Monthly Performance Trend</h2>
-
-          {loading ? (
-            <div className="text-gray-500">Loading…</div>
-          ) : monthlyData.length === 0 ? (
-            <div className="text-gray-500">No data available.</div>
-          ) : (
-            <div className="space-y-4">
-              {monthlyData.map((m) => {
-                const maxTasks = Math.max(10, ...monthlyData.map((x) => x.tasks));
-                const taskPercentage = maxTasks > 0 ? (m.tasks / maxTasks) * 100 : 0;
-
-                return (
-                  <div key={m.month}>
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="font-medium text-gray-900">{m.month}</span>
-                      <div className="flex gap-4 text-xs text-gray-600">
-                        <span>{m.tasks} tasks</span>
-                        <span>{m.hours}h</span>
-                      </div>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-gray-700" style={{ width: `${taskPercentage}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Workflow Signals (summary + due soon) */}
-        <div className="bg-white border border-gray-200 rounded-lg">
-          <div className="px-5 py-4 border-b border-gray-200">
-            <h2 className="font-semibold text-gray-900">Workflow Signals</h2>
-          </div>
-
-          {loading ? (
-            <div className="px-5 py-10 text-gray-500">Loading…</div>
-          ) : (
-            <div className="p-5 space-y-5">
-              <div className="flex flex-wrap gap-2">
-                <span className="px-2.5 py-1 text-xs rounded bg-gray-100 text-gray-700">
-                  Completed this month: <b>{workflowSignals.completedThisMonthCount}</b>
-                </span>
-                <span className="px-2.5 py-1 text-xs rounded bg-yellow-400 text-black">
-                  Pending approvals: <b>{workflowSignals.pendingApprovalsCount}</b>
-                </span>
-                <span
-                  className={`px-2.5 py-1 text-xs rounded ${
-                    workflowSignals.overdueCount ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                  }`}
-                >
-                  Overdue tasks: <b>{workflowSignals.overdueCount}</b>
-                </span>
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <CalendarIcon className="w-4 h-4 text-gray-500" />
-                  <h3 className="text-sm font-medium text-gray-900">Due Soon</h3>
-                </div>
-
-                {workflowSignals.dueSoon.length === 0 ? (
-                  <div className="text-sm text-gray-500">No upcoming deadlines.</div>
-                ) : (
-                  <div className="divide-y divide-gray-200 border border-gray-200 rounded-lg">
-                    {workflowSignals.dueSoon.map((t) => (
-                      <div key={String(t._id)} className="p-3 flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm text-gray-900 font-medium">{t.title}</div>
-                          <div className="text-xs text-gray-500">
-                            Due {t.dueDate} • {t.priority} • {t.status}
-                          </div>
-                        </div>
-                        <Link
-                          to={`/tasks/${t._id}`}
-                          className="text-xs text-gray-700 hover:text-gray-900 underline"
-                        >
-                          View
-                        </Link>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="px-5 py-3 border-t border-gray-200">
-            <Link to="/tasks" className="text-sm text-gray-600 hover:text-gray-900">
-              View all tasks →
-            </Link>
-          </div>
-        </div>
-
-        {/* Tasks Breakdown */}
-        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-6">
-          <h2 className="font-semibold text-gray-900 mb-4">Tasks Breakdown</h2>
-
-          {loading ? (
-            <div className="text-gray-500">Loading…</div>
-          ) : tasksBreakdown.length === 0 ? (
-            <div className="text-gray-500">No data available.</div>
-          ) : (
-            <div className="space-y-4">
-              {tasksBreakdown.map((item) => {
-                const completionRate = item.total > 0 ? (item.completed / item.total) * 100 : 0;
-
-                return (
-                  <div key={item.label}>
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="font-medium text-gray-900">{item.label}</span>
-                      <div className="flex gap-3 text-xs text-gray-600">
-                        <span>
-                          {item.completed}/{item.total}
-                        </span>
-                        <span>{item.hours}h</span>
-                      </div>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${
-                          completionRate === 100 ? 'bg-green-600' : 'bg-blue-600'
-                        }`}
-                        style={{ width: `${completionRate}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Achievements */}
-        <div className="bg-white border border-gray-200 rounded-lg p-6">
-          <h2 className="font-semibold text-gray-900 mb-4">Recent Achievements</h2>
-
-          {loading ? (
-            <div className="text-gray-500">Loading…</div>
-          ) : achievements.length === 0 ? (
-            <div className="text-gray-500">No achievements yet.</div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4">
-              {achievements.map((a) => {
-                const Icon = a.icon;
-                return (
-                  <div key={a.title} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-start gap-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${a.color}`}>
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{a.title}</p>
-                        <p className="text-xs text-gray-500 mt-1">{a.description}</p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="mt-6 pt-4 border-t border-gray-200">
-            <p className="text-xs text-gray-500">
-              Achievements are generated from rating, task completion, approvals and time logs (when available).
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Junior Performance</div>
+            <h1 className="mt-1 text-2xl font-semibold text-gray-900 dark:text-gray-100">My Performance</h1>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+              {loading
+                ? 'Loading…'
+                : data
+                  ? `Period: ${data.range.from} → ${data.range.to}`
+                  : 'Track your productivity, quality, and deadlines from live data'}
             </p>
           </div>
+          <div className="rounded-full bg-gray-900 px-4 py-2 text-xs font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
+            Live task feed • progress visible in both themes
+          </div>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-200">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {metrics.map((metric) => (
+          <MetricTile key={metric.label} metric={metric} loading={loading} />
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <div className="xl:col-span-2">
+          <PageCard title="Monthly Performance Trend" subtitle="Completion, on-time work, and task volume from live records">
+            {loading ? (
+              <div className="text-sm text-gray-500 dark:text-gray-400">Loading…</div>
+            ) : monthlyData.length === 0 ? (
+              <div className="text-sm text-gray-500 dark:text-gray-400">No monthly data available yet.</div>
+            ) : (
+              <div className="space-y-4">
+                {monthlyData.map((month) => (
+                  <div key={month.month} className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/50">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{month.month}</div>
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          {month.tasksCompleted}/{month.tasksTotal} completed • {month.onTime} on time • {month.late} late
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{month.completionRate}% complete</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">{month.onTimeRate}% on time</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      <div>
+                        <div className="mb-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                          <span>Completion</span>
+                          <span>{month.completionRate}%</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                          <div className="h-2 rounded-full bg-gray-700 dark:bg-gray-400" style={{ width: `${Math.min(100, month.completionRate)}%` }} />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mb-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                          <span>On-time</span>
+                          <span>{month.onTimeRate}%</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                          <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${Math.min(100, month.onTimeRate)}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </PageCard>
         </div>
 
-        {/* Overdue Attention (kept module, separated like a panel) */}
-        <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg">
-          <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-600" />
-              <h2 className="font-semibold text-gray-900">Overdue (Attention)</h2>
+        <PageCard title="Workflow Signals" subtitle="What needs attention right now">
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                ['Completed this month', workflowSignals.completedThisMonthCount, 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'],
+                ['Pending approvals', workflowSignals.pendingApprovals.length, 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'],
+                ['Overdue tasks', workflowSignals.overdue.length, 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'],
+                ['Due soon', workflowSignals.dueSoon.length, 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'],
+              ].map(([label, value, classes]) => (
+                <div key={String(label)} className={`rounded-2xl px-3 py-3 text-sm ${classes}`}>
+                  <div className="font-semibold">{value}</div>
+                  <div className="text-xs">{label}</div>
+                </div>
+              ))}
             </div>
-            <span className="text-xs text-gray-500">
-              {loading ? '…' : `${workflowSignals.overdueTop.length} shown`}
-            </span>
-          </div>
 
-          {loading ? (
-            <div className="px-5 py-10 text-gray-500">Loading…</div>
-          ) : workflowSignals.overdueTop.length === 0 ? (
-            <div className="px-5 py-10 text-gray-500">No overdue tasks.</div>
+            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/50">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Current completion</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Completed tasks divided by total tasks</div>
+                </div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{workflowSignals.completionRate}%</div>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                <div className="h-2 rounded-full bg-gray-700 dark:bg-gray-400" style={{ width: `${workflowSignals.completionRate}%` }} />
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center gap-2">
+                <CalendarIcon className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Due Soon</h3>
+              </div>
+              {workflowSignals.dueSoon.length === 0 ? (
+                <div className="text-sm text-gray-500 dark:text-gray-400">No upcoming deadlines.</div>
+              ) : (
+                <div className="space-y-2">
+                  {workflowSignals.dueSoon.map((task) => (
+                    <div key={String(task._id)} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{task.title}</div>
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Due {task.dueDate} • {task.priority} • {task.status}
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <div className={`rounded-full px-2.5 py-1 text-xs font-medium ${task.priority === 'High' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300' : task.priority === 'Medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
+                          {task.priority}
+                        </div>
+                        <Link to={`/tasks/${task._id}`} className="text-xs font-medium text-gray-700 underline hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100">
+                          Open
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </PageCard>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <PageCard title="Status Breakdown" subtitle="Progress by workflow status">
+          {statusBreakdown.length === 0 ? (
+            <div className="text-sm text-gray-500 dark:text-gray-400">No status breakdown yet.</div>
           ) : (
-            <div className="divide-y divide-gray-200">
-              {workflowSignals.overdueTop.map((t) => (
-                <div key={String(t._id)} className="px-5 py-4 hover:bg-gray-50 flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm text-gray-900 font-medium">{t.title}</div>
-                    <div className="text-xs text-red-700">Overdue since {t.dueDate} • {t.priority}</div>
+            <div className="space-y-4">
+              {statusBreakdown.map((item) => (
+                <div key={item.label}>
+                  <div className="mb-1 flex items-center justify-between text-sm">
+                    <span className="font-medium text-gray-900 dark:text-gray-100">{item.label}</span>
+                    <span className="text-gray-600 dark:text-gray-400">
+                      {item.completed}/{item.total} • {item.percent}%
+                    </span>
                   </div>
-                  <Link to={`/tasks/${t._id}`} className="text-xs text-gray-700 hover:text-gray-900 underline">
-                    View
-                  </Link>
+                  <div className="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                    <div className="h-2 rounded-full bg-blue-600" style={{ width: `${item.percent}%` }} />
+                  </div>
                 </div>
               ))}
             </div>
           )}
-
-          <div className="px-5 py-3 border-t border-gray-200">
-            <Link to="/tasks" className="text-sm text-gray-600 hover:text-gray-900">
-              Go to task board →
-            </Link>
-          </div>
-        </div>
+        </PageCard>
       </div>
+
+      <PageCard title="Recent Achievements" subtitle="Signals generated from rating, completion, approvals, and live task data">
+        {achievements.length === 0 ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">No achievements yet.</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {achievements.map((achievement) => {
+              const Icon = achievement.icon;
+              const tone = toneClasses[achievement.tone];
+              return (
+                <div key={achievement.title} className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/50">
+                  <div className="flex items-start gap-3">
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${tone.icon}`}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{achievement.title}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{achievement.description}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </PageCard>
+
+      <PageCard title="Overdue Attention" subtitle="Tasks that need immediate follow-up">
+        {workflowSignals.overdue.length === 0 ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">No overdue tasks.</div>
+        ) : (
+          <div className="space-y-3">
+            {workflowSignals.overdue.slice(0, 8).map((task) => (
+              <div key={String(task._id)} className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+                <div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{task.title}</div>
+                  <div className="mt-1 text-xs text-rose-700 dark:text-rose-300">
+                    Overdue since {task.dueDate} • {task.priority}
+                  </div>
+                </div>
+                <Link to={`/tasks/${task._id}`} className="text-xs font-medium text-gray-700 underline hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100">
+                  View
+                </Link>
+              </div>
+            ))}
+          </div>
+        )}
+      </PageCard>
     </div>
   );
 }

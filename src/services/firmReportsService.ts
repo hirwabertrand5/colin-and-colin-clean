@@ -35,7 +35,6 @@ export type FirmReportResponse = {
     firmOperatingExpenses?: number;
     netProfit?: number;
     netProfitMargin?: number;
-    billableHours: number;
     clientRelatedExpenses?: number;
     taxDataAvailable: boolean;
     taxMessage: string;
@@ -83,7 +82,6 @@ export type FirmReportResponse = {
     assistantTasksCompleted?: number;
     prospectsCreated?: number;
     reportsGenerated?: number;
-    billableHours: number;
     invoicePaymentsReceived?: number;
     earnedFees?: number;
     grossFeesHandled?: number;
