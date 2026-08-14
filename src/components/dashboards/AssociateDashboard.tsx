@@ -191,13 +191,6 @@ const addDaysISO = (baseISO: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-const startOfMonthISO = () => {
-  const d = new Date();
-  d.setDate(1);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-};
-
 const safeNum = (value: unknown) => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   const parsed = Number(String(value || '').replace(/[^\d.-]/g, ''));
@@ -326,7 +319,6 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   usePageTitle(profile.title);
 
   const today = useMemo(() => isoToday(), []);
-  const monthStart = useMemo(() => startOfMonthISO(), []);
   const next30Days = useMemo(() => addDaysISO(today, 30), [today]);
   const meName = useMemo(() => normalizeName(me?.name), [me?.name]);
 
@@ -403,21 +395,27 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       { excellent: 0, good: 0, warning: 0, poor: 0, late: 0 } as Record<string, number>
     );
     const scoredQuality = tasks.filter((task) => Number.isFinite(Number(task.qualityScore)));
-    const qualityAverage = scoredQuality.length
-      ? Math.round(scoredQuality.reduce((sum, task) => sum + safeNum(task.qualityScore), 0) / scoredQuality.length)
-      : null;
-    const timelinessAverage = tasks.length
-      ? Math.round(tasks.reduce((sum, task) => sum + getTimelinessScore(task, today), 0) / tasks.length)
-      : 0;
-    const onTime = completed.filter((task) => {
-      const completedDate = String(task.completedAt || task.updatedAt || '').slice(0, 10);
-      return completedDate && completedDate <= task.dueDate;
-    }).length;
-    const onTimeRate = completed.length ? Math.round((onTime / completed.length) * 100) : performance?.onTimeCompletionPct ?? 0;
-    const completionRate = tasks.length ? Math.round((completed.length / tasks.length) * 100) : 0;
+    const qualityAverage =
+      performance?.averageQualityScore != null
+        ? Math.round(performance.averageQualityScore)
+        : scoredQuality.length
+          ? Math.round(scoredQuality.reduce((sum, task) => sum + safeNum(task.qualityScore), 0) / scoredQuality.length)
+          : null;
+    const timelinessAverage =
+      performance?.averageTimelinessScore != null
+        ? Math.round(performance.averageTimelinessScore)
+        : tasks.length
+          ? Math.round(tasks.reduce((sum, task) => sum + getTimelinessScore(task, today), 0) / tasks.length)
+          : 0;
+    const onTimeRate = performance?.onTimeCompletionPct ?? 0;
+    const completionRate = performance?.tasksTotal
+      ? Math.round((performance.tasksCompleted / performance.tasksTotal) * 100)
+      : tasks.length
+        ? Math.round((completed.length / tasks.length) * 100)
+        : 0;
 
     return { open, completed, dueSoon, overdue, awaitingReview, awaitingExternal, bandCounts, qualityAverage, timelinessAverage, onTimeRate, completionRate };
-  }, [performance?.onTimeCompletionPct, tasks, today]);
+  }, [performance?.averageQualityScore, performance?.averageTimelinessScore, performance?.onTimeCompletionPct, performance?.tasksCompleted, performance?.tasksTotal, tasks, today]);
 
   const matterRows = useMemo<MatterRow[]>(() => {
     return authorisedCases
@@ -506,23 +504,23 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   );
 
   const headlineStats = useMemo<StatCard[]>(() => {
-    const activeMatters = matterRows.filter((matter) => String(matter.status || '').toLowerCase() !== 'closed').length;
+    const activeMatters = authorisedCases.filter((matter) => String(matter.status || '').toLowerCase() !== 'closed').length;
     const qualityFactor = (taskSignals.qualityAverage ?? 0) / 100;
     const feeEarnedSignal = Math.round(financials.earnedValue * (profile.tpa / 100) * (taskSignals.timelinessAverage / 100) * qualityFactor);
     const stats: StatCard[] = [
-      { label: profile.financialScope === 'client' ? 'Active Clients / Matters' : 'Active Matters', value: String(activeMatters), helper: `${matterRows.length} authorised records`, icon: Briefcase, tone: 'blue', href: '/matters' },
+      { label: profile.financialScope === 'client' ? 'Active Clients / Matters' : 'Active Matters', value: String(activeMatters), helper: 'Uses linked matters from your task set', icon: Briefcase, tone: 'blue', href: '/matters' },
       { label: 'Tasks Outstanding', value: String(taskSignals.open.length), helper: `${taskSignals.dueSoon.length} due in 7 days`, icon: CheckSquare, tone: taskSignals.open.length ? 'amber' : 'green', href: '/tasks' },
       { label: 'Overdue Tasks', value: String(taskSignals.overdue.length), helper: taskSignals.overdue.length ? 'Action required' : 'No overdue work', icon: AlertTriangle, tone: taskSignals.overdue.length ? 'red' : 'green', href: '/tasks' },
-      { label: 'On-Time Completion', value: `${taskSignals.onTimeRate}%`, helper: 'Completed on or before deadline', icon: Clock, tone: taskSignals.onTimeRate >= 80 ? 'green' : 'amber', href: '/performance' },
-      { label: 'Quality Score', value: taskSignals.qualityAverage == null ? 'Pending' : `${taskSignals.qualityAverage}%`, helper: 'Approved task reviews', icon: Award, tone: 'purple', href: '/performance' },
-      { label: 'Tasks Completed', value: String(taskSignals.completed.length), helper: `${taskSignals.completionRate}% completion rate`, icon: TrendingUp, tone: 'green', href: '/performance' },
+      { label: 'On-Time Completion', value: `${taskSignals.onTimeRate}%`, helper: 'Matches productivity report', icon: Clock, tone: taskSignals.onTimeRate >= 80 ? 'green' : 'amber', href: '/performance' },
+      { label: 'Quality Score', value: taskSignals.qualityAverage == null ? 'Pending' : `${taskSignals.qualityAverage}%`, helper: 'Matches productivity report', icon: Award, tone: 'purple', href: '/performance' },
+      { label: 'Tasks Completed', value: String(performance?.tasksCompleted ?? taskSignals.completed.length), helper: `${taskSignals.completionRate}% completion rate`, icon: TrendingUp, tone: 'green', href: '/performance' },
       profile.financialScope === 'own'
         ? { label: 'TPA', value: `${profile.tpa}%`, helper: 'Role remuneration configuration', icon: DollarSign, tone: 'green' }
         : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Authorised matter values', icon: DollarSign, tone: 'green' },
       { label: 'Fee Earned Signal', value: feeEarnedSignal > 0 ? formatRwf(feeEarnedSignal) : 'Pending', helper: `Uses ${profile.tpa}% TPA × timeliness × quality`, icon: DollarSign, tone: feeEarnedSignal > 0 ? 'green' : 'amber' },
     ];
     return stats;
-  }, [financials, matterRows, profile, taskSignals]);
+  }, [authorisedCases, financials, profile, taskSignals]);
 
   return (
     <div>
@@ -551,13 +549,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             <SectionHeader title={profile.labels.overview} description="Assigned work, timeliness bands, approval/review queues, and urgent actions." />
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               {[
-                ['🔵 Excellent', taskSignals.bandCounts.excellent, 'bg-blue-50 text-blue-700'],
-                ['🟢 Good', taskSignals.bandCounts.good, 'bg-green-50 text-green-700'],
-                ['🟡 Warning', taskSignals.bandCounts.warning, 'bg-yellow-50 text-yellow-700'],
-                ['🔴 Poor', taskSignals.bandCounts.poor, 'bg-red-50 text-red-700'],
-                ['Late', taskSignals.bandCounts.late, 'bg-red-100 text-red-800'],
+                ['🔵 Excellent', taskSignals.bandCounts.excellent, 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200'],
+                ['🟢 Good', taskSignals.bandCounts.good, 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'],
+                ['🟡 Warning', taskSignals.bandCounts.warning, 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'],
+                ['🔴 Poor', taskSignals.bandCounts.poor, 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'],
+                ['Late', taskSignals.bandCounts.late, 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200'],
               ].map(([label, value, classes]) => (
-                <div key={String(label)} className={`rounded-lg px-3 py-2 text-sm ${classes}`}>
+                <div key={String(label)} className={`rounded-lg border px-3 py-2 text-sm ${classes}`}>
                   <div className="font-semibold">{loading ? '…' : value}</div>
                   <div className="text-xs">{label}</div>
                 </div>

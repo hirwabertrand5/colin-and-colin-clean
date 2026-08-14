@@ -51,13 +51,6 @@ const addDaysISO = (baseISO: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-const startOfMonthISO = () => {
-  const d = new Date();
-  d.setDate(1);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
-};
-
 const ratingLabel = (v?: number) => {
   switch (v) {
     case 5:
@@ -162,8 +155,6 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
   const [error, setError] = useState('');
 
   const today = useMemo(() => isoToday(), []);
-  const monthStart = useMemo(() => startOfMonthISO(), []);
-
   usePageTitle('My Performance');
 
   useEffect(() => {
@@ -209,16 +200,6 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
     const awaitingReview = tasks.filter(
       (task) => task.workflowStage === 'Awaiting Review' || task.approvalStatus === 'Pending'
     );
-    const completed = tasks.filter((task) => isCompleted(task));
-    const completedThisMonth = completed.filter((task) => {
-      const completedAt = String(task.completedAt || task.updatedAt || '').slice(0, 10);
-      return completedAt && completedAt >= monthStart;
-    });
-    const onTimeCompleted = completed.filter((task) => {
-      const completedAt = String(task.completedAt || task.updatedAt || '').slice(0, 10);
-      return completedAt && task.dueDate && completedAt <= task.dueDate;
-    }).length;
-
     return {
       totalTasks: tasks.length,
       openTasks: openTasks.length,
@@ -226,11 +207,11 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
       dueSoon,
       pendingApprovals,
       awaitingReview,
-      completedThisMonthCount: completedThisMonth.length,
-      completionRate: tasks.length ? Math.round((completed.length / tasks.length) * 100) : 0,
-      onTimeRate: completed.length ? Math.round((onTimeCompleted / completed.length) * 100) : data?.onTimeCompletionPct ?? 0,
+      completedThisMonthCount: data?.tasksCompleted ?? 0,
+      completionRate: data?.tasksTotal ? Math.round(((data.tasksCompleted ?? 0) / data.tasksTotal) * 100) : 0,
+      onTimeRate: data?.onTimeCompletionPct ?? 0,
     };
-  }, [data?.onTimeCompletionPct, monthStart, tasks, today]);
+  }, [data?.onTimeCompletionPct, data?.tasksCompleted, data?.tasksTotal, tasks, today]);
 
   const metrics = useMemo<MetricCard[]>(() => {
     const rating = data?.rating?.value;
@@ -238,8 +219,8 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
     const tasksCompleted = data?.tasksCompleted ?? 0;
     const tasksTotal = data?.tasksTotal ?? 0;
     const onTime = data?.onTimeCompletionPct ?? 0;
-    const qualityScore = data?.rating?.qualityScore ?? 0;
-    const reliabilityScore = data?.rating?.reliabilityScore ?? 0;
+    const qualityScore = data?.averageQualityScore ?? data?.rating?.qualityScore ?? null;
+    const timelinessScore = data?.averageTimelinessScore ?? data?.rating?.reliabilityScore ?? null;
 
     return [
       {
@@ -275,19 +256,19 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
         pill: `${approvals?.pending ?? 0} pending`,
       },
       {
-        label: 'Quality Score',
-        value: `${qualityScore}%`,
-        helper: 'From approved quality reviews',
+        label: 'Average Quality Score',
+        value: qualityScore == null ? '—' : `${qualityScore}%`,
+        helper: 'Matches the productivity report',
         icon: Sparkles,
-        tone: qualityScore >= 80 ? 'green' : qualityScore >= 60 ? 'amber' : 'red',
-        pill: `${qualityScore}%`,
+        tone: (qualityScore ?? 0) >= 80 ? 'green' : (qualityScore ?? 0) >= 60 ? 'amber' : 'red',
+        pill: `${data?.pendingQualityScores ?? 0} pending`,
       },
       {
-        label: 'Reliability Score',
-        value: `${reliabilityScore}%`,
-        helper: 'Blends timeliness and consistency',
+        label: 'Average Timeliness Score',
+        value: timelinessScore == null ? '—' : `${timelinessScore}%`,
+        helper: 'Matches the productivity report',
         icon: Users,
-        tone: reliabilityScore >= 80 ? 'green' : reliabilityScore >= 60 ? 'amber' : 'red',
+        tone: (timelinessScore ?? 0) >= 80 ? 'green' : (timelinessScore ?? 0) >= 60 ? 'amber' : 'red',
         pill: `${workflowSignals.overdue.length} overdue`,
       },
       {
@@ -341,7 +322,7 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
     if (data.rating?.value) {
       list.push({
         title: `Rating ${data.rating.value}/5`,
-        description: `${ratingLabel(data.rating.value)} • Productivity ${data.rating.productivityScore}% • Quality ${data.rating.qualityScore}%`,
+        description: `${ratingLabel(data.rating.value)} • Productivity ${data.rating.productivityScore}% • Quality ${data.averageQualityScore ?? data.rating.qualityScore}%`,
         icon: Award,
         tone: data.rating.value >= 4 ? 'green' : data.rating.value >= 3 ? 'amber' : 'red',
       });

@@ -8,6 +8,9 @@ export type PerformanceSummary = {
   tasksCompleted: number;
   tasksTotal: number;
   onTimeCompletionPct: number;
+  averageQualityScore?: number | null;
+  averageTimelinessScore?: number | null;
+  pendingQualityScores?: number;
   deadlineBreakdown?: {
     early: number;
     onTime: number;

@@ -90,6 +90,9 @@ const selectedPathLabel = (c: any) => {
     : String(c?.matterType || c?.workflow || c?.caseType || 'Unclassified');
 };
 
+const normalizeName = (value: unknown) => String(value || '').trim().toLowerCase();
+const isOpenCase = (c: any) => String(c?.status || '').trim().toLowerCase() !== 'closed';
+
 type PerformanceZone = 'excellent' | 'good' | 'delayed' | 'risk';
 
 const roleEarningShare = (role?: string) => {
@@ -274,22 +277,22 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       ? await User.findById(teamMemberId).select('name role').lean()
       : null;
     const selectedMemberName = selectedMember ? String(selectedMember.name || '').trim() : null;
+    const selectedMemberNameNormalized = selectedMemberName ? normalizeName(selectedMemberName) : null;
 
     // -----------------------------
     // KPIs
     // -----------------------------
-    const activeCases = selectedMemberName
-      ? await Case.countDocuments({ status: { $ne: 'Closed' }, assignedTo: selectedMemberName })
-      : await Case.countDocuments({ status: { $ne: 'Closed' } });
+    let activeCases = 0;
 
     const invoicesByInvoiceDateQuery = { date: { $gte: fromISO, $lte: toISO } };
     const invoicesByPaymentDateQuery = { status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } };
     const tasksByDateQuery = { status: 'Completed', completedAt: { $gte: fromDate, $lte: toDate } };
 
-    const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
+    const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, allTaskLinks, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
       Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Task.find(tasksByDateQuery).select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt checklist qualityScore').lean(),
+      Task.find().select('caseId assignee supervisor').lean(),
       User.find({ isActive: { $ne: false } }).select('name role').lean(),
       Prospect.aggregate([
         { $match: { createdAt: { $gte: fromDate, $lte: toDate }, createdBy: { $exists: true } } },
@@ -305,8 +308,32 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .select('_id assignedTo')
       .lean();
 
+    const allCases = await Case.find().select('_id assignedTo status').lean();
+    const caseById = new Map((allCases as any[]).map((c) => [String(c._id), c]));
+
+    const linkedCaseIdsByName = new Map<string, Set<string>>();
+    for (const c of allCases as any[]) {
+      const name = normalizeName(c.assignedTo);
+      if (!name) continue;
+      const current = linkedCaseIdsByName.get(name) || new Set<string>();
+      current.add(String(c._id));
+      linkedCaseIdsByName.set(name, current);
+    }
+    for (const task of allTaskLinks as any[]) {
+      const caseId = String(task.caseId || '');
+      const linkedNames = [task.assignee, task.supervisor].map(normalizeName).filter(Boolean);
+      if (!caseId || !linkedNames.length) continue;
+      for (const name of linkedNames) {
+        const current = linkedCaseIdsByName.get(name) || new Set<string>();
+        current.add(caseId);
+        linkedCaseIdsByName.set(name, current);
+      }
+    }
+
     const financialMatters = await Case.find(
-      selectedMemberName ? { assignedTo: selectedMemberName } : {}
+      selectedMemberNameNormalized
+        ? { _id: { $in: Array.from(linkedCaseIdsByName.get(selectedMemberNameNormalized) || []) } }
+        : {}
     )
       .select('_id assignedTo budget updatedAt workflowProgress billingSettings')
       .lean();
@@ -361,21 +388,38 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const taxMessage = 'Tax data unavailable - source not configured';
 
     const roleByName = new Map(
-      (users as any[]).map((u) => [String(u.name || '').trim(), String(u.role || '')])
+      (users as any[]).map((u) => [normalizeName(u.name), String(u.role || '')])
     );
 
     // -----------------------------
     // Team table (best-effort based on name strings)
     // -----------------------------
-    const activeByName = new Map<string, number>();
-    const allCases = await Case.find().select('assignedTo status').lean();
+    const activeCaseIdsByName = new Map<string, Set<string>>();
+    const allOpenCaseIds = new Set<string>();
     for (const c of allCases as any[]) {
-      const isActive = String(c.status || '').toLowerCase() !== 'closed';
-      if (!isActive) continue;
-      const name = String(c.assignedTo || '—').trim();
-      if (selectedMemberName && name !== selectedMemberName) continue;
-      activeByName.set(name, (activeByName.get(name) || 0) + 1);
+      if (!isOpenCase(c)) continue;
+      allOpenCaseIds.add(String(c._id));
+      const name = normalizeName(c.assignedTo);
+      if (!name) continue;
+      const current = activeCaseIdsByName.get(name) || new Set<string>();
+      current.add(String(c._id));
+      activeCaseIdsByName.set(name, current);
     }
+    for (const task of allTaskLinks as any[]) {
+      const caseId = String(task.caseId || '');
+      const caseDoc = caseById.get(caseId);
+      if (!caseId || !caseDoc || !isOpenCase(caseDoc)) continue;
+      const linkedNames = [task.assignee, task.supervisor].map(normalizeName).filter(Boolean);
+      if (!linkedNames.length) continue;
+      for (const name of linkedNames) {
+        const current = activeCaseIdsByName.get(name) || new Set<string>();
+        current.add(caseId);
+        activeCaseIdsByName.set(name, current);
+      }
+    }
+    activeCases = selectedMemberNameNormalized
+      ? (activeCaseIdsByName.get(selectedMemberNameNormalized)?.size || 0)
+      : allOpenCaseIds.size;
 
     const completedTasksByName = new Map<string, number>();
     const earlyByName = new Map<string, number>();
@@ -399,7 +443,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const getTaskProductivityFinancials = (task: any) => {
       const staffName = String(task.assignee || '—').trim();
-      const role = String(roleByName.get(staffName) || '').trim();
+      const role = String(roleByName.get(normalizeName(staffName)) || '').trim();
       const tpaPercent = getTaskParticipationAllocation(role);
       const matter = taskCaseMap.get(String(task.caseId || ''));
       const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
@@ -425,8 +469,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     };
 
     for (const t of tasksCompleted as any[]) {
-      const name = String(t.assignee || '—').trim();
-      if (selectedMemberName && name !== selectedMemberName) continue;
+      const name = normalizeName(t.assignee);
+      if (selectedMemberNameNormalized && name !== selectedMemberNameNormalized) continue;
       completedTasksByName.set(name, (completedTasksByName.get(name) || 0) + 1);
       const due = new Date(`${t.dueDate}T23:59:59.999`);
       const completed = t.completedAt ? new Date(t.completedAt) : undefined;
@@ -458,7 +502,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const overdueTasks = await Task.find(overdueFilter).select('assignee').lean();
     const overdueByName = new Map<string, number>();
     for (const t of overdueTasks as any[]) {
-      const name = String(t.assignee || '—').trim();
+      const name = normalizeName(t.assignee);
       overdueByName.set(name, (overdueByName.get(name) || 0) + 1);
     }
 
@@ -472,8 +516,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const team = (users as any[])
       .map((u) => {
         const name = String(u.name || '—').trim();
+        const normalizedName = normalizeName(name);
         const roleShare = roleEarningShare(u.role);
-        const taskCount = completedTasksByName.get(name) || 0;
+        const taskCount = completedTasksByName.get(normalizedName) || 0;
         const prospectCount = prospectCountsByUser.get(String(u._id)) || 0;
         const reportCount = reportCountsByUser.get(String(u._id)) || 0;
         const assistantProductivity = roleShare.label.includes('Executive Assistant')
@@ -486,32 +531,32 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           role: u.role,
           earningRoleLabel: roleShare.label,
           earningSharePercent: roleShare.percent,
-          activeCases: activeByName.get(name) || 0,
+          activeCases: activeCaseIdsByName.get(normalizedName)?.size || 0,
           tasksCompleted: assistantProductivity,
           assistantTasksCompleted: taskCount,
           prospectsCreated: prospectCount,
           reportsGenerated: reportCount,
-          invoicePaymentsReceived: Math.round((grossHandledByName.get(name) || 0) * 100) / 100,
-          earnedFees: Math.round((earnedByName.get(name) || 0) * 100) / 100,
-          revenueAttributed: Math.round((earnedByName.get(name) || 0) * 100) / 100,
-          grossFeesHandled: Math.round((grossHandledByName.get(name) || 0) * 100) / 100,
-          firmRetainedEarnings: Math.round((firmRetainedByName.get(name) || 0) * 100) / 100,
-          earlyTasks: earlyByName.get(name) || 0,
-          onTimeTasks: onTimeByName.get(name) || 0,
-          lateTasks: lateByName.get(name) || 0,
-          overdueTasks: overdueByName.get(name) || 0,
-          excellentTasks: excellentByName.get(name) || 0,
-          goodTasks: goodByName.get(name) || 0,
-          delayedTasks: delayedByName.get(name) || 0,
-          riskTasks: riskByName.get(name) || 0,
+          invoicePaymentsReceived: Math.round((grossHandledByName.get(normalizedName) || 0) * 100) / 100,
+          earnedFees: Math.round((earnedByName.get(normalizedName) || 0) * 100) / 100,
+          revenueAttributed: Math.round((earnedByName.get(normalizedName) || 0) * 100) / 100,
+          grossFeesHandled: Math.round((grossHandledByName.get(normalizedName) || 0) * 100) / 100,
+          firmRetainedEarnings: Math.round((firmRetainedByName.get(normalizedName) || 0) * 100) / 100,
+          earlyTasks: earlyByName.get(normalizedName) || 0,
+          onTimeTasks: onTimeByName.get(normalizedName) || 0,
+          lateTasks: lateByName.get(normalizedName) || 0,
+          overdueTasks: overdueByName.get(normalizedName) || 0,
+          excellentTasks: excellentByName.get(normalizedName) || 0,
+          goodTasks: goodByName.get(normalizedName) || 0,
+          delayedTasks: delayedByName.get(normalizedName) || 0,
+          riskTasks: riskByName.get(normalizedName) || 0,
           averageTimeUsedPercent: (() => {
-            const values = usedPercentByName.get(name) || [];
+            const values = usedPercentByName.get(normalizedName) || [];
             if (!values.length) return null;
             return Math.round((values.reduce((s, v) => s + v, 0) / values.length) * 10) / 10;
           })(),
         };
       })
-      .filter((member) => !selectedMemberName || member.name === selectedMemberName)
+      .filter((member) => !selectedMemberNameNormalized || normalizeName(member.name) === selectedMemberNameNormalized)
       .sort((a, b) => b.activeCases - a.activeCases);
 
     const caseAnalyticsByPath = new Map<string, { type: string; active: number; closed: number; durationTotal: number; durationCount: number }>();
@@ -557,7 +602,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     })).sort((a, b) => a.type.localeCompare(b.type));
 
     const productivityRows = (tasksCompleted as any[])
-      .filter((task) => !selectedMemberName || String(task.assignee || '').trim() === selectedMemberName)
+      .filter((task) => !selectedMemberNameNormalized || normalizeName(task.assignee) === selectedMemberNameNormalized)
       .map((task) => {
         const staffName = String(task.assignee || '—').trim();
         const financials = getTaskProductivityFinancials(task);
@@ -627,7 +672,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       monthsMap.set(key, item);
     }
     for (const inv of invoicesByPaymentDate as any[]) {
-      if (selectedMemberName && !selectedMatterIds.has(String(inv.caseId || ''))) continue;
+      if (selectedMemberNameNormalized && !selectedMatterIds.has(String(inv.caseId || ''))) continue;
       const dt = inv.updatedAt ? new Date(inv.updatedAt) : toDate;
       const key = monthKey(dt);
       const item = monthsMap.get(key) || { month: key, billed: 0, collected: 0 };
@@ -643,7 +688,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .lean();
 
     const clientRelatedExpenses = (expensesInRange as any[])
-      .filter((expense) => expense.chargeType === 'client' && (!selectedMemberName || selectedMatterIds.has(String(expense.caseId || ''))))
+      .filter((expense) => expense.chargeType === 'client' && (!selectedMemberNameNormalized || selectedMatterIds.has(String(expense.caseId || ''))))
       .reduce((sum, expense) => sum + getDirectMatterCost(expense), 0);
 
     const firmOperatingExpensesInRange = (expensesInRange as any[])
@@ -652,7 +697,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const expenseTypeMap = new Map<string, { type: string; amount: number; count: number; clientRelatedAmount: number }>();
     for (const expense of expensesInRange as any[]) {
-      const type = String(expense.category || expense.title || 'Unclassified').trim() || 'Unclassified';
+      const type = String(expense.itemDescription || expense.title || expense.category || 'Unclassified').trim() || 'Unclassified';
       const current = expenseTypeMap.get(type) || { type, amount: 0, count: 0, clientRelatedAmount: 0 };
       current.amount += Number(expense.amount) || 0;
       current.count += 1;
@@ -672,14 +717,14 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       ? {
         name: selectedMemberName,
         role: selectedMember?.role || 'Unknown',
-        tasksCompleted: completedTasksByName.get(selectedMemberName) || 0,
-        outstandingTasks: overdueByName.get(selectedMemberName) || 0,
-        revenueGenerated: Math.round((grossHandledByName.get(selectedMemberName) || 0) * 100) / 100,
+        tasksCompleted: completedTasksByName.get(selectedMemberNameNormalized || '') || 0,
+        outstandingTasks: overdueByName.get(selectedMemberNameNormalized || '') || 0,
+        revenueGenerated: Math.round((grossHandledByName.get(selectedMemberNameNormalized || '') || 0) * 100) / 100,
         paymentsReceived: Math.round(
           selectedMatters.reduce((sum, matter: any) => sum + (paidInvoicesByCaseId.get(String(matter._id)) || 0), 0) * 100
         ) / 100,
         outstandingBalance: outstanding,
-        feesEarned: Math.round((earnedByName.get(selectedMemberName) || 0) * 100) / 100,
+        feesEarned: Math.round((earnedByName.get(selectedMemberNameNormalized || '') || 0) * 100) / 100,
         qualityReviewStatus: qualityReviewMessage,
       }
       : null;

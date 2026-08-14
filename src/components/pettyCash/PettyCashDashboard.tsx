@@ -34,6 +34,23 @@ const BACKEND_URL = API_URL ? API_URL.replace(/\/api\/?$/, '') : '';
 
 const formatRwf = (n: number) => `RWF ${Math.round(n).toLocaleString('en-US')}`;
 
+const EXPENSE_DESCRIPTION_OPTIONS = [
+  'Office rent',
+  'Salaries',
+  'Electricity',
+  'Water',
+  'Internet',
+  'Software subscriptions',
+  'Professional indemnity insurance',
+  'Marketing',
+  'Bank/MOMO charges',
+  'Office stationery',
+  'Cleaning',
+  'Security',
+  'Vehicles',
+  'Depreciation',
+] as const;
+
 export default function PettyCashDashboard() {
   const [fund, setFund] = useState<PettyCashFund | null>(null);
   const [fundHistory, setFundHistory] = useState<PettyCashFund[]>([]);
@@ -54,20 +71,21 @@ export default function PettyCashDashboard() {
   const [selectedFundExpenses, setSelectedFundExpenses] = useState<PettyCashExpense[]>([]);
   const [cases, setCases] = useState<CaseData[]>([]);
   const [expenseForm, setExpenseForm] = useState({
-  date: '',
-  title: '',
-  itemDescription: '',
-  chargeType: 'internal' as const,
-  caseId: '',
-  amount: '',
-  amountRwf: '',
-  dateSpent: '',
-  spentByUserId: '',
-  isBillableToMatter: false,
-  matterId: '',
-  note: '',
-  receiptFiles: [] as File[],
-});
+    date: '',
+    expenseType: '',
+    title: '',
+    itemDescription: '',
+    chargeType: 'internal' as const,
+    caseId: '',
+    amount: '',
+    amountRwf: '',
+    dateSpent: '',
+    spentByUserId: '',
+    isBillableToMatter: false,
+    matterId: '',
+    note: '',
+    receiptFiles: [] as File[],
+  });
 
   // Add refund modal
   const [showAddRefund, setShowAddRefund] = useState(false);
@@ -200,9 +218,13 @@ export default function PettyCashDashboard() {
     try {
       setError('');
       const amount = Number(String(expenseForm.amount).replace(/[^\d.]/g, ''));
+      const description =
+        expenseForm.expenseType === 'others'
+          ? expenseForm.title.trim()
+          : expenseForm.expenseType.trim();
 
-      if (!expenseForm.date || !expenseForm.title.trim() || !Number.isFinite(amount) || amount <= 0) {
-        setError('Provide date, title and a valid amount.');
+      if (!expenseForm.date || !expenseForm.expenseType || !description || !Number.isFinite(amount) || amount <= 0) {
+        setError('Provide date, expense description and a valid amount.');
         return;
       }
       if (expenseForm.chargeType === 'client' && !expenseForm.caseId) {
@@ -213,11 +235,12 @@ export default function PettyCashDashboard() {
       const amountRwf = Number(String(expenseForm.amountRwf).replace(/[^\d.]/g, ''));
       await addExpenseToFund(fund._id, {
         date: expenseForm.date,
-        title: expenseForm.title.trim(),
+        title: description,
         amount,
         chargeType: expenseForm.chargeType,
         caseId: expenseForm.chargeType === 'client' ? expenseForm.caseId : undefined,
-        itemDescription: expenseForm.itemDescription.trim() || undefined,
+        category: expenseForm.expenseType,
+        itemDescription: description,
         amountRwf: Number.isFinite(amountRwf) ? amountRwf : undefined,
         dateSpent: expenseForm.dateSpent || undefined,
         spentByUserId: expenseForm.spentByUserId.trim() || undefined,
@@ -230,6 +253,7 @@ export default function PettyCashDashboard() {
       setShowAddExpense(false);
       setExpenseForm({
         date: '',
+        expenseType: '',
         title: '',
         itemDescription: '',
         chargeType: 'internal',
@@ -968,17 +992,46 @@ export default function PettyCashDashboard() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Item / Expense Description *</label>
-                <input
-                  type="text"
-                  value={expenseForm.itemDescription || expenseForm.title}
+                <select
+                  value={expenseForm.expenseType}
                   onChange={(e) => {
                     const nextValue = e.target.value;
-                    setExpenseForm((p) => ({ ...p, itemDescription: nextValue, title: p.title || nextValue }));
+                    setExpenseForm((p) => ({
+                      ...p,
+                      expenseType: nextValue,
+                      title: nextValue === 'others' ? '' : nextValue,
+                      itemDescription: nextValue === 'others' ? '' : nextValue,
+                    }));
                   }}
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                  placeholder="Taxi fare to client meeting"
-                />
+                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
+                >
+                  <option value="" disabled>
+                    Select an expense type
+                  </option>
+                  {EXPENSE_DESCRIPTION_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                  <option value="others">Others</option>
+                </select>
+                {expenseForm.expenseType === 'others' ? (
+                  <input
+                    type="text"
+                    value={expenseForm.title}
+                    onChange={(e) =>
+                      setExpenseForm((p) => ({
+                        ...p,
+                        title: e.target.value,
+                        itemDescription: e.target.value,
+                      }))
+                    }
+                    required
+                    className="mt-3 w-full rounded border border-gray-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    placeholder="Type the expense name"
+                  />
+                ) : null}
               </div>
 
               <div>

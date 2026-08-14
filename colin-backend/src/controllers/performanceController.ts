@@ -12,7 +12,7 @@ const parseRange = (q: any) => {
     String(q?.from || '').slice(0, 10) ||
     (() => {
       const d = new Date();
-      d.setMonth(d.getMonth() - 5);
+      d.setMonth(d.getMonth() - 1);
       return d.toISOString().slice(0, 10);
     })();
 
@@ -29,6 +29,27 @@ const priorityWeight = (p: string) => {
   if (p === 'High') return 3;
   if (p === 'Medium') return 2;
   return 1;
+};
+
+const getTimelinessScore = (task: any) => {
+  const due = task?.dueDate ? new Date(`${task.dueDate}T23:59:59.999`) : null;
+  const completed = task?.completedAt ? new Date(task.completedAt) : null;
+  const start =
+    task?.startDate ? new Date(task.startDate) :
+    task?.createdAt ? new Date(task.createdAt) :
+    null;
+
+  if (!due || !completed || !start) return null;
+  if (!Number.isFinite(due.getTime()) || !Number.isFinite(completed.getTime()) || !Number.isFinite(start.getTime())) {
+    return null;
+  }
+
+  const totalMs = due.getTime() - start.getTime();
+  const usedMs = completed.getTime() - start.getTime();
+  if (totalMs <= 0 || !Number.isFinite(totalMs) || !Number.isFinite(usedMs)) return null;
+
+  const consumedPercent = Math.max(0, Math.round((usedMs / totalMs) * 1000) / 10);
+  return Math.max(0, Math.round(100 - consumedPercent));
 };
 
 const computeRating1to5 = (inputs: {
@@ -134,13 +155,25 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
   const weightedTotal = inRangeTasks.reduce((s: number, t: any) => s + priorityWeight(t.priority), 0);
   const productivityScore = weightedTotal ? Math.round((weightedCompleted / weightedTotal) * 100) : 0;
 
-  // Quality score based on approval success
+  const scoredQuality = completed.filter((t: any) => Number.isFinite(Number(t.qualityScore)));
+  const averageQualityScore = scoredQuality.length
+    ? Math.round((scoredQuality.reduce((sum: number, t: any) => sum + (Number(t.qualityScore) || 0), 0) / scoredQuality.length) * 10) / 10
+    : null;
+
+  const scoredTimeliness = completed
+    .map((task: any) => getTimelinessScore(task))
+    .filter((score): score is number => score !== null);
+  const averageTimelinessScore = scoredTimeliness.length
+    ? Math.round((scoredTimeliness.reduce((sum: number, score: number) => sum + score, 0) / scoredTimeliness.length) * 10) / 10
+    : null;
+
+  // Quality score based on review scores when available, then approval success as fallback
   const decided = approved.length + rejected.length;
   const approvalRate = decided ? Math.round((approved.length / decided) * 100) : 100; // if none, treat as perfect
-  const qualityScore = clamp(approvalRate, 0, 100);
+  const qualityScore = clamp(averageQualityScore ?? approvalRate, 0, 100);
 
-  // Reliability score based on on-time completion
-  const reliabilityScore = clamp(onTimePct, 0, 100);
+  // Reliability score based on task timeliness, then on-time completion as fallback
+  const reliabilityScore = clamp(averageTimelinessScore ?? onTimePct, 0, 100);
 
   const rating = computeRating1to5({ productivityScore, qualityScore, reliabilityScore });
 
@@ -150,6 +183,9 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
     tasksCompleted: completed.length,
     tasksTotal: inRangeTasks.length,
     onTimeCompletionPct: clamp(onTimePct, 0, 100),
+    averageQualityScore,
+    averageTimelinessScore,
+    pendingQualityScores: completed.filter((t: any) => !Number.isFinite(Number(t.qualityScore))).length,
     deadlineBreakdown: {
       ...deadlineBreakdown,
       overdue: overdueCount,
