@@ -955,8 +955,20 @@ export const deleteCase = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
-    const deleted = await Case.findByIdAndDelete(req.params.id);
+    const deleted = await Case.findById(req.params.id).lean();
     if (!deleted) return res.status(404).json({ message: 'Case not found.' });
+
+    await Case.findByIdAndDelete(req.params.id);
+
+    const actor = actorFromReq(req);
+    await writeAudit({
+      caseId: String(deleted._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'CASE_DELETED',
+      message: 'Deleted case',
+      detail: `${deleted.caseNo || ''} • ${deleted.parties || ''}`.trim(),
+    });
 
     return res.json({ message: 'Case deleted.' });
   } catch {

@@ -106,6 +106,43 @@ export type FirmReportResponse = {
     avgDurationDays: number | null;
     revenueBilled: number;
   }>;
+  clientProfitability: Array<{
+    partyName: string;
+    matterCount: number;
+    activeMatters: number;
+    completedMatters: number;
+    contractValue: number;
+    totalBilled: number;
+    collected: number;
+    outstanding: number;
+    directMatterCosts: number;
+    grossProfit: number;
+    grossProfitMargin: number;
+    collectionPeriodDays: number | null;
+    retainerValue: number;
+    primaryPracticeArea?: string;
+    matterDetails?: Array<{
+      id: string;
+      recordType: 'Matter' | 'Prospect';
+      recordLabel: string;
+      matterNo: string;
+      status: string;
+      practiceArea: string;
+      contractValue: number;
+      totalBilled: number;
+      collected: number;
+      outstanding: number;
+      directMatterCosts: number;
+      grossProfit: number;
+      grossProfitMargin: number;
+      assignedLawyer: string;
+      nextDeadline: string | null;
+    }>;
+    revenueByPracticeArea: Array<{
+      type: string;
+      amount: number;
+    }>;
+  }>;
   months: Array<{ month: string; billed: number; collected: number }>;
   expenseTypes?: Array<{ type: string; amount: number; count: number; clientRelatedAmount: number }>;
 };
@@ -126,3 +163,4 @@ export const getFirmReports = async (params?: { range?: FirmReportRange; from?: 
   if (!res.ok) throw new Error(data?.message || 'Failed to load firm reports');
   return data as FirmReportResponse;
 };
+

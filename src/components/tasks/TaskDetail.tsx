@@ -103,6 +103,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [documents, setDocuments] = useState<CaseDocument[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
+  const [relatedCaseMessage, setRelatedCaseMessage] = useState('');
 
   // Task attachments
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
@@ -190,9 +191,9 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   }, [task, isManagingDirector, currentUser?.role, isTaskSupervisor, isApprovedLocked]);
 
   const relatedCaseLabel = useMemo(() => {
-    if (!caseData) return '—';
-    return caseData.parties || caseData.caseNo || '—';
-  }, [caseData]);
+    if (caseData) return caseData.parties || caseData.caseNo || '—';
+    return task?.relatedClient || 'Case unavailable';
+  }, [caseData, task?.relatedClient]);
 
   const billingCurrency = useMemo(
     () => caseData?.billingSettings?.currency || caseData?.workflowProgress?.plannedValue?.currency || 'RWF',
@@ -315,24 +316,31 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     if (!id) return;
     setLoading(true);
     setError('');
+    setRelatedCaseMessage('');
     try {
       const t = await getTaskById(id);
       setTask(t);
       setQualityScoreDraft(t.qualityScore == null ? '' : String(t.qualityScore));
 
-      const [c, docs, audit] = await Promise.all([
+      const [caseResult, docsResult, auditResult] = await Promise.allSettled([
         getCaseById(t.caseId),
         getDocumentsForCase(t.caseId),
         getAuditForCase(t.caseId),
       ]);
 
-      setCaseData(c);
-      setDocuments(docs);
+      if (caseResult.status === 'fulfilled') {
+        setCaseData(caseResult.value);
+      } else {
+        setCaseData(null);
+        setRelatedCaseMessage('The related case record is missing or was deleted. You can still review the task details below.');
+      }
+
+      setDocuments(docsResult.status === 'fulfilled' ? docsResult.value : []);
       setWorkflowInstance(null);
       setInvoices([]);
 
       // ✅ Only show latest 6 activity logs
-      setAuditLogs((audit || []).slice(0, 6));
+      setAuditLogs(auditResult.status === 'fulfilled' ? (auditResult.value || []).slice(0, 6) : []);
 
       const [workflowResult, invoicesResult] = await Promise.allSettled([
         getWorkflowForCase(t.caseId),
@@ -648,6 +656,12 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
             <p className="text-sm text-gray-600 mt-1">
               Related client: <span className="text-gray-900 font-medium">{task.relatedClient || relatedCaseLabel}</span>
             </p>
+
+            {relatedCaseMessage ? (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {relatedCaseMessage}
+              </div>
+            ) : null}
 
             <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
               <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">

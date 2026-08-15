@@ -6,6 +6,7 @@ export type AuditAction =
   | 'TASK_CREATED'
   | 'TASK_UPDATED'
   | 'TASK_DELETED'
+  | 'CASE_DELETED'
   | 'EVENT_CREATED'
   | 'EVENT_UPDATED'
   | 'EVENT_DELETED'

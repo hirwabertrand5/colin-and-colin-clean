@@ -12,6 +12,7 @@ import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
   getContractValue,
+  parseMoneyValue,
 } from '../utils/financialMetrics';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -89,6 +90,8 @@ const selectedPathLabel = (c: any) => {
     ? selected.join(' / ')
     : String(c?.matterType || c?.workflow || c?.caseType || 'Unclassified');
 };
+
+const roundMoney = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
 
 const normalizeName = (value: unknown) => String(value || '').trim().toLowerCase();
 const isOpenCase = (c: any) => String(c?.status || '').trim().toLowerCase() !== 'closed';
@@ -335,7 +338,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         ? { _id: { $in: Array.from(linkedCaseIdsByName.get(selectedMemberNameNormalized) || []) } }
         : {}
     )
-      .select('_id assignedTo budget updatedAt workflowProgress billingSettings')
+      .select('_id assignedTo status caseNo parties budget updatedAt workflowProgress billingSettings legalServicePath matterType workflow caseType')
       .lean();
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
@@ -713,6 +716,246 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       }))
       .sort((a, b) => b.amount - a.amount);
 
+    const clientProfitabilityMatters = await Case.find()
+      .select('_id caseNo parties clientName status budget workflowProgress billingSettings legalServicePath matterType workflow caseType')
+      .lean();
+    const clientProfitabilityProspects = await Prospect.find({
+      $or: [
+        { convertedToMatters: null },
+        { convertedToMatters: { $exists: false } },
+      ],
+    })
+      .select('_id clientName parties stage estimatedFeeValue quotationAmount estimatedMatterValue depositAmount legalServicePath')
+      .lean();
+
+    const clientProfitabilityByKey = new Map<string, {
+      partyName: string;
+      matterCount: number;
+      activeMatters: number;
+      completedMatters: number;
+      contractValue: number;
+      totalBilled: number;
+      totalCollected: number;
+      directMatterCosts: number;
+      retainerValue: number;
+      collectionDaysTotal: number;
+      collectionDaysCount: number;
+      revenueByPracticeArea: Map<string, number>;
+    }>();
+    const clientKeyByCaseId = new Map<string, string>();
+    const practiceLabelByCaseId = new Map<string, string>();
+    const matterFinancialsByCaseId = new Map<string, { billed: number; collected: number; directMatterCosts: number }>();
+    const matterDetailsByCaseId = new Map<string, any>();
+    const clientDetailsByKey = new Map<string, any[]>();
+    for (const matter of clientProfitabilityMatters as any[]) {
+      const partyName = String(matter.parties || matter.clientName || matter.caseNo || 'Unassigned party').trim() || 'Unassigned party';
+      const key = normalizeName(partyName) || String(matter._id);
+      const caseId = String(matter._id);
+      clientKeyByCaseId.set(String(matter._id), key);
+      practiceLabelByCaseId.set(String(matter._id), selectedPathLabel(matter));
+
+      const detail = {
+        id: caseId,
+        recordType: 'Matter',
+        recordLabel: String(matter.caseNo || matter.parties || 'Matter'),
+        matterNo: String(matter.caseNo || ''),
+        status: String(matter.status || 'Open'),
+        practiceArea: selectedPathLabel(matter),
+        contractValue: roundMoney(getContractValue(matter)),
+        totalBilled: 0,
+        collected: 0,
+        outstanding: 0,
+        directMatterCosts: 0,
+        grossProfit: 0,
+        grossProfitMargin: 0,
+        assignedLawyer: String(matter.assignedTo || 'Unassigned'),
+        nextDeadline: matter?.workflowProgress?.nextDueAt ? new Date(matter.workflowProgress.nextDueAt).toISOString() : null,
+      };
+      matterDetailsByCaseId.set(caseId, detail);
+      const existingDetails = clientDetailsByKey.get(key) || [];
+      existingDetails.push(detail);
+      clientDetailsByKey.set(key, existingDetails);
+
+      const current = clientProfitabilityByKey.get(key) || {
+        partyName,
+        matterCount: 0,
+        activeMatters: 0,
+        completedMatters: 0,
+        contractValue: 0,
+        totalBilled: 0,
+        totalCollected: 0,
+        directMatterCosts: 0,
+        retainerValue: 0,
+        collectionDaysTotal: 0,
+        collectionDaysCount: 0,
+        revenueByPracticeArea: new Map<string, number>(),
+      };
+
+      current.partyName = partyName;
+      current.matterCount += 1;
+      if (isOpenCase(matter)) current.activeMatters += 1;
+      else current.completedMatters += 1;
+      current.contractValue += getContractValue(matter);
+      current.retainerValue += parseMoneyValue(matter?.billingSettings?.prepaidTotal);
+      clientProfitabilityByKey.set(key, current);
+    }
+
+    for (const prospect of clientProfitabilityProspects as any[]) {
+      const partyName = String(prospect.parties || prospect.clientName || 'Unassigned party').trim() || 'Unassigned party';
+      const key = normalizeName(partyName) || String(prospect._id);
+      const prospectDetail = {
+        id: String(prospect._id),
+        recordType: 'Prospect',
+        recordLabel: String(prospect.prospectNo || prospect.clientName || 'Prospect'),
+        matterNo: String(prospect.prospectNo || ''),
+        status: String(prospect.stage || 'Inquiry'),
+        practiceArea: Array.isArray(prospect.legalServicePath) && prospect.legalServicePath.length
+          ? prospect.legalServicePath.map((item: any) => String(item?.label || '').trim()).filter(Boolean).join(' / ')
+          : String(prospect.practiceArea || 'Prospect'),
+        contractValue: roundMoney(parseMoneyValue(prospect?.estimatedFeeValue || prospect?.quotationAmount || prospect?.estimatedMatterValue || 0)),
+        totalBilled: 0,
+        collected: 0,
+        outstanding: 0,
+        directMatterCosts: 0,
+        grossProfit: 0,
+        grossProfitMargin: 0,
+        assignedLawyer: String(prospect.assignedTo || 'Pipeline'),
+        nextDeadline: null,
+      };
+      const existingProspectDetails = clientDetailsByKey.get(key) || [];
+      existingProspectDetails.push(prospectDetail);
+      clientDetailsByKey.set(key, existingProspectDetails);
+      const current = clientProfitabilityByKey.get(key) || {
+        partyName,
+        matterCount: 0,
+        activeMatters: 0,
+        completedMatters: 0,
+        contractValue: 0,
+        totalBilled: 0,
+        totalCollected: 0,
+        directMatterCosts: 0,
+        retainerValue: 0,
+        collectionDaysTotal: 0,
+        collectionDaysCount: 0,
+        revenueByPracticeArea: new Map<string, number>(),
+      };
+
+      current.partyName = partyName;
+      current.matterCount += 1;
+      if (String(prospect.stage || '').trim().toLowerCase() === 'non-converted') current.completedMatters += 1;
+      else current.activeMatters += 1;
+      current.contractValue += parseMoneyValue(prospect?.estimatedFeeValue || prospect?.quotationAmount || 0);
+      current.retainerValue += parseMoneyValue(prospect?.depositAmount);
+      clientProfitabilityByKey.set(key, current);
+    }
+
+    const clientMatterIds = new Set<string>(Array.from(clientKeyByCaseId.keys()));
+    for (const inv of baseInvoices as any[]) {
+      const caseId = String(inv.caseId || '');
+      if (!caseId || !clientMatterIds.has(caseId)) continue;
+      const key = clientKeyByCaseId.get(caseId);
+      if (!key) continue;
+      const current = clientProfitabilityByKey.get(key);
+      if (!current) continue;
+      const amount = Number(inv.amount) || 0;
+      current.totalBilled += amount;
+      const financials = matterFinancialsByCaseId.get(caseId) || { billed: 0, collected: 0, directMatterCosts: 0 };
+      financials.billed += amount;
+      matterFinancialsByCaseId.set(caseId, financials);
+      const practiceLabel = practiceLabelByCaseId.get(caseId) || 'Unclassified';
+      current.revenueByPracticeArea.set(practiceLabel, (current.revenueByPracticeArea.get(practiceLabel) || 0) + amount);
+    }
+
+    for (const inv of invoicesByPaymentDate as any[]) {
+      const caseId = String(inv.caseId || '');
+      if (!caseId || !clientMatterIds.has(caseId)) continue;
+      const key = clientKeyByCaseId.get(caseId);
+      if (!key) continue;
+      const current = clientProfitabilityByKey.get(key);
+      if (!current) continue;
+      const amount = Number(inv.amount) || 0;
+      current.totalCollected += amount;
+      const financials = matterFinancialsByCaseId.get(caseId) || { billed: 0, collected: 0, directMatterCosts: 0 };
+      financials.collected += amount;
+      matterFinancialsByCaseId.set(caseId, financials);
+      const invoiceDate = inv.date ? new Date(`${String(inv.date).slice(0, 10)}T00:00:00.000Z`) : null;
+      const paymentDate = inv.updatedAt ? new Date(inv.updatedAt) : null;
+      if (invoiceDate && paymentDate && Number.isFinite(invoiceDate.getTime()) && Number.isFinite(paymentDate.getTime())) {
+        const diffDays = Math.max(0, (paymentDate.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24));
+        current.collectionDaysTotal += diffDays;
+        current.collectionDaysCount += 1;
+      }
+    }
+
+    for (const expense of expensesInRange as any[]) {
+      if (expense.chargeType !== 'client') continue;
+      const caseId = String(expense.caseId || '');
+      if (!caseId || !clientMatterIds.has(caseId)) continue;
+      const key = clientKeyByCaseId.get(caseId);
+      if (!key) continue;
+      const current = clientProfitabilityByKey.get(key);
+      if (!current) continue;
+      const cost = getDirectMatterCost(expense);
+      current.directMatterCosts += cost;
+      const financials = matterFinancialsByCaseId.get(caseId) || { billed: 0, collected: 0, directMatterCosts: 0 };
+      financials.directMatterCosts += cost;
+      matterFinancialsByCaseId.set(caseId, financials);
+    }
+
+    for (const [caseId, financials] of matterFinancialsByCaseId.entries()) {
+      const detail = matterDetailsByCaseId.get(caseId);
+      if (!detail) continue;
+      detail.totalBilled = roundMoney(financials.billed);
+      detail.collected = roundMoney(financials.collected);
+      detail.directMatterCosts = roundMoney(financials.directMatterCosts);
+      detail.outstanding = roundMoney(financials.billed - financials.collected);
+      detail.grossProfit = roundMoney(financials.collected - financials.directMatterCosts);
+      detail.grossProfitMargin = financials.collected > 0 ? Math.round(((financials.collected - financials.directMatterCosts) / financials.collected) * 100) : 0;
+    }
+
+    const clientProfitability = Array.from(clientProfitabilityByKey.values())
+      .map((row) => {
+        const grossProfit = row.totalCollected - row.directMatterCosts;
+        const grossProfitMargin = row.totalCollected > 0 ? Math.round((grossProfit / row.totalCollected) * 100) : 0;
+        const revenueByPracticeArea = Array.from(row.revenueByPracticeArea.entries())
+          .map(([type, amount]) => ({
+            type,
+            amount: roundMoney(amount),
+          }))
+          .sort((a, b) => b.amount - a.amount || a.type.localeCompare(b.type));
+
+        return {
+          partyName: row.partyName,
+          matterCount: row.matterCount,
+          activeMatters: row.activeMatters,
+          completedMatters: row.completedMatters,
+          contractValue: roundMoney(row.contractValue),
+          totalBilled: roundMoney(row.totalBilled),
+          collected: roundMoney(row.totalCollected),
+          outstanding: roundMoney(row.totalBilled - row.totalCollected),
+          directMatterCosts: roundMoney(row.directMatterCosts),
+          grossProfit: roundMoney(grossProfit),
+          grossProfitMargin,
+          collectionPeriodDays: row.collectionDaysCount > 0 ? roundMoney(row.collectionDaysTotal / row.collectionDaysCount) : null,
+          retainerValue: roundMoney(row.retainerValue),
+          primaryPracticeArea: revenueByPracticeArea[0]?.type || 'Unclassified',
+          matterDetails: (clientDetailsByKey.get(normalizeName(row.partyName)) || [])
+            .map((item) => ({
+              ...item,
+              contractValue: roundMoney(item.contractValue),
+              totalBilled: roundMoney(item.totalBilled),
+              collected: roundMoney(item.collected),
+              outstanding: roundMoney(item.outstanding),
+              directMatterCosts: roundMoney(item.directMatterCosts),
+              grossProfit: roundMoney(item.grossProfit),
+              grossProfitMargin: item.grossProfitMargin,
+            }))
+            .sort((a, b) => String(a.recordType).localeCompare(String(b.recordType)) || String(a.recordLabel).localeCompare(String(b.recordLabel))),
+          revenueByPracticeArea,
+        };
+      })
+      .sort((a, b) => a.partyName.localeCompare(b.partyName));
+
     const selectedMemberMetrics = selectedMemberName
       ? {
         name: selectedMemberName,
@@ -761,6 +1004,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       productivitySummary,
       productivityRows,
       caseTypes,
+      clientProfitability,
       months,
       expenseTypes,
     });
@@ -768,3 +1012,5 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ message: e?.message || 'Failed to load firm reports.' });
   }
 };
+
+
