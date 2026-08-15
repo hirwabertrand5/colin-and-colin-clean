@@ -220,6 +220,15 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     };
   }, [clientProfitabilityRows]);
 
+  const clientPracticeAreas = useMemo(() => {
+    const areas = new Set<string>();
+    for (const row of clientProfitabilityRows) {
+      const practiceArea = row.primaryPracticeArea || row.revenueByPracticeArea?.[0]?.type;
+      if (practiceArea) areas.add(practiceArea);
+    }
+    return Array.from(areas).sort((a, b) => a.localeCompare(b));
+  }, [clientProfitabilityRows]);
+
   const formatOptionalMoney = (value?: number | null) => (value == null || value === 0 ? 'N/A' : fmtMoney(value));
   const getPracticeArea = (row: ClientProfitabilityRow) => row.primaryPracticeArea || row.revenueByPracticeArea?.[0]?.type || 'Unclassified';
   const getStatusBucket = (row: ClientProfitabilityRow) =>
