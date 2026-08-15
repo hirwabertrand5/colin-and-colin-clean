@@ -40,6 +40,7 @@ const ROLE_ORDER = [
   'Senior Partner / Executive Partner / Originating Attorney',
   'Firm Retained Earnings',
 ];
+const CLIENT_PROFITABILITY_PAGE_SIZE = 10;
 
 type ClientProfitabilityRow = NonNullable<FirmReportResponse['clientProfitability']>[number];
 type ClientProfitabilitySort =
@@ -64,6 +65,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
   const [clientPracticeAreaFilter, setClientPracticeAreaFilter] = useState('all');
   const [clientStatusFilter, setClientStatusFilter] = useState('all');
   const [clientSortBy, setClientSortBy] = useState<ClientProfitabilitySort>('nameAsc');
+  const [clientProfitabilityPage, setClientProfitabilityPage] = useState(1);
   const [selectedClientProfitability, setSelectedClientProfitability] = useState<ClientProfitabilityRow | null>(null);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
@@ -228,6 +230,24 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     }
     return Array.from(areas).sort((a, b) => a.localeCompare(b));
   }, [clientProfitabilityRows]);
+
+  const clientProfitabilityTotalPages = Math.max(1, Math.ceil(clientProfitabilityRows.length / CLIENT_PROFITABILITY_PAGE_SIZE));
+  const paginatedClientProfitabilityRows = useMemo(
+    () =>
+      clientProfitabilityRows.slice(
+        (clientProfitabilityPage - 1) * CLIENT_PROFITABILITY_PAGE_SIZE,
+        clientProfitabilityPage * CLIENT_PROFITABILITY_PAGE_SIZE
+      ),
+    [clientProfitabilityRows, clientProfitabilityPage]
+  );
+
+  useEffect(() => {
+    setClientProfitabilityPage(1);
+  }, [clientNameFilter, clientPracticeAreaFilter, clientStatusFilter, clientSortBy, data]);
+
+  useEffect(() => {
+    setClientProfitabilityPage((prev) => Math.min(prev, clientProfitabilityTotalPages));
+  }, [clientProfitabilityTotalPages]);
 
   const formatOptionalMoney = (value?: number | null) => (value == null || value === 0 ? 'N/A' : fmtMoney(value));
   const getPracticeArea = (row: ClientProfitabilityRow) => row.primaryPracticeArea || row.revenueByPracticeArea?.[0]?.type || 'Unclassified';
@@ -1071,6 +1091,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                 <table className="min-w-[1600px] w-full">
                   <thead className="bg-gray-50 border-b border-gray-200 dark:border-slate-700 dark:bg-slate-800">
                     <tr>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase dark:text-gray-300">No.</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase dark:text-gray-300">Client</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase dark:text-gray-300">Contract Value</th>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase dark:text-gray-300">Total Billed</th>
@@ -1087,11 +1108,14 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-slate-800">
-                    {clientProfitabilityRows.map((row) => {
+                    {paginatedClientProfitabilityRows.map((row, index) => {
                       const practiceArea = getPracticeArea(row);
                       const statusBucket = getStatusBucket(row);
                       return (
                         <tr key={row.partyName} className="cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800/70" onClick={() => setSelectedClientProfitability(row)}>
+                          <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">
+                            {(clientProfitabilityPage - 1) * CLIENT_PROFITABILITY_PAGE_SIZE + index + 1}
+                          </td>
                           <td className="px-5 py-4">
                             <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{row.partyName}</div>
                             <div className="text-xs text-gray-500 dark:text-gray-400">{statusBucket === 'mixed' ? 'Mixed client activity' : statusBucket === 'active' ? 'Active pipeline' : 'Completed records'}</div>
@@ -1126,6 +1150,35 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {clientProfitabilityRows.length > 0 && (
+              <div className="flex flex-col gap-3 border-t border-gray-200 px-5 py-4 dark:border-slate-700 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  Showing {(clientProfitabilityPage - 1) * CLIENT_PROFITABILITY_PAGE_SIZE + 1}-
+                  {Math.min(clientProfitabilityPage * CLIENT_PROFITABILITY_PAGE_SIZE, clientProfitabilityRows.length)} of {clientProfitabilityRows.length} clients
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setClientProfitabilityPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={clientProfitabilityPage === 1}
+                    className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-gray-200 dark:hover:bg-slate-800"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">
+                    Page {clientProfitabilityPage} of {clientProfitabilityTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setClientProfitabilityPage((prev) => Math.min(prev + 1, clientProfitabilityTotalPages))}
+                    disabled={clientProfitabilityPage === clientProfitabilityTotalPages}
+                    className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-gray-200 dark:hover:bg-slate-800"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             )}
           </div>
