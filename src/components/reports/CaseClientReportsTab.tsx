@@ -7,6 +7,7 @@ import {
   ClientReportRun,
   downloadReportPdf,
 } from '../../services/clientReportService';
+import { formatCaseAssignedTo, getPrimaryCaseAssignee, getCaseAssignments } from '../../utils/caseAssignments';
 
 type Props = {
   caseData: CaseData;
@@ -42,7 +43,7 @@ const buildDefaultTemplate = (caseData: CaseData): ClientReportTemplate => {
     caseTypeLabel: caseData.caseType || '',
     updateReportDate: '',
     serviceRequested,
-    partnerInCharge: caseData.assignedTo || '',
+    partnerInCharge: getPrimaryCaseAssignee(caseData) || '',
     reportPeriodLabel: '',
     reportTypeLabel: '',
     workDone: '',
@@ -162,7 +163,17 @@ export default function CaseClientReportsTab({ caseData, canManage }: Props) {
         clientContacts: contacts,
         description: reportTemplate.caseSummary,
         status: reportTemplate.overallStatus,
-        assignedTo: reportTemplate.partnerInCharge,
+        caseAssignments: {
+          ...(caseData.caseAssignments || {}),
+          signerApprover: reportTemplate.partnerInCharge || getCaseAssignments(caseData).signerApprover || '',
+        },
+        assignedTo: formatCaseAssignedTo({
+          ...caseData,
+          caseAssignments: {
+            ...(caseData.caseAssignments || {}),
+            signerApprover: reportTemplate.partnerInCharge || getCaseAssignments(caseData).signerApprover || '',
+          },
+        }),
         reporting: {
           weeklyEnabled,
           monthlyEnabled,

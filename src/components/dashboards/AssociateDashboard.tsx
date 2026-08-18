@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
+import { caseMatchesAssignee } from '../../utils/caseAssignments';
 import { getAllCases, CaseData } from '../../services/caseService';
 import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
@@ -362,8 +363,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
   const authorisedCases = useMemo(() => {
     const scoped = cases.filter((matter) => {
-      const assignedTo = normalizeName(matter.assignedTo);
-      return visibleCaseIds.has(String(matter._id || '')) || (meName && assignedTo === meName);
+      return visibleCaseIds.has(String(matter._id || '')) || caseMatchesAssignee(matter, meName);
     });
     return scoped.length > 0 ? scoped : cases;
   }, [cases, meName, visibleCaseIds]);

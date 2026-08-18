@@ -68,6 +68,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     mode: 'add' | 'edit';
     index?: number;
     text: string;
+    position?: number;
   } | null>(null);
 
   const canAmendDeadlines = canCompleteSteps;
@@ -120,8 +121,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     }
   };
 
-  const openAddAction = (stepKey: string, stepTitle: string) => {
-    setActionEditor({ stepKey, stepTitle, mode: 'add', text: '' });
+  const openAddAction = (stepKey: string, stepTitle: string, position?: number) => {
+    setActionEditor({ stepKey, stepTitle, mode: 'add', text: '', position });
   };
 
   const openEditAction = (stepKey: string, stepTitle: string, index: number, text: string) => {
@@ -135,13 +136,17 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('Action text is required.');
       return;
     }
+    if (actionEditor.mode === 'add' && typeof actionEditor.position !== 'number') {
+      setErr('Choose an insertion position for the new key action.');
+      return;
+    }
 
     try {
       setBusyKey(`${actionEditor.mode}:${actionEditor.stepKey}:${actionEditor.index ?? 'new'}`);
       setErr('');
       const updated =
         actionEditor.mode === 'add'
-          ? await addWorkflowStepAction(caseId, actionEditor.stepKey, text)
+          ? await addWorkflowStepAction(caseId, actionEditor.stepKey, text, actionEditor.position)
           : await updateWorkflowStepAction(caseId, actionEditor.stepKey, Number(actionEditor.index), { text });
       setWf(updated);
       await onWorkflowChanged?.();
@@ -447,7 +452,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 {canManageActions ? (
                   <button
                     type="button"
-                    onClick={() => openAddAction(s.stepKey, s.title)}
+                    onClick={() => openAddAction(s.stepKey, s.title, keyActions.length)}
                     className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -525,7 +530,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Key Actions</div>
                 <button
                   type="button"
-                  onClick={() => openAddAction(s.stepKey, s.title)}
+                  onClick={() => openAddAction(s.stepKey, s.title, 0)}
                   className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -657,9 +662,43 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   className="mt-2 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-0 focus:border-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                   placeholder="Enter a key action"
                 />
+                {actionEditor.mode === 'add' ? (
+                  <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+                    <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
+                      Insert position
+                    </label>
+                    <select
+                      value={typeof actionEditor.position === 'number' ? String(actionEditor.position) : ''}
+                      onChange={(e) =>
+                        setActionEditor((curr) =>
+                          curr
+                            ? {
+                                ...curr,
+                                position: e.target.value === '' ? undefined : Number(e.target.value),
+                              }
+                            : curr
+                        )
+                      }
+                      className="mt-2 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                    >
+                      <option value="">Choose a position</option>
+                      {Array.from(
+                        { length: (wf?.steps?.find((step) => step.stepKey === actionEditor.stepKey)?.actions?.length || 0) + 1 },
+                        (_, idx) => (
+                          <option key={idx} value={idx}>
+                            {idx === 0 ? 'At the start' : `After action ${idx}`}
+                          </option>
+                        )
+                      )}
+                    </select>
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      Position 0 inserts the item at the top of the checklist.
+                    </p>
+                  </div>
+                ) : null}
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   {actionEditor.mode === 'add'
-                    ? 'This will append to the step’s key action list.'
+                    ? 'Choose where the new key action should be inserted.'
                     : 'Update the action text without changing its completion status.'}
                 </p>
               </div>

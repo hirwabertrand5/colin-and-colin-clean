@@ -9,6 +9,7 @@ import { writeAudit } from '../services/auditService';
 import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
 import { buildYearlySequence } from '../utils/counter';
 import { isPublicYellowCase } from '../utils/caseVisibility';
+import { caseMatchesAssignee } from '../utils/caseAssignments';
 
 const isAssociateLikeRole = (role?: string) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
@@ -165,7 +166,7 @@ const canAccessCaseId = async (req: AuthRequest, caseId: string) => {
 
   if (isAdminCaseRole(role)) return true;
 
-  const c: any = await Case.findById(caseId).select('assignedTo status workflowProgress workflowStartDate createdAt');
+  const c: any = await Case.findById(caseId).select('assignedTo caseAssignments status workflowProgress workflowStartDate createdAt');
   if (!c) return false;
 
   if (isPublicYellowCase(c)) return true;
@@ -174,8 +175,7 @@ const canAccessCaseId = async (req: AuthRequest, caseId: string) => {
   const meEmail = normalizeIdentity(req.user?.email);
   if (!meName && !meEmail) return false;
 
-  const assignedTo = normalizeIdentity(c.assignedTo);
-  if (assignedTo && (assignedTo === meName || assignedTo === meEmail)) return true;
+  if (caseMatchesAssignee(c, meName) || caseMatchesAssignee(c, meEmail)) return true;
 
   const tasks = await Task.find({ caseId }).select('assignee supervisor').lean();
   return tasks.some((task: any) => {
@@ -343,7 +343,14 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
 
       const visibility: any = { $or: [{ assignee: me }, { supervisor: me }] };
       if (req.user?.role === 'associate') {
-        const ownedCaseIds = await Case.find({ assignedTo: me }).distinct('_id');
+        const ownedCaseIds = await Case.find({
+          $or: [
+            { assignedTo: new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+            { 'caseAssignments.initiator': new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+            { 'caseAssignments.reviewer': new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+            { 'caseAssignments.signerApprover': new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+          ],
+        }).distinct('_id');
         const caseIdsFromTasks = await Task.distinct('caseId', { $or: [{ assignee: me }, { supervisor: me }] });
         const visibleCaseIds = [...new Set([...ownedCaseIds, ...caseIdsFromTasks].map(String))];
         visibility.caseId = { $in: visibleCaseIds.map((value) => new mongoose.Types.ObjectId(value)) };

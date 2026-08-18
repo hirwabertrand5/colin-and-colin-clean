@@ -5,6 +5,8 @@ import Event from '../models/eventModel';
 import Case from '../models/caseModel';
 import Task from '../models/taskModel';
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
   role === 'managing_partner' ||
@@ -38,7 +40,15 @@ export const getFirmEvents = async (req: AuthRequest, res: Response) => {
     if (!isAdmin(role)) {
       if (!userName) return res.status(401).json({ message: 'Unauthorized (missing user name).' });
 
-      const allowedCases = await Case.find({ assignedTo: userName }).select('_id');
+      const userRegex = new RegExp(escapeRegExp(String(userName).trim()), 'i');
+      const allowedCases = await Case.find({
+        $or: [
+          { assignedTo: userRegex },
+          { 'caseAssignments.initiator': userRegex },
+          { 'caseAssignments.reviewer': userRegex },
+          { 'caseAssignments.signerApprover': userRegex },
+        ],
+      }).select('_id');
       const allowedIds = allowedCases.map((c: any) => c._id);
       eventFilter.caseId = { $in: allowedIds };
     }
@@ -53,7 +63,14 @@ export const getFirmEvents = async (req: AuthRequest, res: Response) => {
       ],
     };
     if (!isAdmin(role)) {
-      workflowCaseFilter.assignedTo = userName;
+      const userRegex = new RegExp(escapeRegExp(String(userName || '').trim()), 'i');
+      workflowCaseFilter.$or = [
+        { assignedTo: userRegex },
+        { 'caseAssignments.initiator': userRegex },
+        { 'caseAssignments.reviewer': userRegex },
+        { 'caseAssignments.signerApprover': userRegex },
+        ...workflowCaseFilter.$or,
+      ];
     }
     const workflowCases = await Case.find(workflowCaseFilter).select(
       '_id caseNo parties assignedTo workflowProgress'
@@ -130,7 +147,15 @@ export const getCalendarTasks = async (req: AuthRequest, res: Response) => {
     if (!isAdmin(role)) {
       if (!userName) return res.status(401).json({ message: 'Unauthorized (missing user name).' });
 
-      const allowedCases = await Case.find({ assignedTo: userName }).select('_id');
+      const userRegex = new RegExp(escapeRegExp(String(userName).trim()), 'i');
+      const allowedCases = await Case.find({
+        $or: [
+          { assignedTo: userRegex },
+          { 'caseAssignments.initiator': userRegex },
+          { 'caseAssignments.reviewer': userRegex },
+          { 'caseAssignments.signerApprover': userRegex },
+        ],
+      }).select('_id');
       const allowedIds = allowedCases.map((c: any) => c._id);
       taskFilter.caseId = { $in: allowedIds };
     }

@@ -11,6 +11,7 @@ import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps } from '../utils/workflowCompute';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
+import { caseMatchesAssignee } from '../utils/caseAssignments';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -36,6 +37,67 @@ const actorFromReq = (req: AuthRequest) => ({
 });
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
+
+const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: any, startDate: Date) => {
+  const builtSteps = buildInstanceSteps(template, startDate);
+  const existingByKey = new Map((existingSteps || []).map((step: any) => [String(step.stepKey), step]));
+
+  return builtSteps.map((nextStep: any, index: number) => {
+    const previous = existingByKey.get(String(nextStep.stepKey));
+    const mergedActions = (nextStep.actions || []).map((action: any, actionIndex: number) => {
+      const previousAction = Array.isArray(previous?.actions) ? previous.actions[actionIndex] : undefined;
+      return {
+        text: String(action?.text || '').trim(),
+        done: Boolean(previousAction?.done),
+        ...(previousAction?.doneAt ? { doneAt: previousAction.doneAt } : {}),
+      };
+    });
+
+    return {
+      ...nextStep,
+      status: previous?.status || nextStep.status,
+      startAt: previous?.startAt || nextStep.startAt,
+      dueAt: previous?.dueAt || nextStep.dueAt,
+      completedAt: previous?.completedAt,
+      extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
+      feeAmount:
+        typeof previous?.feeSetByUser === 'boolean' && previous.feeSetByUser
+          ? previous.feeAmount
+          : nextStep.feeAmount,
+      feeCurrency: previous?.feeCurrency || nextStep.feeCurrency,
+      feeText: previous?.feeText || nextStep.feeText,
+      feeRangeMin: previous?.feeRangeMin ?? nextStep.feeRangeMin,
+      feeRangeMax: previous?.feeRangeMax ?? nextStep.feeRangeMax,
+      feeInputRequired: previous?.feeInputRequired ?? nextStep.feeInputRequired,
+      feeSetByUser: previous?.feeSetByUser ?? nextStep.feeSetByUser,
+      actions: mergedActions,
+      outputs: nextStep.outputs,
+    };
+  });
+};
+
+const syncCaseWorkflowInstanceFromTemplate = async (caseId: string, template: any, wfStart: Date) => {
+  const inst: any = await WorkflowInstance.findOne({ caseId });
+  if (!inst) return null;
+
+  const nextSteps = buildUpdatedInstanceSteps(inst.steps, template, wfStart);
+  const currentStep = inst.currentStepKey ? nextSteps.find((step: any) => step.stepKey === inst.currentStepKey) : null;
+
+  inst.templateId = template._id;
+  inst.steps = nextSteps;
+  if (currentStep) {
+    inst.currentStepKey = currentStep.stepKey;
+    if (currentStep.status === 'Completed') {
+      const nextOpen = nextSteps.find((step: any) => step.status !== 'Completed');
+      inst.currentStepKey = nextOpen?.stepKey || currentStep.stepKey;
+    }
+  } else {
+    inst.currentStepKey = nextSteps[0]?.stepKey;
+  }
+
+  await inst.save();
+  return inst;
+};
 
 const computeWorkflowMoney = (inst: any) => {
   const plannedAmount = (inst.steps || []).reduce(
@@ -286,11 +348,10 @@ const ensureInstanceStepActions = async (inst: any, step: any) => {
 const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   if (!isAssociateLike(req.user?.role)) return false;
 
+  if (caseMatchesAssignee(foundCase, req.user?.name) || caseMatchesAssignee(foundCase, req.user?.email)) return true;
+
   const me = (req.user?.name || '').trim();
   if (!me) return false;
-
-  const assignedTo = String(foundCase.assignedTo || '').trim();
-  if (assignedTo && assignedTo === me) return true;
 
   const hasTask = await Task.exists({ caseId: foundCase._id, assignee: me });
   return Boolean(hasTask);
@@ -360,8 +421,28 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
 
     const { templateId } = req.params as any;
+    const before = await WorkflowTemplate.findById(templateId).lean();
     const updated = await WorkflowTemplate.findByIdAndUpdate(templateId, req.body, { new: true });
     if (!updated) return res.status(404).json({ message: 'Template not found.' });
+
+    const affectedCases = await Case.find({ workflowTemplateId: templateId }).select('_id workflowStartDate createdAt').lean();
+    for (const matter of affectedCases as any[]) {
+      const wfStartRaw = matter.workflowStartDate || matter.createdAt || new Date();
+      const wfStart = wfStartRaw instanceof Date ? wfStartRaw : new Date(wfStartRaw);
+      const inst = await syncCaseWorkflowInstanceFromTemplate(String(matter._id), updated, wfStart);
+      if (!inst) continue;
+
+      const caseDoc: any = await Case.findById(matter._id);
+      if (!caseDoc) continue;
+      caseDoc.workflowTemplateId = updated._id as any;
+      caseDoc.matterType = updated.matterType;
+      caseDoc.workflowStartDate = wfStart;
+      await updateCaseWorkflowProgress(caseDoc, inst);
+    }
+
+    if (before && before.matterType !== updated.matterType) {
+      // Keep the template metadata itself authoritative; the case sync above updates linked cases.
+    }
 
     res.json(updated);
   } catch (e: any) {
@@ -701,7 +782,7 @@ export const addStepAction = async (req: AuthRequest, res: Response) => {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
 
     const { caseId, stepKey } = req.params as any;
-    const { text } = req.body || {};
+    const { text, position } = req.body || {};
     const actionText = String(text || '').trim();
     if (!actionText) {
       return res.status(400).json({ message: 'Action text is required.' });
@@ -718,7 +799,9 @@ export const addStepAction = async (req: AuthRequest, res: Response) => {
     if (step.status === 'Completed') return res.status(400).json({ message: 'Cannot modify key actions on a completed step.' });
 
     const actions = await ensureInstanceStepActions(inst, step);
-    actions.push({ text: actionText, done: false });
+    const insertAt = Number(position);
+    const normalizedPosition = Number.isInteger(insertAt) ? Math.max(0, Math.min(actions.length, insertAt)) : actions.length;
+    actions.splice(normalizedPosition, 0, { text: actionText, done: false });
 
     await inst.save();
     await updateCaseWorkflowProgress(c, inst);

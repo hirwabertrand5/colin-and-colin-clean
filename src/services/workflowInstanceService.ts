@@ -159,14 +159,19 @@ export const deleteWorkflowStep = async (caseId: string, stepKey: string): Promi
   return data;
 };
 
-export const addWorkflowStepAction = async (caseId: string, stepKey: string, text: string): Promise<WorkflowInstance> => {
+export const addWorkflowStepAction = async (
+  caseId: string,
+  stepKey: string,
+  text: string,
+  position?: number
+): Promise<WorkflowInstance> => {
   const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/actions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${getToken()}`,
     },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(typeof position === 'number' ? { position } : {}) }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || 'Failed to add key action');

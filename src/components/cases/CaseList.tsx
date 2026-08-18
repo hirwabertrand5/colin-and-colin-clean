@@ -10,6 +10,7 @@ import {
   getUrgencyColorForDueDate,
 } from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
+import { caseMatchesAssignee, formatCaseAssignedTo } from '../../utils/caseAssignments';
 
 interface CaseListProps {
   userRole: UserRole;
@@ -57,7 +58,13 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
   const entityLabel = isTemporaryClosedMode ? 'matters' : 'cases';
   const currentUser = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('user') || '{}') as { id?: string; _id?: string; name?: string; role?: string };
+      return JSON.parse(localStorage.getItem('user') || '{}') as {
+        id?: string;
+        _id?: string;
+        name?: string;
+        email?: string;
+        role?: string;
+      };
     } catch {
       return {};
     }
@@ -201,11 +208,11 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
     return cases.map((c, originalIndex) => ({
       c,
       originalIndex,
-      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''} ${c.assignedTo ?? ''} ${c.workflow ?? ''} ${c.matterType ?? ''} ${c.caseType ?? ''} ${c.workflowProgress?.currentStepTitle ?? ''} ${c.workflowProgress?.status ?? ''}`.toLowerCase(),
+      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''} ${formatCaseAssignedTo(c)} ${c.workflow ?? ''} ${c.matterType ?? ''} ${c.caseType ?? ''} ${c.workflowProgress?.currentStepTitle ?? ''} ${c.workflowProgress?.status ?? ''}`.toLowerCase(),
       createdAtMs: toMs(c.createdAt),
       workflowLabel: getCasePracticePath(c).toLowerCase(),
       currentStepLabel: String(c.workflowProgress?.currentStepTitle || '').toLowerCase(),
-      assignedToLabel: String(c.assignedTo || '').toLowerCase(),
+      assignedToLabel: formatCaseAssignedTo(c).toLowerCase(),
       deadlineRank: urgencyRank(c),
       nextDueAtMs: nextDueAtMs(c),
     }));
@@ -410,7 +417,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                       : item.workflowProgress?.currentStepTitle || '—'}
                   </td>
 
-                  <td className="px-6 py-5 text-sm text-gray-600">{item.assignedTo}</td>
+                  <td className="px-6 py-5 text-sm text-gray-600">{formatCaseAssignedTo(item)}</td>
 
                   <td className="px-6 py-5 text-sm text-gray-500">
                     {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}
@@ -463,7 +470,8 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                       </Link>
 
                       {!canManageCases &&
-                        String(item.assignedTo || '').trim() !== String(currentUser.name || '').trim() &&
+                        !caseMatchesAssignee(item, currentUser.name) &&
+                        !caseMatchesAssignee(item, currentUser.email) &&
                         item.takeRequestState?.status !== 'claimed' &&
                         !isPendingLockActive(item) && (
                         <>

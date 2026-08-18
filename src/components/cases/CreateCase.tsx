@@ -5,6 +5,7 @@ import { createCase, CaseData, CaseType } from '../../services/caseService';
 import { listActiveWorkflowTemplates, WorkflowTemplate } from '../../services/workflowService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { getRoleSuggestions } from '../../constants/partyRoles';
+import { formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
 
 type StaffUser = {
   _id: string;
@@ -37,6 +38,12 @@ type PreviewWorkflowStep = {
 };
 
 type MatterTiming = 'new';
+
+const CASE_ASSIGNMENT_ROLE_OPTIONS: Record<'initiator' | 'reviewer' | 'signerApprover', string[]> = {
+  initiator: ['intern', 'trainee_associate', 'associate'],
+  reviewer: ['associate', 'senior_associate'],
+  signerApprover: ['managing_partner', 'executive_managing_partner'],
+};
 
 interface CreateCaseProps {
   initialStatus?: string;
@@ -89,6 +96,11 @@ export default function CreateCase({
     status: initialStatus,
     priority: 'Medium',
     assignedTo: '',
+    caseAssignments: {
+      initiator: '',
+      reviewer: '',
+      signerApprover: '',
+    },
     description: '',
     legalServicePath: [],
     workflow: '',
@@ -133,9 +145,16 @@ export default function CreateCase({
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (parsed?.formData) {
+        const draftAssignments = parsed.formData.caseAssignments || {};
         setFormData((prev) => ({
           ...prev,
           ...parsed.formData,
+          caseAssignments: {
+            initiator: draftAssignments.initiator || '',
+            reviewer: draftAssignments.reviewer || '',
+            signerApprover: draftAssignments.signerApprover || '',
+          },
+          assignedTo: formatCaseAssignedTo(parsed.formData),
           status: parsed.formData.status || initialStatus,
           matterTiming: 'new',
           workflowAutomation: true,
@@ -160,7 +179,12 @@ export default function CreateCase({
           step,
           matterTiming,
           servicePath,
-          formData: { ...formData, matterTiming: 'new', workflowAutomation: true },
+          formData: {
+            ...formData,
+            assignedTo: formatCaseAssignedTo(formData),
+            matterTiming: 'new',
+            workflowAutomation: true,
+          },
           savedAt: new Date().toISOString(),
         })
       );
@@ -223,6 +247,17 @@ export default function CreateCase({
 
   const handleInputChange = (field: string, value: any) => {
     setFormData({ ...formData, [field]: value });
+  };
+
+  const updateAssignmentSlot = (slot: 'initiator' | 'reviewer' | 'signerApprover', value: string) => {
+    setFormData((prev) => {
+      const caseAssignments = setCaseAssignmentSlot(prev.caseAssignments, slot, value);
+      return {
+        ...prev,
+        caseAssignments,
+        assignedTo: formatCaseAssignedTo({ caseAssignments, assignedTo: prev.assignedTo }),
+      };
+    });
   };
 
   // -------------------------
@@ -361,6 +396,7 @@ export default function CreateCase({
 
       await createCase({
         ...formData,
+        assignedTo: formatCaseAssignedTo(formData),
         legalServicePath: formData.legalServicePath || [],
         caseNo: caseNoToSend,
         parties: finalParties,
@@ -397,7 +433,9 @@ export default function CreateCase({
       const hideCaseNo = (computedCaseType || formData.caseType) === 'Transactional Cases';
       const partiesOk = partiesStructured ? partiesList.length > 0 && partiesList.every((p) => p.name && p.name.trim()) : Boolean(formData.parties && String(formData.parties).trim());
       const caseNoOk = hideCaseNo ? true : Boolean(formData.caseNo && String(formData.caseNo).trim());
-      return Boolean(caseNoOk && partiesOk && formData.assignedTo && isServiceSelectionValid());
+      const assignments = formData.caseAssignments || {};
+      const assigneeOk = Boolean(assignments.initiator && assignments.reviewer && assignments.signerApprover);
+      return Boolean(caseNoOk && partiesOk && assigneeOk && formData.assignedTo && isServiceSelectionValid());
     }
     if (step === 2) {
       return Boolean(formData.workflowTemplateId && formData.workflowStartDate && plannedValueAmount > 0);
@@ -917,21 +955,66 @@ export default function CreateCase({
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Assigned To *</label>
-              <select
-                value={formData.assignedTo}
-                onChange={(e) => handleInputChange('assignedTo', e.target.value)}
-                disabled={loadingStaff}
-                className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400 disabled:opacity-60"
-              >
-                <option value="">{loadingStaff ? 'Loading staff...' : 'Select staff'}</option>
-                {staffUsers.map((u) => (
-                  <option key={u._id} value={u.name}>
-                    {u.name} ({ROLE_DISPLAY_MAP[u.role] || u.role})
-                  </option>
-                ))}
-              </select>
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="text-sm font-semibold text-gray-900">Assigned To *</div>
+              <p className="text-xs text-gray-500 mt-1">Choose the initiator, reviewer, and signer/approver for this matter.</p>
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  {
+                    key: 'initiator' as const,
+                    label: 'Initiator',
+                    hint: 'Intern / Junior',
+                    roles: CASE_ASSIGNMENT_ROLE_OPTIONS.initiator,
+                    placeholder: 'Select initiator',
+                  },
+                  {
+                    key: 'reviewer' as const,
+                    label: 'Reviewer',
+                    hint: 'Associate / Senior Associate',
+                    roles: CASE_ASSIGNMENT_ROLE_OPTIONS.reviewer,
+                    placeholder: 'Select reviewer',
+                  },
+                  {
+                    key: 'signerApprover' as const,
+                    label: 'Signer / Approver',
+                    hint: 'Managing Partner',
+                    roles: CASE_ASSIGNMENT_ROLE_OPTIONS.signerApprover,
+                    placeholder: 'Select approver',
+                  },
+                ].map((field) => {
+                  const currentValue = formData.caseAssignments?.[field.key] || '';
+                  const optionUsers = staffUsers.filter((user) => field.roles.includes(String(user.role || '').toLowerCase()));
+                  return (
+                    <div key={field.key}>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>
+                      <div className="mb-2 text-xs text-gray-500">{field.hint}</div>
+                      <select
+                        value={currentValue}
+                        onChange={(e) => updateAssignmentSlot(field.key, e.target.value)}
+                        disabled={loadingStaff}
+                        className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400 disabled:opacity-60"
+                      >
+                        <option value="">{loadingStaff ? 'Loading staff...' : field.placeholder}</option>
+                        {optionUsers.map((u) => (
+                          <option key={u._id} value={u.name}>
+                            {u.name} ({ROLE_DISPLAY_MAP[u.role] || u.role})
+                          </option>
+                        ))}
+                        {!optionUsers.length
+                          ? staffUsers.map((u) => (
+                              <option key={u._id} value={u.name}>
+                                {u.name} ({ROLE_DISPLAY_MAP[u.role] || u.role})
+                              </option>
+                            ))
+                          : null}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-3 text-xs text-gray-500">Selected: {formData.assignedTo || 'Not set'}</div>
               {!loadingStaff && staffUsers.length === 0 && (
                 <p className="text-xs text-gray-500 mt-2">
                   No active staff users found. Add users first in Administration → Users.

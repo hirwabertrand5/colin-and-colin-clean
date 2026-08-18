@@ -14,6 +14,12 @@ import WorkflowInstance from '../models/workflowInstanceModel';
 import { buildInstanceSteps } from '../utils/workflowCompute';
 import { buildYearlySequence } from '../utils/counter';
 import { isPublicYellowCase } from '../utils/caseVisibility';
+import {
+  buildCaseAssignedToDisplay,
+  caseMatchesAssignee,
+  normalizeCaseAssignmentsPayload,
+  normalizeCaseAssignee,
+} from '../utils/caseAssignments';
 
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
@@ -72,6 +78,8 @@ const canTakeRequestAccess = (c: any) => isPublicYellowCase(c) && !isTakeRequest
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   if (!isAssociateLikeRole(req.user?.role)) return false;
 
@@ -81,8 +89,7 @@ const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   const meEmail = normalizeIdentity(req.user?.email);
   if (!meName && !meEmail) return false;
 
-  const assignedTo = normalizeIdentity(foundCase.assignedTo);
-  if (assignedTo && (assignedTo === meName || assignedTo === meEmail)) return true;
+  if (caseMatchesAssignee(foundCase, meName) || caseMatchesAssignee(foundCase, meEmail)) return true;
 
   const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor').lean();
   return tasks.some((task: any) => {
@@ -97,7 +104,7 @@ const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) =>
   const meEmail = normalizeIdentity(req.user?.email);
   if (!meName && !meEmail) return false;
 
-  if (normalizeIdentity(foundCase.assignedTo) && [meName, meEmail].includes(normalizeIdentity(foundCase.assignedTo))) {
+  if (caseMatchesAssignee(foundCase, meName) || caseMatchesAssignee(foundCase, meEmail)) {
     return true;
   }
 
@@ -218,8 +225,18 @@ export const getAllCases = async (req: AuthRequest, res: Response) => {
     }
 
     const me = (req.user?.name || '').trim();
-
-    const assignedCases = me ? await Case.find({ assignedTo: me }).sort({ updatedAt: -1 }) : [];
+    const meRegex = me ? new RegExp(escapeRegExp(me), 'i') : null;
+    const assignedFilter = meRegex
+      ? {
+          $or: [
+            { assignedTo: meRegex },
+            { 'caseAssignments.initiator': meRegex },
+            { 'caseAssignments.reviewer': meRegex },
+            { 'caseAssignments.signerApprover': meRegex },
+          ],
+        }
+      : null;
+    const assignedCases = me && assignedFilter ? await Case.find(assignedFilter).sort({ updatedAt: -1 }) : [];
     const taskCaseIds = me ? await Task.distinct('caseId', { assignee: me }) : [];
     const taskCases = taskCaseIds.length ? await Case.find({ _id: { $in: taskCaseIds } }).sort({ updatedAt: -1 }) : [];
     const yellowCandidates = await Case.find({
@@ -243,10 +260,12 @@ export const createCase = async (req: AuthRequest, res: Response) => {
     }
 
     const workflowAutomation = (req.body as any)?.workflowAutomation !== false && (req.body as any)?.matterTiming !== 'historical';
+    const caseAssignments = normalizeCaseAssignmentsPayload(req.body);
     const caseNo = String((req.body as any)?.caseNo || '').trim() || (await generateCaseNo());
     const newCase = new Case({
       ...req.body,
       caseNo,
+      ...(caseAssignments ? { caseAssignments, assignedTo: buildCaseAssignedToDisplay({ caseAssignments, assignedTo: (req.body as any)?.assignedTo }) } : {}),
       matterTiming: workflowAutomation ? 'new' : 'historical',
       workflowAutomation,
       ...(workflowAutomation
@@ -802,7 +821,16 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     }
 
     const before: any = await Case.findById(req.params.id);
-    const updated: any = await Case.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const nextAssignments = normalizeCaseAssignmentsPayload(req.body);
+    const updatePayload: any = { ...(req.body as any) };
+    if (nextAssignments) {
+      updatePayload.caseAssignments = nextAssignments;
+      updatePayload.assignedTo = buildCaseAssignedToDisplay({
+        caseAssignments: nextAssignments,
+        assignedTo: (req.body as any)?.assignedTo || before?.assignedTo,
+      });
+    }
+    const updated: any = await Case.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
 
     if (!updated) return res.status(404).json({ message: 'Case not found.' });
 
@@ -919,6 +947,7 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
         changes.push(`Priority: ${before.priority} → ${req.body.priority}`);
       if (req.body.assignedTo && req.body.assignedTo !== before.assignedTo)
         changes.push(`Assigned: ${before.assignedTo || '-'} → ${req.body.assignedTo}`);
+      if (nextAssignments) changes.push('Case assignees updated');
       if (req.body.budget && String(req.body.budget) !== String(before.budget))
         changes.push(`Budget: ${before.budget || '-'} → ${req.body.budget}`);
       if (req.body.caseNo && req.body.caseNo !== before.caseNo) changes.push(`Case No changed`);

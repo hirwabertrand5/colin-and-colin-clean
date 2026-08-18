@@ -66,6 +66,11 @@ export interface CaseData {
   status: string;
   priority: string;
   assignedTo: string;
+  caseAssignments?: {
+    initiator?: string;
+    reviewer?: string;
+    signerApprover?: string;
+  };
   description?: string;
   legalServicePath?: LegalServicePathItem[];
 

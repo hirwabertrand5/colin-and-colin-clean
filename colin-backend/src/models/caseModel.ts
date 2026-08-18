@@ -60,6 +60,11 @@ export interface ICase extends Document {
   status: string;
   priority: string;
   assignedTo: string;
+  caseAssignments?: {
+    initiator?: string;
+    reviewer?: string;
+    signerApprover?: string;
+  };
 
   description?: string;
   legalServicePath?: ILegalServicePathItem[];
@@ -203,6 +208,14 @@ const CaseSchema = new Schema<ICase>(
     priority: { type: String, default: 'Medium', trim: true },
 
     assignedTo: { type: String, required: true, trim: true },
+    caseAssignments: {
+      type: {
+        initiator: { type: String, trim: true },
+        reviewer: { type: String, trim: true },
+        signerApprover: { type: String, trim: true },
+      },
+      default: {},
+    },
 
     description: { type: String },
     legalServicePath: { type: [LegalServicePathItemSchema], default: [] },

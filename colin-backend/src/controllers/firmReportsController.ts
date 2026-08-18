@@ -8,6 +8,7 @@ import User from '../models/userModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
+import WorkflowTemplate from '../models/workflowTemplateModel';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
@@ -81,14 +82,26 @@ const monthKey = (d: Date) => {
   return `${y}-${m}`;
 };
 
-const selectedPathLabel = (c: any) => {
+const selectedPathLabel = (c: any, workflowTemplateMatterTypeById?: Map<string, string>) => {
   const path = Array.isArray(c?.legalServicePath) ? c.legalServicePath : [];
   const selected = path
     .map((item: any) => String(item?.label || '').trim())
     .filter(Boolean);
-  return selected.length
-    ? selected.join(' / ')
-    : String(c?.matterType || c?.workflow || c?.caseType || 'Unclassified');
+  if (selected.length) return selected.join(' / ');
+
+  const workflowTemplateId = String(c?.workflowTemplateId || '').trim();
+  const workflowTemplateMatterType = workflowTemplateId && workflowTemplateMatterTypeById
+    ? String(workflowTemplateMatterTypeById.get(workflowTemplateId) || '').trim()
+    : '';
+
+  return String(
+    c?.caseTypeLabel ||
+    c?.matterType ||
+    c?.workflow ||
+    workflowTemplateMatterType ||
+    c?.caseType ||
+    'Unclassified'
+  );
 };
 
 const roundMoney = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
@@ -308,11 +321,20 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     ]);
 
     const casesForInvoices = await Case.find({ _id: { $in: Array.from(new Set([...invoicesByInvoiceDate, ...invoicesByPaymentDate].map((inv: any) => String(inv.caseId || '')).filter(Boolean))) } })
-      .select('_id assignedTo')
+      .select('_id assignedTo workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
       .lean();
 
-    const allCases = await Case.find().select('_id assignedTo status').lean();
+    const allCases = await Case.find().select('_id assignedTo status workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel').lean();
     const caseById = new Map((allCases as any[]).map((c) => [String(c._id), c]));
+    const workflowTemplateIds = Array.from(new Set((allCases as any[])
+      .map((c) => String(c.workflowTemplateId || '').trim())
+      .filter(Boolean)));
+    const workflowTemplateMatterTypeById = new Map(
+      workflowTemplateIds.length
+        ? ((await WorkflowTemplate.find({ _id: { $in: workflowTemplateIds } }).select('_id matterType').lean()) as any[])
+          .map((template) => [String(template._id), String(template.matterType || '').trim()])
+        : []
+    );
 
     const linkedCaseIdsByName = new Map<string, Set<string>>();
     for (const c of allCases as any[]) {
@@ -338,14 +360,14 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         ? { _id: { $in: Array.from(linkedCaseIdsByName.get(selectedMemberNameNormalized) || []) } }
         : {}
     )
-      .select('_id assignedTo status caseNo parties budget updatedAt workflowProgress billingSettings legalServicePath matterType workflow caseType')
+      .select('_id assignedTo status caseNo parties budget updatedAt workflowProgress billingSettings legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
       .lean();
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
     const taskCaseIds = Array.from(new Set((tasksCompleted as any[]).map((task) => String(task.caseId || '')).filter(Boolean)));
     const taskCases = taskCaseIds.length
       ? await Case.find({ _id: { $in: taskCaseIds } })
-        .select('_id caseNo parties budget workflowProgress billingSettings matterType workflow legalServicePath')
+        .select('_id caseNo parties budget workflowProgress billingSettings matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
         .lean()
       : [];
     const taskCaseMap = new Map((taskCases as any[]).map((matter) => [String(matter._id), matter]));
@@ -564,10 +586,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const caseAnalyticsByPath = new Map<string, { type: string; active: number; closed: number; durationTotal: number; durationCount: number }>();
     const casesForAnalytics = await Case.find()
-      .select('caseType matterType workflow legalServicePath status updatedAt createdAt')
+      .select('caseType caseTypeLabel matterType workflow workflowTemplateId legalServicePath status updatedAt createdAt')
       .lean();
     for (const c of casesForAnalytics as any[]) {
-      const type = selectedPathLabel(c);
+      const type = selectedPathLabel(c, workflowTemplateMatterTypeById);
       const current = caseAnalyticsByPath.get(type) || {
         type,
         active: 0,
@@ -589,7 +611,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       caseAnalyticsByPath.set(type, current);
     }
 
-    const caseTypeById = new Map((casesForInvoices as any[]).map((c) => [String(c._id), selectedPathLabel(c)]));
+    const caseTypeById = new Map((casesForInvoices as any[]).map((c) => [String(c._id), selectedPathLabel(c, workflowTemplateMatterTypeById)]));
     const revenueByType = new Map<string, number>();
     for (const inv of invoicesByInvoiceDate as any[]) {
       const ct = caseTypeById.get(String(inv.caseId)) || 'Unknown';
@@ -717,7 +739,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .sort((a, b) => b.amount - a.amount);
 
     const clientProfitabilityMatters = await Case.find()
-      .select('_id caseNo parties clientName status budget workflowProgress billingSettings legalServicePath matterType workflow caseType')
+      .select('_id caseNo parties clientName status budget workflowProgress billingSettings legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
       .lean();
     const clientProfitabilityProspects = await Prospect.find({
       $or: [
@@ -741,6 +763,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       collectionDaysTotal: number;
       collectionDaysCount: number;
       revenueByPracticeArea: Map<string, number>;
+      practiceAreaCounts: Map<string, number>;
     }>();
     const clientKeyByCaseId = new Map<string, string>();
     const practiceLabelByCaseId = new Map<string, string>();
@@ -752,7 +775,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const key = normalizeName(partyName) || String(matter._id);
       const caseId = String(matter._id);
       clientKeyByCaseId.set(String(matter._id), key);
-      practiceLabelByCaseId.set(String(matter._id), selectedPathLabel(matter));
+      practiceLabelByCaseId.set(String(matter._id), selectedPathLabel(matter, workflowTemplateMatterTypeById));
 
       const detail = {
         id: caseId,
@@ -760,7 +783,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         recordLabel: String(matter.caseNo || matter.parties || 'Matter'),
         matterNo: String(matter.caseNo || ''),
         status: String(matter.status || 'Open'),
-        practiceArea: selectedPathLabel(matter),
+        practiceArea: selectedPathLabel(matter, workflowTemplateMatterTypeById),
         contractValue: roundMoney(getContractValue(matter)),
         totalBilled: 0,
         collected: 0,
@@ -789,6 +812,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         collectionDaysTotal: 0,
         collectionDaysCount: 0,
         revenueByPracticeArea: new Map<string, number>(),
+        practiceAreaCounts: new Map<string, number>(),
       };
 
       current.partyName = partyName;
@@ -797,6 +821,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       else current.completedMatters += 1;
       current.contractValue += getContractValue(matter);
       current.retainerValue += parseMoneyValue(matter?.billingSettings?.prepaidTotal);
+      const matterPracticeArea = selectedPathLabel(matter, workflowTemplateMatterTypeById);
+      if (matterPracticeArea && matterPracticeArea !== 'Unclassified') {
+        current.practiceAreaCounts.set(matterPracticeArea, (current.practiceAreaCounts.get(matterPracticeArea) || 0) + 1);
+      }
       clientProfitabilityByKey.set(key, current);
     }
 
@@ -838,6 +866,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         collectionDaysTotal: 0,
         collectionDaysCount: 0,
         revenueByPracticeArea: new Map<string, number>(),
+        practiceAreaCounts: new Map<string, number>(),
       };
 
       current.partyName = partyName;
@@ -846,6 +875,12 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       else current.activeMatters += 1;
       current.contractValue += parseMoneyValue(prospect?.estimatedFeeValue || prospect?.quotationAmount || 0);
       current.retainerValue += parseMoneyValue(prospect?.depositAmount);
+      const prospectPracticeArea = Array.isArray(prospect.legalServicePath) && prospect.legalServicePath.length
+        ? prospect.legalServicePath.map((item: any) => String(item?.label || '').trim()).filter(Boolean).join(' / ')
+        : String(prospect.practiceArea || 'Prospect');
+      if (prospectPracticeArea && prospectPracticeArea !== 'Prospect') {
+        current.practiceAreaCounts.set(prospectPracticeArea, (current.practiceAreaCounts.get(prospectPracticeArea) || 0) + 1);
+      }
       clientProfitabilityByKey.set(key, current);
     }
 
@@ -923,6 +958,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
             amount: roundMoney(amount),
           }))
           .sort((a, b) => b.amount - a.amount || a.type.localeCompare(b.type));
+        const practiceAreaCounts = Array.from(row.practiceAreaCounts.entries())
+          .map(([type, count]) => ({ type, count }))
+          .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+        const practiceArea = practiceAreaCounts[0]?.type || revenueByPracticeArea[0]?.type || 'Unclassified';
 
         return {
           partyName: row.partyName,
@@ -938,7 +977,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           grossProfitMargin,
           collectionPeriodDays: row.collectionDaysCount > 0 ? roundMoney(row.collectionDaysTotal / row.collectionDaysCount) : null,
           retainerValue: roundMoney(row.retainerValue),
-          primaryPracticeArea: revenueByPracticeArea[0]?.type || 'Unclassified',
+          primaryPracticeArea: practiceArea,
           matterDetails: (clientDetailsByKey.get(normalizeName(row.partyName)) || [])
             .map((item) => ({
               ...item,

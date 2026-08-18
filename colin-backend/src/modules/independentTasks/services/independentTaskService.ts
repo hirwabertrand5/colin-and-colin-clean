@@ -15,6 +15,7 @@ import IndependentTaskComment from '../models/independentTaskCommentModel';
 import IndependentTaskHistory, {
   IndependentTaskHistoryAction,
 } from '../models/independentTaskHistoryModel';
+import { caseMatchesAssignee } from '../../../utils/caseAssignments';
 
 export type IndependentTaskListQuery = {
   q?: string;
@@ -150,8 +151,8 @@ const isVisibleToUser = async (req: AuthRequest, task: any) => {
   if ([task.assignee, task.supervisor, task.createdBy, task.assignedBy, task.lastActionBy].some((v) => cleanString(v) === me))
     return true;
   if (task.relatedMatterId) {
-    const matter = await Case.findById(task.relatedMatterId).select('assignedTo').lean();
-    if (matter && cleanString((matter as any).assignedTo) === me) return true;
+    const matter = await Case.findById(task.relatedMatterId).select('assignedTo caseAssignments').lean();
+    if (matter && (caseMatchesAssignee(matter, me) || caseMatchesAssignee(matter, req.user?.email))) return true;
   }
   return false;
 };
@@ -171,19 +172,20 @@ const canActAsAssignee = (req: AuthRequest, task: any) => {
 
 const hydrateTask = async (task: any) => {
   const matter = task.relatedMatterId
-    ? await Case.findById(task.relatedMatterId).select('caseNo parties status assignedTo').lean()
+    ? await Case.findById(task.relatedMatterId).select('caseNo parties status assignedTo caseAssignments').lean()
     : null;
   const taskObj = typeof task.toObject === 'function' ? task.toObject() : task;
 
   return {
     ...taskObj,
     relatedMatter: matter
-      ? {
+        ? {
           _id: String((matter as any)._id),
           caseNo: (matter as any).caseNo,
           parties: (matter as any).parties,
           status: (matter as any).status,
           assignedTo: (matter as any).assignedTo,
+          caseAssignments: (matter as any).caseAssignments,
         }
       : null,
   };
@@ -348,7 +350,7 @@ export const independentTaskService = {
     let relatedClient = cleanString(payload.relatedClient);
 
     if (relatedMatterId) {
-      const matter = await Case.findById(relatedMatterId).select('caseNo parties assignedTo').lean();
+      const matter = await Case.findById(relatedMatterId).select('caseNo parties assignedTo caseAssignments').lean();
       if (!matter) throw new Error('Selected matter was not found.');
       matterLabel = [matter.caseNo, matter.parties].filter(Boolean).join(' • ');
       if (!relatedClient) relatedClient = cleanString((matter as any).parties);

@@ -10,6 +10,7 @@ import {
   getUrgencyColorForDueDate,
 } from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
+import { formatCaseAssignedTo } from '../../utils/caseAssignments';
 
 interface ClosedCasesProps {
   userRole: UserRole;
@@ -98,7 +99,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
     return cases.map((c, originalIndex) => ({
       c,
       originalIndex,
-      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''} ${c.assignedTo ?? ''} ${c.workflow ?? ''} ${c.matterType ?? ''} ${c.caseType ?? ''} ${c.workflowProgress?.currentStepTitle ?? ''} ${c.workflowProgress?.status ?? ''}`.toLowerCase(),
+      searchable: `${c.caseNo ?? ''} ${c.parties ?? ''} ${formatCaseAssignedTo(c)} ${c.workflow ?? ''} ${c.matterType ?? ''} ${c.caseType ?? ''} ${c.workflowProgress?.currentStepTitle ?? ''} ${c.workflowProgress?.status ?? ''}`.toLowerCase(),
       createdAtMs: toMs(c.createdAt),
       workflowLabel: getCasePracticePath(c).toLowerCase(),
       currentStepLabel: String(c.workflowProgress?.currentStepTitle || '').toLowerCase(),
@@ -245,7 +246,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
                       ? 'Completed'
                       : item.workflowProgress?.currentStepTitle || '—'}
                   </td>
-                  <td className="px-6 py-5 text-sm text-gray-600">{item.assignedTo}</td>
+                  <td className="px-6 py-5 text-sm text-gray-600">{formatCaseAssignedTo(item)}</td>
                   <td className="px-6 py-5 text-sm text-gray-500">{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}</td>
                   <td className="px-6 py-5 text-sm text-gray-500">
                     {String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed'

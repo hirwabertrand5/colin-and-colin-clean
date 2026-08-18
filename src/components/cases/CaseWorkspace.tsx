@@ -80,6 +80,7 @@ import {
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { getRoleSuggestions } from '../../constants/partyRoles';
 import { getCasePracticePath } from '../../utils/caseLabels';
+import { caseMatchesAssignee, formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
 import { getUrgencyColorForDueDate } from '../../utils/workflowDeadline';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -182,6 +183,12 @@ const getServicePathAccent = (caseType?: CaseData['caseType']) => {
   return 'bg-blue-50 text-blue-700 border-blue-200';
 };
 
+const CASE_ASSIGNMENT_ROLE_OPTIONS: Record<'initiator' | 'reviewer' | 'signerApprover', string[]> = {
+  initiator: ['intern', 'trainee_associate', 'associate'],
+  reviewer: ['associate', 'senior_associate'],
+  signerApprover: ['managing_partner', 'executive_managing_partner'],
+};
+
 const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
 
 const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
@@ -216,6 +223,18 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       return {};
     }
   }, []);
+
+  const updateEditAssignmentSlot = (slot: 'initiator' | 'reviewer' | 'signerApprover', value: string) => {
+    setEditCaseData((prev) => {
+      if (!prev) return prev;
+      const caseAssignments = setCaseAssignmentSlot(prev.caseAssignments, slot, value);
+      return {
+        ...prev,
+        caseAssignments,
+        assignedTo: formatCaseAssignedTo({ caseAssignments, assignedTo: prev.assignedTo }),
+      };
+    });
+  };
 
   // Case data
   const [caseData, setCaseData] = useState<CaseData | null>(null);
@@ -271,6 +290,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     const meName = normalizeIdentity(currentUser?.name);
     const meEmail = normalizeIdentity(currentUser?.email);
     if (!meName && !meEmail) return false;
+    if (caseMatchesAssignee(caseData, currentUser?.name) || caseMatchesAssignee(caseData, currentUser?.email)) return true;
     return tasks.some((task) => {
       const taskAssignee = normalizeIdentity(task.assignee);
       const taskSupervisor = normalizeIdentity(task.supervisor);
@@ -980,7 +1000,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const nowMs = Date.now();
 
   const isYellowMatter = currentMatterColor === 'yellow';
-  const isCurrentAssignee = String(caseData?.assignedTo || '').trim() === String(currentUser.name || '').trim();
+  const isCurrentAssignee = caseMatchesAssignee(caseData, currentUser.name) || caseMatchesAssignee(caseData, currentUser.email);
   const takeRequestState = caseData?.takeRequestState;
   const isPendingTakeRequest =
     String(takeRequestState?.status || '').toLowerCase() === 'pending' &&
@@ -1350,7 +1370,19 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
               <button
                 className="px-5 py-2 border border-gray-300 rounded-lg text-base text-gray-700 hover:bg-gray-50 font-medium"
                 onClick={() => {
-                  setEditCaseData(caseData);
+                  setEditCaseData(
+                    caseData
+                      ? {
+                          ...caseData,
+                          caseAssignments: {
+                            initiator: caseData.caseAssignments?.initiator || caseData.assignedTo || '',
+                            reviewer: caseData.caseAssignments?.reviewer || '',
+                            signerApprover: caseData.caseAssignments?.signerApprover || '',
+                          },
+                          assignedTo: formatCaseAssignedTo(caseData),
+                        }
+                      : caseData
+                  );
                   setShowEditCase(true);
                 }}
               >
@@ -3160,23 +3192,56 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Assigned To</label>
-                <select
-                  value={editCaseData.assignedTo}
-                  onChange={(e) => setEditCaseData((c) => (c ? { ...c, assignedTo: e.target.value } : c))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                  disabled={staffLoading}
-                  required
-                >
-                  <option value="">{staffLoading ? 'Loading staff...' : 'Select staff'}</option>
-                  {staffUsers.map((u) => (
-                    <option key={u._id} value={u.name}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
-
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <div className="text-sm font-semibold text-gray-900">Assigned To</div>
+                <p className="text-xs text-gray-500 mt-1">Choose the initiator, reviewer, and signer/approver for this case.</p>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {[
+                    {
+                      key: 'initiator' as const,
+                      label: 'Initiator',
+                      hint: 'Intern / Junior',
+                      roles: CASE_ASSIGNMENT_ROLE_OPTIONS.initiator,
+                    },
+                    {
+                      key: 'reviewer' as const,
+                      label: 'Reviewer',
+                      hint: 'Associate / Senior Associate',
+                      roles: CASE_ASSIGNMENT_ROLE_OPTIONS.reviewer,
+                    },
+                    {
+                      key: 'signerApprover' as const,
+                      label: 'Signer / Approver',
+                      hint: 'Managing Partner',
+                      roles: CASE_ASSIGNMENT_ROLE_OPTIONS.signerApprover,
+                    },
+                  ].map((field) => {
+                    const currentValue = editCaseData.caseAssignments?.[field.key] || '';
+                    const optionUsers = staffUsers.filter((user) => field.roles.includes(String(user.role || '').toLowerCase()));
+                    const usersToRender = optionUsers.length > 0 ? optionUsers : staffUsers;
+                    return (
+                      <div key={field.key}>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>
+                        <div className="mb-2 text-xs text-gray-500">{field.hint}</div>
+                        <select
+                          value={currentValue}
+                          onChange={(e) => updateEditAssignmentSlot(field.key, e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                          disabled={staffLoading}
+                          required
+                        >
+                          <option value="">{staffLoading ? 'Loading staff...' : 'Select staff'}</option>
+                          {usersToRender.map((u) => (
+                            <option key={u._id} value={u.name}>
+                              {u.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 text-xs text-gray-500">{editCaseData.assignedTo || 'No assignees selected yet.'}</div>
                 {staffError && <p className="text-xs text-red-600 mt-2">{staffError}</p>}
               </div>
 
