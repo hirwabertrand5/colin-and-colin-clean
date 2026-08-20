@@ -34,6 +34,196 @@ const isAdminCaseRole = (role?: string) =>
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
 
+const TASK_WORKFLOW_MODES = ['LEGACY', 'STAGED'] as const;
+type TaskWorkflowMode = (typeof TASK_WORKFLOW_MODES)[number];
+const TASK_STAGE_STATUSES = ['Assigned', 'In Progress', 'Completed', 'Cancelled'] as const;
+type TaskStageStatus = (typeof TASK_STAGE_STATUSES)[number];
+const TASK_STAGE_ROLES = ['Initiator', 'Reviewer', 'Signer', 'Approver', 'Signer/Approver', 'Preparer', 'Researcher'] as const;
+type TaskStageRole = (typeof TASK_STAGE_ROLES)[number];
+
+const normalizeWorkflowMode = (value: unknown): TaskWorkflowMode => {
+  const raw = String(value || '').trim();
+  return (TASK_WORKFLOW_MODES as readonly string[]).includes(raw) ? (raw as TaskWorkflowMode) : 'LEGACY';
+};
+
+const normalizeTaskStageRole = (value: unknown): TaskStageRole | null => {
+  const raw = String(value || '').trim();
+  return (TASK_STAGE_ROLES as readonly string[]).includes(raw) ? (raw as TaskStageRole) : null;
+};
+
+const normalizeTaskStageStatus = (value: unknown): TaskStageStatus => {
+  const raw = String(value || '').trim();
+  return (TASK_STAGE_STATUSES as readonly string[]).includes(raw) ? (raw as TaskStageStatus) : 'Assigned';
+};
+
+const normalizeTaskStagesPayload = (value: unknown, fallback: any[] = []) => {
+  const stages = Array.isArray(value) ? value : [];
+  if (!stages.length) return fallback;
+  return stages
+    .map((stage, index) => {
+      const role = normalizeTaskStageRole(stage?.role);
+      if (!role) return null;
+      return {
+        role,
+        staffMember: String(stage?.staffMember || '').trim(),
+        sequence: Number.isFinite(Number(stage?.sequence)) ? Number(stage?.sequence) : index + 1,
+        required: stage?.required !== false,
+        assignedAt: stage?.assignedAt ? new Date(stage.assignedAt) : undefined,
+        dueAt: stage?.dueAt ? new Date(stage.dueAt) : undefined,
+        status: normalizeTaskStageStatus(stage?.status),
+        completedAt: stage?.completedAt ? new Date(stage.completedAt) : undefined,
+        timelinessScore:
+          stage?.timelinessScore === null || stage?.timelinessScore === undefined || stage?.timelinessScore === ''
+            ? null
+            : Number(stage.timelinessScore),
+        qualityScore:
+          stage?.qualityScore === null || stage?.qualityScore === undefined || stage?.qualityScore === ''
+            ? null
+            : Number(stage.qualityScore),
+        qualityApplicable: stage?.qualityApplicable !== false,
+        supervisorReviewer: String(stage?.supervisorReviewer || '').trim(),
+        tpaUsed:
+          stage?.tpaUsed === null || stage?.tpaUsed === undefined || stage?.tpaUsed === '' ? null : Number(stage.tpaUsed),
+        potentialAllocation:
+          stage?.potentialAllocation === null ||
+          stage?.potentialAllocation === undefined ||
+          stage?.potentialAllocation === ''
+            ? null
+            : Number(stage.potentialAllocation),
+        earnedRevenue:
+          stage?.earnedRevenue === null || stage?.earnedRevenue === undefined || stage?.earnedRevenue === ''
+            ? null
+            : Number(stage.earnedRevenue),
+        notes: String(stage?.notes || '').trim(),
+      };
+    })
+    .filter(Boolean);
+};
+
+const buildDefaultTaskStagesFromCase = (caseRecord: any, dueDate: string, assignedAt = new Date()) => {
+  const caseAssignments = caseRecord?.caseAssignments || {};
+  const initiator = String(caseAssignments?.initiator || caseRecord?.assignedTo || '').trim();
+  const reviewer = String(caseAssignments?.reviewer || '').trim();
+  const signer = String(caseAssignments?.signerApprover || '').trim();
+  const dueAt = dueDate ? new Date(`${dueDate}T17:00:00.000Z`) : undefined;
+
+  return [
+    {
+      role: 'Initiator',
+      staffMember: initiator,
+      sequence: 1,
+      required: true,
+      assignedAt,
+      dueAt,
+      status: 'Assigned' as TaskStageStatus,
+      completedAt: undefined,
+      timelinessScore: null,
+      qualityScore: null,
+      qualityApplicable: true,
+      supervisorReviewer: reviewer || signer || '',
+      tpaUsed: null,
+      potentialAllocation: null,
+      earnedRevenue: null,
+      notes: '',
+    },
+    {
+      role: 'Reviewer',
+      staffMember: reviewer,
+      sequence: 2,
+      required: true,
+      assignedAt,
+      dueAt,
+      status: 'Assigned' as TaskStageStatus,
+      completedAt: undefined,
+      timelinessScore: null,
+      qualityScore: null,
+      qualityApplicable: true,
+      supervisorReviewer: signer || initiator || '',
+      tpaUsed: null,
+      potentialAllocation: null,
+      earnedRevenue: null,
+      notes: '',
+    },
+    {
+      role: 'Signer/Approver',
+      staffMember: signer,
+      sequence: 3,
+      required: true,
+      assignedAt,
+      dueAt,
+      status: 'Assigned' as TaskStageStatus,
+      completedAt: undefined,
+      timelinessScore: null,
+      qualityScore: null,
+      qualityApplicable: true,
+      supervisorReviewer: reviewer || initiator || '',
+      tpaUsed: null,
+      potentialAllocation: null,
+      earnedRevenue: null,
+      notes: '',
+    },
+  ];
+};
+
+const ensureMatterAssignmentTask = async (caseId: string) => {
+  const caseRecord: any = await Case.findById(caseId)
+    .select('caseNo parties assignedTo caseAssignments workflowStartDate createdAt')
+    .lean();
+  if (!caseRecord) return;
+
+  const caseAssignments = caseRecord.caseAssignments || {};
+  const hasMatterAssignments = Boolean(caseAssignments?.initiator && caseAssignments?.reviewer && caseAssignments?.signerApprover);
+  if (!hasMatterAssignments) return;
+
+  const existingTask = await Task.findOne({
+    caseId: new mongoose.Types.ObjectId(caseId),
+    workflowMode: 'STAGED',
+  }).lean();
+  if (existingTask) return;
+
+  const autoTaskNo = await buildYearlySequence('task', 'TASK');
+  const autoDueDate = new Date();
+  autoDueDate.setDate(autoDueDate.getDate() + 7);
+  const autoDueDateString = autoDueDate.toISOString().slice(0, 10);
+  const stagedTask = new Task({
+    caseId: new mongoose.Types.ObjectId(caseId),
+    taskNo: autoTaskNo,
+    title: `Matter Assignment - ${caseRecord.caseNo || 'Case'}`,
+    workflowMode: 'STAGED',
+    workflowStage: 'Assigned',
+    priority: 'Medium',
+    status: 'Not Started',
+    assignee: String(caseAssignments.initiator || caseRecord.assignedTo || '').trim(),
+    supervisor: String(caseAssignments.reviewer || caseAssignments.signerApprover || '').trim(),
+    relatedClient: String(caseRecord.parties || '').trim(),
+    startDate:
+      caseRecord.workflowStartDate?.toISOString?.().slice(0, 10) ||
+      caseRecord.createdAt?.toISOString?.().slice(0, 10) ||
+      new Date().toISOString().slice(0, 10),
+    dueDate: autoDueDateString,
+    description: 'Auto-created from matter assignment.',
+    taskStages: buildDefaultTaskStagesFromCase(caseRecord, autoDueDateString),
+    requiresApproval: false,
+    approvalStatus: 'Not Required',
+    assignedBy: 'System',
+  });
+
+  await stagedTask.save();
+};
+
+const taskStagesToOverallStatus = (taskStages: any[] = []) => {
+  if (!taskStages.length) return null;
+  return taskStagesAreComplete(taskStages) ? 'Completed' : 'In Progress';
+};
+
+const taskStageMatchesUser = (stage: any, meName: string, meEmail: string) => {
+  const staffMember = normalizeIdentity(stage?.staffMember);
+  return Boolean(staffMember && [meName, meEmail].includes(staffMember));
+};
+
+const taskStagesAreComplete = (taskStages: any[] = []) =>
+  taskStages.length > 0 && taskStages.every((stage) => !stage?.required || String(stage?.status || '') === 'Completed');
+
 const TASK_WORKFLOW_STAGES = [
   'Created',
   'Assigned',
@@ -110,7 +300,8 @@ const canAccessTask = async (req: AuthRequest, task: any) => {
   const meEmail = normalizeIdentity(req.user?.email);
   const assignee = normalizeIdentity(task.assignee);
   const supervisor = normalizeIdentity(task.supervisor);
-  return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
+  const stageMatch = (task?.taskStages || []).some((stage: any) => taskStageMatchesUser(stage, meName, meEmail));
+  return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
 };
 
 const assertAssigneeAllowed = async (req: AuthRequest, assigneeValue: unknown) => {
@@ -177,11 +368,12 @@ const canAccessCaseId = async (req: AuthRequest, caseId: string) => {
 
   if (caseMatchesAssignee(c, meName) || caseMatchesAssignee(c, meEmail)) return true;
 
-  const tasks = await Task.find({ caseId }).select('assignee supervisor').lean();
+  const tasks = await Task.find({ caseId }).select('assignee supervisor taskStages').lean();
   return tasks.some((task: any) => {
     const assignee = normalizeIdentity(task?.assignee);
     const supervisor = normalizeIdentity(task?.supervisor);
-    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
+    const stageMatch = (task?.taskStages || []).some((stage: any) => taskStageMatchesUser(stage, meName, meEmail));
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
   });
 };
 
@@ -201,6 +393,7 @@ export const getTasksForCase = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
+    await ensureMatterAssignmentTask(String(caseId));
     const tasks = await Task.find({
       caseId: new mongoose.Types.ObjectId(caseId),
     }).sort({ dueDate: 1 });
@@ -224,6 +417,7 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
 
     const assignee = String(req.body?.assignee || '').trim();
     const supervisor = String(req.body?.supervisor || '').trim();
+    const workflowMode = normalizeWorkflowMode(req.body?.workflowMode);
     const dueDate = normalizeTaskDueDate(req.body?.dueDate);
     const startDate = normalizeTaskStartDate(req.body?.startDate);
     const relatedStage = normalizeWorkflowStage(req.body?.workflowStage) || 'Assigned';
@@ -243,9 +437,16 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
     await assertAssigneeAllowed(req, assignee);
     await assertSupervisorAllowed(supervisor);
 
-    const caseRecord: any = await Case.findById(caseId).select('parties caseNo').lean();
+    const caseRecord: any = await Case.findById(caseId).select('parties caseNo assignedTo caseAssignments').lean();
     const taskNo = String(req.body?.taskNo || '').trim() || (await generateTaskNo());
     const relatedClient = String(req.body?.relatedClient || caseRecord?.parties || '').trim();
+    const providedTaskStages = normalizeTaskStagesPayload(req.body?.taskStages, []);
+    const taskStages =
+      workflowMode === 'STAGED'
+        ? providedTaskStages.length
+          ? providedTaskStages
+          : buildDefaultTaskStagesFromCase(caseRecord, dueDate)
+        : [];
 
     const requiresApproval = Boolean(req.body.requiresApproval);
     const approvalStatus = requiresApproval ? 'Draft' : 'Not Required';
@@ -254,6 +455,7 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
       ...req.body,
       taskNo,
       caseId: new mongoose.Types.ObjectId(caseId),
+      workflowMode,
       requiresApproval,
       approvalStatus,
       assignee,
@@ -266,6 +468,7 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
       acknowledgedAt: stageRequiresAcknowledgement(relatedStage) ? new Date() : undefined,
       completedAt: relatedStage === 'Completed' ? new Date() : undefined,
       closedAt: undefined,
+      taskStages,
       assignedBy: req.user?.name || 'System',
       submittedAt: undefined,
       approvedAt: undefined,
@@ -341,7 +544,7 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
         return res.json([]);
       }
 
-      const visibility: any = { $or: [{ assignee: me }, { supervisor: me }] };
+      const visibility: any = { $or: [{ assignee: me }, { supervisor: me }, { 'taskStages.staffMember': me }] };
       if (req.user?.role === 'associate') {
         const ownedCaseIds = await Case.find({
           $or: [
@@ -351,7 +554,9 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
             { 'caseAssignments.signerApprover': new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
           ],
         }).distinct('_id');
-        const caseIdsFromTasks = await Task.distinct('caseId', { $or: [{ assignee: me }, { supervisor: me }] });
+        const caseIdsFromTasks = await Task.distinct('caseId', {
+          $or: [{ assignee: me }, { supervisor: me }, { 'taskStages.staffMember': me }],
+        });
         const visibleCaseIds = [...new Set([...ownedCaseIds, ...caseIdsFromTasks].map(String))];
         visibility.caseId = { $in: visibleCaseIds.map((value) => new mongoose.Types.ObjectId(value)) };
       }
@@ -365,7 +570,16 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
 
     if (q && String(q).trim()) {
       const regex = new RegExp(String(q).trim(), 'i');
-      andFilters.push({ $or: [{ title: regex }, { assignee: regex }, { supervisor: regex }, { taskNo: regex }, { relatedClient: regex }] });
+      andFilters.push({
+        $or: [
+          { title: regex },
+          { assignee: regex },
+          { supervisor: regex },
+          { 'taskStages.staffMember': regex },
+          { taskNo: regex },
+          { relatedClient: regex },
+        ],
+      });
     }
 
     if (andFilters.length) filter.$and = andFilters;
@@ -405,21 +619,35 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
 
     const before: any = await Task.findById(taskId);
     if (!before) return res.status(404).json({ message: 'Task not found.' });
+    const caseRecord: any = await Case.findById(before.caseId).select('parties caseNo assignedTo caseAssignments').lean();
 
     const canManage = await canManageTask(req, before);
-    const isAssignee = before.assignee === req.user?.name;
-    const isSupervisor = String(before.supervisor || '').trim() === String(req.user?.name || '').trim();
+    const meName = normalizeIdentity(req.user?.name);
+    const meEmail = normalizeIdentity(req.user?.email);
+    const isAssignee = normalizeIdentity(before.assignee) === meName || normalizeIdentity(before.assignee) === meEmail;
+    const isSupervisor = normalizeIdentity(before.supervisor) === meName || normalizeIdentity(before.supervisor) === meEmail;
+    const isStageParticipant = (before.taskStages || []).some((stage: any) => taskStageMatchesUser(stage, meName, meEmail));
     const attemptedKeys = Object.keys(req.body || {}).filter((key) => req.body?.[key] !== undefined);
     const qualityOnlyUpdate = attemptedKeys.length > 0 && attemptedKeys.every((key) => key === 'qualityScore');
 
-    if (!canManage && !isAssignee && !isSupervisor) {
+    if (!canManage && !isAssignee && !isSupervisor && !isStageParticipant) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
     if (!canManage) {
-      const allowedSelfServiceKeys = isSupervisor ? ['qualityScore'] : ['status', 'workflowStage'];
+      const allowedSelfServiceKeys = isStageParticipant
+        ? ['status', 'workflowStage', 'taskStages', 'workflowMode', 'qualityScore']
+        : isSupervisor
+          ? ['qualityScore']
+          : ['status', 'workflowStage'];
       if (attemptedKeys.some((key) => !allowedSelfServiceKeys.includes(key))) {
-        return res.status(403).json({ message: isSupervisor ? 'Supervisors can only update quality score.' : 'You can only update task status.' });
+        return res.status(403).json({
+          message: isStageParticipant
+            ? 'You can only update your assigned stage.'
+            : isSupervisor
+              ? 'Supervisors can only update quality score.'
+              : 'You can only update task status.',
+        });
       }
     }
 
@@ -465,6 +693,25 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
       updates.startDate = normalizeTaskStartDate(updates.startDate);
     }
 
+    if (Object.prototype.hasOwnProperty.call(updates, 'workflowMode')) {
+      updates.workflowMode = normalizeWorkflowMode(updates.workflowMode);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'taskStages')) {
+      updates.taskStages = normalizeTaskStagesPayload(updates.taskStages, before.taskStages || []);
+      if (!Object.prototype.hasOwnProperty.call(updates, 'workflowMode') && updates.taskStages.length) {
+        updates.workflowMode = 'STAGED';
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, 'workflowMode') && updates.workflowMode === 'STAGED') {
+      if (!Object.prototype.hasOwnProperty.call(updates, 'taskStages') || !updates.taskStages.length) {
+        updates.taskStages = normalizeTaskStagesPayload(
+          buildDefaultTaskStagesFromCase(caseRecord, Object.prototype.hasOwnProperty.call(updates, 'dueDate') ? updates.dueDate : before.dueDate),
+          []
+        );
+      }
+    }
+
     try {
       assertTaskDateRange(
         Object.prototype.hasOwnProperty.call(updates, 'startDate') ? updates.startDate : before.startDate,
@@ -477,6 +724,7 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
     const hasWorkflowStage = Object.prototype.hasOwnProperty.call(updates, 'workflowStage');
     const hasStatus = Object.prototype.hasOwnProperty.call(updates, 'status');
     const hasApprovalStatus = Object.prototype.hasOwnProperty.call(updates, 'approvalStatus');
+    const hasTaskStages = Object.prototype.hasOwnProperty.call(updates, 'taskStages');
     const confirmCompletion = Boolean((updates.confirmCompletion || updates.completionConfirmed));
     delete updates.confirmCompletion;
     delete updates.completionConfirmed;
@@ -552,6 +800,17 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
         updates.workflowStage = 'Completed';
         updates.completedAt = now;
         updates.closedAt = undefined;
+      }
+    }
+
+    if (hasTaskStages) {
+      const nextStatus = taskStagesAreComplete(updates.taskStages) ? 'Completed' : 'In Progress';
+      updates.status = nextStatus;
+      if (!hasWorkflowStage) updates.workflowStage = nextStatus === 'Completed' ? 'Completed' : 'In Progress';
+      if (nextStatus === 'Completed') {
+        updates.completedAt = before.completedAt || new Date();
+      } else if (!before.completedAt) {
+        updates.completedAt = undefined;
       }
     }
 

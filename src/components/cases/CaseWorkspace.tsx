@@ -177,6 +177,22 @@ const getTaskWorkflowChip = (stage?: string) => {
   return 'bg-blue-50 text-blue-700 border-blue-100';
 };
 
+const getTaskWorkflowModeChip = (mode?: TaskData['workflowMode']) =>
+  mode === 'STAGED' ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-700 border-slate-200';
+
+const formatTaskStageSummary = (task?: TaskData | null) => {
+  const stages = task?.taskStages || [];
+  if (!stages.length) {
+    return task?.workflowMode === 'STAGED' ? 'Staged task with no saved contributors yet.' : 'Legacy single-assignee task.';
+  }
+
+  return stages
+    .slice()
+    .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
+    .map((stage) => `${stage.role}: ${stage.staffMember || 'Unassigned'}`)
+    .join(' • ');
+};
+
 const getServicePathAccent = (caseType?: CaseData['caseType']) => {
   if (caseType === 'Litigation Cases') return 'bg-red-50 text-red-700 border-red-200';
   if (caseType === 'Labor Cases') return 'bg-amber-50 text-amber-700 border-amber-200';
@@ -244,7 +260,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   // Tabs
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'tasks' | 'calendar' | 'documents' | 'billing' | 'audit' | 'reports'
+    'overview' | 'teamStages' | 'tasks' | 'calendar' | 'documents' | 'billing' | 'audit' | 'reports'
   >('overview');
 
   // Workflow instance (for overview checklist)
@@ -266,13 +282,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [staffLoading, setStaffLoading] = useState(false);
   const [staffError, setStaffError] = useState('');
   const assigneeUsers = staffUsers;
-  const supervisorUsers = useMemo(
-    () =>
-      staffUsers.filter((u) =>
-        ['associate', 'executive_assistant', 'managing_partner', 'managing_director'].includes(String(u.role || '').toLowerCase())
-      ),
-    [staffUsers]
-  );
+  const supervisorUsers = useMemo(() => staffUsers, [staffUsers]);
 
   // Tasks
   const [tasks, setTasks] = useState<TaskData[]>([]);
@@ -294,7 +304,11 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     return tasks.some((task) => {
       const taskAssignee = normalizeIdentity(task.assignee);
       const taskSupervisor = normalizeIdentity(task.supervisor);
-      return [taskAssignee, taskSupervisor].some((value) => value && (value === meName || value === meEmail));
+      const stageMatch = (task.taskStages || []).some((stage) => {
+        const staffMember = normalizeIdentity(stage.staffMember);
+        return staffMember && (staffMember === meName || staffMember === meEmail);
+      });
+      return [taskAssignee, taskSupervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
     });
   }, [caseData?._id, canManageCase, currentUser?.email, currentUser?.name, tasks]);
 
@@ -306,6 +320,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     workflowStage: 'Assigned',
     assignee: '',
     supervisor: '',
+    workflowMode: 'LEGACY',
     relatedClient: '',
     startDate: new Date().toISOString().slice(0, 10),
     dueDate: '',
@@ -736,6 +751,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         workflowStage: 'Assigned',
         assignee: '',
         supervisor: '',
+        workflowMode: 'LEGACY',
         relatedClient: '',
         startDate: new Date().toISOString().slice(0, 10),
         dueDate: '',
@@ -1398,6 +1414,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         <nav className="flex space-x-6 overflow-x-auto">
           {[
             { id: 'overview', label: 'Overview', icon: FileText },
+            { id: 'teamStages', label: 'Team & Stages', icon: FolderTree },
             { id: 'tasks', label: 'Tasks', icon: CheckSquare },
             { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
             { id: 'documents', label: 'Documents', icon: Upload },
@@ -1655,6 +1672,127 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         </div>
       )}
 
+      {activeTab === 'teamStages' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-900">Case Team & Stages</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Matter visibility and staged execution for the selected Initiator, Reviewer, and Signer/Approver.
+                </p>
+              </div>
+              <div className="text-xs text-gray-500">
+                Current matter assignment: <span className="font-medium text-gray-900">{caseData?.assignedTo || 'Not set'}</span>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                { label: 'Initiator', value: caseData?.caseAssignments?.initiator || '—', hint: 'Intern / Junior' },
+                { label: 'Reviewer', value: caseData?.caseAssignments?.reviewer || '—', hint: 'Associate / Senior Associate' },
+                { label: 'Signer / Approver', value: caseData?.caseAssignments?.signerApprover || '—', hint: 'Managing Partner' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">{item.label}</div>
+                  <div className="mt-2 text-lg font-semibold text-gray-900">{item.value}</div>
+                  <div className="mt-1 text-xs text-gray-500">{item.hint}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-900">Task Stage Register</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Staged tasks show the contributors, deadlines, completion, quality, and attributed values here.
+                </p>
+              </div>
+            </div>
+
+            {tasks.length === 0 ? (
+              <div className="px-5 py-8 text-gray-500">No tasks have been created for this case yet.</div>
+            ) : (
+              <div className="divide-y divide-gray-200">
+                {tasks.map((task) => {
+                  const taskStages = [...(task.taskStages || [])].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+                  const hasStages = taskStages.length > 0;
+
+                  return (
+                    <div key={task._id} className="px-5 py-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold text-gray-500">{task.taskNo || 'Task'}</div>
+                          <div className="mt-1 text-base font-semibold text-gray-900">{task.title}</div>
+                          <div className="mt-1 text-xs text-gray-500">{task.description || 'No description provided.'}</div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${getTaskWorkflowModeChip(task.workflowMode)}`}>
+                            {task.workflowMode === 'STAGED' ? 'Staged' : 'Legacy'}
+                          </span>
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${getTaskWorkflowChip(task.workflowStage)}`}
+                          >
+                            {task.workflowStage || 'Assigned'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {hasStages ? (
+                        <div className="mt-4 overflow-x-auto">
+                          <table className="w-full min-w-[1100px]">
+                            <thead className="bg-gray-50 border-b border-gray-200">
+                              <tr>
+                                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-600">Stage</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-600">Staff member</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-600">Deadline</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-600">Status</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-600">Completed</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-600">Quality</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-600">Revenue</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {taskStages.map((stage) => (
+                                <tr key={`${task._id}-${stage.sequence}-${stage.role}`}>
+                                  <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                                    {stage.sequence}. {stage.role}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-gray-700">{stage.staffMember || 'Unassigned'}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-700">
+                                    {stage.dueAt ? new Date(stage.dueAt).toLocaleDateString() : '—'}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-gray-700">{stage.status}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-700">
+                                    {stage.completedAt ? new Date(stage.completedAt).toLocaleDateString() : '—'}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-gray-700">
+                                    {stage.qualityScore == null ? '—' : `${stage.qualityScore}%`}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-gray-700">
+                                    {stage.earnedRevenue == null ? '—' : formatRwf(stage.earnedRevenue)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm text-gray-600">
+                          {formatTaskStageSummary(task)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Tasks */}
       {activeTab === 'tasks' && (
         <div className="bg-white border border-gray-200 rounded-lg">
@@ -1685,6 +1823,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">No.</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Task</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Workflow</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Mode</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Ownership</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">Dates</th>
                     <th className="px-4 py-2 text-right text-xs font-medium text-gray-600 uppercase">Actions</th>
@@ -1728,9 +1867,30 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                         <div className="mt-2 text-xs text-gray-500">{task.status}</div>
                       </td>
 
+                      <td className="px-4 py-3 min-w-[120px]">
+                        <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${getTaskWorkflowModeChip(task.workflowMode)}`}>
+                          {task.workflowMode === 'STAGED' ? 'Staged' : 'Legacy'}
+                        </span>
+                      </td>
+
                       <td className="px-4 py-3 min-w-[210px] text-sm">
-                        <div className="font-medium text-gray-900">{task.assignee || '—'}</div>
-                        <div className="text-xs text-gray-500">Supervisor: {task.supervisor || '—'}</div>
+                        {task.taskStages?.length ? (
+                          <div className="space-y-1">
+                            {task.taskStages
+                              .slice()
+                              .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
+                              .map((stage) => (
+                                <div key={`${task._id}-${stage.sequence}-${stage.role}`} className="text-xs text-gray-700">
+                                  <span className="font-semibold text-gray-900">{stage.role}:</span> {stage.staffMember || 'Unassigned'}
+                                </div>
+                              ))}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="font-medium text-gray-900">{task.assignee || '—'}</div>
+                            <div className="text-xs text-gray-500">Supervisor: {task.supervisor || '—'}</div>
+                          </>
+                        )}
                         <div className="mt-1 text-xs text-gray-500">Client: {task.relatedClient || caseData.parties || '—'}</div>
                       </td>
 
@@ -1842,6 +2002,21 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Workflow Type</label>
+                  <select
+                    value={newTask.workflowMode || 'LEGACY'}
+                    onChange={(e) => setNewTask((t) => ({ ...t, workflowMode: e.target.value as TaskData['workflowMode'] }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                  >
+                    <option value="LEGACY">Legacy</option>
+                    <option value="STAGED">Staged</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Staged tasks will use the selected case staff when no custom stage list is provided.
+                  </p>
                 </div>
 
               </div>
@@ -2013,6 +2188,20 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   </select>
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Workflow Type</label>
+                  <select
+                    value={editTask.workflowMode || 'LEGACY'}
+                    onChange={(e) =>
+                      setEditTask((t) => (t ? { ...t, workflowMode: e.target.value as TaskData['workflowMode'] } : t))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                  >
+                    <option value="LEGACY">Legacy</option>
+                    <option value="STAGED">Staged</option>
+                  </select>
+                </div>
+
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2091,6 +2280,26 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
               <p className="text-xs text-gray-500">{taskTimingSummary}</p>
               {editTaskDateWarning && <p className="text-xs font-medium text-red-600">{editTaskDateWarning}</p>}
+
+              {(editTask.workflowMode === 'STAGED' || editTask.taskStages?.length) && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-sm font-semibold text-gray-900">Stage summary</div>
+                  <div className="mt-2 space-y-1 text-xs text-gray-600">
+                    {editTask.taskStages?.length ? (
+                      editTask.taskStages
+                        .slice()
+                        .sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
+                        .map((stage) => (
+                          <div key={`${editTask._id}-${stage.sequence}-${stage.role}`}>
+                            <span className="font-semibold text-gray-900">{stage.role}:</span> {stage.staffMember || 'Unassigned'}
+                          </div>
+                        ))
+                    ) : (
+                      <div>{formatTaskStageSummary(editTask)}</div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
@@ -3217,8 +3426,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     },
                   ].map((field) => {
                     const currentValue = editCaseData.caseAssignments?.[field.key] || '';
-                    const optionUsers = staffUsers.filter((user) => field.roles.includes(String(user.role || '').toLowerCase()));
-                    const usersToRender = optionUsers.length > 0 ? optionUsers : staffUsers;
+                    const usersToRender = staffUsers;
                     return (
                       <div key={field.key}>
                         <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>

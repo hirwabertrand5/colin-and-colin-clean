@@ -56,7 +56,9 @@ type ClientProfitabilitySort =
 
 
 export default function FirmReports({ userRole }: FirmReportsProps) {
-  const [selectedReport, setSelectedReport] = useState<'overview' | 'financial' | 'productivity' | 'cases' | 'clientProfitability'>('overview');
+  const [selectedReport, setSelectedReport] = useState<
+    'overview' | 'financial' | 'productivity' | 'cases' | 'clientProfitability' | 'staffRevenue' | 'staffProfitability'
+  >('overview');
   const [dateRange, setDateRange] = useState<FirmReportRange>('monthly');
   const [dateBasis, setDateBasis] = useState<FirmReportDateBasis>('invoiceDate');
   const [teamMembers, setTeamMembers] = useState<User[]>([]);
@@ -81,6 +83,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     { id: 'productivity', label: 'Productivity Report', icon: Users },
     { id: 'cases', label: 'Case Analytics', icon: FileText },
     { id: 'clientProfitability', label: 'Client Profitability', icon: TrendingUp },
+    { id: 'staffRevenue', label: 'Staff Revenue Attribution', icon: Users },
+    { id: 'staffProfitability', label: 'Staff Profitability', icon: TrendingUp },
   ] as const;
 
   useEffect(() => {
@@ -271,6 +275,68 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     });
   }, [data]);
 
+  const staffPerformanceRows = useMemo(
+    () =>
+      [...(data?.team || [])]
+        .map((member) => {
+          const revenueAttributed = pickMoney(member.revenueAttributed, member.earnedFees);
+          const grossFeesHandled = pickMoney(member.grossFeesHandled, member.invoicePaymentsReceived);
+          const firmRetainedEarnings = pickMoney(member.firmRetainedEarnings, grossFeesHandled - revenueAttributed);
+          const contributionMargin = member.contributionMargin ?? (grossFeesHandled > 0 ? Math.round((revenueAttributed / grossFeesHandled) * 1000) / 10 : null);
+          const contributionRatio = member.contributionRatio ?? (grossFeesHandled > 0 ? Math.round((revenueAttributed / grossFeesHandled) * 1000) / 10 : null);
+          return {
+            ...member,
+            revenueAttributed,
+            grossFeesHandled,
+            firmRetainedEarnings,
+            contributionMargin,
+            contributionRatio,
+          };
+        })
+        .sort((a, b) => (b.revenueAttributed || 0) - (a.revenueAttributed || 0)),
+    [data]
+  );
+
+  const staffRevenueSummary = useMemo(
+    () => ({
+      staffCount: staffPerformanceRows.length,
+      totalRevenueAttributed: staffPerformanceRows.reduce((sum, row) => sum + (row.revenueAttributed || 0), 0),
+      totalGrossFeesHandled: staffPerformanceRows.reduce((sum, row) => sum + (row.grossFeesHandled || 0), 0),
+      totalFirmRetainedEarnings: staffPerformanceRows.reduce((sum, row) => sum + (row.firmRetainedEarnings || 0), 0),
+    }),
+    [staffPerformanceRows]
+  );
+
+  const staffProfitabilitySummary = useMemo(
+    () => ({
+      staffCount: staffPerformanceRows.length,
+      averageContributionMargin:
+        staffPerformanceRows.length > 0
+          ? Math.round(
+              (staffPerformanceRows.reduce((sum, row) => sum + (Number(row.contributionMargin) || 0), 0) / staffPerformanceRows.length) * 10
+            ) / 10
+          : null,
+      averageContributionRatio:
+        staffPerformanceRows.length > 0
+          ? Math.round(
+              (staffPerformanceRows.reduce((sum, row) => sum + (Number(row.contributionRatio) || 0), 0) / staffPerformanceRows.length) * 10
+            ) / 10
+          : null,
+      totalTasksCompleted: staffPerformanceRows.reduce((sum, row) => sum + (row.tasksCompleted || 0), 0),
+      totalOverdueTasks: staffPerformanceRows.reduce((sum, row) => sum + (row.overdueTasks || 0), 0),
+    }),
+    [staffPerformanceRows]
+  );
+
+  const staffRevenueRows = useMemo(
+    () => staffPerformanceRows.slice().sort((a, b) => (b.revenueAttributed || 0) - (a.revenueAttributed || 0)),
+    [staffPerformanceRows]
+  );
+  const staffProfitabilityRows = useMemo(
+    () => staffPerformanceRows.slice().sort((a, b) => (b.contributionMargin || 0) - (a.contributionMargin || 0)),
+    [staffPerformanceRows]
+  );
+
   const exportWorkbook = async () => {
     if (!data) return;
 
@@ -449,6 +515,100 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                 rows: numberedClientProfitability,
                 currencyColumns: [6, 7, 8, 9, 10, 11, 13],
                 centerColumns: [3, 4, 5, 12],
+              },
+            ],
+          };
+        case 'staffRevenue':
+          return {
+            title: 'Staff Revenue Attribution',
+            sections: [
+              {
+                title: 'Staff Revenue Summary',
+                headers: ['#', 'Metric', 'Value'],
+                rows: withRowNumbers([
+                  ['Staff Members', staffRevenueSummary.staffCount],
+                  ['Total Revenue Attributed', staffRevenueSummary.totalRevenueAttributed],
+                  ['Total Gross Fees Handled', staffRevenueSummary.totalGrossFeesHandled],
+                  ['Total Firm Retained Earnings', staffRevenueSummary.totalFirmRetainedEarnings],
+                ]),
+                currencyColumns: [3],
+              },
+              {
+                title: 'Staff Revenue Attribution by Member',
+                headers: ['#', 'Staff Member', 'Role', 'Active Cases', 'Tasks Completed', 'Share', 'Revenue Attributed', 'Gross Fees Handled', 'Firm Retained Earnings'],
+                rows: withRowNumbers(
+                  staffRevenueRows.map((member) => [
+                    member.name,
+                    member.role,
+                    member.activeCases,
+                    member.tasksCompleted,
+                    member.earningSharePercent == null ? 0 : member.earningSharePercent / 100,
+                    member.revenueAttributed || 0,
+                    member.grossFeesHandled || 0,
+                    member.firmRetainedEarnings || 0,
+                  ])
+                ),
+                currencyColumns: [7, 8, 9],
+                percentColumns: [6],
+              },
+            ],
+          };
+        case 'staffProfitability':
+          return {
+            title: 'Staff Profitability',
+            sections: [
+              {
+                title: 'Staff Profitability Summary',
+                headers: ['#', 'Metric', 'Value'],
+                rows: withRowNumbers([
+                  ['Staff Members', staffProfitabilitySummary.staffCount],
+                  ['Tasks Completed', staffProfitabilitySummary.totalTasksCompleted],
+                  ['Overdue Tasks', staffProfitabilitySummary.totalOverdueTasks],
+                  [
+                    'Average Contribution Margin (%)',
+                    staffProfitabilitySummary.averageContributionMargin == null ? 'â€”' : `${staffProfitabilitySummary.averageContributionMargin}%`,
+                  ],
+                  [
+                    'Average Contribution Ratio (%)',
+                    staffProfitabilitySummary.averageContributionRatio == null ? 'â€”' : `${staffProfitabilitySummary.averageContributionRatio}%`,
+                  ],
+                ]),
+              },
+              {
+                title: 'Staff Profitability by Member',
+                headers: [
+                  '#',
+                  'Staff Member',
+                  'Role',
+                  'Tasks Completed',
+                  'Overdue',
+                  'Early',
+                  'On Time',
+                  'Late',
+                  'Excellent',
+                  'Good',
+                  'Delayed',
+                  'Risk',
+                  'Contribution Margin',
+                  'Contribution Ratio',
+                ],
+                rows: withRowNumbers(
+                  staffProfitabilityRows.map((member) => [
+                    member.name,
+                    member.role,
+                    member.tasksCompleted,
+                    member.overdueTasks || 0,
+                    member.earlyTasks || 0,
+                    member.onTimeTasks || 0,
+                    member.lateTasks || 0,
+                    member.excellentTasks || 0,
+                    member.goodTasks || 0,
+                    member.delayedTasks || 0,
+                    member.riskTasks || 0,
+                    member.contributionMargin == null ? 'â€”' : `${member.contributionMargin}%`,
+                    member.contributionRatio == null ? 'â€”' : `${member.contributionRatio}%`,
+                  ])
+                ),
               },
             ],
           };
@@ -1179,6 +1339,182 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     Next
                   </button>
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {selectedReport === 'staffRevenue' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-900">Staff Revenue Attribution</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Revenue is attributed from the existing team and productivity data while the staged task engine is rolled out.
+                </p>
+              </div>
+              <div className="text-xs text-gray-500">
+                Staff members: <span className="font-medium text-gray-900">{staffRevenueSummary.staffCount}</span>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                ['Total Revenue Attributed', fmtMoney(staffRevenueSummary.totalRevenueAttributed)],
+                ['Total Gross Fees Handled', fmtMoney(staffRevenueSummary.totalGrossFeesHandled)],
+                ['Total Firm Retained Earnings', fmtMoney(staffRevenueSummary.totalFirmRetainedEarnings)],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">{label}</div>
+                  <div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h2 className="font-semibold text-gray-900">Revenue Attribution by Staff Member</h2>
+            </div>
+
+            {!staffRevenueRows.length ? (
+              <div className="px-5 py-10 text-gray-500">No staff revenue data available for this period.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-[1200px] w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Staff Member</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Role</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Active Cases</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tasks Completed</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Share</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Revenue Attributed</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Gross Fees Handled</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Firm Retained Earnings</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {staffRevenueRows.map((member, index) => (
+                      <tr key={member.id || member.name} className="hover:bg-gray-50">
+                        <td className="px-5 py-4 text-sm text-gray-500">{index + 1}</td>
+                        <td className="px-5 py-4 text-sm font-medium text-gray-900">{member.name}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.role}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.activeCases}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.tasksCompleted}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.earningSharePercent ?? 0}%</td>
+                        <td className="px-5 py-4 text-sm font-medium text-gray-900">{fmtMoney(member.revenueAttributed || 0)}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{fmtMoney(member.grossFeesHandled || 0)}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{fmtMoney(member.firmRetainedEarnings || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {selectedReport === 'staffProfitability' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-900">Staff Profitability</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  This view uses current contribution metrics and task performance while the dedicated cost engine is introduced.
+                </p>
+              </div>
+              <div className="text-xs text-gray-500">
+                Staff members: <span className="font-medium text-gray-900">{staffProfitabilitySummary.staffCount}</span>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Tasks Completed</div>
+                <div className="mt-2 text-2xl font-semibold text-gray-900">{staffProfitabilitySummary.totalTasksCompleted}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Overdue Tasks</div>
+                <div className="mt-2 text-2xl font-semibold text-gray-900">{staffProfitabilitySummary.totalOverdueTasks}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Average Contribution Margin</div>
+                <div className="mt-2 text-2xl font-semibold text-gray-900">
+                  {staffProfitabilitySummary.averageContributionMargin == null
+                    ? '—'
+                    : `${staffProfitabilitySummary.averageContributionMargin}%`}
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Average Contribution Ratio</div>
+                <div className="mt-2 text-2xl font-semibold text-gray-900">
+                  {staffProfitabilitySummary.averageContributionRatio == null
+                    ? '—'
+                    : `${staffProfitabilitySummary.averageContributionRatio}%`}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h2 className="font-semibold text-gray-900">Profitability by Staff Member</h2>
+            </div>
+
+            {!staffProfitabilityRows.length ? (
+              <div className="px-5 py-10 text-gray-500">No staff profitability data available for this period.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-[1500px] w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Staff Member</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Role</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tasks Completed</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Overdue</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Early</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">On Time</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Late</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Excellent</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Good</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Delayed</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Risk</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Contribution Margin</th>
+                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Contribution Ratio</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {staffProfitabilityRows.map((member, index) => (
+                      <tr key={member.id || member.name} className="hover:bg-gray-50">
+                        <td className="px-5 py-4 text-sm text-gray-500">{index + 1}</td>
+                        <td className="px-5 py-4 text-sm font-medium text-gray-900">{member.name}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.role}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.tasksCompleted}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.overdueTasks || 0}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.earlyTasks || 0}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.onTimeTasks || 0}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.lateTasks || 0}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.excellentTasks || 0}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.goodTasks || 0}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.delayedTasks || 0}</td>
+                        <td className="px-5 py-4 text-sm text-gray-600">{member.riskTasks || 0}</td>
+                        <td className="px-5 py-4 text-sm font-medium text-gray-900">
+                          {member.contributionMargin == null ? '—' : `${member.contributionMargin}%`}
+                        </td>
+                        <td className="px-5 py-4 text-sm font-medium text-gray-900">
+                          {member.contributionRatio == null ? '—' : `${member.contributionRatio}%`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

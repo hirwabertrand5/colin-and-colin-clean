@@ -84,6 +84,34 @@ const getWorkflowStageColor = (stage: string) => {
 
 const normalizeIdentity = (value?: string | null) => String(value || '').trim().toLowerCase();
 
+const getStageStatusColor = (status?: string) => {
+  switch (status) {
+    case 'Completed':
+      return 'bg-green-100 text-green-700';
+    case 'In Progress':
+      return 'bg-blue-100 text-blue-700';
+    case 'Cancelled':
+      return 'bg-rose-100 text-rose-700';
+    default:
+      return 'bg-gray-100 text-gray-700';
+  }
+};
+
+const getStagePrimaryActionLabel = (role?: string) => {
+  switch (role) {
+    case 'Initiator':
+      return 'Send to Reviewer';
+    case 'Reviewer':
+      return 'Send to Signer / Approver';
+    case 'Signer':
+    case 'Approver':
+    case 'Signer/Approver':
+      return 'Approve & Complete';
+    default:
+      return 'Mark Completed';
+  }
+};
+
 type DerivedChecklistItem = {
   id: string;
   item: string;
@@ -153,6 +181,11 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     return Boolean(task?.workflowStage === 'Closed' || (task?.requiresApproval && task?.approvalStatus === 'Approved'));
   }, [task?.workflowStage, task?.requiresApproval, task?.approvalStatus]);
 
+  const sortedTaskStages = useMemo(
+    () => [...(task?.taskStages || [])].sort((a, b) => (a.sequence || 0) - (b.sequence || 0)),
+    [task?.taskStages]
+  );
+
   // We now enforce read-only after Approved for everyone:
   const canWorkOnTask = useMemo(() => {
     if (!task) return false;
@@ -162,8 +195,12 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     const meEmail = normalizeIdentity(currentUser?.email);
     const assignee = normalizeIdentity(task.assignee);
     const supervisor = normalizeIdentity(task.supervisor);
-    return Boolean([assignee, supervisor].some((value) => value && (value === meName || value === meEmail)));
-  }, [task, isManagingDirector, currentUser?.email, currentUser?.name, isApprovedLocked]);
+    const stageMatch = sortedTaskStages.some((stage) => {
+      const staffMember = normalizeIdentity(stage.staffMember);
+      return Boolean(staffMember && (staffMember === meName || staffMember === meEmail));
+    });
+    return Boolean([assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch);
+  }, [sortedTaskStages, task, isManagingDirector, currentUser?.email, currentUser?.name, isApprovedLocked]);
 
   const isTaskSupervisor = useMemo(() => {
     if (!task) return false;
@@ -181,8 +218,12 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     const meEmail = normalizeIdentity(currentUser?.email);
     const assignee = normalizeIdentity(task.assignee);
     const supervisor = normalizeIdentity(task.supervisor);
-    return Boolean([assignee, supervisor].some((value) => value && (value === meName || value === meEmail)));
-  }, [task, isManagingDirector, currentUser?.email, currentUser?.name, isApprovedLocked]);
+    const stageMatch = sortedTaskStages.some((stage) => {
+      const staffMember = normalizeIdentity(stage.staffMember);
+      return Boolean(staffMember && (staffMember === meName || staffMember === meEmail));
+    });
+    return Boolean([assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch);
+  }, [sortedTaskStages, task, isManagingDirector, currentUser?.email, currentUser?.name, isApprovedLocked]);
 
   const canSetQualityScore = useMemo(() => {
     if (!task) return false;
@@ -536,6 +577,40 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     }
   };
 
+  const updateStageStatus = async (stageIndex: number, status: 'Assigned' | 'In Progress' | 'Completed' | 'Cancelled') => {
+    if (!task?._id) return;
+
+    try {
+      setStatusLoading(true);
+      const nextStages = sortedTaskStages.map((stage, index) =>
+        index === stageIndex
+          ? {
+              ...stage,
+              status,
+              assignedAt: stage.assignedAt || new Date().toISOString(),
+              ...(status === 'Completed' ? { completedAt: new Date().toISOString() } : {}),
+            }
+          : stage
+      );
+      const isComplete = nextStages.length > 0 && nextStages.every((stage) => !stage.required || stage.status === 'Completed');
+
+      await updateTask(task._id, {
+        workflowMode: 'STAGED',
+        taskStages: nextStages,
+        status: isComplete ? 'Completed' : 'In Progress',
+        workflowStage: isComplete ? 'Completed' : 'In Progress',
+        ...(isComplete ? { completedAt: new Date().toISOString() } : {}),
+      } as any);
+
+      await loadAll();
+      window.dispatchEvent(new CustomEvent('task-report-updated', { detail: { taskId: task._id } }));
+    } catch (err: any) {
+      setError(err.message || 'Failed to update task stage');
+    } finally {
+      setStatusLoading(false);
+    }
+  };
+
   // --------------------
   // Attachments
   // --------------------
@@ -628,6 +703,14 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
               <span className={`px-2 py-1 text-xs rounded ${getWorkflowStageColor(workflowStage)}`}>
                 {workflowStage}
+              </span>
+
+              <span
+                className={`px-2 py-1 text-xs rounded font-medium ${
+                  task.workflowMode === 'STAGED' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                {task.workflowMode === 'STAGED' ? 'Staged workflow' : 'Legacy workflow'}
               </span>
 
               {task.requiresApproval && task.approvalStatus === 'Draft' && (
@@ -755,6 +838,82 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
             <p className="text-sm font-medium text-gray-900">{task.dueDate}</p>
           </div>
         </div>
+
+        {task.workflowMode === 'STAGED' && sortedTaskStages.length > 0 && (
+          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold text-gray-900">Staged Contributors</h2>
+                <p className="text-sm text-gray-500">Each stage can be completed separately by the assigned staff member.</p>
+              </div>
+              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                {sortedTaskStages.filter((stage) => stage.status === 'Completed').length} / {sortedTaskStages.length} completed
+              </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              {sortedTaskStages.map((stage, index) => {
+                const meName = normalizeIdentity(currentUser?.name);
+                const meEmail = normalizeIdentity(currentUser?.email);
+                const staffMember = normalizeIdentity(stage.staffMember);
+                const isMine = Boolean(staffMember && (staffMember === meName || staffMember === meEmail));
+                const priorStagesComplete = sortedTaskStages
+                  .slice(0, index)
+                  .every((prev) => !prev.required || prev.status === 'Completed');
+                const canActOnStage = isMine && priorStagesComplete && stage.status !== 'Completed' && canWorkOnTask;
+
+                return (
+                  <div key={`${task._id}-${stage.sequence}-${stage.role}`} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                          {stage.sequence}. {stage.role}
+                        </div>
+                        <div className="mt-1 text-sm font-medium text-gray-900">{stage.staffMember || 'Unassigned'}</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          Due: {stage.dueAt ? new Date(stage.dueAt).toLocaleDateString() : '—'}
+                        </div>
+                      </div>
+                      <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStageStatusColor(stage.status)}`}>
+                        {stage.status}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                      {stage.completedAt ? <span>Completed: {new Date(stage.completedAt).toLocaleDateString()}</span> : <span>Not completed yet</span>}
+                      {stage.qualityScore != null ? <span>Quality: {stage.qualityScore}%</span> : null}
+                    </div>
+
+                    {canActOnStage ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateStageStatus(index, 'In Progress')}
+                          disabled={statusLoading}
+                          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                        >
+                          Begin {stage.role}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateStageStatus(index, 'Completed')}
+                          disabled={statusLoading}
+                          className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+                        >
+                          {getStagePrimaryActionLabel(stage.role)}
+                        </button>
+                      </div>
+                    ) : isMine && !priorStagesComplete && stage.status !== 'Completed' ? (
+                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                        Waiting for the earlier stage to be completed before you can act on this one.
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

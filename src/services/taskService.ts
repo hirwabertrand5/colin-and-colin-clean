@@ -4,6 +4,7 @@ const getToken = () => localStorage.getItem('token');
 export type TaskApprovalStatus = 'Not Required' | 'Draft' | 'Pending' | 'Approved' | 'Rejected';
 export type TaskStatus = 'Not Started' | 'In Progress' | 'Completed';
 export type TaskPriority = 'High' | 'Medium' | 'Low';
+export type TaskWorkflowMode = 'LEGACY' | 'STAGED';
 export type TaskWorkflowStage =
   | 'Created'
   | 'Assigned'
@@ -13,6 +14,15 @@ export type TaskWorkflowStage =
   | 'Awaiting External Action'
   | 'Completed'
   | 'Closed';
+export type TaskStageStatus = 'Assigned' | 'In Progress' | 'Completed' | 'Cancelled';
+export type TaskStageRole =
+  | 'Initiator'
+  | 'Reviewer'
+  | 'Signer'
+  | 'Approver'
+  | 'Signer/Approver'
+  | 'Preparer'
+  | 'Researcher';
 
 export const TASK_WORKFLOW_STAGES: TaskWorkflowStage[] = [
   'Created',
@@ -31,12 +41,34 @@ export type TaskChecklistItem = {
   completed: boolean;
 };
 
+export type TaskStage = {
+  _id?: string;
+  taskId?: string;
+  role: TaskStageRole;
+  staffMember: string;
+  sequence: number;
+  required: boolean;
+  assignedAt?: string;
+  dueAt?: string;
+  status: TaskStageStatus;
+  completedAt?: string;
+  timelinessScore?: number | null;
+  qualityScore?: number | null;
+  qualityApplicable?: boolean;
+  supervisorReviewer?: string;
+  tpaUsed?: number | null;
+  potentialAllocation?: number | null;
+  earnedRevenue?: number | null;
+  notes?: string;
+};
+
 export interface TaskData {
   _id: string;
   caseId: string;
   taskNo?: string;
 
   title: string;
+  workflowMode?: TaskWorkflowMode;
   priority: TaskPriority;
   status: TaskStatus;
   workflowStage?: TaskWorkflowStage;
@@ -47,6 +79,7 @@ export interface TaskData {
   startDate?: string;
   dueDate: string;
   description?: string;
+  taskStages?: TaskStage[];
 
   requiresApproval: boolean;
   approvalStatus: TaskApprovalStatus;

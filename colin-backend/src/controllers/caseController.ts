@@ -91,11 +91,15 @@ const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
 
   if (caseMatchesAssignee(foundCase, meName) || caseMatchesAssignee(foundCase, meEmail)) return true;
 
-  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor').lean();
+  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor taskStages').lean();
   return tasks.some((task: any) => {
     const assignee = normalizeIdentity(task?.assignee);
     const supervisor = normalizeIdentity(task?.supervisor);
-    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
+    const stageMatch = (task?.taskStages || []).some((stage: any) => {
+      const staffMember = normalizeIdentity(stage?.staffMember);
+      return staffMember && [meName, meEmail].includes(staffMember);
+    });
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
   });
 };
 
@@ -108,11 +112,15 @@ const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) =>
     return true;
   }
 
-  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor').lean();
+  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor taskStages').lean();
   return tasks.some((task: any) => {
     const assignee = normalizeIdentity(task?.assignee);
     const supervisor = normalizeIdentity(task?.supervisor);
-    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
+    const stageMatch = (task?.taskStages || []).some((stage: any) => {
+      const staffMember = normalizeIdentity(stage?.staffMember);
+      return staffMember && [meName, meEmail].includes(staffMember);
+    });
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
   });
 };
 
@@ -215,6 +223,71 @@ const gatherTakeRequestRecipients = async (opts: {
   };
 };
 
+const buildMatterTaskStages = (caseRecord: any, dueDate: string, assignedAt = new Date()) => {
+  const caseAssignments = caseRecord?.caseAssignments || {};
+  const initiator = String(caseAssignments?.initiator || caseRecord?.assignedTo || '').trim();
+  const reviewer = String(caseAssignments?.reviewer || '').trim();
+  const signer = String(caseAssignments?.signerApprover || '').trim();
+  const dueAt = dueDate ? new Date(`${dueDate}T17:00:00.000Z`) : undefined;
+
+  return [
+    {
+      role: 'Initiator',
+      staffMember: initiator,
+      sequence: 1,
+      required: true,
+      assignedAt,
+      dueAt,
+      status: 'Assigned',
+      completedAt: undefined,
+      timelinessScore: null,
+      qualityScore: null,
+      qualityApplicable: true,
+      supervisorReviewer: reviewer || signer || '',
+      tpaUsed: null,
+      potentialAllocation: null,
+      earnedRevenue: null,
+      notes: '',
+    },
+    {
+      role: 'Reviewer',
+      staffMember: reviewer,
+      sequence: 2,
+      required: true,
+      assignedAt,
+      dueAt,
+      status: 'Assigned',
+      completedAt: undefined,
+      timelinessScore: null,
+      qualityScore: null,
+      qualityApplicable: true,
+      supervisorReviewer: signer || initiator || '',
+      tpaUsed: null,
+      potentialAllocation: null,
+      earnedRevenue: null,
+      notes: '',
+    },
+    {
+      role: 'Signer/Approver',
+      staffMember: signer,
+      sequence: 3,
+      required: true,
+      assignedAt,
+      dueAt,
+      status: 'Assigned',
+      completedAt: undefined,
+      timelinessScore: null,
+      qualityScore: null,
+      qualityApplicable: true,
+      supervisorReviewer: reviewer || initiator || '',
+      tpaUsed: null,
+      potentialAllocation: null,
+      earnedRevenue: null,
+      notes: '',
+    },
+  ];
+};
+
 export const getAllCases = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
@@ -237,7 +310,11 @@ export const getAllCases = async (req: AuthRequest, res: Response) => {
         }
       : null;
     const assignedCases = me && assignedFilter ? await Case.find(assignedFilter).sort({ updatedAt: -1 }) : [];
-    const taskCaseIds = me ? await Task.distinct('caseId', { assignee: me }) : [];
+    const taskCaseIds = me
+      ? await Task.distinct('caseId', {
+          $or: [{ assignee: me }, { supervisor: me }, { 'taskStages.staffMember': me }],
+        })
+      : [];
     const taskCases = taskCaseIds.length ? await Case.find({ _id: { $in: taskCaseIds } }).sort({ updatedAt: -1 }) : [];
     const yellowCandidates = await Case.find({
       status: { $nin: ['Closed', 'Temporarily Closed'] },
@@ -382,6 +459,38 @@ export const createCase = async (req: AuthRequest, res: Response) => {
           detail: `${template.name} v${template.version}`,
         });
       }
+    }
+
+    const assignedCaseAssignments = (newCase as any).caseAssignments || caseAssignments;
+    const hasMatterAssignments = Boolean(
+      assignedCaseAssignments?.initiator && assignedCaseAssignments?.reviewer && assignedCaseAssignments?.signerApprover
+    );
+    if (hasMatterAssignments) {
+      const autoTaskNo = await buildYearlySequence('task', 'TASK');
+      const autoDueDate = new Date();
+      autoDueDate.setDate(autoDueDate.getDate() + 7);
+      const autoDueDateString = autoDueDate.toISOString().slice(0, 10);
+      const stagedTask = new Task({
+        caseId: newCase._id,
+        taskNo: autoTaskNo,
+        title: `Matter Assignment - ${newCase.caseNo || 'Case'}`,
+        workflowMode: 'STAGED',
+        workflowStage: 'Assigned',
+        priority: 'Medium',
+        status: 'Not Started',
+        assignee: String(assignedCaseAssignments.initiator || newCase.assignedTo || req.user?.name || '').trim(),
+        supervisor: String(assignedCaseAssignments.reviewer || assignedCaseAssignments.signerApprover || req.user?.name || '').trim(),
+        relatedClient: String(newCase.parties || '').trim(),
+        startDate: newCase.workflowStartDate || newCase.createdAt?.toISOString().slice(0, 10) || new Date().toISOString().slice(0, 10),
+        dueDate: autoDueDateString,
+        description: 'Auto-created from matter assignment.',
+        taskStages: buildMatterTaskStages(newCase, autoDueDateString),
+        requiresApproval: false,
+        approvalStatus: 'Not Required',
+        assignedBy: req.user?.name || 'System',
+      });
+
+      await stagedTask.save();
     }
 
     const actor = actorFromReq(req);

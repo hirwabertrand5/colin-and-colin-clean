@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export type TaskApprovalStatus = 'Not Required' | 'Draft' | 'Pending' | 'Approved' | 'Rejected';
 export type TaskStatus = 'Not Started' | 'In Progress' | 'Completed';
+export type TaskWorkflowMode = 'LEGACY' | 'STAGED';
 export type TaskWorkflowStage =
   | 'Created'
   | 'Assigned'
@@ -11,11 +12,41 @@ export type TaskWorkflowStage =
   | 'Awaiting External Action'
   | 'Completed'
   | 'Closed';
+export type TaskStageStatus = 'Assigned' | 'In Progress' | 'Completed' | 'Cancelled';
+export type TaskStageRole =
+  | 'Initiator'
+  | 'Reviewer'
+  | 'Signer'
+  | 'Approver'
+  | 'Signer/Approver'
+  | 'Preparer'
+  | 'Researcher';
 
 export interface ITaskChecklistItem {
   _id?: mongoose.Types.ObjectId;
   item: string;
   completed: boolean;
+}
+
+export interface ITaskStage {
+  _id?: mongoose.Types.ObjectId;
+  taskId?: mongoose.Types.ObjectId;
+  role: TaskStageRole;
+  staffMember: string;
+  sequence: number;
+  required: boolean;
+  assignedAt?: Date;
+  dueAt?: Date;
+  status: TaskStageStatus;
+  completedAt?: Date;
+  timelinessScore?: number | null;
+  qualityScore?: number | null;
+  qualityApplicable?: boolean;
+  supervisorReviewer?: string;
+  tpaUsed?: number | null;
+  potentialAllocation?: number | null;
+  earnedRevenue?: number | null;
+  notes?: string;
 }
 
 export interface ITask extends Document {
@@ -26,6 +57,7 @@ export interface ITask extends Document {
   priority: 'High' | 'Medium' | 'Low';
   status: TaskStatus;
   workflowStage: TaskWorkflowStage;
+  workflowMode?: TaskWorkflowMode;
 
   assignee: string;
   supervisor: string;
@@ -33,6 +65,7 @@ export interface ITask extends Document {
   startDate?: string;
   dueDate: string; // YYYY-MM-DD
   description?: string;
+  taskStages?: ITaskStage[];
 
   requiresApproval: boolean;
   approvalStatus: TaskApprovalStatus;
@@ -66,12 +99,44 @@ const TaskChecklistItemSchema = new Schema<ITaskChecklistItem>(
   { _id: true }
 );
 
+const TaskStageSchema = new Schema<ITaskStage>(
+  {
+    role: {
+      type: String,
+      enum: ['Initiator', 'Reviewer', 'Signer', 'Approver', 'Signer/Approver', 'Preparer', 'Researcher'],
+      required: true,
+      trim: true,
+    },
+    staffMember: { type: String, trim: true, default: '' },
+    sequence: { type: Number, required: true, default: 1 },
+    required: { type: Boolean, default: true },
+    assignedAt: { type: Date },
+    dueAt: { type: Date },
+    status: {
+      type: String,
+      enum: ['Assigned', 'In Progress', 'Completed', 'Cancelled'],
+      default: 'Assigned',
+    },
+    completedAt: { type: Date },
+    timelinessScore: { type: Number, min: 0, max: 100, default: null },
+    qualityScore: { type: Number, min: 0, max: 100, default: null },
+    qualityApplicable: { type: Boolean, default: true },
+    supervisorReviewer: { type: String, trim: true, default: '' },
+    tpaUsed: { type: Number, min: 0, default: null },
+    potentialAllocation: { type: Number, min: 0, default: null },
+    earnedRevenue: { type: Number, min: 0, default: null },
+    notes: { type: String, trim: true, default: '' },
+  },
+  { _id: true }
+);
+
 const TaskSchema = new Schema<ITask>(
   {
     caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true, index: true },
     taskNo: { type: String, required: true, trim: true, unique: true, index: true },
 
     title: { type: String, required: true, trim: true },
+    workflowMode: { type: String, enum: ['LEGACY', 'STAGED'], default: 'LEGACY', index: true },
 
     priority: {
       type: String,
@@ -108,6 +173,7 @@ const TaskSchema = new Schema<ITask>(
     startDate: { type: String, trim: true },
     dueDate: { type: String, required: true },
     description: { type: String },
+    taskStages: { type: [TaskStageSchema], default: [] },
 
     requiresApproval: { type: Boolean, default: false },
     approvalStatus: {

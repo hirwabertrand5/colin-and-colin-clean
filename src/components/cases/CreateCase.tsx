@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { createCase, CaseData, CaseType } from '../../services/caseService';
 import { listActiveWorkflowTemplates, WorkflowTemplate } from '../../services/workflowService';
+import { getAssignmentUsers } from '../../services/userService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { getRoleSuggestions } from '../../constants/partyRoles';
 import { formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
@@ -13,9 +14,6 @@ type StaffUser = {
   email: string;
   role: string;
 };
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-const getToken = () => localStorage.getItem('token');
 
 const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
 const DEFAULT_CREATE_CASE_DRAFT_KEY = 'createCaseDraft:v1';
@@ -200,25 +198,7 @@ export default function CreateCase({
     const fetchStaff = async () => {
       setLoadingStaff(true);
       try {
-        const res = await fetch(`${API_URL}/users/staff`, {
-          headers: {
-            Authorization: `Bearer ${getToken()}`,
-          },
-        });
-
-        if (res.status === 401) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          window.location.href = '/login';
-          return;
-        }
-
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`Failed to fetch staff users (${res.status}): ${text}`);
-        }
-
-        const data: StaffUser[] = await res.json();
+        const data: StaffUser[] = await getAssignmentUsers();
         setStaffUsers(data);
       } catch (e: any) {
         setError(e.message || 'Failed to load staff');
@@ -984,7 +964,7 @@ export default function CreateCase({
                   },
                 ].map((field) => {
                   const currentValue = formData.caseAssignments?.[field.key] || '';
-                  const optionUsers = staffUsers.filter((user) => field.roles.includes(String(user.role || '').toLowerCase()));
+                  const optionUsers = staffUsers;
                   return (
                     <div key={field.key}>
                       <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>
