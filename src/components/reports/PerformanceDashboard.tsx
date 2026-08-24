@@ -15,6 +15,7 @@ import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getAllTasks, TaskData } from '../../services/taskService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
+import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 
 interface PerformanceDashboardProps {
   userRole: UserRole;
@@ -50,6 +51,8 @@ const addDaysISO = (baseISO: string, days: number) => {
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
 };
+
+const getTaskDueAt = (task: TaskData) => resolveDeadlineDateTime(task.dueDate);
 
 const ratingLabel = (v?: number) => {
   switch (v) {
@@ -188,7 +191,10 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
     const isCompleted = (task: TaskData) => task.status === 'Completed';
     const openTasks = tasks.filter((task) => !isCompleted(task));
     const overdue = openTasks
-      .filter((task) => task.dueDate && task.dueDate < today)
+      .filter((task) => {
+        const due = getTaskDueAt(task);
+        return due ? due.getTime() < Date.now() : Boolean(task.dueDate && task.dueDate < today);
+      })
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     const dueSoon = openTasks
       .filter((task) => task.dueDate && task.dueDate >= today && task.dueDate <= addDaysISO(today, 7))
@@ -491,7 +497,7 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
                     <div key={String(task._id)} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{task.title}</div>
                       <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Due {task.dueDate} • {task.priority} • {task.status}
+                        Due {formatDeadlineDateTime(task.dueDate)} • {task.priority} • {task.status}
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-3">
                         <div className={`rounded-full px-2.5 py-1 text-xs font-medium ${task.priority === 'High' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300' : task.priority === 'Medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
@@ -570,7 +576,7 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
                 <div>
                   <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{task.title}</div>
                   <div className="mt-1 text-xs text-rose-700 dark:text-rose-300">
-                    Overdue since {task.dueDate} • {task.priority}
+                    Overdue since {formatDeadlineDateTime(task.dueDate)} • {task.priority}
                   </div>
                 </div>
                 <Link to={`/tasks/${task._id}`} className="text-xs font-medium text-gray-700 underline hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100">

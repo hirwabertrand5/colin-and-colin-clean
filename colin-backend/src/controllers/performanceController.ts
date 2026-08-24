@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Task from '../models/taskModel';
 import User from '../models/userModel';
+import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const isoToday = () => new Date().toISOString().slice(0, 10);
@@ -32,7 +33,7 @@ const priorityWeight = (p: string) => {
 };
 
 const getTimelinessScore = (task: any) => {
-  const due = task?.dueDate ? new Date(`${task.dueDate}T23:59:59.999`) : null;
+  const due = task?.dueDate ? resolveDeadlineDateTime(task.dueDate) : null;
   const completed = task?.completedAt ? new Date(task.completedAt) : null;
   const start =
     task?.startDate ? new Date(task.startDate) :
@@ -95,15 +96,15 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
   // On-time: completedAt <= dueDate
   const onTimeCount = completed.filter((t: any) => {
     const comp = t.completedAt ? new Date(t.completedAt) : null;
-    if (!comp) return false;
-    const compISO = comp.toISOString().slice(0, 10);
-    return compISO <= String(t.dueDate);
+    const due = resolveDeadlineDateTime(t.dueDate);
+    if (!comp || !due) return false;
+    return comp.getTime() <= due.getTime();
   }).length;
   const deadlineBreakdown = completed.reduce(
     (acc: { early: number; onTime: number; late: number }, t: any) => {
       const comp = t.completedAt ? new Date(t.completedAt) : null;
-      const due = new Date(`${t.dueDate}T23:59:59.999`);
-      if (!comp || !Number.isFinite(due.getTime())) return acc;
+      const due = resolveDeadlineDateTime(t.dueDate);
+      if (!comp || !due || !Number.isFinite(due.getTime())) return acc;
       const diffHours = (due.getTime() - comp.getTime()) / (1000 * 60 * 60);
       if (diffHours >= 24) acc.early += 1;
       else if (diffHours >= 0) acc.onTime += 1;
@@ -112,22 +113,27 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
     },
     { early: 0, onTime: 0, late: 0 }
   );
-  const overdueCount = inRangeTasks.filter((t: any) => t.status !== 'Completed' && String(t.dueDate) < isoToday()).length;
+  const overdueCount = inRangeTasks.filter((t: any) => {
+    if (t.status === 'Completed') return false;
+    const due = resolveDeadlineDateTime(t.dueDate);
+    return due ? due.getTime() < Date.now() : String(t.dueDate) < isoToday();
+  }).length;
 
   const onTimePct = completed.length ? Math.round((onTimeCount / completed.length) * 100) : 0;
 
   // Monthly aggregates (by dueDate month)
   const monthlyMap = new Map<string, { month: string; tasksCompleted: number; tasksTotal: number; onTime: number; late: number }>();
   for (const t of inRangeTasks as any[]) {
-    const dt = new Date(String(t.dueDate));
+    const dt = resolveDeadlineDateTime(String(t.dueDate));
+    if (!dt) continue;
     const key = monthKey(dt);
     const row = monthlyMap.get(key) || { month: key, tasksCompleted: 0, tasksTotal: 0, onTime: 0, late: 0 };
     row.tasksTotal += 1;
     if (t.status === 'Completed') {
       row.tasksCompleted += 1;
       const comp = t.completedAt ? new Date(t.completedAt) : null;
-      const compISO = comp && Number.isFinite(comp.getTime()) ? comp.toISOString().slice(0, 10) : '';
-      if (compISO && compISO <= String(t.dueDate)) row.onTime += 1;
+      const due = resolveDeadlineDateTime(t.dueDate);
+      if (comp && due && comp.getTime() <= due.getTime()) row.onTime += 1;
       else row.late += 1;
     }
     monthlyMap.set(key, row);

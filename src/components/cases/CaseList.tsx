@@ -5,9 +5,11 @@ import { UserRole } from '../../App';
 import { getAllCases, deleteCase, CaseData, requestTakeCase } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
 import {
+  formatDeadlineDateTime,
   formatDueCountdown,
   getDeadlinePillClass,
   getUrgencyColorForDueDate,
+  resolveDeadlineDateTime,
 } from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
 import { caseMatchesAssignee, formatCaseAssignedTo } from '../../utils/caseAssignments';
@@ -201,7 +203,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
       // Use only the current active step due date for sorting (business rule)
       const raw = c.workflowProgress?.currentStepDueAt;
       if (!raw) return Number.MAX_SAFE_INTEGER;
-      const ms = Date.parse(String(raw));
+      const ms = resolveDeadlineDateTime(raw)?.getTime() ?? Number.NaN;
       return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;
     };
 
@@ -436,7 +438,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                   </td>
 
                   <td className="px-6 py-5 text-sm text-gray-500">
-                    {item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt ? new Date(item.workflowProgress.currentStepDueAt || item.workflowProgress.nextDueAt || '').toLocaleDateString() : '—'}
+                    {item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt ? formatDeadlineDateTime(item.workflowProgress.currentStepDueAt || item.workflowProgress.nextDueAt) : '—'}
                     {item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt ? (
                       <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>
                         {formatDueCountdown(item.workflowProgress?.currentStepDueAt || item.workflowProgress?.nextDueAt)}
@@ -455,7 +457,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                     {item.workflowProgress?.currentStepExtension ? (
                       <div
                         className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
-                        title={`Extension granted${item.workflowProgress.currentStepExtension.days ? ` ${item.workflowProgress.currentStepExtension.days > 0 ? `+${item.workflowProgress.currentStepExtension.days}` : item.workflowProgress.currentStepExtension.days}d` : ''}${item.workflowProgress.currentStepExtension.reason ? ` • ${item.workflowProgress.currentStepExtension.reason}` : ''}${item.workflowProgress.currentStepExtension.grantedBy ? ` • by ${item.workflowProgress.currentStepExtension.grantedBy}` : ''}${item.workflowProgress.currentStepExtension.newDueAt ? ` • due ${new Date(item.workflowProgress.currentStepExtension.newDueAt).toLocaleDateString()}` : ''}`}
+                        title={`Extension granted${item.workflowProgress.currentStepExtension.days ? ` ${item.workflowProgress.currentStepExtension.days > 0 ? `+${item.workflowProgress.currentStepExtension.days}` : item.workflowProgress.currentStepExtension.days}d` : ''}${item.workflowProgress.currentStepExtension.reason ? ` • ${item.workflowProgress.currentStepExtension.reason}` : ''}${item.workflowProgress.currentStepExtension.grantedBy ? ` • by ${item.workflowProgress.currentStepExtension.grantedBy}` : ''}${item.workflowProgress.currentStepExtension.newDueAt ? ` • due ${formatDeadlineDateTime(item.workflowProgress.currentStepExtension.newDueAt)}` : ''}`}
                       >
                         Extension {item.workflowProgress.currentStepExtension.days && item.workflowProgress.currentStepExtension.days > 0 ? '+' : ''}
                         {item.workflowProgress.currentStepExtension.days || 0}d

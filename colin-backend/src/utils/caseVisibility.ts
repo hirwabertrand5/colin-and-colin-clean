@@ -1,13 +1,15 @@
+import { resolveDeadlineDateTime } from './deadlineUtils';
+
 export type UrgencyColor = 'blue' | 'green' | 'yellow' | 'red' | 'gray';
 
 const getDueRemainingRatio = (startAt?: Date | string, dueAt?: Date | string, now = new Date()) => {
   if (!startAt || !dueAt) return undefined;
-  const s = startAt instanceof Date ? startAt : new Date(startAt);
-  const d = dueAt instanceof Date ? dueAt : new Date(dueAt);
+  const s = resolveDeadlineDateTime(startAt);
+  const d = resolveDeadlineDateTime(dueAt);
+  if (!s || !d) return undefined;
   const startMs = s.getTime();
   const dueMs = d.getTime();
   const nowMs = now.getTime();
-  if (!Number.isFinite(startMs) || !Number.isFinite(dueMs)) return undefined;
   const total = Math.max(0, dueMs - startMs);
   if (total === 0) return nowMs <= dueMs ? 1 : 0;
   const remaining = dueMs - nowMs;
@@ -24,9 +26,9 @@ const getUrgencyColorFromRatio = (ratio: number | undefined): UrgencyColor => {
 
 export const getUrgencyColorForDueDate = (dueAt?: Date | string, startAt?: Date | string, now = new Date()): UrgencyColor => {
   if (!dueAt) return 'gray';
-  const d = dueAt instanceof Date ? dueAt : new Date(dueAt);
+  const d = resolveDeadlineDateTime(dueAt);
+  if (!d) return 'gray';
   const dueMs = d.getTime();
-  if (!Number.isFinite(dueMs)) return 'gray';
 
   const nowMs = now.getTime();
   const remainingMs = dueMs - nowMs;

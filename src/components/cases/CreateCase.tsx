@@ -7,6 +7,7 @@ import { getAssignmentUsers } from '../../services/userService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { getRoleSuggestions } from '../../constants/partyRoles';
 import { formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
+import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 
 type StaffUser = {
   _id: string;
@@ -553,7 +554,8 @@ export default function CreateCase({
       ? [...(selectedWorkflowTemplate as any).steps].sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
       : [];
 
-    const start = new Date(`${formData.workflowStartDate}T00:00:00`);
+    const start = resolveDeadlineDateTime(formData.workflowStartDate);
+    if (!start) return [];
     let cursor = new Date(start);
 
     return steps.map((s: any, index: number) => {
@@ -1142,7 +1144,7 @@ export default function CreateCase({
                     <div className="rounded-lg border border-gray-200 bg-white p-3">
                       <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Next deadline</div>
                       <div className="mt-2 text-sm font-semibold text-gray-900">
-                        {workflowSummary?.nextDueAt ? workflowSummary.nextDueAt.toLocaleDateString() : 'TBD'}
+                        {workflowSummary?.nextDueAt ? formatDeadlineDateTime(workflowSummary.nextDueAt) : 'TBD'}
                       </div>
                     </div>
                     <div className="rounded-lg border border-gray-200 bg-white p-3">
@@ -1225,7 +1227,7 @@ export default function CreateCase({
                                       <span className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-medium ${getUrgencyStyle(step.dueAt)}`}>
                                         {formatRelativeDue(step.dueAt)}
                                       </span>
-                                      <div className="mt-1 text-xs text-gray-500">Due {step.dueAt.toLocaleDateString()}</div>
+                                      <div className="mt-1 text-xs text-gray-500">Due {formatDeadlineDateTime(step.dueAt)}</div>
                                     </div>
                                     <div>
                                       <div className="text-xs text-gray-500">Fee</div>
@@ -1270,8 +1272,8 @@ export default function CreateCase({
                   ['Assigned To', formData.assignedTo],
                   ['Workflow Template', selectedWorkflowTemplate?.name || selectedWorkflowTemplate?.matterType || 'Not selected'],
                   ['Workflow Start Date', formData.workflowStartDate || 'Not set'],
-                  ['Next expected deadline', workflowSummary?.nextDueAt ? workflowSummary.nextDueAt.toLocaleDateString() : 'TBD'],
-                  ['Estimated completion', workflowSummary?.completionDate ? workflowSummary.completionDate.toLocaleDateString() : 'TBD'],
+                  ['Next expected deadline', workflowSummary?.nextDueAt ? formatDeadlineDateTime(workflowSummary.nextDueAt) : 'TBD'],
+                  ['Estimated completion', workflowSummary?.completionDate ? formatDeadlineDateTime(workflowSummary.completionDate) : 'TBD'],
                   ['Contract value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
                   ['Key action progress', `${checkedActionCount}/${orderedActionRefs.length} actions checked (${actionProgressPercent}%)`],
                   ['Collected preview', formatCurrency(previewEarnedValue, plannedValueCurrency)],

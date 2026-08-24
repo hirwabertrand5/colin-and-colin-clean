@@ -101,10 +101,20 @@ export const extendWorkflowStepDeadline = async (
 export const amendWorkflowStepDeadline = async (
   caseId: string,
   stepKey: string,
-  amendDays: number,
+  newDueAt: string,
   reason?: string
 ): Promise<WorkflowInstance> => {
-  return extendWorkflowStepDeadline(caseId, stepKey, amendDays, reason);
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/extend-deadline`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ newDueAt, reason }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Failed to amend deadline');
+  return data;
 };
 
 export const toggleWorkflowStepAction = async (

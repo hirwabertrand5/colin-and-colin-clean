@@ -5,6 +5,7 @@ import Case from '../models/caseModel';
 import Task from '../models/taskModel';
 import Invoice from '../models/invoiceModel';
 import User from '../models/userModel';
+import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
@@ -146,7 +147,8 @@ const parseTaskDate = (value: any, endOfDay = false) => {
 
   const isoDateOnly = /^\d{4}-\d{2}-\d{2}$/;
   if (isoDateOnly.test(raw)) {
-    const parsed = new Date(`${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+    const parsed = resolveDeadlineDateTime(raw);
+    if (!parsed) return null;
     return Number.isFinite(parsed.getTime()) ? parsed : null;
   }
 
@@ -497,9 +499,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const name = normalizeName(t.assignee);
       if (selectedMemberNameNormalized && name !== selectedMemberNameNormalized) continue;
       completedTasksByName.set(name, (completedTasksByName.get(name) || 0) + 1);
-      const due = new Date(`${t.dueDate}T23:59:59.999`);
+      const due = resolveDeadlineDateTime(t.dueDate);
       const completed = t.completedAt ? new Date(t.completedAt) : undefined;
-      if (completed && Number.isFinite(due.getTime())) {
+      if (completed && due && Number.isFinite(due.getTime())) {
         const diffHours = (due.getTime() - completed.getTime()) / (1000 * 60 * 60);
         if (diffHours >= 24) earlyByName.set(name, (earlyByName.get(name) || 0) + 1);
         else if (diffHours >= 0) onTimeByName.set(name, (onTimeByName.get(name) || 0) + 1);
@@ -792,7 +794,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         grossProfit: 0,
         grossProfitMargin: 0,
         assignedLawyer: String(matter.assignedTo || 'Unassigned'),
-        nextDeadline: matter?.workflowProgress?.nextDueAt ? new Date(matter.workflowProgress.nextDueAt).toISOString() : null,
+        nextDeadline: matter?.workflowProgress?.nextDueAt
+          ? resolveDeadlineDateTime(matter.workflowProgress.nextDueAt)?.toISOString() || null
+          : null,
       };
       matterDetailsByCaseId.set(caseId, detail);
       const existingDetails = clientDetailsByKey.get(key) || [];

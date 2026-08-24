@@ -14,6 +14,7 @@ import WorkflowInstance from '../models/workflowInstanceModel';
 import { buildInstanceSteps } from '../utils/workflowCompute';
 import { buildYearlySequence } from '../utils/counter';
 import { isPublicYellowCase } from '../utils/caseVisibility';
+import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import {
   buildCaseAssignedToDisplay,
   caseMatchesAssignee,
@@ -172,7 +173,7 @@ const buildTakeRequestNotificationHtml = (opts: {
   dueDate?: Date | string;
   reviewUrl: string;
 }) => {
-  const dueText = opts.dueDate ? new Date(opts.dueDate).toLocaleString() : 'Not set';
+  const dueText = opts.dueDate ? resolveDeadlineDateTime(opts.dueDate)?.toLocaleString() || 'Not set' : 'Not set';
   return `
     <div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">
       <p>A yellow urgency matter has been requested.</p>
@@ -228,7 +229,7 @@ const buildMatterTaskStages = (caseRecord: any, dueDate: string, assignedAt = ne
   const initiator = String(caseAssignments?.initiator || caseRecord?.assignedTo || '').trim();
   const reviewer = String(caseAssignments?.reviewer || '').trim();
   const signer = String(caseAssignments?.signerApprover || '').trim();
-  const dueAt = dueDate ? new Date(`${dueDate}T17:00:00.000Z`) : undefined;
+  const dueAt = resolveDeadlineDateTime(dueDate);
 
   return [
     {
@@ -393,6 +394,11 @@ export const createCase = async (req: AuthRequest, res: Response) => {
       };
     }
 
+    const normalizedWorkflowStartDate =
+      resolveDeadlineDateTime((req.body as any)?.workflowStartDate || newCase.workflowStartDate || newCase.createdAt || new Date()) ||
+      new Date();
+    newCase.workflowStartDate = normalizedWorkflowStartDate;
+
     await newCase.save();
 
     // ✅ Initialize workflow instance if workflowTemplateId provided
@@ -400,8 +406,7 @@ export const createCase = async (req: AuthRequest, res: Response) => {
     if (workflowAutomation && workflowTemplateId) {
       const template: any = await WorkflowTemplate.findById(workflowTemplateId).lean();
       if (template) {
-        const wfStart = (newCase as any).workflowStartDate || newCase.createdAt || new Date();
-        const steps = buildInstanceSteps(template, wfStart);
+        const steps = buildInstanceSteps(template, normalizedWorkflowStartDate);
         applySequentialInitialActions(steps as any[], (req.body as any)?.initialWorkflowActions);
 
         const inst = await WorkflowInstance.create({
@@ -958,8 +963,9 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
       if (templateIdToUse) {
         const template: any = await WorkflowTemplate.findById(templateIdToUse).lean();
         if (template) {
-          const wfStartRaw = (req.body as any)?.workflowStartDate || updated.workflowStartDate || updated.createdAt || new Date();
-          const wfStart = wfStartRaw instanceof Date ? wfStartRaw : new Date(wfStartRaw);
+          const wfStart =
+            resolveDeadlineDateTime((req.body as any)?.workflowStartDate || updated.workflowStartDate || updated.createdAt || new Date()) ||
+            new Date();
           const steps = buildInstanceSteps(template, wfStart);
 
           let inst: any = await WorkflowInstance.findOne({ caseId: updated._id });

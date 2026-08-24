@@ -45,6 +45,7 @@ import {
   deleteTaskAttachment,
   TaskAttachment,
 } from '../../services/taskAttachmentService';
+import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 
 interface TaskDetailProps {
   userRole: UserRole;
@@ -835,7 +836,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
               <Clock className="w-4 h-4 mr-2" />
               <span className="text-xs">Due Date</span>
             </div>
-            <p className="text-sm font-medium text-gray-900">{task.dueDate}</p>
+            <p className="text-sm font-medium text-gray-900">{formatDeadlineDateTime(task.dueDate)}</p>
           </div>
         </div>
 
@@ -871,7 +872,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                         </div>
                         <div className="mt-1 text-sm font-medium text-gray-900">{stage.staffMember || 'Unassigned'}</div>
                         <div className="mt-1 text-xs text-gray-500">
-                          Due: {stage.dueAt ? new Date(stage.dueAt).toLocaleDateString() : '—'}
+                          Due: {stage.dueAt ? formatDeadlineDateTime(stage.dueAt) : '—'}
                         </div>
                       </div>
                       <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStageStatusColor(stage.status)}`}>
@@ -1251,7 +1252,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
               </div>
               <div>
                 <span className="text-gray-600">Due Date:</span>
-                <p className="font-medium text-gray-900">{task.dueDate || '—'}</p>
+                <p className="font-medium text-gray-900">{task.dueDate ? formatDeadlineDateTime(task.dueDate) : '—'}</p>
               </div>
               <div>
                 <span className="text-gray-600">Completion Date:</span>

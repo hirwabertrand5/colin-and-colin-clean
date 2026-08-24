@@ -3,14 +3,80 @@ export type DeadlineZone = 'excellent' | 'good' | 'delayed' | 'risk' | 'untracke
 
 export const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
+const DEFAULT_DEADLINE_HOUR_UTC = 12;
+
+const isDateOnlyString = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const normalizeLegacyMidnightDate = (value: Date) => {
+  if (
+    value.getUTCHours() === 0 &&
+    value.getUTCMinutes() === 0 &&
+    value.getUTCSeconds() === 0 &&
+    value.getUTCMilliseconds() === 0
+  ) {
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate(), DEFAULT_DEADLINE_HOUR_UTC, 0, 0, 0));
+  }
+  return value;
+};
+
+export const resolveDeadlineDateTime = (value?: Date | string) => {
+  if (!value) return undefined;
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return undefined;
+    return normalizeLegacyMidnightDate(new Date(value));
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return undefined;
+
+  if (isDateOnlyString(raw)) {
+    const [year, month, day] = raw.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, DEFAULT_DEADLINE_HOUR_UTC, 0, 0, 0));
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isFinite(parsed.getTime())) return undefined;
+  return normalizeLegacyMidnightDate(parsed);
+};
+
+const hasExplicitTime = (value?: Date | string) => {
+  if (!value) return false;
+  if (value instanceof Date) {
+    return (
+      value.getHours() !== 0 ||
+      value.getMinutes() !== 0 ||
+      value.getSeconds() !== 0 ||
+      value.getMilliseconds() !== 0
+    );
+  }
+  const raw = String(value).trim();
+  return raw.includes('T') || raw.includes(' ');
+};
+
+export const formatDeadlineDateTime = (value?: Date | string) => {
+  const resolved = resolveDeadlineDateTime(value);
+  if (!resolved) return 'No deadline';
+  return resolved.toLocaleString();
+};
+
+export const toDateTimeLocalValue = (value?: Date | string) => {
+  const resolved = resolveDeadlineDateTime(value);
+  if (!resolved) return '';
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${resolved.getFullYear()}-${pad(resolved.getMonth() + 1)}-${pad(resolved.getDate())}T${pad(
+    resolved.getHours()
+  )}:${pad(resolved.getMinutes())}`;
+};
+
 export const getDueRemainingRatio = (startAt?: Date | string, dueAt?: Date | string, now = new Date()) => {
   if (!startAt || !dueAt) return undefined;
-  const s = startAt instanceof Date ? startAt : new Date(startAt);
-  const d = dueAt instanceof Date ? dueAt : new Date(dueAt);
+  const s = resolveDeadlineDateTime(startAt);
+  const d = resolveDeadlineDateTime(dueAt);
+  if (!s || !d) return undefined;
   const startMs = s.getTime();
   const dueMs = d.getTime();
   const nowMs = now.getTime();
-  if (!Number.isFinite(startMs) || !Number.isFinite(dueMs)) return undefined;
   const total = Math.max(0, dueMs - startMs);
   if (total === 0) return nowMs <= dueMs ? 1 : 0;
   const remaining = dueMs - nowMs;
@@ -36,9 +102,9 @@ export const getUrgencyColorForDueDate = (
   // - <= 21 days => GREEN
   // - > 21 days => BLUE
   if (!dueAt) return 'gray';
-  const d = dueAt instanceof Date ? dueAt : new Date(dueAt);
+  const d = resolveDeadlineDateTime(dueAt);
+  if (!d) return 'gray';
   const dueMs = d.getTime();
-  if (!Number.isFinite(dueMs)) return 'gray';
 
   const nowMs = now.getTime();
   const remainingMs = dueMs - nowMs;
@@ -85,12 +151,13 @@ export const getDeadlinePillClass = (dueAt?: Date | string, startAt?: Date | str
 
 export const getTimeUsedRatio = (startAt?: Date | string, endAt?: Date | string, dueAt?: Date | string) => {
   if (!startAt || !endAt || !dueAt) return undefined;
-  const s = startAt instanceof Date ? startAt : new Date(startAt);
-  const e = endAt instanceof Date ? endAt : new Date(endAt);
-  const d = dueAt instanceof Date ? dueAt : new Date(dueAt);
+  const s = resolveDeadlineDateTime(startAt);
+  const e = resolveDeadlineDateTime(endAt);
+  const d = resolveDeadlineDateTime(dueAt);
+  if (!s || !e || !d) return undefined;
   const total = d.getTime() - s.getTime();
   const used = e.getTime() - s.getTime();
-  if (!Number.isFinite(total) || !Number.isFinite(used) || total <= 0) return undefined;
+  if (total <= 0) return undefined;
   return Math.max(0, used / total);
 };
 
@@ -112,9 +179,9 @@ export const formatDurationCountdown = (ms: number) => {
 
 export const formatDueCountdown = (dueAt?: Date | string, now = new Date()) => {
   if (!dueAt) return 'No deadline';
-  const d = dueAt instanceof Date ? dueAt : new Date(dueAt);
+  const d = resolveDeadlineDateTime(dueAt);
+  if (!d) return 'No deadline';
   const ms = d.getTime();
-  if (!Number.isFinite(ms)) return 'No deadline';
   const diff = ms - now.getTime();
   if (diff < 0) return `${formatDurationCountdown(diff)} overdue`;
   return `${formatDurationCountdown(diff)} left`;

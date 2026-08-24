@@ -6,8 +6,10 @@ import { getAllCases, CaseData } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
 import {
   formatDueCountdown,
+  formatDeadlineDateTime,
   getDeadlinePillClass,
   getUrgencyColorForDueDate,
+  resolveDeadlineDateTime,
 } from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
 import { formatCaseAssignedTo } from '../../utils/caseAssignments';
@@ -92,7 +94,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
     const nextDueAtMs = (c: CaseData) => {
       const raw = c.workflowProgress?.nextDueAt || c.workflowProgress?.currentStepDueAt;
       if (!raw) return Number.MAX_SAFE_INTEGER;
-      const ms = Date.parse(String(raw));
+      const ms = resolveDeadlineDateTime(raw)?.getTime() ?? Number.NaN;
       return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;
     };
 
@@ -252,7 +254,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
                     {String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed'
                       ? '—'
                       : item.workflowProgress?.nextDueAt || item.workflowProgress?.currentStepDueAt
-                      ? new Date(item.workflowProgress.nextDueAt || item.workflowProgress.currentStepDueAt || '').toLocaleDateString()
+                      ? formatDeadlineDateTime(item.workflowProgress.nextDueAt || item.workflowProgress.currentStepDueAt)
                       : '—'}
                     {!(String(item.status || '').toLowerCase() === 'closed' || item.workflowProgress?.status === 'Completed') && (item.workflowProgress?.nextDueAt || item.workflowProgress?.currentStepDueAt) ? (
                       <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>{formatDueCountdown(item.workflowProgress?.nextDueAt || item.workflowProgress?.currentStepDueAt)}</div>

@@ -10,6 +10,7 @@ import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps } from '../utils/workflowCompute';
+import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
 
@@ -427,8 +428,7 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
 
     const affectedCases = await Case.find({ workflowTemplateId: templateId }).select('_id workflowStartDate createdAt').lean();
     for (const matter of affectedCases as any[]) {
-      const wfStartRaw = matter.workflowStartDate || matter.createdAt || new Date();
-      const wfStart = wfStartRaw instanceof Date ? wfStartRaw : new Date(wfStartRaw);
+      const wfStart = resolveDeadlineDateTime(matter.workflowStartDate || matter.createdAt || new Date()) || new Date();
       const inst = await syncCaseWorkflowInstanceFromTemplate(String(matter._id), updated, wfStart);
       if (!inst) continue;
 
@@ -528,7 +528,7 @@ export const initWorkflowForCase = async (req: AuthRequest, res: Response) => {
     const template: any = await WorkflowTemplate.findById(tId).lean();
     if (!template) return res.status(404).json({ message: 'Template not found.' });
 
-    const wfStart = (c as any).workflowStartDate || c.createdAt || new Date();
+    const wfStart = resolveDeadlineDateTime((c as any).workflowStartDate || c.createdAt || new Date()) || new Date();
     const steps = buildInstanceSteps(template, wfStart);
 
     const inst = await WorkflowInstance.create({
@@ -696,13 +696,7 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
 
     const { caseId, stepKey } = req.params as any;
-    const { extendDays, reason } = req.body || {};
-
-    const days = Number(extendDays);
-    if (!Number.isFinite(days)) {
-      return res.status(400).json({ message: 'extendDays must be a valid number.' });
-    }
-    const dayOffset = Math.round(days);
+    const { extendDays, newDueAt, reason } = req.body || {};
 
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
@@ -715,9 +709,9 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     if (!step.dueAt) return res.status(400).json({ message: 'Step has no due date to extend.' });
     if (step.status === 'Completed') return res.status(400).json({ message: 'Cannot extend a completed step.' });
 
-    const shiftDate = (value?: Date) => {
+    const shiftDate = (value?: Date, offsetMs = 0) => {
       if (!value) return undefined;
-      const next = new Date(value.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+      const next = new Date(value.getTime() + offsetMs);
       return Number.isFinite(next.getTime()) ? next : undefined;
     };
 
@@ -726,24 +720,28 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     const downstreamSteps = currentIndex >= 0 ? orderedSteps.slice(currentIndex + 1) : [];
 
     const oldDue = new Date(step.dueAt);
-    const newDue = shiftDate(oldDue);
+    const hasExactDue = Boolean(String(newDueAt || '').trim());
+    const exactDue = hasExactDue ? new Date(newDueAt) : undefined;
+    const newDue = hasExactDue ? exactDue : shiftDate(oldDue, Math.round(Number(extendDays)) * 24 * 60 * 60 * 1000);
     if (!newDue || !Number.isFinite(newDue.getTime())) {
       return res.status(400).json({ message: 'Resulting due date is invalid.' });
     }
+    const dayOffset = (newDue.getTime() - oldDue.getTime()) / (24 * 60 * 60 * 1000);
     step.dueAt = newDue;
     step.extensionHistory = Array.isArray(step.extensionHistory) ? step.extensionHistory : [];
     step.extensionHistory.push({
       previousDueAt: oldDue,
       newDueAt: newDue,
-      days: dayOffset,
+      days: Math.round(dayOffset * 100) / 100,
       reason: String(reason || '').trim(),
       grantedBy: req.user?.name || 'System',
       grantedAt: new Date(),
     });
 
+    const deltaMs = newDue.getTime() - oldDue.getTime();
     for (const downstream of downstreamSteps) {
-      if (downstream.startAt) downstream.startAt = shiftDate(downstream.startAt) || downstream.startAt;
-      if (downstream.dueAt) downstream.dueAt = shiftDate(downstream.dueAt) || downstream.dueAt;
+      if (downstream.startAt) downstream.startAt = shiftDate(downstream.startAt, deltaMs) || downstream.startAt;
+      if (downstream.dueAt) downstream.dueAt = shiftDate(downstream.dueAt, deltaMs) || downstream.dueAt;
     }
 
     await inst.save();

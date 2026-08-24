@@ -35,6 +35,7 @@ import {
 } from '../../services/independentTaskService';
 import usePageTitle from '../../hooks/usePageTitle';
 import {
+  formatDeadlineDateTime,
   formatDueCountdown,
   getDeadlinePillClass,
   getDueRemainingRatio,
@@ -263,7 +264,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   );
 
   const getDeadlineUsage = (task: Pick<IndependentTask, 'startDate' | 'dueDate'>) => {
-    const dueAt = task.dueDate ? `${task.dueDate}T23:59:59.999` : undefined;
+    const dueAt = task.dueDate;
     const ratio = getDueRemainingRatio(task.startDate, dueAt);
     if (ratio === undefined) {
       return { usedPercent: undefined as number | undefined, zone: 'untracked' as const };
@@ -679,7 +680,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                           <td className="px-4 py-4">
                             {(() => {
                               const deadline = getDeadlineUsage(task);
-                              const deadlinePillClass = getDeadlinePillClass(`${task.dueDate}T23:59:59.999`, task.startDate);
+                              const deadlinePillClass = getDeadlinePillClass(task.dueDate, task.startDate);
                               const usageLabel =
                                 deadline.zone === 'excellent'
                                   ? 'Excellent pace'
@@ -694,7 +695,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                               return (
                                 <div className="space-y-2">
                                   <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${deadlinePillClass}`}>
-                                    {formatDueCountdown(`${task.dueDate}T23:59:59.999`)}
+                                    {formatDueCountdown(task.dueDate)}
                                   </span>
                                   <div className="space-y-1">
                                     <div className="flex items-center justify-between text-xs text-gray-500">
@@ -727,7 +728,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                               {task.status}
                             </span>
                           </td>
-                          <td className="px-4 py-4 text-sm text-gray-600">{task.dueDate}</td>
+                          <td className="px-4 py-4 text-sm text-gray-600">{formatDeadlineDateTime(task.dueDate)}</td>
                           <td className="px-4 py-4">
                             <div className="flex justify-end gap-2">
                               <Link
@@ -865,8 +866,8 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                           <div className="text-sm font-medium text-gray-900">{task.title}</div>
                           <div className="text-xs text-gray-500">{task.taskNumber}</div>
                         </div>
-                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getDeadlinePillClass(`${task.dueDate}T23:59:59.999`, task.startDate)}`}>
-                          {formatDueCountdown(`${task.dueDate}T23:59:59.999`)}
+                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getDeadlinePillClass(task.dueDate, task.startDate)}`}>
+                          {formatDueCountdown(task.dueDate)}
                         </span>
                       </div>
                       <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
@@ -937,7 +938,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                 dashboard!.upcomingDeadlines.map((task) => (
                   <Link key={task._id} to={`/matters/independent-tasks/${task._id}`} className="block rounded-2xl border border-gray-200 p-3 hover:bg-gray-50">
                     <div className="font-medium text-gray-900">{task.title}</div>
-                    <div className="mt-1 text-xs text-gray-500">{task.dueDate}</div>
+                    <div className="mt-1 text-xs text-gray-500">{formatDeadlineDateTime(task.dueDate)}</div>
                   </Link>
                 ))
               )}

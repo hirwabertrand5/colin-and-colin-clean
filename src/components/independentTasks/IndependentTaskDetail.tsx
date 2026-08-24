@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 import {
   addIndependentTaskComment,
   deleteIndependentTaskAttachment,
@@ -388,7 +389,7 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
               )}
               <span className="inline-flex items-center gap-1.5">
                 <CalendarDays className="h-4 w-4" />
-                Due {formatDate(task?.dueDate)}
+                Due {formatDeadlineDateTime(task?.dueDate)}
               </span>
               {task?.relatedMatterLabel && <span>{task.relatedMatterLabel}</span>}
             </div>
@@ -486,7 +487,7 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
                         </div>
                         <div className="flex justify-between gap-4">
                           <dt className="text-gray-500">Due Date</dt>
-                          <dd className="text-right text-gray-700">{formatDate(task.dueDate)}</dd>
+                          <dd className="text-right text-gray-700">{formatDeadlineDateTime(task.dueDate)}</dd>
                         </div>
                       </dl>
                     </div>

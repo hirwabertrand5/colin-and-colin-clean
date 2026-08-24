@@ -44,6 +44,7 @@ import { getRecentAuditFeed, AuditFeedItem } from '../../services/auditService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
 import { listInvoices, Invoice } from '../../services/invoiceService';
 import { getActivePettyCashFund, PettyCashFund } from '../../services/pettyCashService';
+import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 
 const formatRwfShort = (n: number) => {
   const val = Number(n) || 0;
@@ -91,6 +92,8 @@ const formatActivityDateTime = (isoDate?: string) => {
     minute: '2-digit',
   });
 };
+
+const getTaskDueAt = (task?: TaskData) => resolveDeadlineDateTime(task?.dueDate);
 
 const normalizeProspectStage = (stage?: string) => String(stage || '').trim().toLowerCase().replace(/-/g, ' ');
 const normalizeOpportunitySource = (prospect: Prospect) =>
@@ -435,9 +438,8 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
     () =>
       allTasks.filter((task) => {
         if (task.status === 'Completed') return false;
-        if (!task.dueDate) return false;
-        const due = new Date(task.dueDate);
-        return Number.isFinite(due.getTime()) && due.getTime() < Date.now();
+        const due = getTaskDueAt(task);
+        return Boolean(due && Number.isFinite(due.getTime()) && due.getTime() < Date.now());
       }).length,
     [allTasks]
   );
@@ -450,7 +452,10 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
   const onTimeCompletionRate = useMemo(() => {
     const withDeadlines = completedTasks.filter((task) => task.dueDate && task.completedAt);
     if (!withDeadlines.length) return 0;
-    const onTime = withDeadlines.filter((task) => new Date(task.completedAt!).getTime() <= new Date(task.dueDate).getTime()).length;
+    const onTime = withDeadlines.filter((task) => {
+      const due = getTaskDueAt(task);
+      return Boolean(due && new Date(task.completedAt!).getTime() <= due.getTime());
+    }).length;
     return Math.round((onTime / withDeadlines.length) * 100);
   }, [completedTasks]);
 
@@ -508,7 +513,8 @@ export default function ManagingPartnerDashboard({ userRole }: { userRole?: User
       const row = map.get(name) || { name, assigned: 0, completed: 0, overdue: 0, qualityTotal: 0, qualityCount: 0 };
       row.assigned += 1;
       if (task.status === 'Completed') row.completed += 1;
-      if (task.status !== 'Completed' && task.dueDate && new Date(task.dueDate).getTime() < Date.now()) row.overdue += 1;
+      const due = getTaskDueAt(task);
+      if (task.status !== 'Completed' && due && due.getTime() < Date.now()) row.overdue += 1;
       if (Number.isFinite(Number(task.qualityScore))) {
         row.qualityTotal += Number(task.qualityScore) || 0;
         row.qualityCount += 1;

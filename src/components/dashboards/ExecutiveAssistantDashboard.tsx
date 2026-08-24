@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 
 import { getExecutiveAssistantDashboard } from '../../services/dashboardService';
+import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 
 export default function ExecutiveAssistantDashboard() {
   const [loading, setLoading] = useState(true);
@@ -242,7 +243,7 @@ export default function ExecutiveAssistantDashboard() {
                   </div>
                   <div className="text-xs text-gray-500 flex items-center">
                     <Clock className="w-3 h-3 mr-1" />
-                    Due {item.dueDate}
+                    Due {formatDeadlineDateTime(item.dueDate)}
                   </div>
                 </div>
               ))}

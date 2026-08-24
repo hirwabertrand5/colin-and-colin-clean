@@ -13,9 +13,11 @@ import {
 } from '../../services/workflowInstanceService';
 import { getWorkflowTemplateById, WorkflowTemplate } from '../../services/workflowService';
 import {
+  formatDeadlineDateTime,
   formatDueCountdown,
   getUrgencyClass,
   getUrgencyColorForDueDate,
+  toDateTimeLocalValue,
 } from '../../utils/workflowDeadline';
 
 type Props = {
@@ -35,24 +37,6 @@ const formatWorkflowStepFee = (step: WorkflowInstance['steps'][number]) => {
     return `${currency} ${Math.round(step.feeAmount).toLocaleString()}`;
   }
   return step.feeText || 'No fee set';
-};
-
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
-
-const formatDateInputValue = (value?: string | Date | null) => {
-  if (!value) return '';
-  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
-  if (!Number.isFinite(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const dateInputValueToUtcMs = (value: string) => {
-  const [year, month, day] = value.split('-').map((part) => Number(part));
-  if (![year, month, day].every(Number.isFinite)) return NaN;
-  return Date.UTC(year, month - 1, day);
 };
 
 export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged }: Props) {
@@ -215,28 +199,19 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       return;
     }
     if (!amendDate) {
-      setErr('Please choose a new due date.');
+      setErr('Please choose a new due date and time.');
       return;
     }
     try {
-      const currentDueDate = formatDateInputValue(step.dueAt);
-      const currentDueMs = dateInputValueToUtcMs(currentDueDate);
-      const selectedMs = dateInputValueToUtcMs(amendDate);
-
-      if (!Number.isFinite(currentDueMs) || !Number.isFinite(selectedMs)) {
-        setErr('Please choose a valid date.');
-        return;
-      }
-
-      const days = Math.round((selectedMs - currentDueMs) / MS_PER_DAY);
-      if (!Number.isFinite(days)) {
-        setErr('Please choose a valid date.');
+      const selected = new Date(amendDate);
+      if (!Number.isFinite(selected.getTime())) {
+        setErr('Please choose a valid date and time.');
         return;
       }
 
       setBusyKey(`amend:${stepKey}`);
       setErr('');
-      const updated = await amendWorkflowStepDeadline(caseId, stepKey, days, amendReason);
+      const updated = await amendWorkflowStepDeadline(caseId, stepKey, selected.toISOString(), amendReason);
       setWf(updated);
       await onWorkflowChanged?.();
       setAmendOpenFor('');
@@ -347,7 +322,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${getUrgencyClass(
                     getUrgencyColorForDueDate(s.dueAt, s.startAt)
                   )}`}
-                  title={s.dueAt ? `Due: ${new Date(s.dueAt).toLocaleString()}` : 'No due date'}
+                  title={s.dueAt ? `Due: ${formatDeadlineDateTime(s.dueAt)}` : 'No due date'}
                 >
                   {formatDueCountdown(s.dueAt)}
                 </span>
@@ -368,7 +343,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                       `Extension granted${latestExtension.days ? ` ${latestExtension.days > 0 ? `+${latestExtension.days}` : latestExtension.days}d` : ''}` +
                       `${latestExtension.reason ? ` • ${latestExtension.reason}` : ''}` +
                       `${latestExtension.grantedBy ? ` • by ${latestExtension.grantedBy}` : ''}` +
-                      `${latestExtension.newDueAt ? ` • due ${new Date(latestExtension.newDueAt).toLocaleDateString()}` : ''}`
+                      `${latestExtension.newDueAt ? ` • due ${formatDeadlineDateTime(latestExtension.newDueAt)}` : ''}`
                     }
                   >
                     Extension granted: {latestExtension.days > 0 ? '+' : ''}
@@ -385,7 +360,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               {/* Fee section on the right side */}
               <div className="flex flex-col items-end gap-1 pl-4">
                 {s.dueAt ? (
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Due {new Date(s.dueAt).toLocaleDateString()}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Due {formatDeadlineDateTime(s.dueAt)}</span>
                 ) : null}
                 <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">
                   Fee / range: {formatWorkflowStepFee(s)}
@@ -406,7 +381,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                       setAmendDate('');
                     } else {
                       setAmendOpenFor(s.stepKey);
-                      setAmendDate(formatDateInputValue(s.dueAt));
+                      setAmendDate(toDateTimeLocalValue(s.dueAt));
                     }
                   }}
                   className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded"
@@ -544,15 +519,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           ) : null}
 
           {amendOpenFor === s.stepKey && canAmendDeadlines ? (
-            <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
+                <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
               <div className="text-sm font-semibold text-gray-900">Amend deadline</div>
               <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">New due date</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">New due date & time</label>
                   <input
                     value={amendDate}
                     onChange={(e) => setAmendDate(e.target.value)}
-                    type="date"
+                    type="datetime-local"
                     className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
                   />
                 </div>
@@ -603,8 +578,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     {extension.previousDueAt && extension.newDueAt ? (
                       <span>
                         {' '}
-                        from {new Date(extension.previousDueAt).toLocaleDateString()} to{' '}
-                        {new Date(extension.newDueAt).toLocaleDateString()}
+                        from {formatDeadlineDateTime(extension.previousDueAt)} to {formatDeadlineDateTime(extension.newDueAt)}
                       </span>
                     ) : null}
                     {extension.reason ? <span> • {extension.reason}</span> : null}

@@ -5,7 +5,7 @@ import { UserRole } from '../../App';
 import { getAllTasks, TaskData, TASK_WORKFLOW_STAGES, TaskWorkflowStage } from '../../services/taskService';
 import { getAllCases, CaseData, isTemporarilyClosedCase } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
-import { formatDueCountdown, getDeadlinePillClass } from '../../utils/workflowDeadline';
+import { formatDeadlineDateTime, formatDueCountdown, getDeadlinePillClass } from '../../utils/workflowDeadline';
 
 interface TaskBoardProps {
   userRole: UserRole;
@@ -74,7 +74,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
   };
 
   const getTaskDeadlineColor = (task: TaskData) =>
-    getDeadlinePillClass(`${task.dueDate}T23:59:59.999`, task.createdAt);
+    getDeadlinePillClass(task.dueDate, task.createdAt);
 
   // Performance badge intentionally removed — show only deadline pill
 
@@ -272,7 +272,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
                             <div className="grid grid-cols-1 gap-1 text-xs text-gray-500">
                               <div className="flex items-center justify-between gap-3">
                                 <span className="truncate">Assignee: {task.assignee || '—'}</span>
-                                <span className="shrink-0">Due {task.dueDate}</span>
+                                <span className="shrink-0">Due {formatDeadlineDateTime(task.dueDate)}</span>
                               </div>
                               <div className="flex items-center justify-between gap-3">
                                 <span className="truncate">Supervisor: {task.supervisor || '—'}</span>
@@ -282,7 +282,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
                             <div className="mt-3 flex items-center gap-2 flex-wrap">
                               {!isCompleted && (
                                 <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${getTaskDeadlineColor(task)}`}>
-                                  {formatDueCountdown(`${task.dueDate}T23:59:59.999`)}
+                                  {formatDueCountdown(task.dueDate)}
                                 </span>
                               )}
                               {/* performance badge removed */}

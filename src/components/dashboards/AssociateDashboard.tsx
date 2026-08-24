@@ -24,6 +24,7 @@ import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
 import { getAllTasks, TaskData } from '../../services/taskService';
+import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 
 type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
 type FinancialScope = 'own' | 'matter' | 'portfolio' | 'client';
@@ -219,7 +220,7 @@ const getMatterEarnedValue = (matter: CaseData) => {
 
 const getTaskDate = (raw?: string) => {
   if (!raw) return null;
-  const parsed = new Date(raw.length <= 10 ? `${raw}T00:00:00` : raw);
+  const parsed = resolveDeadlineDateTime(raw);
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 };
 
@@ -238,7 +239,8 @@ const getConsumedPercent = (task: TaskData, todayISO: string) => {
 };
 
 const getTimelinessBand = (task: TaskData, todayISO: string) => {
-  if (task.status !== 'Completed' && task.dueDate < todayISO) return 'late';
+  const dueAt = getTaskDate(task.dueDate);
+  if (task.status !== 'Completed' && dueAt && dueAt.getTime() < Date.now()) return 'late';
   const consumed = getConsumedPercent(task, todayISO);
   if (consumed <= 25) return 'excellent';
   if (consumed <= 50) return 'good';
@@ -382,7 +384,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     const open = tasks.filter((task) => task.status !== 'Completed');
     const completed = tasks.filter((task) => task.status === 'Completed');
     const dueSoon = open.filter((task) => task.dueDate >= today && task.dueDate <= addDaysISO(today, 7));
-    const overdue = open.filter((task) => task.dueDate < today || getTimelinessBand(task, today) === 'late');
+    const overdue = open.filter((task) => {
+      const dueAt = getTaskDate(task.dueDate);
+      return (dueAt ? dueAt.getTime() < Date.now() : task.dueDate < today) || getTimelinessBand(task, today) === 'late';
+    });
     const awaitingReview = tasks.filter(
       (task) => task.workflowStage === 'Awaiting Review' || (task.requiresApproval && task.approvalStatus === 'Pending')
     );
@@ -458,7 +463,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       const row = map.get(name) || { assigned: 0, completed: 0, overdue: 0, quality: [] };
       row.assigned += 1;
       if (task.status === 'Completed') row.completed += 1;
-      if (task.status !== 'Completed' && task.dueDate < today) row.overdue += 1;
+      if (task.status !== 'Completed' && ((getTaskDate(task.dueDate)?.getTime() ?? 0) < Date.now())) row.overdue += 1;
       if (Number.isFinite(Number(task.qualityScore))) row.quality.push(safeNum(task.qualityScore));
       map.set(name, row);
     });
@@ -582,7 +587,9 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                           {task.workflowStage ? <span className="px-2 py-0.5 text-xs rounded bg-blue-50 text-blue-700">{task.workflowStage}</span> : null}
                         </div>
                         <p className="text-sm font-medium text-gray-900">{task.title}</p>
-                        <p className="mt-1 text-xs text-gray-500">Due {task.dueDate} · Supervisor {task.supervisor || '—'} · Timeliness {getTimelinessScore(task, today)}%</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Due {formatDeadlineDateTime(task.dueDate)} · Supervisor {task.supervisor || '—'} · Timeliness {getTimelinessScore(task, today)}%
+                        </p>
                       </div>
                       <Link to={`/tasks/${task._id}`} className="shrink-0 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">Open</Link>
                     </div>
@@ -639,7 +646,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                         <span className={`px-2 py-0.5 text-xs rounded ${priorityChip(matter.priority)}`}>{matter.priority}</span>
                       </div>
                       <p className="mt-1 text-xs text-gray-500">Client/parties: {matter.parties || '—'}</p>
-                      <p className="mt-1 text-xs text-gray-500">Next action: {matter.workflowProgress?.currentStepTitle || 'Workflow task'} · Deadline {matter.nextDeadline}</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Next action: {matter.workflowProgress?.currentStepTitle || 'Workflow task'} · Deadline{' '}
+                        {matter.nextDeadline && matter.nextDeadline !== '—' ? formatDeadlineDateTime(matter.nextDeadline) : '—'}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3 md:text-right">
                       <div>

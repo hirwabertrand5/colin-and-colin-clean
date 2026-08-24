@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
+import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 import {
   addEventToCase,
   deleteEvent,
@@ -246,7 +247,7 @@ export default function Calendar({ userRole }: CalendarProps) {
   const upcoming = useMemo(() => {
     const mix = [
       ...events.map((e) => ({ kind: 'event' as const, date: e.date, time: e.time, title: e.title, data: e })),
-      ...tasks.map((t) => ({ kind: 'task' as const, date: t.dueDate, time: '23:59', title: t.title, data: t })),
+      ...tasks.map((t) => ({ kind: 'task' as const, date: t.dueDate, time: '12:00', title: t.title, data: t })),
     ];
     return mix
       .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
@@ -415,7 +416,7 @@ export default function Calendar({ userRole }: CalendarProps) {
           ) : (
             <div className="divide-y divide-gray-200">
               {[...events.map(e => ({ kind: 'event' as const, date: e.date, time: e.time, data: e })),
-                ...tasks.map(t => ({ kind: 'task' as const, date: t.dueDate, time: '23:59', data: t }))]
+                ...tasks.map(t => ({ kind: 'task' as const, date: t.dueDate, time: '12:00', data: t }))]
                 .sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time))
                 .map((row, i) => (
                   <button
@@ -436,7 +437,9 @@ export default function Calendar({ userRole }: CalendarProps) {
                               Task Due
                             </span>
                           )}
-                          <span className="text-xs text-gray-500">{row.date} • {row.kind === 'event' ? row.data.time : 'EOD'}</span>
+                          <span className="text-xs text-gray-500">
+                            {row.kind === 'event' ? `${row.date} • ${row.data.time}` : formatDeadlineDateTime(row.data.dueDate)}
+                          </span>
                         </div>
 
                         <div className="text-sm font-semibold text-gray-900">
@@ -487,7 +490,7 @@ export default function Calendar({ userRole }: CalendarProps) {
                         <span className="px-2 py-0.5 text-xs rounded border bg-gray-100 text-gray-800 border-gray-200">Task Due</span>
                       )}
                       <span className="text-xs text-gray-500">
-                        {u.kind === 'event' ? `${u.data.date} • ${u.data.time}` : `${u.data.dueDate} • EOD`}
+                        {u.kind === 'event' ? `${u.data.date} • ${u.data.time}` : formatDeadlineDateTime(u.data.dueDate)}
                       </span>
                     </div>
                     <p className="text-sm font-medium text-gray-900">{u.data.title}</p>
@@ -534,8 +537,8 @@ export default function Calendar({ userRole }: CalendarProps) {
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">
                   {detailItem.kind === 'event'
-                    ? `${detailItem.data.date} at ${detailItem.data.time} • ${detailItem.data.type}`
-                    : `${detailItem.data.dueDate} • Assignee: ${detailItem.data.assignee}`}
+                  ? `${detailItem.data.date} at ${detailItem.data.time} • ${detailItem.data.type}`
+                    : `${formatDeadlineDateTime(detailItem.data.dueDate)} • Assignee: ${detailItem.data.assignee}` }
                 </p>
               </div>
 

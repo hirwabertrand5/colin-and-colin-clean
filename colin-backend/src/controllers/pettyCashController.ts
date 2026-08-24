@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import PettyCashFund from '../models/pettyCashFundModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import CaseModel from '../models/caseModel';
+import User from '../models/userModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { notifyRoles } from '../services/notifyService';
 
@@ -211,6 +212,7 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
       spentByUserId,
       isBillableToMatter,
       matterId,
+      receivedByUserId,
     } = req.body || {};
     if (!fundId) return res.status(400).json({ message: 'Missing fundId.' });
 
@@ -278,6 +280,15 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
         expensePayload.isBillableToMatter = String(isBillableToMatter) === 'true';
       }
       if (matterId) expensePayload.matterId = String(matterId).trim();
+      if (receivedByUserId) {
+        if (!mongoose.Types.ObjectId.isValid(String(receivedByUserId))) {
+          throw new Error('INVALID_RECEIVED_BY');
+        }
+        const receivedBy = await User.findById(receivedByUserId).select('name').session(session).lean();
+        if (!receivedBy) throw new Error('RECEIVED_BY_NOT_FOUND');
+        expensePayload.receivedByUserId = new mongoose.Types.ObjectId(String(receivedByUserId));
+        expensePayload.receivedByName = String(receivedBy.name || '').trim();
+      }
       if (category) expensePayload.category = String(category).trim();
       if (vendor) expensePayload.vendor = String(vendor).trim();
       if (note) expensePayload.note = String(note).trim();
@@ -371,6 +382,8 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
     }
     if (msg === 'INVALID_CASE') return res.status(400).json({ message: 'Invalid case selected.' });
     if (msg === 'CASE_NOT_FOUND') return res.status(404).json({ message: 'Selected case not found.' });
+    if (msg === 'INVALID_RECEIVED_BY') return res.status(400).json({ message: 'Invalid received-by user selected.' });
+    if (msg === 'RECEIVED_BY_NOT_FOUND') return res.status(404).json({ message: 'Selected received-by user not found.' });
     if (msg === 'FUND_NOT_FOUND') return res.status(404).json({ message: 'Fund not found.' });
     if (msg === 'FUND_NOT_ACTIVE') return res.status(400).json({ message: 'Fund is not active.' });
     if (msg === 'INSUFFICIENT_FUNDS')

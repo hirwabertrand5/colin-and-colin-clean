@@ -6,6 +6,8 @@ export interface IPettyCashExpense extends Document {
 
   expenseId?: string;
   itemDescription?: string;
+  receivedByUserId?: mongoose.Types.ObjectId;
+  receivedByName?: string;
   amountRwf?: number;
   dateSpent?: string;
   spentByUserId?: string;
@@ -47,6 +49,8 @@ const PettyCashExpenseSchema = new Schema<IPettyCashExpense>(
 
     expenseId: { type: String, trim: true },
     itemDescription: { type: String, trim: true },
+    receivedByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
+    receivedByName: { type: String, trim: true },
     amountRwf: { type: Number, min: 0 },
     dateSpent: { type: String, trim: true },
     spentByUserId: { type: String, trim: true },

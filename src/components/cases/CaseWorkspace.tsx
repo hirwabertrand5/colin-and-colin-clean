@@ -81,7 +81,11 @@ import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesT
 import { getRoleSuggestions } from '../../constants/partyRoles';
 import { getCasePracticePath } from '../../utils/caseLabels';
 import { caseMatchesAssignee, formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
-import { getUrgencyColorForDueDate } from '../../utils/workflowDeadline';
+import {
+  formatDeadlineDateTime,
+  resolveDeadlineDateTime,
+  getUrgencyColorForDueDate,
+} from '../../utils/workflowDeadline';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const BACKEND_URL = API_URL ? API_URL.replace(/\/api\/?$/, '') : '';
@@ -335,10 +339,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     return workflowInstance.steps.find((step) => step.stepKey === workflowInstance.currentStepKey) || null;
   }, [workflowInstance]);
 
-  const suggestedTaskDeadline = currentWorkflowStep?.dueAt ? currentWorkflowStep.dueAt.slice(0, 10) : '';
   const taskTimingSummary = currentWorkflowStep
     ? `${currentWorkflowStep.title}${currentWorkflowStep.slaText ? ` • ${currentWorkflowStep.slaText}` : ''}${
-        suggestedTaskDeadline ? ` • due ${suggestedTaskDeadline}` : ''
+        currentWorkflowStep.dueAt ? ` • due ${formatDeadlineDateTime(currentWorkflowStep.dueAt)}` : ''
       }`
     : 'No active workflow deadline is available yet.';
   const newTaskDateWarning = useMemo(
@@ -353,7 +356,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const openAddTaskModal = () => {
     setNewTask((task) => ({
       ...task,
-      dueDate: task.dueDate || suggestedTaskDeadline,
       relatedClient: task.relatedClient || caseData?.parties || '',
       startDate: task.startDate || new Date().toISOString().slice(0, 10),
     }));
@@ -1281,8 +1283,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     if (!dueAt) return 100;
     
     const now = new Date();
-    const dueDate = new Date(dueAt);
-    const start = startDate ? new Date(startDate) : now;
+    const dueDate = resolveDeadlineDateTime(dueAt);
+    const start = startDate ? resolveDeadlineDateTime(startDate) : now;
+    if (!dueDate || !start) return 100;
     
     const totalDuration = dueDate.getTime() - start.getTime();
     const remaining = dueDate.getTime() - now.getTime();
@@ -1762,7 +1765,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                                   </td>
                                   <td className="px-4 py-3 text-sm text-gray-700">{stage.staffMember || 'Unassigned'}</td>
                                   <td className="px-4 py-3 text-sm text-gray-700">
-                                    {stage.dueAt ? new Date(stage.dueAt).toLocaleDateString() : '—'}
+                                    {stage.dueAt ? formatDeadlineDateTime(stage.dueAt) : '—'}
                                   </td>
                                   <td className="px-4 py-3 text-sm text-gray-700">{stage.status}</td>
                                   <td className="px-4 py-3 text-sm text-gray-700">
@@ -1895,7 +1898,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                       </td>
 
                       <td className="px-4 py-3 min-w-[180px]">
-                        <div className="text-sm font-medium text-gray-900">Due {task.dueDate || '—'}</div>
+                        <div className="text-sm font-medium text-gray-900">Due {task.dueDate ? formatDeadlineDateTime(task.dueDate) : '—'}</div>
                         <div className="text-xs text-gray-500">Start {task.startDate || '—'}</div>
                         {task.completedAt ? (
                           <div className="text-xs text-green-700">

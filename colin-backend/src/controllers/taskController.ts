@@ -10,6 +10,7 @@ import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../servi
 import { buildYearlySequence } from '../utils/counter';
 import { isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
+import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 
 const isAssociateLikeRole = (role?: string) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
@@ -33,6 +34,7 @@ const isAdminCaseRole = (role?: string) =>
   role === 'managing_director' || role === 'executive_assistant';
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
+const formatDeadline = (value?: string | Date) => resolveDeadlineDateTime(value)?.toLocaleString() || String(value || '-');
 
 const TASK_WORKFLOW_MODES = ['LEGACY', 'STAGED'] as const;
 type TaskWorkflowMode = (typeof TASK_WORKFLOW_MODES)[number];
@@ -105,7 +107,7 @@ const buildDefaultTaskStagesFromCase = (caseRecord: any, dueDate: string, assign
   const initiator = String(caseAssignments?.initiator || caseRecord?.assignedTo || '').trim();
   const reviewer = String(caseAssignments?.reviewer || '').trim();
   const signer = String(caseAssignments?.signerApprover || '').trim();
-  const dueAt = dueDate ? new Date(`${dueDate}T17:00:00.000Z`) : undefined;
+  const dueAt = resolveDeadlineDateTime(dueDate);
 
   return [
     {
@@ -267,7 +269,8 @@ const normalizeTaskDueDate = (value: unknown) => String(value || '').trim();
 const parseTaskDateOnly = (value: unknown) => {
   const raw = String(value || '').trim();
   if (!raw) return null;
-  const parsed = new Date(`${raw}T00:00:00.000Z`);
+  const parsed = resolveDeadlineDateTime(raw);
+  if (!parsed) return null;
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 };
 
@@ -484,7 +487,7 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
       message: 'Created task',
       detail: `${newTask.taskNo || 'Task'} • ${newTask.title || 'Untitled'} • Assignee: ${
         newTask.assignee || '-'
-      } • Due: ${newTask.dueDate || '-'}`,
+      } • Due: ${formatDeadline(newTask.dueDate)}`,
     });
 
     // ✅ Notify assignee (customized per-user)
@@ -499,7 +502,7 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
             notification: {
               type: 'TASK_ASSIGNED',
               title: 'New task assigned',
-              message: `${newTask.taskNo || 'Task'} • ${newTask.title || 'Task'} (Due: ${newTask.dueDate || '-'})`,
+              message: `${newTask.taskNo || 'Task'} • ${newTask.title || 'Task'} (Due: ${formatDeadline(newTask.dueDate)})`,
               severity: 'info',
               caseId: String(caseId),
               taskId: String(newTask._id),
@@ -510,7 +513,7 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
             html: `<div style="font-family: Arial, sans-serif">
                     <p>A new task has been assigned to you.</p>
                     <p><b>${newTask.taskNo || 'Task'} - ${newTask.title || 'Task'}</b></p>
-                    <p>Due: ${newTask.dueDate || '-'}</p>
+                    <p>Due: ${formatDeadline(newTask.dueDate)}</p>
                   </div>`,
           },
         });

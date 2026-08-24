@@ -33,6 +33,8 @@ export interface PettyCashExpense {
   fundId: string;
   expenseId?: string;
   itemDescription?: string;
+  receivedByUserId?: string;
+  receivedByName?: string;
   amountRwf?: number;
   dateSpent?: string;
   spentByUserId?: string;
@@ -153,8 +155,9 @@ export const addExpenseToFund = async (
     vendor?: string;
     chargeType?: 'internal' | 'client';
     caseId?: string;
-    itemDescription?: string;
-    amountRwf?: number;
+  itemDescription?: string;
+  receivedByUserId?: string;
+  amountRwf?: number;
     dateSpent?: string;
     spentByUserId?: string;
     isBillableToMatter?: boolean;
@@ -175,6 +178,7 @@ export const addExpenseToFund = async (
   if (payload.chargeType) form.append('chargeType', payload.chargeType);
   if (payload.caseId) form.append('caseId', payload.caseId);
   if (payload.itemDescription) form.append('itemDescription', payload.itemDescription);
+  if (payload.receivedByUserId) form.append('receivedByUserId', payload.receivedByUserId);
   if (payload.amountRwf !== undefined) form.append('amountRwf', String(payload.amountRwf));
   if (payload.dateSpent) form.append('dateSpent', payload.dateSpent);
   if (payload.spentByUserId) form.append('spentByUserId', payload.spentByUserId);

@@ -7,8 +7,10 @@ import User from '../models/userModel';
 import NotificationPreferences from '../models/notificationPreferencesModel';
 import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
 import IndependentTask from '../modules/independentTasks/models/independentTaskModel';
+import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+const formatDeadline = (value?: string) => resolveDeadlineDateTime(value)?.toLocaleString() || (value ? String(value) : '');
 
 const parseEventDateTime = (dateStr: string, timeStr: string) => {
   // date: YYYY-MM-DD, time: HH:mm
@@ -66,7 +68,7 @@ export const runReminderScan = async () => {
       notification: {
         type: 'TASK_DUE_REMINDER',
         title: 'Task due tomorrow',
-        message: `${t.title || 'Task'} is due on ${t.dueDate}.`,
+        message: `${t.title || 'Task'} is due on ${formatDeadline(t.dueDate)}.`,
         severity: 'warning',
         caseId: String(t.caseId),
         taskId: String(t._id),
@@ -78,7 +80,7 @@ export const runReminderScan = async () => {
         html: `<div style="font-family: Arial, sans-serif">
                 <p>This is a reminder that a task is due tomorrow.</p>
                 <p><b>${t.title || 'Task'}</b></p>
-                <p>Due date: ${t.dueDate}</p>
+                <p>Due date: ${formatDeadline(t.dueDate)}</p>
               </div>`,
       },
     });
@@ -109,7 +111,7 @@ export const runReminderScan = async () => {
       notification: {
         type: 'TASK_DUE_REMINDER',
         title: 'Independent task due tomorrow',
-        message: `${t.taskNumber || 'Task'} • ${t.title || 'Task'} is due on ${t.dueDate}.`,
+        message: `${t.taskNumber || 'Task'} • ${t.title || 'Task'} is due on ${formatDeadline(t.dueDate)}.`,
         severity: 'warning',
         taskId: String(t._id),
         link: `/matters/independent-tasks/${t._id}`,
@@ -120,7 +122,7 @@ export const runReminderScan = async () => {
         html: `<div style="font-family: Arial, sans-serif">
                 <p>This is a reminder that an independent task is due tomorrow.</p>
                 <p><b>${t.taskNumber || 'Task'}</b> - ${t.title || 'Task'}</p>
-                <p>Due date: ${t.dueDate}</p>
+                <p>Due date: ${formatDeadline(t.dueDate)}</p>
               </div>`,
       },
     });
@@ -128,12 +130,15 @@ export const runReminderScan = async () => {
 
   const independentTasksOverdue = await IndependentTask.find({
     status: { $nin: ['Completed', 'Closed'] },
-    dueDate: { $lt: todayISO(now) },
+    dueDate: { $lte: todayISO(now) },
   })
     .select('_id taskNumber title dueDate assignee')
     .lean();
 
   for (const t of independentTasksOverdue as any[]) {
+    const dueAt = resolveDeadlineDateTime(t.dueDate);
+    if (!dueAt || dueAt.getTime() >= now.getTime()) continue;
+
     const assignee = String(t.assignee || '').trim();
     if (!assignee) continue;
 
@@ -148,7 +153,7 @@ export const runReminderScan = async () => {
       notification: {
         type: 'TASK_DUE_REMINDER',
         title: 'Independent task overdue',
-        message: `${t.taskNumber || 'Task'} • ${t.title || 'Task'} was due on ${t.dueDate}.`,
+        message: `${t.taskNumber || 'Task'} • ${t.title || 'Task'} was due on ${formatDeadline(t.dueDate)}.`,
         severity: 'critical',
         taskId: String(t._id),
         link: `/matters/independent-tasks/${t._id}`,
@@ -159,7 +164,7 @@ export const runReminderScan = async () => {
         html: `<div style="font-family: Arial, sans-serif">
                 <p>An independent task is overdue.</p>
                 <p><b>${t.taskNumber || 'Task'}</b> - ${t.title || 'Task'}</p>
-                <p>Due date: ${t.dueDate}</p>
+                <p>Due date: ${formatDeadline(t.dueDate)}</p>
               </div>`,
       },
     });
