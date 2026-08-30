@@ -1056,4 +1056,171 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Response) => {
+  try {
+    const { range, from, to } = req.query as any;
+    let fromDate: Date;
+    let toDate: Date;
+
+    if (from && to) {
+      fromDate = new Date(String(from));
+      toDate = new Date(String(to));
+      if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+        return res.status(400).json({ message: 'Invalid from/to date.' });
+      }
+      fromDate.setHours(0, 0, 0, 0);
+      toDate.setHours(23, 59, 59, 999);
+    } else {
+      ({ from: fromDate, to: toDate } = computeRange(range));
+    }
+
+    const fromISO = iso(fromDate);
+    const toISO = iso(toDate);
+    const staffName = String(req.user?.name || '').trim();
+    if (!staffName) return res.status(401).json({ message: 'Unauthorized.' });
+
+    const user = await User.findById(req.user?.id).select('name role').lean();
+    const role = String(user?.role || req.user?.role || '').trim();
+    const normalizedName = normalizeName(user?.name || staffName);
+    const displayName = String(user?.name || staffName).trim();
+    const tpaPercent = getTaskParticipationAllocation(role);
+
+    const tasksCompleted = await Task.find({
+      status: 'Completed',
+      assignee: displayName,
+      completedAt: { $gte: fromDate, $lte: toDate },
+    })
+      .select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore status')
+      .lean();
+
+    const taskCaseIds = Array.from(new Set((tasksCompleted as any[]).map((task) => String(task.caseId || '')).filter(Boolean)));
+    const [taskCases, paidInvoices] = await Promise.all([
+      taskCaseIds.length
+        ? Case.find({ _id: { $in: taskCaseIds } })
+          .select('_id caseNo parties budget workflowProgress billingSettings matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
+          .lean()
+        : [],
+      taskCaseIds.length
+        ? Invoice.find({
+          status: 'Paid',
+          updatedAt: { $gte: fromDate, $lte: toDate },
+          caseId: { $in: taskCaseIds },
+        })
+          .select('amount status date caseId proofUrl createdAt updatedAt')
+          .lean()
+        : [],
+    ]);
+
+    const taskCaseMap = new Map((taskCases as any[]).map((matter) => [String(matter._id), matter]));
+    const paidInvoicesByCaseId = new Map<string, number>();
+    for (const inv of paidInvoices as any[]) {
+      const caseId = String(inv.caseId || '');
+      if (!caseId) continue;
+      paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
+    }
+
+    const rows = (tasksCompleted as any[])
+      .map((task) => {
+        const matter = taskCaseMap.get(String(task.caseId || ''));
+        const matterLabel = matter
+          ? String(matter.caseNo || matter.parties || matter.matterType || matter.workflow || 'N/A')
+          : 'N/A';
+        const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
+        const keyActionsCompleted = checklist.filter((item: any) => Boolean(item?.completed)).length;
+        const keyActionsTotal = checklist.length;
+        const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
+        const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
+        const taskFeeCollected = roundMoney(collectedFee * (taskProgressPercent / 100));
+        const timeliness = getTimelinessScore(task);
+        const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Number(task.qualityScore) : null;
+        const feeEarned =
+          qualityScore == null || !timeliness
+            ? null
+            : roundMoney(taskFeeCollected * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100));
+
+        return {
+          id: String(task._id),
+          completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
+          staff: displayName,
+          role,
+          matter: matterLabel,
+          task: String(task.title || 'Task'),
+          taskFeeCollected,
+          taskFee: taskFeeCollected,
+          tpaPercent,
+          timelinessScore: timeliness ? timeliness.score : null,
+          timelinessConsumedPercent: timeliness ? Math.round(timeliness.consumedPercent * 10) / 10 : null,
+          qualityScore,
+          formula:
+            qualityScore == null
+              ? 'Pending quality score'
+              : !timeliness
+                ? 'Pending timeliness score'
+                : `${taskFeeCollected} x ${tpaPercent}% x ${timeliness.score}% x ${qualityScore}% = ${feeEarned}`,
+          feeEarned,
+          keyActionsCompleted,
+          keyActionsTotal,
+          taskProgressPercent,
+          timelinessStatus: timeliness ? timeliness.status : 'Late',
+        };
+      })
+      .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
+
+    const totalTaskFeeCollected = roundMoney(rows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0));
+    const totalFeeEarned = roundMoney(rows.reduce((sum, row) => sum + (row.feeEarned || 0), 0));
+    const qualityRows = rows.filter((row) => row.qualityScore != null);
+    const timelinessRows = rows.filter((row) => row.timelinessScore != null);
+    const roleShare = roleEarningShare(role);
+    const overdueTasks = await Task.countDocuments({ assignee: displayName, status: { $ne: 'Completed' } });
+
+    return res.json({
+      range: { from: fromISO, to: toISO },
+      dateBasis: 'paymentDate',
+      selectedMember: {
+        name: displayName,
+        role,
+        tasksCompleted: rows.length,
+        outstandingTasks: overdueTasks,
+        revenueGenerated: totalTaskFeeCollected,
+        paymentsReceived: totalTaskFeeCollected,
+        outstandingBalance: 0,
+        feesEarned: totalFeeEarned,
+        qualityReviewStatus: 'Uses completed task quality scores from the productivity report formula.',
+      },
+      productivitySummary: {
+        completedTasks: rows.length,
+        totalTaskFeeCollected,
+        totalTaskFee: totalTaskFeeCollected,
+        totalFeeEarned,
+        pendingQualityScores: rows.filter((row) => row.qualityScore == null).length,
+        averageQualityScore: qualityRows.length
+          ? Math.round((qualityRows.reduce((sum, row) => sum + (row.qualityScore || 0), 0) / qualityRows.length) * 10) / 10
+          : null,
+        averageTimelinessScore: timelinessRows.length
+          ? Math.round((timelinessRows.reduce((sum, row) => sum + (row.timelinessScore || 0), 0) / timelinessRows.length) * 10) / 10
+          : null,
+      },
+      productivityRows: rows,
+      team: [
+        {
+          id: String(user?._id || req.user?.id || ''),
+          name: displayName,
+          role,
+          earningRoleLabel: roleShare.label,
+          earningSharePercent: roleShare.percent,
+          activeCases: taskCaseIds.length,
+          tasksCompleted: rows.length,
+          invoicePaymentsReceived: totalTaskFeeCollected,
+          earnedFees: totalFeeEarned,
+          revenueAttributed: totalFeeEarned,
+          grossFeesHandled: totalTaskFeeCollected,
+          firmRetainedEarnings: roundMoney(Math.max(0, totalTaskFeeCollected - totalFeeEarned)),
+        },
+      ],
+    });
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message || 'Failed to load productivity earnings report.' });
+  }
+};
+
 

@@ -1,0 +1,61 @@
+.staff-dashboard {
+  min-width: 0;
+}
+
+.staff-dashboard * {
+  letter-spacing: 0;
+}
+
+.dark .staff-dashboard {
+  color: #e2e8f0;
+}
+
+.dark .staff-dashboard .bg-white {
+  background-color: #0f172a !important;
+}
+
+.dark .staff-dashboard .bg-gray-50,
+.dark .staff-dashboard .bg-gray-100 {
+  background-color: #111c2f !important;
+}
+
+.dark .staff-dashboard .border-gray-200,
+.dark .staff-dashboard .border-gray-300 {
+  border-color: #253449 !important;
+}
+
+.dark .staff-dashboard .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #253449 !important;
+}
+
+.dark .staff-dashboard .text-gray-900,
+.dark .staff-dashboard .text-black {
+  color: #f8fafc !important;
+}
+
+.dark .staff-dashboard .text-gray-700,
+.dark .staff-dashboard .text-gray-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark .staff-dashboard .text-gray-500 {
+  color: #94a3b8 !important;
+}
+
+.dark .staff-dashboard .hover\:bg-gray-50:hover {
+  background-color: #172554 !important;
+}
+
+.dark .staff-dashboard .hover\:text-gray-900:hover {
+  color: #f8fafc !important;
+}
+
+.dark .staff-dashboard .bg-gray-900 {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.staff-dashboard .rounded-lg,
+.staff-dashboard .rounded-2xl {
+  max-width: 100%;
+}

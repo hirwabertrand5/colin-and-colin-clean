@@ -640,6 +640,108 @@
   text-align: center;
 }
 
+.dark .mp-dashboard {
+  color: #e2e8f0;
+}
+
+.dark .mp-error,
+.dark .mp-loader,
+.dark .mp-metric-card,
+.dark .mp-card {
+  background: #0f172a;
+  border-color: #1e293b;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+}
+
+.dark .mp-error {
+  background: #431407;
+  border-color: #9a3412;
+  color: #fed7aa;
+}
+
+.dark .mp-metric-title,
+.dark .mp-finance-chart h3,
+.dark .mp-two-col h3,
+.dark .mp-capacity h3,
+.dark .mp-alert-row span:nth-child(2),
+.dark .mp-bar-row > span,
+.dark .mp-conversion,
+.dark .mp-value-row {
+  color: #cbd5e1;
+}
+
+.dark .mp-metric-card > strong,
+.dark .mp-card-header h2,
+.dark .mp-donut-center strong,
+.dark .mp-value-row strong,
+.dark .mp-profit-cards strong,
+.dark .mp-cash-summary strong,
+.dark .mp-deadline-row div:nth-child(2) strong,
+.dark .mp-activity-row strong,
+.dark .mp-mini-kpis strong,
+.dark .mp-bar-row strong,
+.dark .mp-conversion strong {
+  color: #f8fafc;
+}
+
+.dark .mp-metric-trend span,
+.dark .mp-donut-center span,
+.dark .mp-profit-cards span,
+.dark .mp-cash-summary span,
+.dark .mp-deadline-row div:nth-child(2) span,
+.dark .mp-activity-row span,
+.dark .mp-mini-kpis span {
+  color: #94a3b8;
+}
+
+.dark .mp-card-action,
+.dark .mp-deadline-row em,
+.dark .mp-alert-row em,
+.dark .mp-activity-row em,
+.dark .mp-activity-row svg {
+  color: #60a5fa;
+}
+
+.dark .mp-finance-chart {
+  border-left-color: #1e293b;
+}
+
+.dark .mp-profit-cards div,
+.dark .mp-cash-summary div,
+.dark .mp-mini-kpis div,
+.dark .mp-empty-block {
+  background: #111c2f;
+  border-color: #253449;
+}
+
+.dark .mp-empty-block,
+.dark .mp-mini-na,
+.dark .mp-muted {
+  color: #64748b !important;
+}
+
+.dark .mp-bar-track {
+  background: #253449;
+}
+
+.dark .mp-risk-list .mp-value-row {
+  background: #0f172a;
+  border-bottom-color: #1e293b;
+}
+
+.dark .mp-risk-list .mp-value-row strong {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.dark .mp-deadline-date {
+  background: #172554;
+}
+
+.dark .mp-deadline-date strong {
+  color: #bfdbfe;
+}
+
 @media (max-width: 1450px) {
   .mp-metrics-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -50,16 +50,16 @@ type NavItem = {
   submenu?: { name: string; href: string; icon?: React.ComponentType<any>; exact?: boolean }[];
 };
 
-const formatToday = () =>
-  new Date().toLocaleDateString('en-US', {
+const formatToday = (date: Date) =>
+  date.toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
     year: 'numeric',
   });
 
-const getTimeGreeting = () => {
-  const hour = new Date().getHours();
+const getTimeGreeting = (date: Date) => {
+  const hour = date.getHours();
   if (hour >= 5 && hour < 12) return 'Good morning';
   if (hour >= 12 && hour < 17) return 'Good afternoon';
   return 'Good evening';
@@ -69,11 +69,12 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedMenu, setExpandedMenu] = useState<string | null>(null);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [clockNow, setClockNow] = useState(() => new Date());
   const topbarRef = useRef<HTMLElement | null>(null);
   const location = useLocation();
   const { isDark, toggleTheme } = useTheme();
   const companyLogo = companyLogoDark;
-  const greeting = getTimeGreeting();
+  const greeting = getTimeGreeting(clockNow);
 
   const navigation: NavItem[] = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -171,6 +172,11 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
     return () => {
       window.removeEventListener('resize', updateTopbarHeight);
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(new Date()), 60000);
+    return () => window.clearInterval(timer);
   }, []);
 
   return (
@@ -372,7 +378,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
 
           <div className="app-topbar-greeting">
             <strong>{greeting}, {user.name.split(' ')[0] || user.name}</strong>
-            <span>Here&apos;s your firm overview for {formatToday()}.</span>
+            <span>Here&apos;s your firm overview for {formatToday(clockNow)}.</span>
           </div>
 
           <label className="app-topbar-search">

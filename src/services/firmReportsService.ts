@@ -164,3 +164,27 @@ export const getFirmReports = async (params?: { range?: FirmReportRange; from?: 
   return data as FirmReportResponse;
 };
 
+export type MyProductivityEarningsResponse = Pick<
+  FirmReportResponse,
+  'range' | 'dateBasis' | 'selectedMember' | 'productivitySummary' | 'productivityRows' | 'team'
+>;
+
+export const getMyProductivityEarningsReport = async (params?: {
+  range?: FirmReportRange;
+  from?: string;
+  to?: string;
+}): Promise<MyProductivityEarningsResponse> => {
+  const qs = new URLSearchParams();
+  if (params?.range) qs.set('range', params.range);
+  if (params?.from) qs.set('from', params.from);
+  if (params?.to) qs.set('to', params.to);
+
+  const res = await fetch(`${API_URL}/reports/my-productivity?${qs.toString()}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.message || 'Failed to load productivity earnings report');
+  return data as MyProductivityEarningsResponse;
+};
+

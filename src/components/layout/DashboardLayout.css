@@ -274,6 +274,73 @@ main.main-content {
   padding-top: calc(var(--topbar-height) + 1.35rem) !important;
 }
 
+.dark .app-shell {
+  background: #07111f !important;
+}
+
+.dark .app-shell-sidebar {
+  background: linear-gradient(180deg, #03152f 0%, #020a18 100%) !important;
+}
+
+.dark .app-shell-logo img {
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.28));
+}
+
+.dark .app-shell-topbar {
+  background: #07111f !important;
+}
+
+.dark .app-topbar-greeting strong,
+.dark .app-topbar-profile strong {
+  color: #f8fafc;
+}
+
+.dark .app-topbar-greeting span,
+.dark .app-topbar-profile span {
+  color: #94a3b8;
+}
+
+.dark .app-topbar-search {
+  background: #0f172a;
+  border-color: #1e293b;
+  box-shadow: none;
+  color: #94a3b8;
+}
+
+.dark .app-topbar-search input {
+  color: #f8fafc;
+}
+
+.dark .app-topbar-search input::placeholder {
+  color: #64748b;
+}
+
+.dark .app-topbar-search kbd {
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+.dark .app-icon-button {
+  background: #0f172a;
+  border-color: #1e293b;
+  color: #cbd5e1 !important;
+}
+
+.dark .app-icon-button:hover {
+  background: #172554;
+  color: #bfdbfe !important;
+}
+
+.dark .app-topbar-primary {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #fff !important;
+}
+
+.dark main.main-content {
+  background: #07111f !important;
+}
+
 @media (min-width: 1100px) {
   .app-topbar-greeting,
   .app-topbar-profile {

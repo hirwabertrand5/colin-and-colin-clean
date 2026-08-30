@@ -24,7 +24,9 @@ import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
 import { getAllTasks, TaskData } from '../../services/taskService';
+import { getMyProductivityEarningsReport, MyProductivityEarningsResponse } from '../../services/firmReportsService';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
+import './AssociateDashboard.css';
 
 type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
 type FinancialScope = 'own' | 'matter' | 'portfolio' | 'client';
@@ -200,6 +202,12 @@ const safeNum = (value: unknown) => {
 };
 
 const formatRwf = (value: number) => `RWF ${Math.round(value).toLocaleString('en-US')}`;
+const formatPeriodDate = (value?: string) => {
+  if (!value) return 'N/A';
+  const d = new Date(`${value}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) return value;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
 
 const normalizeName = (value: unknown) => String(value || '').trim().toLowerCase();
 
@@ -317,6 +325,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const [cases, setCases] = useState<CaseData[]>([]);
   const [events, setEvents] = useState<FirmCalendarEvent[]>([]);
   const [performance, setPerformance] = useState<PerformanceSummary | null>(null);
+  const [earningsReport, setEarningsReport] = useState<MyProductivityEarningsResponse | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
 
   usePageTitle(profile.title);
@@ -333,11 +342,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         setLoading(true);
         setError('');
 
-        const [taskResult, caseResult, eventResult, performanceResult, prospectResult] = await Promise.allSettled([
+        const [taskResult, caseResult, eventResult, performanceResult, earningsResult, prospectResult] = await Promise.allSettled([
           getAllTasks(),
           getAllCases(),
           getFirmEvents({ from: today, to: next30Days, type: 'all' }),
           getMyPerformance(),
+          getMyProductivityEarningsReport({ range: 'monthly' }),
           getAllProspects({ includeTerminal: true }),
         ]);
 
@@ -346,6 +356,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         if (caseResult.status === 'fulfilled') setCases(caseResult.value);
         if (eventResult.status === 'fulfilled') setEvents(eventResult.value);
         if (performanceResult.status === 'fulfilled') setPerformance(performanceResult.value);
+        if (earningsResult.status === 'fulfilled') setEarningsReport(earningsResult.value);
         if (prospectResult.status === 'fulfilled') setProspects(prospectResult.value);
       } catch (e: any) {
         if (!mounted) return;
@@ -508,27 +519,42 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     [events, today]
   );
 
+  const earningsPeriod = useMemo(() => {
+    const range = earningsReport?.range || performance?.range;
+    return range ? `${formatPeriodDate(range.from)} to ${formatPeriodDate(range.to)}` : 'N/A';
+  }, [earningsReport?.range, performance?.range]);
+  const earningsSummary = earningsReport?.productivitySummary;
+  const earningsMember = earningsReport?.selectedMember;
+  const earningsTeamRow = earningsReport?.team?.[0];
+  const reportTaskFeeCollected = earningsSummary?.totalTaskFeeCollected ?? earningsSummary?.totalTaskFee ?? 0;
+  const reportFeeEarned = earningsMember?.feesEarned ?? earningsSummary?.totalFeeEarned ?? earningsTeamRow?.earnedFees ?? 0;
+  const reportTasksCompleted = earningsSummary?.completedTasks ?? performance?.tasksCompleted ?? taskSignals.completed.length;
+  const reportTpaPercent =
+    earningsReport?.productivityRows?.find((row) => row.tpaPercent != null)?.tpaPercent ??
+    earningsTeamRow?.earningSharePercent ??
+    profile.tpa;
+  const reportQualityScore = earningsSummary?.averageQualityScore ?? taskSignals.qualityAverage;
+  const reportTimelinessScore = earningsSummary?.averageTimelinessScore ?? taskSignals.timelinessAverage;
+
   const headlineStats = useMemo<StatCard[]>(() => {
     const activeMatters = authorisedCases.filter((matter) => String(matter.status || '').toLowerCase() !== 'closed').length;
-    const qualityFactor = (taskSignals.qualityAverage ?? 0) / 100;
-    const feeEarnedSignal = Math.round(financials.earnedValue * (profile.tpa / 100) * (taskSignals.timelinessAverage / 100) * qualityFactor);
     const stats: StatCard[] = [
       { label: profile.financialScope === 'client' ? 'Active Clients / Matters' : 'Active Matters', value: String(activeMatters), helper: 'Uses linked matters from your task set', icon: Briefcase, tone: 'blue', href: '/matters' },
       { label: 'Tasks Outstanding', value: String(taskSignals.open.length), helper: `${taskSignals.dueSoon.length} due in 7 days`, icon: CheckSquare, tone: taskSignals.open.length ? 'amber' : 'green', href: '/tasks' },
       { label: 'Overdue Tasks', value: String(taskSignals.overdue.length), helper: taskSignals.overdue.length ? 'Action required' : 'No overdue work', icon: AlertTriangle, tone: taskSignals.overdue.length ? 'red' : 'green', href: '/tasks' },
       { label: 'On-Time Completion', value: `${taskSignals.onTimeRate}%`, helper: 'Matches productivity report', icon: Clock, tone: taskSignals.onTimeRate >= 80 ? 'green' : 'amber', href: '/performance' },
-      { label: 'Quality Score', value: taskSignals.qualityAverage == null ? 'Pending' : `${taskSignals.qualityAverage}%`, helper: 'Matches productivity report', icon: Award, tone: 'purple', href: '/performance' },
-      { label: 'Tasks Completed', value: String(performance?.tasksCompleted ?? taskSignals.completed.length), helper: `${taskSignals.completionRate}% completion rate`, icon: TrendingUp, tone: 'green', href: '/performance' },
+      { label: 'Quality Score', value: reportQualityScore == null ? 'Pending' : `${reportQualityScore}%`, helper: `Firm report period: ${earningsPeriod}`, icon: Award, tone: 'purple', href: '/performance' },
+      { label: 'Tasks Completed', value: String(reportTasksCompleted), helper: `Completed in ${earningsPeriod}`, icon: TrendingUp, tone: 'green', href: '/performance' },
       profile.financialScope === 'own'
-        ? { label: 'TPA', value: `${profile.tpa}%`, helper: 'Role remuneration configuration', icon: DollarSign, tone: 'green' }
+        ? { label: 'TPA', value: `${reportTpaPercent}%`, helper: 'Role remuneration configuration', icon: DollarSign, tone: 'green' }
         : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Authorised matter values', icon: DollarSign, tone: 'green' },
-      { label: 'Fee Earned Signal', value: feeEarnedSignal > 0 ? formatRwf(feeEarnedSignal) : 'Pending', helper: `Uses ${profile.tpa}% TPA × timeliness × quality`, icon: DollarSign, tone: feeEarnedSignal > 0 ? 'green' : 'amber' },
+      { label: 'Fee Earned Signal', value: reportFeeEarned > 0 ? formatRwf(reportFeeEarned) : 'Pending', helper: `Firm report formula, ${earningsPeriod}`, icon: DollarSign, tone: reportFeeEarned > 0 ? 'green' : 'amber' },
     ];
     return stats;
-  }, [authorisedCases, financials, profile, taskSignals]);
+  }, [authorisedCases, earningsPeriod, financials.contractValue, profile, reportFeeEarned, reportQualityScore, reportTasksCompleted, reportTpaPercent, taskSignals]);
 
   return (
-    <div>
+    <div className="staff-dashboard">
       <div className="mb-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
@@ -800,13 +826,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         )}
 
         <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
-          <SectionHeader title={profile.labels.earnings} description="Own remuneration only, calculated from collected/work value, role TPA, timeliness, and quality." />
+          <SectionHeader title={profile.labels.earnings} description={`Own remuneration for ${earningsPeriod}, calculated with the same task productivity formula used in Firm Reports.`} />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
-              ['Task Fee Collected', formatRwf(financials.earnedValue), 'Billing/payment records and matter progress'],
-              ['TPA', `${profile.tpa}%`, 'Configured from role/remuneration setup'],
-              ['Timeliness Score', `${taskSignals.timelinessAverage}%`, 'Calculated from assignment, deadline, and completion'],
-              ['Quality Score', taskSignals.qualityAverage == null ? 'Pending' : `${taskSignals.qualityAverage}%`, 'Approved task review score'],
+              ['Task Fee Collected', formatRwf(reportTaskFeeCollected), 'Paid invoice value allocated to completed tasks'],
+              ['TPA', `${reportTpaPercent}%`, 'Configured from role/remuneration setup'],
+              ['Timeliness Score', reportTimelinessScore == null ? 'Pending' : `${reportTimelinessScore}%`, 'Firm report completed-task timeliness score'],
+              ['Quality Score', reportQualityScore == null ? 'Pending' : `${reportQualityScore}%`, 'Firm report completed-task quality score'],
             ].map(([label, value, helper]) => (
               <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">{label}</div>
@@ -816,7 +842,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             ))}
           </div>
           <div className="mt-4 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white">
-            Fee Earned = Task Fee Collected × {profile.tpa}% × Timeliness Score × Quality Score
+            Fee Earned for {earningsPeriod}: {formatRwf(reportFeeEarned)} = Task Fee Collected x {reportTpaPercent}% x Timeliness Score x Quality Score
           </div>
         </div>
       </div>
