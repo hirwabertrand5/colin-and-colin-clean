@@ -134,7 +134,7 @@ function App() {
                     path="/"
                     element={
                       isManagementDashboardRole ? (
-                        <ManagingPartnerDashboard userRole={user.role} />
+                        <ManagingPartnerDashboard />
                       ) : isExec ? (
                         <ExecutiveAssistantDashboard />
                       ) : (

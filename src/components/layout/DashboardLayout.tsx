@@ -19,11 +19,20 @@ import {
   Sun,
   Moon,
   ChevronDown,
+  Search,
+  Plus,
+  FilePlus2,
+  UserPlus,
+  ReceiptText,
+  ClipboardPlus,
+  UploadCloud,
+  CalendarPlus,
+  Mail,
 } from 'lucide-react';
 import { User } from '../../App';
 import { useTheme } from '../../hooks/useTheme';
+import './DashboardLayout.css';
 
-import companyLogoLight from '../../assets/logo-colin.png';
 import companyLogoDark from '../../assets/logo-colin-dark-mode.png';
 import { getUnreadNotificationCount } from '../../services/notificationService';
 
@@ -41,6 +50,20 @@ type NavItem = {
   submenu?: { name: string; href: string; icon?: React.ComponentType<any>; exact?: boolean }[];
 };
 
+const formatToday = () =>
+  new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+const getTimeGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return 'Good morning';
+  if (hour >= 12 && hour < 17) return 'Good afternoon';
+  return 'Good evening';
+};
 
 export default function DashboardLayout({ user, onLogout, children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -49,7 +72,8 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
   const topbarRef = useRef<HTMLElement | null>(null);
   const location = useLocation();
   const { isDark, toggleTheme } = useTheme();
-  const companyLogo = isDark ? companyLogoDark : companyLogoLight;
+  const companyLogo = companyLogoDark;
+  const greeting = getTimeGreeting();
 
   const navigation: NavItem[] = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -97,6 +121,14 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
 
   const hasAccess = (item: { roles?: string[] }) => !item.roles || item.roles.includes(user.role);
   const adminItems = adminNavigation.filter(hasAccess);
+  const quickActions = [
+    { name: 'New Matter', href: '/matters/new', icon: FilePlus2 },
+    { name: 'New Client', href: '/matters/intake-prospects', icon: UserPlus },
+    { name: 'New Invoice', href: '/billing/invoices', icon: ReceiptText },
+    { name: 'New Task', href: '/matters/independent-tasks', icon: ClipboardPlus },
+    { name: 'Upload Document', href: '/matters', icon: UploadCloud },
+    { name: 'Schedule Meeting', href: '/calendar', icon: CalendarPlus },
+  ];
 
   useEffect(() => {
     if (location.pathname.startsWith('/matters')) {
@@ -142,7 +174,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="app-shell min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div
@@ -154,19 +186,19 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
       {/* Sidebar */}
       <div
         className={`
-          fixed inset-y-0 left-0 w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transform transition-transform duration-200 ease-in-out z-50
+          app-shell-sidebar fixed inset-y-0 left-0 w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transform transition-transform duration-200 ease-in-out z-50
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
           lg:translate-x-0
         `}
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="flex items-center justify-center h-24 px-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="app-shell-logo flex items-center justify-center h-24 px-6 border-b border-gray-200 dark:border-gray-700">
             <img src={companyLogo} alt="Colin & Colin Logo" className="max-w-[165px] w-full object-contain" />
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-3 py-4 overflow-y-auto">
+          <nav className="app-shell-nav flex-1 px-3 py-4 overflow-y-auto">
             <div className="space-y-1">
               {navigation.filter(hasAccess).map((item) => {
                 const Icon = item.icon;
@@ -244,6 +276,29 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
               })}
             </div>
 
+            <div className="app-quick-actions">
+              <div className="app-quick-actions-title">
+                <span>Quick Actions</span>
+                <Plus className="w-4 h-4" />
+              </div>
+              <div className="app-quick-actions-list">
+                {quickActions.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className="app-quick-action-link"
+                      onClick={() => setSidebarOpen(false)}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Admin */}
             {adminItems.length > 0 && (
               <div className="mt-8">
@@ -278,7 +333,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
           </nav>
 
           {/* User Footer */}
-          <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="app-shell-user p-4 border-t border-gray-200 dark:border-gray-700">
             <div className="flex items-center mb-3">
               <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center text-gray-600 dark:text-gray-300 font-medium">
                 {user.name.split(' ').map((n) => n[0]).join('')}
@@ -305,27 +360,41 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
         {/* Top Header */}
         <header
           ref={topbarRef}
-          className="topbar fixed top-0 left-0 right-0 lg:left-64 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 lg:px-6 z-30"
+          className="app-shell-topbar topbar fixed top-0 left-0 right-0 lg:left-64 h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 lg:px-6 z-30"
         >
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="lg:hidden p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+            className="app-icon-button lg:hidden p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+            title="Toggle menu"
           >
             {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
 
-          <div className="hidden lg:block" />
+          <div className="app-topbar-greeting">
+            <strong>{greeting}, {user.name.split(' ')[0] || user.name}</strong>
+            <span>Here&apos;s your firm overview for {formatToday()}.</span>
+          </div>
 
-          <div className="flex items-center space-x-4">
+          <label className="app-topbar-search">
+            <Search className="w-4 h-4" />
+            <input type="search" placeholder="Search matters, clients, documents, tasks, invoices..." />
+            <kbd>Ctrl K</kbd>
+          </label>
+
+          <div className="app-topbar-actions flex items-center space-x-4">
+            <Link to="/matters/new" className="app-topbar-primary" title="New matter">
+              <Plus className="w-5 h-5" />
+            </Link>
+
             <button
               onClick={toggleTheme}
-              className="relative z-10 p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+              className="app-icon-button relative z-10 p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
               title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {isDark ? <Sun className="w-6 h-6" /> : <Moon className="w-6 h-6" />}
             </button>
 
-            <Link to="/notifications" className="relative p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+            <Link to="/notifications" className="app-icon-button relative p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors" title="Notifications">
               <Bell className="w-6 h-6" />
               {notificationCount > 0 && (
                 <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
@@ -334,8 +403,23 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
               )}
             </Link>
 
-            <div className="lg:hidden w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center text-gray-600 dark:text-gray-300 font-medium">
-              {user.name.split(' ').map((n) => n[0]).join('')}
+            <Link to="/calendar" className="app-icon-button" title="Calendar">
+              <CalendarIcon className="w-5 h-5" />
+            </Link>
+
+            <Link to="/billing/invoices" className="app-icon-button" title="Invoices">
+              <Mail className="w-5 h-5" />
+            </Link>
+
+            <div className="app-topbar-profile">
+              <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center text-gray-600 dark:text-gray-300 font-medium">
+                {user.name.split(' ').map((n) => n[0]).join('')}
+              </div>
+              <div>
+                <strong>{user.name}</strong>
+                <span>{user.role.replaceAll('_', ' ')}</span>
+              </div>
+              <ChevronDown className="w-4 h-4" />
             </div>
           </div>
         </header>
