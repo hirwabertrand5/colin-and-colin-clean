@@ -87,8 +87,8 @@ import {
   getUrgencyColorForDueDate,
 } from '../../utils/workflowDeadline';
 
-const API_URL = import.meta.env.VITE_API_URL;
-const BACKEND_URL = API_URL ? API_URL.replace(/\/api\/?$/, '') : '';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const BACKEND_URL = API_URL.replace(/\/api\/?$/, '');
 const getToken = () => localStorage.getItem('token');
 
 type StaffUser = { _id: string; name: string; email: string; role: string };
@@ -2978,16 +2978,25 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                         {inv.notes ? <div className="text-sm text-gray-500 mt-1">{inv.notes}</div> : null}
 
                         {/* Invoice file link */}
-                        <div className="mt-2 text-sm">
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
                           {inv.invoiceFileUrl ? (
-                            <a
-                              href={BACKEND_URL + inv.invoiceFileUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 underline font-medium"
-                            >
-                              View Invoice File
-                            </a>
+                            <>
+                              <a
+                                href={BACKEND_URL + inv.invoiceFileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 underline font-medium"
+                              >
+                                View Invoice File
+                              </a>
+                              <a
+                                href={BACKEND_URL + inv.invoiceFileUrl}
+                                download
+                                className="text-blue-600 underline font-medium"
+                              >
+                                Download Invoice
+                              </a>
+                            </>
                           ) : (
                             <span className="text-gray-400">No invoice file</span>
                           )}
@@ -3008,14 +3017,23 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                       {/* Proof */}
                       {inv.status === 'Paid' ? (
                         inv.proofUrl ? (
-                          <a
-                            href={BACKEND_URL + inv.proofUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 underline text-xs font-medium"
-                          >
-                            View Receipt
-                          </a>
+                          <div className="flex items-center gap-3">
+                            <a
+                              href={BACKEND_URL + inv.proofUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 underline text-xs font-medium"
+                            >
+                              View Receipt
+                            </a>
+                            <a
+                              href={BACKEND_URL + inv.proofUrl}
+                              download
+                              className="text-blue-600 underline text-xs font-medium"
+                            >
+                              Download Receipt
+                            </a>
+                          </div>
                         ) : (
                           <span className="text-xs text-gray-400">No receipt</span>
                         )

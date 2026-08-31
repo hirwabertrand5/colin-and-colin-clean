@@ -386,9 +386,6 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
                   : 'Track your productivity, quality, and deadlines from live data'}
             </p>
           </div>
-          <div className="rounded-full bg-gray-900 px-4 py-2 text-xs font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
-            Live task feed • progress visible in both themes
-          </div>
         </div>
       </div>
 

@@ -51,8 +51,8 @@ interface TaskDetailProps {
   userRole: UserRole;
 }
 
-const API_URL = import.meta.env.VITE_API_URL;
-const BACKEND_URL = API_URL ? API_URL.replace(/\/api\/?$/, '') : '';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const BACKEND_URL = API_URL.replace(/\/api\/?$/, '');
 
 const inferWorkflowStageFromStatus = (status?: string): TaskWorkflowStage => {
   if (status === 'Completed') return 'Completed';

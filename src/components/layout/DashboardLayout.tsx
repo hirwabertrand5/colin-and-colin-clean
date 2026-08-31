@@ -122,6 +122,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
 
   const hasAccess = (item: { roles?: string[] }) => !item.roles || item.roles.includes(user.role);
   const adminItems = adminNavigation.filter(hasAccess);
+  const canShowQuickActions = ['managing_director', 'executive_assistant'].includes(user.role);
   const quickActions = [
     { name: 'New Matter', href: '/matters/new', icon: FilePlus2 },
     { name: 'New Client', href: '/matters/intake-prospects', icon: UserPlus },
@@ -282,28 +283,30 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
               })}
             </div>
 
-            <div className="app-quick-actions">
-              <div className="app-quick-actions-title">
-                <span>Quick Actions</span>
-                <Plus className="w-4 h-4" />
+            {canShowQuickActions && (
+              <div className="app-quick-actions">
+                <div className="app-quick-actions-title">
+                  <span>Quick Actions</span>
+                  <Plus className="w-4 h-4" />
+                </div>
+                <div className="app-quick-actions-list">
+                  {quickActions.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.name}
+                        to={item.href}
+                        className="app-quick-action-link"
+                        onClick={() => setSidebarOpen(false)}
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span>{item.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="app-quick-actions-list">
-                {quickActions.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.name}
-                      to={item.href}
-                      className="app-quick-action-link"
-                      onClick={() => setSidebarOpen(false)}
-                    >
-                      <Icon className="w-4 h-4" />
-                      <span>{item.name}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
+            )}
 
             {/* Admin */}
             {adminItems.length > 0 && (
