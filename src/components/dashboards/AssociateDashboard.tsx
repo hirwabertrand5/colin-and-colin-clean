@@ -24,8 +24,9 @@ import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
 import { getAllTasks, TaskData } from '../../services/taskService';
-import { getMyProductivityEarningsReport, MyProductivityEarningsResponse } from '../../services/firmReportsService';
+import { FirmReportDateBasis, getFirmReports, getMyProductivityEarningsReport, MyProductivityEarningsResponse } from '../../services/firmReportsService';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
+import { baseNameFromLabel, computeMemberFeeEarnedFromRows, computeTaskFeeCollectedFromRows } from '../../utils/productivity';
 import './AssociateDashboard.css';
 
 type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
@@ -201,15 +202,13 @@ const safeNum = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatRwf = (value: number) => `RWF ${Math.round(value).toLocaleString('en-US')}`;
+const formatRwf = (value: number) => `RWF ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const formatPeriodDate = (value?: string) => {
   if (!value) return 'N/A';
   const d = new Date(`${value}T00:00:00`);
   if (!Number.isFinite(d.getTime())) return value;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
-
-const normalizeName = (value: unknown) => String(value || '').trim().toLowerCase();
 
 const getMatterContractValue = (matter: CaseData) => {
   const planned = safeNum(matter.workflowProgress?.plannedValue?.amount);
@@ -310,7 +309,7 @@ function SectionHeader({ title, description }: { title: string; description: str
 export default function AssociateDashboard({ userRole }: { userRole?: UserRole }) {
   const me = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('user') || 'null') as { id: string; name: string; email: string; role: UserRole } | null;
+      return JSON.parse(localStorage.getItem('user') || 'null') as { _id?: string; id: string; name: string; email: string; role: UserRole } | null;
     } catch {
       return null;
     }
@@ -332,7 +331,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
   const today = useMemo(() => isoToday(), []);
   const next30Days = useMemo(() => addDaysISO(today, 30), [today]);
-  const meName = useMemo(() => normalizeName(me?.name), [me?.name]);
+  const meName = useMemo(() => baseNameFromLabel(me?.name), [me?.name]);
+  const meId = me?._id || me?.id;
+  const earningsRange = 'monthly' as const;
+  const earningsBasis: FirmReportDateBasis = 'invoiceDate';
 
   useEffect(() => {
     let mounted = true;
@@ -347,7 +349,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           getAllCases(),
           getFirmEvents({ from: today, to: next30Days, type: 'all' }),
           getMyPerformance(),
-          getMyProductivityEarningsReport({ range: 'monthly' }),
+          (async () => {
+            const params = { range: earningsRange, basis: earningsBasis, teamMemberId: meId };
+            try {
+              return await getFirmReports(params);
+            } catch {
+              return await getMyProductivityEarningsReport({ range: earningsRange, basis: earningsBasis });
+            }
+          })(),
           getAllProspects({ includeTerminal: true }),
         ]);
 
@@ -498,7 +507,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       const assignedTo = typeof prospect.assignedTo === 'object' ? prospect.assignedTo?.name : prospect.assignedTo;
       const associate = typeof prospect.responsibleAssociate === 'object' ? prospect.responsibleAssociate?.name : prospect.responsibleAssociate;
       const partner = typeof prospect.responsiblePartner === 'object' ? prospect.responsiblePartner?.name : prospect.responsiblePartner;
-      return [assignedTo, associate, partner].some((value) => normalizeName(value) === meName);
+      return [assignedTo, associate, partner].some((value) => baseNameFromLabel(value) === meName);
     });
     const open = ownProspects.filter((prospect) => !['Converted', 'Non-Converted'].includes(String(prospect.stage)));
     const converted = ownProspects.filter((prospect) => prospect.stage === 'Converted');
@@ -520,14 +529,33 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   );
 
   const earningsPeriod = useMemo(() => {
-    const range = earningsReport?.range || performance?.range;
+    const range = earningsReport?.range;
     return range ? `${formatPeriodDate(range.from)} to ${formatPeriodDate(range.to)}` : 'N/A';
-  }, [earningsReport?.range, performance?.range]);
+  }, [earningsReport?.range]);
   const earningsSummary = earningsReport?.productivitySummary;
   const earningsMember = earningsReport?.selectedMember;
   const earningsTeamRow = earningsReport?.team?.[0];
-  const reportTaskFeeCollected = earningsSummary?.totalTaskFeeCollected ?? earningsSummary?.totalTaskFee ?? 0;
-  const reportFeeEarned = earningsMember?.feesEarned ?? earningsSummary?.totalFeeEarned ?? earningsTeamRow?.earnedFees ?? 0;
+  const earningsRows = earningsReport?.productivityRows || [];
+  const reportTaskFeeCollected = earningsRows.length
+    ? computeTaskFeeCollectedFromRows(earningsRows, { meId, meName: me?.name })
+    : earningsSummary?.totalTaskFeeCollected ?? earningsSummary?.totalTaskFee ?? 0;
+  const reportFeeEarned = earningsRows.length
+    ? computeMemberFeeEarnedFromRows(earningsRows, { meId, meName: me?.name })
+    : earningsMember?.feesEarned ?? earningsSummary?.totalFeeEarned ?? earningsTeamRow?.earnedFees ?? 0;
+  useEffect(() => {
+    if (!earningsRows.length) return;
+    const ownRowCount = earningsRows.filter((row) => {
+      const staffId = String(row.staffId || '').trim();
+      return (meId && staffId && staffId === String(meId)) || baseNameFromLabel(row.staff) === baseNameFromLabel(me?.name);
+    }).length;
+    console.debug({
+      reportBasis: earningsReport?.dateBasis,
+      computedFromRows: reportFeeEarned,
+      selectedMemberFees: earningsMember?.feesEarned,
+      summaryTotal: earningsSummary?.totalFeeEarned,
+      ownRowCount,
+    });
+  }, [earningsMember?.feesEarned, earningsReport?.dateBasis, earningsRows, earningsSummary?.totalFeeEarned, me?.name, meId, reportFeeEarned]);
   const reportTasksCompleted = earningsSummary?.completedTasks ?? performance?.tasksCompleted ?? taskSignals.completed.length;
   const reportTpaPercent =
     earningsReport?.productivityRows?.find((row) => row.tpaPercent != null)?.tpaPercent ??
@@ -548,7 +576,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       profile.financialScope === 'own'
         ? { label: 'TPA', value: `${reportTpaPercent}%`, helper: 'Role remuneration configuration', icon: DollarSign, tone: 'green' }
         : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Authorised matter values', icon: DollarSign, tone: 'green' },
-      { label: 'Fee Earned Signal', value: reportFeeEarned > 0 ? formatRwf(reportFeeEarned) : 'Pending', helper: `Firm report formula, ${earningsPeriod}`, icon: DollarSign, tone: reportFeeEarned > 0 ? 'green' : 'amber' },
+      { label: 'Fee Earned Signal', value: earningsReport ? formatRwf(reportFeeEarned) : 'Pending', helper: `Firm report formula, ${earningsPeriod}`, icon: DollarSign, tone: reportFeeEarned > 0 ? 'green' : 'amber' },
     ];
     return stats;
   }, [authorisedCases, earningsPeriod, financials.contractValue, profile, reportFeeEarned, reportQualityScore, reportTasksCompleted, reportTpaPercent, taskSignals]);

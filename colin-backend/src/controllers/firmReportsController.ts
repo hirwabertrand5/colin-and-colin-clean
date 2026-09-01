@@ -108,6 +108,13 @@ const selectedPathLabel = (c: any, workflowTemplateMatterTypeById?: Map<string, 
 const roundMoney = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
 
 const normalizeName = (value: unknown) => String(value || '').trim().toLowerCase();
+const baseNameFromLabel = (value: unknown) => {
+  const normalized = normalizeName(value) || '';
+  const withoutRole = normalized.split(' - ')[0] || '';
+  const withoutParenthetical = withoutRole.split('(')[0] || '';
+  const withoutCommaSuffix = withoutParenthetical.split(',')[0] || '';
+  return withoutCommaSuffix.trim().replace(/\s+/g, ' ');
+};
 const isOpenCase = (c: any) => String(c?.status || '').trim().toLowerCase() !== 'closed';
 
 type PerformanceZone = 'excellent' | 'good' | 'delayed' | 'risk';
@@ -295,7 +302,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       ? await User.findById(teamMemberId).select('name role').lean()
       : null;
     const selectedMemberName = selectedMember ? String(selectedMember.name || '').trim() : null;
-    const selectedMemberNameNormalized = selectedMemberName ? normalizeName(selectedMemberName) : null;
+    const selectedMemberNameNormalized = selectedMemberName ? baseNameFromLabel(selectedMemberName) : null;
 
     // -----------------------------
     // KPIs
@@ -375,6 +382,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const taskCaseMap = new Map((taskCases as any[]).map((matter) => [String(matter._id), matter]));
 
     const baseInvoices = dateBasis === 'paymentDate' ? invoicesByPaymentDate : invoicesByInvoiceDate;
+    const productivityInvoices = dateBasis === 'invoiceDate'
+      ? invoicesByInvoiceDate.filter((invoice: any) => invoice.status === 'Paid')
+      : invoicesByPaymentDate;
     const selectedInvoices = baseInvoices.filter((inv: any) => selectedMatterIds.has(String(inv.caseId)));
 
     const totalContractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getContractValue(matter), 0);
@@ -416,6 +426,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const roleByName = new Map(
       (users as any[]).map((u) => [normalizeName(u.name), String(u.role || '')])
+    );
+    const userIdByName = new Map(
+      (users as any[]).map((u) => [baseNameFromLabel(u.name), String(u._id || '')])
     );
 
     // -----------------------------
@@ -459,7 +472,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const usedPercentByName = new Map<string, number[]>();
     const caseIds = Array.from(new Set((tasksCompleted as any[]).map((t) => String(t.caseId)).filter(Boolean)));
     const paidInvoicesByCaseId = new Map<string, number>();
-    for (const inv of invoicesByPaymentDate as any[]) {
+    for (const inv of productivityInvoices as any[]) {
       const caseId = String(inv.caseId || '');
       if (!caseId) continue;
       paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
@@ -477,7 +490,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
       const taskFeeCollected = Math.round((collectedFee * (taskProgressPercent / 100)) * 100) / 100;
       const timeliness = getTimelinessScore(task);
-      const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Number(task.qualityScore) : null;
+      const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Math.max(0, Math.round(Number(task.qualityScore))) : null;
       const feeEarned =
         qualityScore == null || !timeliness
           ? null
@@ -1058,7 +1071,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
 export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Response) => {
   try {
-    const { range, from, to } = req.query as any;
+    const { range, from, to, basis } = req.query as any;
+    const dateBasis = normalizeBasis(basis);
     let fromDate: Date;
     let toDate: Date;
 
@@ -1087,13 +1101,15 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
 
     const tasksCompleted = await Task.find({
       status: 'Completed',
-      assignee: displayName,
       completedAt: { $gte: fromDate, $lte: toDate },
     })
       .select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore status')
       .lean();
+    const memberTasksCompleted = (tasksCompleted as any[]).filter(
+      (task) => baseNameFromLabel(task.assignee) === baseNameFromLabel(displayName)
+    );
 
-    const taskCaseIds = Array.from(new Set((tasksCompleted as any[]).map((task) => String(task.caseId || '')).filter(Boolean)));
+    const taskCaseIds = Array.from(new Set(memberTasksCompleted.map((task) => String(task.caseId || '')).filter(Boolean)));
     const [taskCases, paidInvoices] = await Promise.all([
       taskCaseIds.length
         ? Case.find({ _id: { $in: taskCaseIds } })
@@ -1103,7 +1119,9 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       taskCaseIds.length
         ? Invoice.find({
           status: 'Paid',
-          updatedAt: { $gte: fromDate, $lte: toDate },
+          ...(dateBasis === 'invoiceDate'
+            ? { date: { $gte: fromISO, $lte: toISO } }
+            : { updatedAt: { $gte: fromDate, $lte: toDate } }),
           caseId: { $in: taskCaseIds },
         })
           .select('amount status date caseId proofUrl createdAt updatedAt')
@@ -1119,7 +1137,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
     }
 
-    const rows = (tasksCompleted as any[])
+    const rows = memberTasksCompleted
       .map((task) => {
         const matter = taskCaseMap.get(String(task.caseId || ''));
         const matterLabel = matter
@@ -1132,7 +1150,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
         const taskFeeCollected = roundMoney(collectedFee * (taskProgressPercent / 100));
         const timeliness = getTimelinessScore(task);
-        const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Number(task.qualityScore) : null;
+        const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Math.max(0, Math.round(Number(task.qualityScore))) : null;
         const feeEarned =
           qualityScore == null || !timeliness
             ? null
@@ -1140,6 +1158,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
 
         return {
           id: String(task._id),
+          staffId: String(user?._id || req.user?.id || ''),
           completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
           staff: displayName,
           role,
@@ -1175,7 +1194,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
 
     return res.json({
       range: { from: fromISO, to: toISO },
-      dateBasis: 'paymentDate',
+      dateBasis,
       selectedMember: {
         name: displayName,
         role,
