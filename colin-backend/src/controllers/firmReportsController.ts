@@ -425,7 +425,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const taxMessage = 'Tax data unavailable - source not configured';
 
     const roleByName = new Map(
-      (users as any[]).map((u) => [normalizeName(u.name), String(u.role || '')])
+      (users as any[]).map((u) => [baseNameFromLabel(u.name), String(u.role || '')])
     );
     const userIdByName = new Map(
       (users as any[]).map((u) => [baseNameFromLabel(u.name), String(u._id || '')])
@@ -483,7 +483,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const getTaskProductivityFinancials = (task: any) => {
       const staffName = String(task.assignee || '—').trim();
-      const role = String(roleByName.get(normalizeName(staffName)) || '').trim();
+      const role = String(roleByName.get(baseNameFromLabel(staffName)) || '').trim();
       const tpaPercent = getTaskParticipationAllocation(role);
       const matter = taskCaseMap.get(String(task.caseId || ''));
       const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
@@ -509,8 +509,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     };
 
     for (const t of tasksCompleted as any[]) {
-      const name = normalizeName(t.assignee);
-      if (selectedMemberNameNormalized && name !== selectedMemberNameNormalized) continue;
+      const name = baseNameFromLabel(t.assignee);
+      if (selectedMemberNameNormalized && baseNameFromLabel(name) !== selectedMemberNameNormalized) continue;
       completedTasksByName.set(name, (completedTasksByName.get(name) || 0) + 1);
       const due = resolveDeadlineDateTime(t.dueDate);
       const completed = t.completedAt ? new Date(t.completedAt) : undefined;
@@ -542,7 +542,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const overdueTasks = await Task.find(overdueFilter).select('assignee').lean();
     const overdueByName = new Map<string, number>();
     for (const t of overdueTasks as any[]) {
-      const name = normalizeName(t.assignee);
+      const name = baseNameFromLabel(t.assignee);
       overdueByName.set(name, (overdueByName.get(name) || 0) + 1);
     }
 
@@ -596,7 +596,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           })(),
         };
       })
-      .filter((member) => !selectedMemberNameNormalized || normalizeName(member.name) === selectedMemberNameNormalized)
+      .filter((member) => !selectedMemberNameNormalized || baseNameFromLabel(member.name) === selectedMemberNameNormalized)
       .sort((a, b) => b.activeCases - a.activeCases);
 
     const caseAnalyticsByPath = new Map<string, { type: string; active: number; closed: number; durationTotal: number; durationCount: number }>();
@@ -642,7 +642,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     })).sort((a, b) => a.type.localeCompare(b.type));
 
     const productivityRows = (tasksCompleted as any[])
-      .filter((task) => !selectedMemberNameNormalized || normalizeName(task.assignee) === selectedMemberNameNormalized)
+      .filter((task) => !selectedMemberNameNormalized || baseNameFromLabel(task.assignee) === selectedMemberNameNormalized)
       .map((task) => {
         const staffName = String(task.assignee || '—').trim();
         const financials = getTaskProductivityFinancials(task);
