@@ -28,6 +28,31 @@ import {
   UploadCloud,
   CalendarPlus,
   Mail,
+  Activity,
+  Banknote,
+  Calculator,
+  ChartNoAxesCombined,
+  ClipboardCheck,
+  ClipboardList,
+  Coins,
+  FileBarChart,
+  FileClock,
+  FileSearch,
+  Gauge,
+  HandCoins,
+  Landmark,
+  ListChecks,
+  Network,
+  Scale,
+  ShieldAlert,
+  ShoppingCart,
+  Target,
+  TrendingDown,
+  TrendingUp,
+  UserCheck,
+  UserCog,
+  UserRoundSearch,
+  UsersRound,
 } from 'lucide-react';
 import { User } from '../../App';
 import { useTheme } from '../../hooks/useTheme';
@@ -47,8 +72,15 @@ type NavItem = {
   href: string;
   icon: React.ComponentType<any>;
   roles?: string[];
-  submenu?: { name: string; href: string; icon?: React.ComponentType<any>; exact?: boolean }[];
+  submenu?: NavItem[];
+  exact?: boolean;
 };
+
+const managementRoles = ['managing_director', 'managing_partner', 'executive_managing_partner'];
+
+const managementView = (section: string, view: string) => `/management/${section}?view=${encodeURIComponent(view)}`;
+
+const managementItem = (name: string, href: string, icon: React.ComponentType<any>): NavItem => ({ name, href, icon });
 
 const formatToday = (date: Date) =>
   date.toLocaleDateString('en-US', {
@@ -68,6 +100,7 @@ const getTimeGreeting = (date: Date) => {
 export default function DashboardLayout({ user, onLogout, children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedMenu, setExpandedMenu] = useState<string | null>(null);
+  const [expandedManagementMenus, setExpandedManagementMenus] = useState<string[]>([]);
   const [notificationCount, setNotificationCount] = useState(0);
   const [clockNow, setClockNow] = useState(() => new Date());
   const topbarRef = useRef<HTMLElement | null>(null);
@@ -103,6 +136,142 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
     },
   ];
 
+  const managementNavigation: NavItem[] = [
+    {
+      name: 'Matters', href: '/matters', icon: Briefcase, roles: managementRoles, submenu: [
+        managementItem('Intake & Prospects', '/matters/intake-prospects', Users),
+        managementItem('Active Matters', '/matters', Briefcase),
+        managementItem('Temporarily Closed Matters', '/matters/temporarily-closed', Clock3),
+        managementItem('Closed Matters', '/matters/closed', FolderTree),
+        managementItem('Independent Tasks', '/matters/independent-tasks', CheckSquare),
+        managementItem('Matter Financial Status', managementView('matters', 'financial-status'), Calculator),
+        managementItem('Contract Value', managementView('matters', 'contract-value'), HandCoins),
+        managementItem('Amount Billed', managementView('matters', 'amount-billed'), ReceiptText),
+        managementItem('Amount Collected', managementView('matters', 'amount-collected'), Banknote),
+        managementItem('Outstanding Matter Balance', managementView('matters', 'outstanding-balance'), Wallet),
+        managementItem('Matter Direct Cost', managementView('matters', 'direct-cost'), Coins),
+        managementItem('Matter Gross Profit', managementView('matters', 'gross-profit'), TrendingUp),
+        managementItem('Matter Net Profit', managementView('matters', 'net-profit'), ChartNoAxesCombined),
+        managementItem('Matter Gross Profit Margin', managementView('matters', 'gross-profit-margin'), Gauge),
+        managementItem('Amount Billed', managementView('matters', 'amount-billed-profitability'), ReceiptText),
+        managementItem('Amount Collected', managementView('matters', 'amount-collected-profitability'), Banknote),
+        managementItem('Matter Profitability', managementView('matters', 'profitability'), ChartNoAxesCombined),
+        managementItem('Matter Direct Cost Workload', managementView('matters', 'direct-cost-workload'), ClipboardList),
+        managementItem('Matter Gross Profit Matter Timeliness', managementView('matters', 'timeliness'), FileClock),
+      ],
+    },
+    {
+      name: 'Task Management', href: '/tasks', icon: ListChecks, roles: managementRoles, submenu: [
+        managementItem('All Tasks', '/tasks', ListChecks),
+        managementItem('My Tasks', '/tasks?view=my-tasks', UserCheck),
+        managementItem('Unassigned Tasks', '/tasks?view=unassigned', UserCog),
+        managementItem('Due Today', '/tasks?view=due-today', CalendarIcon),
+        managementItem('Due This Week', '/tasks?view=due-this-week', CalendarPlus),
+        managementItem('Overdue Tasks', '/tasks?view=overdue', FileClock),
+        managementItem('Awaiting Review', '/tasks?view=awaiting-review', ClipboardCheck),
+        managementItem('Awaiting External Action', '/tasks?view=awaiting-external-action', HandCoins),
+        managementItem('Completed Tasks', '/tasks?view=completed', CheckSquare),
+        managementItem('Closed Tasks', '/tasks?view=closed', FolderTree),
+        managementItem('Task Performance', '/performance', Activity),
+      ],
+    },
+    {
+      name: 'Calendar & Deadlines', href: '/calendar', icon: CalendarIcon, roles: managementRoles, submenu: [
+        managementItem('Calendar', '/calendar', CalendarIcon),
+        managementItem('All Deadlines', '/calendar?view=all-deadlines', FileClock),
+        managementItem('Litigation Deadlines', '/calendar?view=litigation', Scale),
+        managementItem('Transaction Deadlines', '/calendar?view=transaction', Briefcase),
+        managementItem('Regulatory Deadlines', '/calendar?view=regulatory', ShieldAlert),
+        managementItem('Internal Deadlines', '/calendar?view=internal', ClipboardList),
+        managementItem('Upcoming Deadlines', '/calendar?view=upcoming', Clock3),
+        managementItem('Missed Deadlines', '/calendar?view=missed', FileSearch),
+        managementItem('Deadline Compliance', '/calendar?view=compliance', ClipboardCheck),
+      ],
+    },
+    {
+      name: 'Billing & Finance', href: '/billing', icon: DollarSign, roles: managementRoles, submenu: [
+        {
+          name: 'Financial Dashboard', href: '/billing', icon: Landmark, submenu: [
+            ['Total Contract Value', 'contract-value', HandCoins], ['Total Billed', 'total-billed', ReceiptText], ['Total Collected', 'total-collected', Banknote], ['Outstanding', 'outstanding', Wallet], ['Direct Matter Costs', 'direct-matter-costs', Coins], ['Gross Profit', 'gross-profit', TrendingUp], ['Gross Profit Margin', 'gross-profit-margin', Gauge], ['Firm Operating Expenses', 'operating-expenses', Calculator], ['Net Profit', 'net-profit', ChartNoAxesCombined], ['Net Profit Margin', 'net-profit-margin', Gauge],
+          ].map(([name, view, icon]) => managementItem(name as string, managementView('billing', view as string), icon as React.ComponentType<any>)),
+        },
+        {
+          name: 'Billing & Invoicing', href: '/billing/invoices', icon: ReceiptText, submenu: [
+            ['All Invoices', 'all', FileBarChart], ['Draft', 'draft', FileClock], ['Issued', 'issued', ReceiptText], ['Paid', 'paid', Banknote], ['Pending', 'pending', Clock3], ['Overdue', 'overdue', ShieldAlert], ['No. of Invoices', 'count', Calculator], ['Total Billed', 'total-billed', HandCoins], ['Recent Invoices', 'recent', FileSearch], ['Billing Triggers', 'triggers', Activity],
+          ].map(([name, view, icon]) => managementItem(name as string, `/billing/invoices?view=${view}`, icon as React.ComponentType<any>)),
+        },
+        {
+          name: 'Collections & Receivables', href: managementView('billing', 'collections'), icon: HandCoins, submenu: [
+            ['Outstanding', 'outstanding'], ['Overdue', 'overdue'], ['Collection Rate', 'collection-rate'], ['Debtor Ageing', 'debtor-ageing'], ['Payment Follow-Up', 'payment-follow-up'], ['Collection Triggers', 'collection-triggers'],
+          ].map(([name, view]) => managementItem(name as string, managementView('billing', view as string), name === 'Collection Rate' ? Gauge : HandCoins)),
+        },
+        {
+          name: 'Profitability', href: managementView('profitability', 'firm'), icon: ChartNoAxesCombined, submenu: [
+            ['Firm Profitability', 'firm'], ['Department Profitability', 'department'], ['Matter Profitability', 'matter'], ['Client Profitability', 'client'], ['Staff Profitability', 'staff'], ['Net Profit Margin', 'net-profit-margin'],
+          ].map(([name, view]) => managementItem(name as string, managementView('profitability', view as string), name === 'Net Profit Margin' ? Gauge : ChartNoAxesCombined)),
+        },
+        {
+          name: 'Cash & Cash Flow', href: managementView('cash-flow', 'position'), icon: Wallet, submenu: [
+            ['Cash Position', 'position'], ['Cash Inflows', 'inflows'], ['Cash Outflows', 'outflows'], ['Cash Forecast', 'forecast'],
+          ].map(([name, view]) => managementItem(name as string, managementView('cash-flow', view as string), name === 'Cash Position' ? Wallet : name === 'Cash Inflows' ? Banknote : name === 'Cash Outflows' ? Coins : ChartNoAxesCombined)),
+        },
+        {
+          name: 'Expenses & Procurement', href: managementView('expenses', 'expenses'), icon: ShoppingCart, submenu: [
+            ['Expenses', 'expenses'], ['Direct Matter Costs', 'direct-matter-costs'], ['Operating Expenses', 'operating-expenses'], ['Procurement', 'procurement'],
+          ].map(([name, view]) => managementItem(name as string, managementView('expenses', view as string), name === 'Procurement' ? ShoppingCart : Coins)),
+        },
+        {
+          name: 'Firm Remuneration', href: managementView('remuneration', 'fee-earned'), icon: Coins, submenu: [
+            ['Fee Earned', 'fee-earned'], ['Accrued', 'accrued'], ['Payable', 'payable'], ['Deferred', 'deferred'], ['Paid', 'paid'], ['By Role', 'by-role'], ['By Staff', 'by-staff'], ['By Matter', 'by-matter'],
+          ].map(([name, view]) => managementItem(name as string, managementView('remuneration', view as string), name === 'By Role' ? UsersRound : name === 'By Staff' ? Users : name === 'By Matter' ? Briefcase : Coins)),
+        },
+      ],
+    },
+    {
+      name: 'People & Capacity', href: managementView('people', 'all-staff'), icon: UsersRound, roles: managementRoles, submenu: [
+        ['All Staff', 'all-staff', Users], ['Headcount', 'headcount', UsersRound], ['Capacity', 'capacity', Gauge], ['Utilisation', 'utilisation', Activity], ['Timeliness', 'timeliness', Clock3], ['Performance & Quality', 'performance-quality', Target], ['Staff Contribution', 'staff-contribution', HandCoins], ['Staff Cost', 'staff-cost', Coins], ['Remuneration', 'remuneration', Banknote], ['Training & Development', 'training-development', UserCheck], ['Recruitment & Retention', 'recruitment-retention', UserRoundSearch],
+      ].map(([name, view, icon]) => managementItem(name as string, managementView('people', view as string), icon as React.ComponentType<any>)),
+    },
+    {
+      name: 'Clients & Business Development', href: managementView('clients-business-development', 'portfolio'), icon: Users, roles: managementRoles, submenu: [
+        {
+          name: 'Clients', href: managementView('clients-business-development', 'portfolio'), icon: Users, submenu: ['Client Portfolio', 'Client Financials', 'Client Profitability', 'Client Relationship', 'Client Risk', 'Client Experience']
+            .map((name, index) => managementItem(name, managementView('clients-business-development', `client-${index}`), index === 2 ? ChartNoAxesCombined : index === 4 ? ShieldAlert : Users)),
+        },
+        {
+          name: 'Business Development', href: managementView('clients-business-development', 'prospect-intake'), icon: Network, submenu: ['Prospect & Intake', 'Pipeline', 'Opportunities', 'Proposals & Quotations', 'Conversion', 'Lost Opportunities', 'Referral Sources', 'Revenue Forecast']
+            .map((name, index) => managementItem(name, managementView('clients-business-development', `business-${index}`), index === 1 || index === 7 ? ChartNoAxesCombined : index === 5 ? TrendingDown : Network)),
+        },
+        {
+          name: 'Client Experience', href: managementView('clients-business-development', 'lost-prospect-feedback'), icon: UserCheck, submenu: ['Lost Prospect Feedback', 'Mid-Matter Feedback', 'Matter Completion Feedback', 'Client Satisfaction', 'Complaints', 'Red Flags', 'Follow-Up Actions', 'Client Experience Analytics']
+            .map((name, index) => managementItem(name, managementView('clients-business-development', `experience-${index}`), index === 4 || index === 5 ? ShieldAlert : index === 3 ? Target : UserCheck)),
+        },
+      ],
+    },
+    {
+      name: 'Risk & Compliance', href: managementView('risk-compliance', 'risk-overview'), icon: ShieldAlert, roles: managementRoles, submenu: ['Risk Overview', 'Matter Risk', 'Financial Risk', 'Operational Risk', 'Client Issues', 'Complaints', 'Conflicts', 'Red Flags', 'Management Alerts', 'Critical Matters', 'Litigation Deadlines', 'Regulatory Deadlines', 'Compliance', 'Complaints', 'Conflicts', 'Firm Risk']
+        .map((name, index) => managementItem(name, `${managementView('risk-compliance', name.toLowerCase().replace(/ /g, '-'))}&item=${index}`, index === 12 ? ClipboardCheck : index === 10 || index === 11 ? FileClock : ShieldAlert)),
+    },
+    {
+      name: 'Reports & Analytics', href: managementView('reports-analytics', 'reporting'), icon: BarChart3, roles: managementRoles, submenu: [
+        {
+          name: 'Reports', href: managementView('reports-analytics', 'weekly-transaction-reports'), icon: FileBarChart, submenu: ['Weekly Transaction Reports', 'Monthly Litigation Reports', 'Significant Updates', 'Reporting Compliance', 'Reporting Triggers']
+            .map((name, index) => managementItem(name, managementView('reports-analytics', `report-${index}`), index === 3 ? ClipboardCheck : index === 4 ? Activity : FileBarChart)),
+        },
+        { name: 'Firm Trends', href: managementView('reports-analytics', 'firm-trends'), icon: TrendingUp, submenu: ['Revenue Trend', 'Collections Trend', 'Profitability Trend', 'Matter Volume Trend', 'New Client Trend', 'Staff Productivity Trend'].map((name, index) => managementItem(name, managementView('reports-analytics', `firm-trend-${index}`), index === 1 ? Banknote : index === 2 ? ChartNoAxesCombined : TrendingUp)) },
+        { name: 'Period Comparison', href: managementView('reports-analytics', 'period-comparison'), icon: Activity, submenu: ['Current vs Previous Period', 'Month-on-Month', 'Quarter-on-Quarter', 'Year-on-Year', 'Budget / Target vs Actual'].map((name, index) => managementItem(name, managementView('reports-analytics', `period-${index}`), index === 4 ? Target : Activity)) },
+        { name: 'Historical Analysis', href: managementView('reports-analytics', 'historical-analysis'), icon: FileClock, submenu: ['Revenue History', 'Collections History', 'Profit History', 'Matter History', 'Client Growth History', 'Staff Performance History'].map((name, index) => managementItem(name, managementView('reports-analytics', `history-${index}`), FileClock)) },
+        { name: 'Matter & Practice Analytics', href: managementView('reports-analytics', 'matter-practice'), icon: Briefcase, submenu: ['Matter Growth / Decline', 'Practice Area Growth', 'Practice Area Revenue Trend', 'Matter Success / Closure Trends', 'Matter Cycle-Time Trends'].map((name, index) => managementItem(name, managementView('reports-analytics', `matter-${index}`), index === 2 ? ChartNoAxesCombined : Briefcase)) },
+        { name: 'Client & Business Development Analytics', href: managementView('reports-analytics', 'client-business-development'), icon: Network, submenu: ['Client Growth & Retention', 'New vs Existing Client Revenue', 'Client Revenue Trends', 'Referral / Source Performance', 'Prospect Pipeline', 'Lost Opportunity Analysis', 'Conversion Trends'].map((name, index) => managementItem(name, managementView('reports-analytics', `client-${index}`), index === 4 ? ChartNoAxesCombined : Network)) },
+        { name: 'Client Experience Analytics', href: managementView('reports-analytics', 'client-experience'), icon: UserCheck, submenu: ['Client Satisfaction Trends', 'Repeat Instruction Rate', 'Recommendation Rate', 'Complaint Trends', 'Red Flag Trends', 'Feedback Response Rate'].map((name, index) => managementItem(name, managementView('reports-analytics', `experience-${index}`), index > 2 ? ShieldAlert : UserCheck)) },
+        { name: 'People & Productivity Analytics', href: managementView('reports-analytics', 'people-productivity'), icon: Activity, submenu: ['Productivity Trends', 'Workload Trends', 'Timeliness Trends', 'Revenue Contribution Trends', 'Performance vs Target'].map((name, index) => managementItem(name, managementView('reports-analytics', `people-${index}`), index === 4 ? Target : Activity)) },
+        { name: 'Operational & Reporting Analytics', href: managementView('reports-analytics', 'operational-reporting'), icon: ClipboardCheck, submenu: ['Task Completion', 'Deadline Compliance', 'Matter Timeliness', 'Reporting Compliance', 'Significant Update Compliance'].map((name, index) => managementItem(name, managementView('reports-analytics', `operations-${index}`), ClipboardCheck)) },
+        { name: 'Forecast & Projection', href: managementView('reports-analytics', 'forecast'), icon: ChartNoAxesCombined, submenu: ['Revenue Forecast', 'Collection Forecast', 'Matter Pipeline Forecast', 'Profit Forecast'].map((name, index) => managementItem(name, managementView('reports-analytics', `forecast-${index}`), ChartNoAxesCombined)) },
+        { name: 'Custom Analysis', href: managementView('reports-analytics', 'custom-analysis'), icon: FileSearch, submenu: ['Build Report', 'Compare Dimensions', 'Filter & Segment', 'Save Report', 'Export'].map((name, index) => managementItem(name, managementView('reports-analytics', `custom-${index}`), index === 4 ? FileBarChart : FileSearch)) },
+      ],
+    },
+  ];
+
   const adminNavigation: NavItem[] = [
     { name: 'Users', href: '/admin/users', icon: Users, roles: ['managing_director', 'executive_assistant'] },
     { name: 'Petty Cash', href: '/petty-cash', icon: Wallet, roles: ['managing_director', 'executive_assistant'] },
@@ -115,10 +284,69 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
   ];
 
   const isPathActive = (href: string, exact = false) => {
+    const [path, query] = href.split('?');
     if (href === '/') return location.pathname === '/';
-    if (exact) return location.pathname === href || location.pathname === href + '/';
-    return location.pathname === href || location.pathname.startsWith(href + '/');
+    if (query) return location.pathname === path && location.search === `?${query}`;
+    if (exact) return location.pathname === path || location.pathname === path + '/';
+    return location.pathname === path || location.pathname.startsWith(path + '/');
   };
+
+  const isManagementItemActive = (item: NavItem): boolean =>
+    isPathActive(item.href) || item.submenu?.some(isManagementItemActive) === true;
+
+  const getActiveManagementParents = (items: NavItem[], parents: string[] = []): string[] =>
+    items.reduce((activeParents, item) => {
+      if (item.submenu?.some(isManagementItemActive)) {
+        activeParents.push(item.href);
+        getActiveManagementParents(item.submenu, activeParents);
+      }
+      return activeParents;
+    }, parents);
+
+  const renderManagementItem = (item: NavItem, depth = 0): React.ReactNode => {
+    const Icon = item.icon;
+    const hasSubmenu = Boolean(item.submenu?.length);
+    const isExpanded = expandedManagementMenus.includes(item.href);
+    const isActive = isManagementItemActive(item);
+
+    if (hasSubmenu) {
+      return (
+        <div key={`${item.name}-${item.href}`}>
+          <button
+            onClick={() => setExpandedManagementMenus(current => isExpanded
+              ? current.filter(href => href !== item.href)
+              : [...current, item.href])}
+            className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded transition-colors ${isActive || isExpanded ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'}`}
+          >
+            <span className="flex items-center"><Icon className="w-5 h-5 mr-3" />{item.name}</span>
+            <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+          </button>
+          {isExpanded && (
+            <div className={depth === 0 ? 'mt-2 ml-3 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm p-2' : 'ml-3 mt-1'}>
+              <div className="space-y-1">{item.submenu!.map(child => renderManagementItem(child, depth + 1))}</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <Link
+        key={`${item.name}-${item.href}`}
+        to={item.href}
+        className={`flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors ${isActive ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'}`}
+        onClick={() => setSidebarOpen(false)}
+      >
+        <Icon className="w-4 h-4 text-gray-400" />
+        <span className="truncate">{item.name}</span>
+      </Link>
+    );
+  };
+
+  useEffect(() => {
+    const activeParents = getActiveManagementParents(managementNavigation);
+    if (activeParents.length) setExpandedManagementMenus(activeParents);
+  }, [location.pathname, location.search]);
 
   const hasAccess = (item: { roles?: string[] }) => !item.roles || item.roles.includes(user.role);
   const adminItems = adminNavigation.filter(hasAccess);
@@ -207,11 +435,12 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
           {/* Navigation */}
           <nav className="app-shell-nav flex-1 px-3 py-4 overflow-y-auto">
             <div className="space-y-1">
-              {navigation.filter(hasAccess).map((item) => {
+              {navigation.filter(item => (!managementRoles.includes(user.role) || item.name === 'Dashboard') && hasAccess(item)).map((item) => {
                 const Icon = item.icon;
-                const hasSubmenu = item.submenu && item.submenu.length > 0;
+                const submenu = item.submenu ?? [];
+                const hasSubmenu = submenu.length > 0;
                 const isExpanded = expandedMenu === item.name;
-                const isSubmenuActive = hasSubmenu && item.submenu.some(sub => isPathActive(sub.href, !!sub.exact));
+                const isSubmenuActive = hasSubmenu && submenu.some(sub => isPathActive(sub.href, !!sub.exact));
 
                 if (hasSubmenu) {
                   return (
@@ -235,7 +464,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                       {isExpanded && (
                         <div className="mt-2 ml-3">
                           <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm p-2">
-                            {item.submenu.map((sub: any) => {
+                            {submenu.map((sub: any) => {
                               const SubIcon = sub.icon || Briefcase;
                               const subActive = isPathActive(sub.href, !!sub.exact);
                               return (
@@ -282,6 +511,13 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                 );
               })}
             </div>
+
+            {managementRoles.includes(user.role) && (
+              <div className="mt-8">
+                <div className="px-3 mb-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Management</div>
+                <div className="space-y-1">{managementNavigation.map(item => renderManagementItem(item))}</div>
+              </div>
+            )}
 
             {canShowQuickActions && (
               <div className="app-quick-actions">

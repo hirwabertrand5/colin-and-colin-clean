@@ -143,6 +143,10 @@ function App() {
                     }
                   />
 
+                  {isManagementDashboardRole && (
+                    <Route path="/management/*" element={<ManagingPartnerDashboard />} />
+                  )}
+
                   {/* Cases/Matters */}
                   <Route path="/cases" element={<CaseList userRole={user.role} mode="active" />} />
                   <Route path="/matters" element={<CaseList userRole={user.role} mode="active" />} />
