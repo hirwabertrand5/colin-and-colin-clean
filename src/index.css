@@ -1971,3 +1971,39 @@ html {
   inherits: false;
   initial-value: 0 0 #0000;
 }
+
+.overflow-x-auto > table,
+.overflow-x-auto > * > table {
+  max-width: 100%;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.overflow-x-auto > table th,
+.overflow-x-auto > table td,
+.overflow-x-auto > * > table th,
+.overflow-x-auto > * > table td {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mb-5.flex.flex-col.gap-3 + .overflow-hidden,
+.mb-6.flex.flex-col.gap-3 + .overflow-hidden {
+  margin-top: 0.5rem;
+}
+
+/* Keep dense management cards and filters from touching at narrow widths. */
+.mb-6.grid.gap-x-4.gap-y-6,
+.mb-5.grid.gap-x-4.gap-y-6 {
+  column-gap: 1.5rem;
+  row-gap: 2rem;
+  margin-bottom: 2rem;
+  padding-inline: 0.25rem;
+}
+
+.mb-5.flex.flex-col.gap-3 {
+  margin-top: 0.5rem;
+  margin-bottom: 1.5rem;
+  padding-inline: 0.25rem;
+}

@@ -31,3 +31,14 @@ export const resendClientExperienceRequest = async (requestId: string) => {
   });
   return response.data;
 };
+
+const getClientExperienceList = async (path: string) => {
+  const response = await axios.get(`${API_BASE_URL}/client-experience/${path}`, { headers: getAuthHeaders() });
+  const data = response.data;
+  return Array.isArray(data) ? data : data?.items || data?.requests || data?.responses || data?.complaints || data?.redFlags || [];
+};
+
+export const listClientExperienceRequests = () => getClientExperienceList('requests');
+export const listClientExperienceResponses = () => getClientExperienceList('responses');
+export const listClientExperienceComplaints = () => getClientExperienceList('complaints');
+export const listClientExperienceRedFlags = () => getClientExperienceList('redflags');

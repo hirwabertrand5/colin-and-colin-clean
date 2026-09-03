@@ -40,6 +40,10 @@ function Kpi({ label, value, icon: Icon }: { label: string; value: string; icon:
   return <div className="rounded-lg border border-gray-200 bg-white p-4"><div className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-gray-500"><Icon size={16} />{label}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div></div>;
 }
 
+function LoadingSkeleton() {
+  return <div className="space-y-6"><div className="h-8 w-52 animate-pulse rounded bg-gray-200" /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-24 animate-pulse rounded-lg border border-gray-200 bg-white" />)}</div><div className="overflow-hidden rounded-lg border border-gray-200 bg-white p-4"><div className="space-y-3">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="flex gap-3"><div className="h-9 w-10 animate-pulse rounded bg-gray-200" /><div className="h-9 flex-1 animate-pulse rounded bg-gray-200" /><div className="hidden h-9 w-36 animate-pulse rounded bg-gray-200 md:block" /></div>)}</div></div></div>;
+}
+
 function Pagination({ page, totalPages, total, onChange }: { page: number; totalPages: number; total: number; onChange: (page: number) => void }) {
   return <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-4 py-4 text-sm text-gray-600"><span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}</span><div className="flex gap-1"><button type="button" disabled={page === 1} onClick={() => onChange(Math.max(1, page - 1))} className="rounded border border-gray-300 px-3 py-1.5 disabled:opacity-40">Previous</button>{Array.from({ length: totalPages }, (_, index) => index + 1).map((number) => <button type="button" key={number} onClick={() => onChange(number)} className={`rounded border px-3 py-1.5 ${number === page ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-300 bg-white'}`}>{number}</button>)}<button type="button" disabled={page === totalPages} onClick={() => onChange(Math.min(totalPages, page + 1))} className="rounded border border-gray-300 px-3 py-1.5 disabled:opacity-40">Next</button></div></div>;
 }
@@ -114,7 +118,7 @@ export default function DeadlineManagementPage({ view }: { view: DeadlineView })
     return { due, met, missed, criticalUpcoming };
   }, [events]);
 
-  if (loading) return <div className="py-12 text-center text-gray-500">Loading deadlines...</div>;
+  if (loading) return <LoadingSkeleton />;
 
   return <div><div className="mb-6 flex items-start justify-between gap-4"><div><Link to="/calendar" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Calendar</Link><h1 className="text-2xl font-semibold text-gray-900">{detail.title}</h1><p className="mt-1 text-gray-600">{detail.description}</p></div><div className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-xs text-gray-500 shadow-sm">Source: Calendar Deadline events and workflow deadlines</div></div>
     {error && <div className="mb-4 flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={17} />{error}</div>}

@@ -253,7 +253,7 @@ export default function MatterFinancialStatusPage({ view }: { view: MatterFinanc
         {error && <div className="mb-6 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"><AlertCircle size={18} />{error}</div>}
         {view === 'net-profit' && <div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"><AlertCircle size={18} className="mt-0.5 shrink-0" />The current backend calculates net profit at firm level only. No matter-level overhead or other applicable-cost allocation is available, so this page does not invent a net-profit value.</div>}
 
-        {loading ? <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-sm text-gray-500">Loading matter financial data...</div> : (
+        {loading ? <LoadingSkeleton /> : (
           <>
             <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Kpi icon={BriefcaseBusiness} label="Matters" value={numberValue(rows.length)} />
@@ -271,4 +271,8 @@ export default function MatterFinancialStatusPage({ view }: { view: MatterFinanc
       </div>
     </div>
   );
+}
+
+function LoadingSkeleton() {
+  return <div className="space-y-6"><div className="h-8 w-56 animate-pulse rounded bg-gray-200" /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-24 animate-pulse rounded-xl border border-gray-200 bg-white" />)}</div><div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-4"><div className="space-y-3">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="flex gap-3"><div className="h-9 w-10 animate-pulse rounded bg-gray-200" /><div className="h-9 flex-1 animate-pulse rounded bg-gray-200" /><div className="hidden h-9 w-40 animate-pulse rounded bg-gray-200 md:block" /></div>)}</div></div></div>;
 }
