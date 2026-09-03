@@ -31,6 +31,7 @@
   font-size: 13px !important;
   font-weight: 750 !important;
   min-height: 44px;
+  text-align: left !important;
 }
 
 .app-shell-nav a:hover,
@@ -77,9 +78,14 @@
   display: flex;
   font-size: 12px;
   font-weight: 850;
-  justify-content: space-between;
+  gap: 8px;
+  justify-content: flex-start;
   margin-bottom: 8px;
   padding: 0 6px;
+}
+
+.app-shell-nav .text-xs.font-medium.uppercase.tracking-wider {
+  text-align: left;
 }
 
 .app-quick-actions-title svg {
