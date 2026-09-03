@@ -22,6 +22,7 @@ import DeadlineManagementPage from './components/calendar/DeadlineManagementPage
 import NotificationCenter from './components/notifications/NotificationCenter';
 import BillingDashboard from './components/billing/BillingDashboard';
 import InvoiceManagement from './components/billing/InvoiceManagement';
+import BillingFinancePage from './components/billing/BillingFinancePage';
 import PerformanceDashboard from './components/reports/PerformanceDashboard';
 import FirmReports from './components/reports/FirmReports';
 import MatterFinancialStatusPage from './components/reports/MatterFinancialStatusPage';
@@ -273,6 +274,58 @@ function App() {
                   {/* Billing */}
                   <Route path="/billing" element={<BillingDashboard userRole={user.role} />} />
                   <Route path="/billing/invoices" element={<InvoiceManagement userRole={user.role} />} />
+                  {isManagementDashboardRole && (
+                    <>
+                      <Route path="/billing/finance/financial-dashboard/contract-value" element={<BillingFinancePage view="contract-value" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/total-billed" element={<BillingFinancePage view="total-billed" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/total-collected" element={<BillingFinancePage view="total-collected" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/outstanding" element={<BillingFinancePage view="outstanding" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/direct-matter-costs" element={<BillingFinancePage view="direct-matter-costs" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/gross-profit" element={<BillingFinancePage view="gross-profit" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/gross-profit-margin" element={<BillingFinancePage view="gross-profit-margin" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/operating-expenses" element={<BillingFinancePage view="operating-expenses" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/net-profit" element={<BillingFinancePage view="net-profit" userRole={user.role} />} />
+                      <Route path="/billing/finance/financial-dashboard/net-profit-margin" element={<BillingFinancePage view="net-profit-margin" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/all-invoices" element={<BillingFinancePage view="all-invoices" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/draft" element={<BillingFinancePage view="draft" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/issued" element={<BillingFinancePage view="issued" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/paid" element={<BillingFinancePage view="paid" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/pending" element={<BillingFinancePage view="pending" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/overdue" element={<BillingFinancePage view="overdue" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/invoice-count" element={<BillingFinancePage view="invoice-count" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/invoice-total-billed" element={<BillingFinancePage view="invoice-total-billed" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/recent-invoices" element={<BillingFinancePage view="recent-invoices" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing/billing-triggers" element={<BillingFinancePage view="billing-triggers" userRole={user.role} />} />
+                      <Route path="/billing/finance/collections/collections-outstanding" element={<BillingFinancePage view="collections-outstanding" userRole={user.role} />} />
+                      <Route path="/billing/finance/collections/collections-overdue" element={<BillingFinancePage view="collections-overdue" userRole={user.role} />} />
+                      <Route path="/billing/finance/collections/collections-collection-rate" element={<BillingFinancePage view="collection-rate" userRole={user.role} />} />
+                      <Route path="/billing/finance/collections/collections-debtor-ageing" element={<BillingFinancePage view="debtor-ageing" userRole={user.role} />} />
+                      <Route path="/billing/finance/collections/collections-payment-follow-up" element={<BillingFinancePage view="payment-follow-up" userRole={user.role} />} />
+                      <Route path="/billing/finance/collections/collections-collection-triggers" element={<BillingFinancePage view="collection-triggers" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability/firm-profitability" element={<BillingFinancePage view="firm-profitability" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability/department-profitability" element={<BillingFinancePage view="department-profitability" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability/matter-profitability" element={<BillingFinancePage view="matter-profitability" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability/client-profitability" element={<BillingFinancePage view="client-profitability" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability/staff-profitability" element={<BillingFinancePage view="staff-profitability" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability/net-profit-margin" element={<BillingFinancePage view="net-profit-margin" userRole={user.role} />} />
+                      <Route path="/billing/finance/cash-flow/cash-position" element={<BillingFinancePage view="cash-position" userRole={user.role} />} />
+                      <Route path="/billing/finance/cash-flow/cash-inflows" element={<BillingFinancePage view="cash-inflows" userRole={user.role} />} />
+                      <Route path="/billing/finance/cash-flow/cash-outflows" element={<BillingFinancePage view="cash-outflows" userRole={user.role} />} />
+                      <Route path="/billing/finance/cash-flow/cash-forecast" element={<BillingFinancePage view="cash-forecast" userRole={user.role} />} />
+                      <Route path="/billing/finance/expenses/expenses" element={<BillingFinancePage view="expenses" userRole={user.role} />} />
+                      <Route path="/billing/finance/expenses/expense-direct-costs" element={<BillingFinancePage view="expense-direct-costs" userRole={user.role} />} />
+                      <Route path="/billing/finance/expenses/expense-operating" element={<BillingFinancePage view="expense-operating" userRole={user.role} />} />
+                      <Route path="/billing/finance/expenses/procurement" element={<BillingFinancePage view="procurement" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration/fee-earned" element={<BillingFinancePage view="fee-earned" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration/accrued" element={<BillingFinancePage view="accrued" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration/payable" element={<BillingFinancePage view="payable" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration/deferred" element={<BillingFinancePage view="deferred" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration/remuneration-paid" element={<BillingFinancePage view="remuneration-paid" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration/by-role" element={<BillingFinancePage view="by-role" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration/by-staff" element={<BillingFinancePage view="by-staff" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration/by-matter" element={<BillingFinancePage view="by-matter" userRole={user.role} />} />
+                    </>
+                  )}
 
                   {/* Petty Cash */}
                   {(isMD || isExec) && <Route path="/petty-cash" element={<PettyCashDashboard />} />}

@@ -80,6 +80,7 @@ const managementRoles = ['managing_director', 'managing_partner', 'executive_man
 
 const managementView = (section: string, view: string) => `/management/${section}?view=${encodeURIComponent(view)}`;
 const matterFinancialView = (view: string) => `/management/matters/${view}`;
+const billingFinanceView = (section: string, view: string) => `/billing/finance/${section}/${view}`;
 
 const managementItem = (name: string, href: string, icon: React.ComponentType<any>): NavItem => ({ name, href, icon });
 
@@ -194,37 +195,37 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
         {
           name: 'Financial Dashboard', href: '/billing', icon: Landmark, submenu: [
             ['Total Contract Value', 'contract-value', HandCoins], ['Total Billed', 'total-billed', ReceiptText], ['Total Collected', 'total-collected', Banknote], ['Outstanding', 'outstanding', Wallet], ['Direct Matter Costs', 'direct-matter-costs', Coins], ['Gross Profit', 'gross-profit', TrendingUp], ['Gross Profit Margin', 'gross-profit-margin', Gauge], ['Firm Operating Expenses', 'operating-expenses', Calculator], ['Net Profit', 'net-profit', ChartNoAxesCombined], ['Net Profit Margin', 'net-profit-margin', Gauge],
-          ].map(([name, view, icon]) => managementItem(name as string, managementView('billing', view as string), icon as React.ComponentType<any>)),
+          ].map(([name, view, icon]) => managementItem(name as string, billingFinanceView('financial-dashboard', view as string), icon as React.ComponentType<any>)),
         },
         {
           name: 'Billing & Invoicing', href: '/billing/invoices', icon: ReceiptText, submenu: [
-            ['All Invoices', 'all', FileBarChart], ['Draft', 'draft', FileClock], ['Issued', 'issued', ReceiptText], ['Paid', 'paid', Banknote], ['Pending', 'pending', Clock3], ['Overdue', 'overdue', ShieldAlert], ['No. of Invoices', 'count', Calculator], ['Total Billed', 'total-billed', HandCoins], ['Recent Invoices', 'recent', FileSearch], ['Billing Triggers', 'triggers', Activity],
-          ].map(([name, view, icon]) => managementItem(name as string, `/billing/invoices?view=${view}`, icon as React.ComponentType<any>)),
+            ['All Invoices', 'all-invoices', FileBarChart], ['Draft', 'draft', FileClock], ['Issued', 'issued', ReceiptText], ['Paid', 'paid', Banknote], ['Pending', 'pending', Clock3], ['Overdue', 'overdue', ShieldAlert], ['No. of Invoices', 'invoice-count', Calculator], ['Total Billed', 'invoice-total-billed', HandCoins], ['Recent Invoices', 'recent-invoices', FileSearch], ['Billing Triggers', 'billing-triggers', Activity],
+          ].map(([name, view, icon]) => managementItem(name as string, billingFinanceView('invoicing', view as string), icon as React.ComponentType<any>)),
         },
         {
           name: 'Collections & Receivables', href: managementView('billing', 'collections'), icon: HandCoins, submenu: [
             ['Outstanding', 'outstanding'], ['Overdue', 'overdue'], ['Collection Rate', 'collection-rate'], ['Debtor Ageing', 'debtor-ageing'], ['Payment Follow-Up', 'payment-follow-up'], ['Collection Triggers', 'collection-triggers'],
-          ].map(([name, view]) => managementItem(name as string, managementView('billing', view as string), name === 'Collection Rate' ? Gauge : HandCoins)),
+          ].map(([name, view]) => managementItem(name as string, billingFinanceView('collections', `collections-${view as string}`), name === 'Collection Rate' ? Gauge : HandCoins)),
         },
         {
           name: 'Profitability', href: managementView('profitability', 'firm'), icon: ChartNoAxesCombined, submenu: [
             ['Firm Profitability', 'firm'], ['Department Profitability', 'department'], ['Matter Profitability', 'matter'], ['Client Profitability', 'client'], ['Staff Profitability', 'staff'], ['Net Profit Margin', 'net-profit-margin'],
-          ].map(([name, view]) => managementItem(name as string, managementView('profitability', view as string), name === 'Net Profit Margin' ? Gauge : ChartNoAxesCombined)),
+          ].map(([name, view]) => managementItem(name as string, billingFinanceView('profitability', `${view as string === 'firm' ? 'firm-profitability' : view as string === 'department' ? 'department-profitability' : view as string === 'matter' ? 'matter-profitability' : view as string === 'client' ? 'client-profitability' : view as string === 'staff' ? 'staff-profitability' : 'net-profit-margin'}`), name === 'Net Profit Margin' ? Gauge : ChartNoAxesCombined)),
         },
         {
           name: 'Cash & Cash Flow', href: managementView('cash-flow', 'position'), icon: Wallet, submenu: [
             ['Cash Position', 'position'], ['Cash Inflows', 'inflows'], ['Cash Outflows', 'outflows'], ['Cash Forecast', 'forecast'],
-          ].map(([name, view]) => managementItem(name as string, managementView('cash-flow', view as string), name === 'Cash Position' ? Wallet : name === 'Cash Inflows' ? Banknote : name === 'Cash Outflows' ? Coins : ChartNoAxesCombined)),
+          ].map(([name, view]) => managementItem(name as string, billingFinanceView('cash-flow', `cash-${view as string}`), name === 'Cash Position' ? Wallet : name === 'Cash Inflows' ? Banknote : name === 'Cash Outflows' ? Coins : ChartNoAxesCombined)),
         },
         {
           name: 'Expenses & Procurement', href: managementView('expenses', 'expenses'), icon: ShoppingCart, submenu: [
             ['Expenses', 'expenses'], ['Direct Matter Costs', 'direct-matter-costs'], ['Operating Expenses', 'operating-expenses'], ['Procurement', 'procurement'],
-          ].map(([name, view]) => managementItem(name as string, managementView('expenses', view as string), name === 'Procurement' ? ShoppingCart : Coins)),
+          ].map(([name, view]) => managementItem(name as string, billingFinanceView('expenses', view as string === 'direct-matter-costs' ? 'expense-direct-costs' : view as string === 'operating-expenses' ? 'expense-operating' : view as string), name === 'Procurement' ? ShoppingCart : Coins)),
         },
         {
           name: 'Firm Remuneration', href: managementView('remuneration', 'fee-earned'), icon: Coins, submenu: [
             ['Fee Earned', 'fee-earned'], ['Accrued', 'accrued'], ['Payable', 'payable'], ['Deferred', 'deferred'], ['Paid', 'paid'], ['By Role', 'by-role'], ['By Staff', 'by-staff'], ['By Matter', 'by-matter'],
-          ].map(([name, view]) => managementItem(name as string, managementView('remuneration', view as string), name === 'By Role' ? UsersRound : name === 'By Staff' ? Users : name === 'By Matter' ? Briefcase : Coins)),
+          ].map(([name, view]) => managementItem(name as string, billingFinanceView('remuneration', view as string === 'paid' ? 'remuneration-paid' : view as string), name === 'By Role' ? UsersRound : name === 'By Staff' ? Users : name === 'By Matter' ? Briefcase : Coins)),
         },
       ],
     },
