@@ -316,13 +316,13 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
             onClick={() => setExpandedManagementMenus(current => isExpanded
               ? current.filter(href => href !== item.href)
               : [...current, item.href])}
-            className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded transition-colors ${isActive || isExpanded ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'}`}
+            className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded transition-colors ${isActive || isExpanded ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100' : 'text-slate-100/90 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061a3a]'}`}
           >
             <span className="flex items-center"><Icon className="w-5 h-5 mr-3" />{item.name}</span>
             <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
           </button>
           {isExpanded && (
-            <div className={depth === 0 ? 'mt-2 ml-3 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm p-2' : 'ml-3 mt-1'}>
+            <div className={depth === 0 ? 'mt-2 ml-3 rounded-lg border border-white/10 bg-[#0a1d3e]/80 p-2 shadow-none' : 'ml-3 mt-1'}>
               <div className="space-y-1">{item.submenu!.map(child => renderManagementItem(child, depth + 1))}</div>
             </div>
           )}
@@ -334,10 +334,10 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
       <Link
         key={`${item.name}-${item.href}`}
         to={item.href}
-        className={`flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors ${isActive ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'}`}
+        className={`flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors ${isActive ? 'bg-blue-600 text-white font-medium shadow-sm shadow-blue-950/20' : 'text-slate-100/90 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061a3a]'}`}
         onClick={() => setSidebarOpen(false)}
       >
-        <Icon className="w-4 h-4 text-gray-400" />
+        <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-200'}`} />
         <span className="truncate">{item.name}</span>
       </Link>
     );
@@ -451,7 +451,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                           w-full flex items-center justify-between px-3 py-2 text-sm rounded transition-colors
                           ${isSubmenuActive || isExpanded
                             ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
-                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                            : 'text-slate-100/90 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061a3a]'
                           }
                         `}
                       >
@@ -463,7 +463,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                       </button>
                       {isExpanded && (
                         <div className="mt-2 ml-3">
-                          <div className="rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm p-2">
+                          <div className="rounded-lg border border-white/10 bg-[#0a1d3e]/80 p-2 shadow-none">
                             {submenu.map((sub: any) => {
                               const SubIcon = sub.icon || Briefcase;
                               const subActive = isPathActive(sub.href, !!sub.exact);
@@ -474,13 +474,13 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                                   className={`
                                     flex items-center gap-2 px-3 py-2 text-sm rounded transition-colors
                                     ${subActive
-                                      ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium'
-                                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                                      ? 'bg-blue-600 text-white font-medium shadow-sm shadow-blue-950/20'
+                                      : 'text-slate-100/90 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061a3a]'
                                     }
                                   `}
                                   onClick={() => setSidebarOpen(false)}
                                 >
-                                  <SubIcon className="w-4 h-4 text-gray-400" />
+                                  <SubIcon className={`w-4 h-4 ${subActive ? 'text-white' : 'text-slate-200'}`} />
                                   <span className="truncate">{sub.name}</span>
                                 </Link>
                               );
@@ -500,7 +500,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                       flex items-center px-3 py-2 text-sm rounded transition-colors
                       ${isPathActive(item.href)
                         ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
-                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                        : 'text-slate-100/90 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061a3a]'
                       }
                     `}
                     onClick={() => setSidebarOpen(false)}
@@ -513,10 +513,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
             </div>
 
             {managementRoles.includes(user.role) && (
-              <div className="mt-8">
-                <div className="px-3 mb-2 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Management</div>
-                <div className="space-y-1">{managementNavigation.map(item => renderManagementItem(item))}</div>
-              </div>
+              <div className="space-y-1 mt-1">{managementNavigation.map(item => renderManagementItem(item))}</div>
             )}
 
             {canShowQuickActions && (
@@ -561,7 +558,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                           flex items-center px-3 py-2 text-sm rounded transition-colors
                           ${isPathActive(item.href)
                             ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
-                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100'
+                            : 'text-slate-100/90 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061a3a]'
                           }
                         `}
                         onClick={() => setSidebarOpen(false)}
