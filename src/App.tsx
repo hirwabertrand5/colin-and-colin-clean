@@ -22,6 +22,7 @@ import BillingDashboard from './components/billing/BillingDashboard';
 import InvoiceManagement from './components/billing/InvoiceManagement';
 import PerformanceDashboard from './components/reports/PerformanceDashboard';
 import FirmReports from './components/reports/FirmReports';
+import MatterFinancialStatusPage from './components/reports/MatterFinancialStatusPage';
 import UserManagement from './components/admin/UserManagement';
 import Settings from './components/admin/Settings';
 import PettyCashDashboard from './components/pettyCash/PettyCashDashboard';
@@ -145,6 +146,23 @@ function App() {
 
                   {isManagementDashboardRole && (
                     <Route path="/management/*" element={<ManagingPartnerDashboard />} />
+                  )}
+
+                  {isManagementDashboardRole && (
+                    <>
+                      <Route path="/management/matters/financial-status" element={<MatterFinancialStatusPage view="financial-status" />} />
+                      <Route path="/management/matters/contract-value" element={<MatterFinancialStatusPage view="contract-value" />} />
+                      <Route path="/management/matters/amount-billed" element={<MatterFinancialStatusPage view="amount-billed" />} />
+                      <Route path="/management/matters/amount-collected" element={<MatterFinancialStatusPage view="amount-collected" />} />
+                      <Route path="/management/matters/outstanding-balance" element={<MatterFinancialStatusPage view="outstanding-balance" />} />
+                      <Route path="/management/matters/direct-cost" element={<MatterFinancialStatusPage view="direct-cost" />} />
+                      <Route path="/management/matters/gross-profit" element={<MatterFinancialStatusPage view="gross-profit" />} />
+                      <Route path="/management/matters/net-profit" element={<MatterFinancialStatusPage view="net-profit" />} />
+                      <Route path="/management/matters/gross-profit-margin" element={<MatterFinancialStatusPage view="gross-profit-margin" />} />
+                      <Route path="/management/matters/profitability" element={<MatterFinancialStatusPage view="profitability" />} />
+                      <Route path="/management/matters/direct-cost-workload" element={<MatterFinancialStatusPage view="direct-cost-workload" />} />
+                      <Route path="/management/matters/timeliness" element={<MatterFinancialStatusPage view="timeliness" />} />
+                    </>
                   )}
 
                   {/* Cases/Matters */}

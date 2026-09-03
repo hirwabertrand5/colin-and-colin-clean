@@ -79,6 +79,7 @@ type NavItem = {
 const managementRoles = ['managing_director', 'managing_partner', 'executive_managing_partner'];
 
 const managementView = (section: string, view: string) => `/management/${section}?view=${encodeURIComponent(view)}`;
+const matterFinancialView = (view: string) => `/management/matters/${view}`;
 
 const managementItem = (name: string, href: string, icon: React.ComponentType<any>): NavItem => ({ name, href, icon });
 
@@ -144,20 +145,20 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
         managementItem('Temporarily Closed Matters', '/matters/temporarily-closed', Clock3),
         managementItem('Closed Matters', '/matters/closed', FolderTree),
         managementItem('Independent Tasks', '/matters/independent-tasks', CheckSquare),
-        managementItem('Matter Financial Status', managementView('matters', 'financial-status'), Calculator),
-        managementItem('Contract Value', managementView('matters', 'contract-value'), HandCoins),
-        managementItem('Amount Billed', managementView('matters', 'amount-billed'), ReceiptText),
-        managementItem('Amount Collected', managementView('matters', 'amount-collected'), Banknote),
-        managementItem('Outstanding Matter Balance', managementView('matters', 'outstanding-balance'), Wallet),
-        managementItem('Matter Direct Cost', managementView('matters', 'direct-cost'), Coins),
-        managementItem('Matter Gross Profit', managementView('matters', 'gross-profit'), TrendingUp),
-        managementItem('Matter Net Profit', managementView('matters', 'net-profit'), ChartNoAxesCombined),
-        managementItem('Matter Gross Profit Margin', managementView('matters', 'gross-profit-margin'), Gauge),
-        managementItem('Amount Billed', managementView('matters', 'amount-billed-profitability'), ReceiptText),
-        managementItem('Amount Collected', managementView('matters', 'amount-collected-profitability'), Banknote),
-        managementItem('Matter Profitability', managementView('matters', 'profitability'), ChartNoAxesCombined),
-        managementItem('Matter Direct Cost Workload', managementView('matters', 'direct-cost-workload'), ClipboardList),
-        managementItem('Matter Gross Profit Matter Timeliness', managementView('matters', 'timeliness'), FileClock),
+        managementItem('Matter Financial Status', matterFinancialView('financial-status'), Calculator),
+        managementItem('Contract Value', matterFinancialView('contract-value'), HandCoins),
+        managementItem('Amount Billed', matterFinancialView('amount-billed'), ReceiptText),
+        managementItem('Amount Collected', matterFinancialView('amount-collected'), Banknote),
+        managementItem('Outstanding Matter Balance', matterFinancialView('outstanding-balance'), Wallet),
+        managementItem('Matter Direct Cost', matterFinancialView('direct-cost'), Coins),
+        managementItem('Matter Gross Profit', matterFinancialView('gross-profit'), TrendingUp),
+        managementItem('Matter Net Profit', matterFinancialView('net-profit'), ChartNoAxesCombined),
+        managementItem('Matter Gross Profit Margin', matterFinancialView('gross-profit-margin'), Gauge),
+        managementItem('Amount Billed', matterFinancialView('amount-billed'), ReceiptText),
+        managementItem('Amount Collected', matterFinancialView('amount-collected'), Banknote),
+        managementItem('Matter Profitability', matterFinancialView('profitability'), ChartNoAxesCombined),
+        managementItem('Matter Direct Cost Workload', matterFinancialView('direct-cost-workload'), ClipboardList),
+        managementItem('Matter Gross Profit Matter Timeliness', matterFinancialView('timeliness'), FileClock),
       ],
     },
     {
