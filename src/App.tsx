@@ -18,6 +18,7 @@ import TaskBoard from './components/tasks/TaskBoard';
 import TaskDetail from './components/tasks/TaskDetail';
 import TaskManagementPage from './components/tasks/TaskManagementPage';
 import Calendar from './components/calendar/Calendar';
+import DeadlineManagementPage from './components/calendar/DeadlineManagementPage';
 import NotificationCenter from './components/notifications/NotificationCenter';
 import BillingDashboard from './components/billing/BillingDashboard';
 import InvoiceManagement from './components/billing/InvoiceManagement';
@@ -253,6 +254,18 @@ function App() {
 
                   {/* Calendar */}
                   <Route path="/calendar" element={<Calendar userRole={user.role} />} />
+                  {isManagementDashboardRole && (
+                    <>
+                      <Route path="/deadlines" element={<DeadlineManagementPage view="all" />} />
+                      <Route path="/deadlines/litigation" element={<DeadlineManagementPage view="litigation" />} />
+                      <Route path="/deadlines/transaction" element={<DeadlineManagementPage view="transaction" />} />
+                      <Route path="/deadlines/regulatory" element={<DeadlineManagementPage view="regulatory" />} />
+                      <Route path="/deadlines/internal" element={<DeadlineManagementPage view="internal" />} />
+                      <Route path="/deadlines/upcoming" element={<DeadlineManagementPage view="upcoming" />} />
+                      <Route path="/deadlines/missed" element={<DeadlineManagementPage view="missed" />} />
+                      <Route path="/deadlines/compliance" element={<DeadlineManagementPage view="compliance" />} />
+                    </>
+                  )}
 
                   {/* Notifications */}
                   <Route path="/notifications" element={<NotificationCenter />} />

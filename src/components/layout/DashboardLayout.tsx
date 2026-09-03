@@ -179,14 +179,14 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
     {
       name: 'Calendar & Deadlines', href: '/calendar', icon: CalendarIcon, roles: managementRoles, submenu: [
         managementItem('Calendar', '/calendar', CalendarIcon),
-        managementItem('All Deadlines', '/calendar?view=all-deadlines', FileClock),
-        managementItem('Litigation Deadlines', '/calendar?view=litigation', Scale),
-        managementItem('Transaction Deadlines', '/calendar?view=transaction', Briefcase),
-        managementItem('Regulatory Deadlines', '/calendar?view=regulatory', ShieldAlert),
-        managementItem('Internal Deadlines', '/calendar?view=internal', ClipboardList),
-        managementItem('Upcoming Deadlines', '/calendar?view=upcoming', Clock3),
-        managementItem('Missed Deadlines', '/calendar?view=missed', FileSearch),
-        managementItem('Deadline Compliance', '/calendar?view=compliance', ClipboardCheck),
+        managementItem('All Deadlines', '/deadlines', FileClock),
+        managementItem('Litigation Deadlines', '/deadlines/litigation', Scale),
+        managementItem('Transaction Deadlines', '/deadlines/transaction', Briefcase),
+        managementItem('Regulatory Deadlines', '/deadlines/regulatory', ShieldAlert),
+        managementItem('Internal Deadlines', '/deadlines/internal', ClipboardList),
+        managementItem('Upcoming Deadlines', '/deadlines/upcoming', Clock3),
+        managementItem('Missed Deadlines', '/deadlines/missed', FileSearch),
+        managementItem('Deadline Compliance', '/deadlines/compliance', ClipboardCheck),
       ],
     },
     {
