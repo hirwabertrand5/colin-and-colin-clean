@@ -39,9 +39,10 @@ export const getStaffUsers = async (req: AuthRequest, res: Response) => {
         ? ASSOCIATE_ASSIGNABLE_ROLES
         : STAFF_ASSIGNABLE_ROLES;
 
+    const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true';
     const staff = await User.find(
       {
-        isActive: true,
+        ...(includeInactive ? {} : { isActive: true }),
         role: {
           $in: allowedRoles,
         },

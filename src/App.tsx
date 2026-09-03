@@ -26,6 +26,7 @@ import BillingFinancePage from './components/billing/BillingFinancePage';
 import PerformanceDashboard from './components/reports/PerformanceDashboard';
 import FirmReports from './components/reports/FirmReports';
 import MatterFinancialStatusPage from './components/reports/MatterFinancialStatusPage';
+import PeopleCapacityPage from './components/reports/PeopleCapacityPage';
 import UserManagement from './components/admin/UserManagement';
 import Settings from './components/admin/Settings';
 import PettyCashDashboard from './components/pettyCash/PettyCashDashboard';
@@ -149,6 +150,22 @@ function App() {
 
                   {isManagementDashboardRole && (
                     <Route path="/management/*" element={<ManagingPartnerDashboard />} />
+                  )}
+
+                  {isManagementDashboardRole && (
+                    <>
+                      <Route path="/management/people/all-staff" element={<PeopleCapacityPage view="all-staff" userRole={user.role} />} />
+                      <Route path="/management/people/headcount" element={<PeopleCapacityPage view="headcount" userRole={user.role} />} />
+                      <Route path="/management/people/capacity" element={<PeopleCapacityPage view="capacity" userRole={user.role} />} />
+                      <Route path="/management/people/utilisation" element={<PeopleCapacityPage view="utilisation" userRole={user.role} />} />
+                      <Route path="/management/people/timeliness" element={<PeopleCapacityPage view="timeliness" userRole={user.role} />} />
+                      <Route path="/management/people/performance-quality" element={<PeopleCapacityPage view="performance-quality" userRole={user.role} />} />
+                      <Route path="/management/people/staff-contribution" element={<PeopleCapacityPage view="staff-contribution" userRole={user.role} />} />
+                      <Route path="/management/people/staff-cost" element={<PeopleCapacityPage view="staff-cost" userRole={user.role} />} />
+                      <Route path="/management/people/remuneration" element={<PeopleCapacityPage view="remuneration" userRole={user.role} />} />
+                      <Route path="/management/people/training-development" element={<PeopleCapacityPage view="training-development" userRole={user.role} />} />
+                      <Route path="/management/people/recruitment-retention" element={<PeopleCapacityPage view="recruitment-retention" userRole={user.role} />} />
+                    </>
                   )}
 
                   {isManagementDashboardRole && (

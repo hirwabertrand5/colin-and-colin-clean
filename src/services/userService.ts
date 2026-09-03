@@ -36,8 +36,9 @@ export const getAllUsers = async (): Promise<User[]> => {
   return res.json();
 };
 
-export const getStaffUsers = async (): Promise<User[]> => {
-  const res = await fetch(`${API_URL}/users/staff`, {
+export const getStaffUsers = async (options?: { includeInactive?: boolean }): Promise<User[]> => {
+  const query = options?.includeInactive ? '?includeInactive=true' : '';
+  const res = await fetch(`${API_URL}/users/staff${query}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   handleAuthError(res);

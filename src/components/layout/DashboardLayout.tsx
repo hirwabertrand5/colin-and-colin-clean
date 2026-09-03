@@ -81,6 +81,7 @@ const managementRoles = ['managing_director', 'managing_partner', 'executive_man
 const managementView = (section: string, view: string) => `/management/${section}?view=${encodeURIComponent(view)}`;
 const matterFinancialView = (view: string) => `/management/matters/${view}`;
 const billingFinanceView = (section: string, view: string) => `/billing/finance/${section}/${view}`;
+const peopleCapacityView = (view: string) => `/management/people/${view}`;
 
 const managementItem = (name: string, href: string, icon: React.ComponentType<any>): NavItem => ({ name, href, icon });
 
@@ -230,9 +231,9 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
       ],
     },
     {
-      name: 'People & Capacity', href: managementView('people', 'all-staff'), icon: UsersRound, roles: managementRoles, submenu: [
+      name: 'People & Capacity', href: peopleCapacityView('all-staff'), icon: UsersRound, roles: managementRoles, submenu: [
         ['All Staff', 'all-staff', Users], ['Headcount', 'headcount', UsersRound], ['Capacity', 'capacity', Gauge], ['Utilisation', 'utilisation', Activity], ['Timeliness', 'timeliness', Clock3], ['Performance & Quality', 'performance-quality', Target], ['Staff Contribution', 'staff-contribution', HandCoins], ['Staff Cost', 'staff-cost', Coins], ['Remuneration', 'remuneration', Banknote], ['Training & Development', 'training-development', UserCheck], ['Recruitment & Retention', 'recruitment-retention', UserRoundSearch],
-      ].map(([name, view, icon]) => managementItem(name as string, managementView('people', view as string), icon as React.ComponentType<any>)),
+      ].map(([name, view, icon]) => managementItem(name as string, peopleCapacityView(view as string), icon as React.ComponentType<any>)),
     },
     {
       name: 'Clients & Business Development', href: managementView('clients-business-development', 'portfolio'), icon: Users, roles: managementRoles, submenu: [
