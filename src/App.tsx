@@ -16,6 +16,7 @@ import IndependentTaskDetail from './components/independentTasks/IndependentTask
 import PublicFeedbackForm from './components/public/PublicFeedbackForm';
 import TaskBoard from './components/tasks/TaskBoard';
 import TaskDetail from './components/tasks/TaskDetail';
+import TaskManagementPage from './components/tasks/TaskManagementPage';
 import Calendar from './components/calendar/Calendar';
 import NotificationCenter from './components/notifications/NotificationCenter';
 import BillingDashboard from './components/billing/BillingDashboard';
@@ -233,6 +234,21 @@ function App() {
 
                   {/* Tasks */}
                   <Route path="/tasks" element={<TaskBoard userRole={user.role} />} />
+                  {isManagementDashboardRole && (
+                    <>
+                      <Route path="/tasks/all" element={<TaskManagementPage view="all" />} />
+                      <Route path="/tasks/my" element={<TaskManagementPage view="my" />} />
+                      <Route path="/tasks/unassigned" element={<TaskManagementPage view="unassigned" />} />
+                      <Route path="/tasks/due-today" element={<TaskManagementPage view="due-today" />} />
+                      <Route path="/tasks/due-this-week" element={<TaskManagementPage view="due-this-week" />} />
+                      <Route path="/tasks/overdue" element={<TaskManagementPage view="overdue" />} />
+                      <Route path="/tasks/awaiting-review" element={<TaskManagementPage view="awaiting-review" />} />
+                      <Route path="/tasks/awaiting-external-action" element={<TaskManagementPage view="awaiting-external-action" />} />
+                      <Route path="/tasks/completed" element={<TaskManagementPage view="completed" />} />
+                      <Route path="/tasks/closed" element={<TaskManagementPage view="closed" />} />
+                      <Route path="/tasks/performance" element={<TaskManagementPage view="performance" />} />
+                    </>
+                  )}
                   <Route path="/tasks/:id" element={<TaskDetail userRole={user.role} />} />
 
                   {/* Calendar */}
