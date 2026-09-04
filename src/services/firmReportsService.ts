@@ -1,7 +1,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
 
-export type FirmReportRange = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom';
+export type FirmReportRange = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'ytd' | 'custom';
 export type FirmReportDateBasis = 'invoiceDate' | 'paymentDate' | 'taskDate';
 
 export type FirmReportResponse = {

@@ -1,0 +1,77 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { AlertCircle, ArrowLeft, ShieldAlert } from 'lucide-react';
+import { UserRole } from '../../App';
+import { CaseData, getAllCases } from '../../services/caseService';
+import { listClientExperienceComplaints, listClientExperienceRedFlags } from '../../services/clientExperienceService';
+import { FirmCalendarEvent, getFirmEvents } from '../../services/eventService';
+import { listInvoices, InvoiceWithCase } from '../../services/invoiceService';
+import { getAllProspects, Prospect } from '../../services/prospectService';
+import { getAllTasks, TaskData } from '../../services/taskService';
+import usePageTitle from '../../hooks/usePageTitle';
+import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
+
+const PAGE_SIZE = 10;
+const MANAGEMENT_ROLES: UserRole[] = ['managing_director', 'managing_partner', 'executive_managing_partner'];
+
+type ViewKey = 'risk-overview' | 'matter-risk' | 'financial-risk' | 'operational-risk' | 'client-issues' | 'complaints' | 'conflicts' | 'red-flags' | 'management-alerts' | 'critical-matters' | 'litigation-deadlines' | 'regulatory-deadlines' | 'compliance' | 'firm-risk';
+type Row = Record<string, unknown> & { id: string; severity?: string; status?: string };
+
+const titles: Record<ViewKey, string> = {
+  'risk-overview': 'Risk Overview', 'matter-risk': 'Matter Risk', 'financial-risk': 'Financial Risk', 'operational-risk': 'Operational Risk',
+  'client-issues': 'Client Issues', complaints: 'Complaints', conflicts: 'Conflicts', 'red-flags': 'Red Flags', 'management-alerts': 'Management Alerts',
+  'critical-matters': 'Critical Matters', 'litigation-deadlines': 'Litigation Deadlines', 'regulatory-deadlines': 'Regulatory Deadlines', compliance: 'Compliance', 'firm-risk': 'Firm Risk',
+};
+
+const clean = (value: unknown) => String(value ?? '').trim().toLowerCase(); 
+const dateOf = (value: unknown) => resolveDeadlineDateTime(value as string | Date | undefined);
+const dateLabel = (value: unknown) => { const date = dateOf(value); return date ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'; };
+const amount = (value: unknown) => { const number = Number(value); return Number.isFinite(number) ? `RWF ${Math.round(number).toLocaleString('en-US')}` : '—'; };
+const isClosed = (value: unknown) => ['completed', 'closed', 'resolved', 'complete'].includes(clean(value));
+const badgeClass = (severity: string) => severity.toLowerCase() === 'critical' ? 'border-red-200 bg-red-50 text-red-700' : severity.toLowerCase() === 'high' ? 'border-orange-200 bg-orange-50 text-orange-700' : severity.toLowerCase() === 'medium' || severity.toLowerCase() === 'moderate' ? 'border-yellow-200 bg-yellow-50 text-yellow-700' : 'border-green-200 bg-green-50 text-green-700';
+
+function Metric({ label, value }: { label: string; value: string | number }) {
+  return <div className="min-h-24 rounded-lg border border-gray-200 bg-white p-4 shadow-sm"><div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">{label}</div><div className="mt-3 text-2xl font-semibold text-gray-900">{value}</div></div>;
+}
+
+function RiskTable({ rows, view, page, setPage }: { rows: Row[]; view: ViewKey; page: number; setPage: (page: number) => void }) {
+  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  if (!paged.length) return <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">No records found for this view.</div>;
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  return <div className="overflow-hidden rounded-lg border border-gray-200 bg-white"><div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Risk / Record</th><th className="px-4 py-3">Matter</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Severity</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Responsible / Date</th></tr></thead><tbody>{paged.map((row, index) => <tr key={row.id} className="border-t border-gray-100 align-top hover:bg-gray-50"><td className="px-4 py-4 text-gray-500">{(page - 1) * PAGE_SIZE + index + 1}</td><td className="px-4 py-4"><div className="font-medium text-gray-900">{String(row.name || row.title || row.risk || row.reason || row.alert || 'Record')}</div><div className="mt-1 text-xs text-gray-500">{String(row.details || row.source || '')}</div></td><td className="px-4 py-4 text-gray-600">{String(row.matter || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.client || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.category || row.type || '—')}</td><td className="px-4 py-4">{row.severity ? <span className={`rounded-full border px-2 py-1 text-xs font-medium ${badgeClass(String(row.severity))}`}>{String(row.severity)}</span> : '—'}</td><td className="px-4 py-4 text-gray-600">{String(row.status || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.responsible || row.owner || '—')}<br /><span className="text-xs">{dateLabel(row.date || row.dueDate || row.createdAt)}</span></td></tr>)}</tbody></table></div>{pages > 1 && <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 text-sm text-gray-600"><span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, rows.length)} of {rows.length}</span><div className="flex gap-2"><button type="button" disabled={page === 1} onClick={() => setPage(page - 1)} className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40">Previous</button><button type="button" disabled={page === pages} onClick={() => setPage(page + 1)} className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40">Next</button></div></div>}</div>;
+}
+
+export default function RiskCompliancePage({ userRole }: { userRole: UserRole }) {
+  const [params] = useSearchParams();
+  const requested = params.get('view') as ViewKey | null;
+  const view: ViewKey = requested && titles[requested] ? requested : 'risk-overview';
+  const [cases, setCases] = useState<CaseData[]>([]); const [prospects, setProspects] = useState<Prospect[]>([]); const [invoices, setInvoices] = useState<InvoiceWithCase[]>([]); const [tasks, setTasks] = useState<TaskData[]>([]); const [events, setEvents] = useState<FirmCalendarEvent[]>([]); const [complaints, setComplaints] = useState<any[]>([]); const [redFlags, setRedFlags] = useState<any[]>([]); const [query, setQuery] = useState(''); const [page, setPage] = useState(1); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
+  usePageTitle(titles[view]);
+
+  useEffect(() => { if (!MANAGEMENT_ROLES.includes(userRole)) return; let active = true; setLoading(true); Promise.all([getAllCases(), getAllProspects({ includeTerminal: true }), listInvoices(), getAllTasks(), getFirmEvents({ from: '2000-01-01', to: '2100-12-31', type: 'Deadline' }), listClientExperienceComplaints(), listClientExperienceRedFlags()]).then(([matterData, prospectData, invoiceData, taskData, eventData, complaintData, flagData]) => { if (!active) return; setCases(matterData); setProspects(prospectData); setInvoices(invoiceData); setTasks(taskData); setEvents(eventData); setComplaints(complaintData); setRedFlags(flagData); }).catch((reason: any) => active && setError(reason?.message || 'Unable to load Risk & Compliance data.')).finally(() => active && setLoading(false)); return () => { active = false; }; }, [userRole]);
+
+  const matters = useMemo(() => new Map(cases.map((item) => [String(item._id), item])), [cases]);
+  const openComplaints = complaints.filter((item) => !isClosed(item.status)); const openFlags = redFlags.filter((item) => !isClosed(item.status)); const openConflicts = prospects.filter((item) => item.conflictCheckStatus && item.conflictCheckStatus !== 'Cleared');
+  const overdueTasks = tasks.filter((task) => !isClosed(task.status) && Boolean(dateOf(task.dueDate)) && (dateOf(task.dueDate)?.getTime() || 0) < Date.now());
+  const overdueEvents = events.filter((event) => Boolean(dateOf(event.date)) && (dateOf(event.date)?.getTime() || 0) < Date.now());
+
+  const rows = useMemo<Row[]>(() => {
+    const matterRows = cases.map((item) => { const linked = invoices.filter((invoice) => String(invoice.caseId) === String(item._id)); const billed = linked.reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0); const paid = linked.filter((invoice) => invoice.status === 'Paid').reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0); const overdue = tasks.filter((task) => String(task.caseId) === String(item._id) && overdueTasks.includes(task)).length; const severity = clean(item.priority) === 'high' || overdue > 0 ? 'High' : 'Low'; return { id: String(item._id || item.caseNo), name: item.caseNo || 'Matter', matter: item.caseNo, client: item.parties, category: 'Matter', severity, status: item.status, responsible: item.assignedTo, date: item.updatedAt || item.createdAt, details: billed > paid ? `${amount(billed - paid)} outstanding` : 'No linked financial exposure' }; });
+    if (view === 'matter-risk' || view === 'risk-overview' || view === 'critical-matters') return view === 'critical-matters' ? matterRows.filter((row) => row.severity === 'Critical' || row.severity === 'High') : matterRows;
+    if (view === 'financial-risk') return matterRows.filter((row) => String(row.details).includes('outstanding'));
+    if (view === 'operational-risk') return [...overdueTasks.map((task) => ({ id: task._id, name: task.title, matter: matters.get(String(task.caseId))?.caseNo, client: matters.get(String(task.caseId))?.parties, category: 'Task', severity: task.requiresApproval ? 'High' : 'Medium', status: task.status, responsible: task.assignee, dueDate: task.dueDate, details: task.requiresApproval ? 'Approval required' : 'Overdue task' })), ...overdueEvents.map((event) => ({ id: String(event._id), name: event.title, matter: matters.get(String(event.caseId))?.caseNo, client: matters.get(String(event.caseId))?.parties, category: 'Deadline', severity: 'Critical', status: 'Past due', responsible: matters.get(String(event.caseId))?.assignedTo, date: event.date, details: event.description }))];
+    if (view === 'complaints' || view === 'client-issues') return complaints.map((item) => ({ id: String(item._id || item.id), name: item.category || item.description || 'Complaint', matter: matters.get(String(item.matterId))?.caseNo || item.matterId, client: matters.get(String(item.matterId))?.parties, category: 'Complaint', severity: item.severity || item.priority, status: item.status, responsible: item.assignedTo, date: item.createdAt, details: item.resolution }));
+    if (view === 'red-flags') return redFlags.map((item) => ({ id: String(item._id || item.id), name: item.reason || 'Red flag', matter: matters.get(String(item.matterId))?.caseNo || item.matterId, client: matters.get(String(item.matterId))?.parties, category: 'Red Flag', severity: item.severity, status: item.status, responsible: item.assignedPartner, date: item.createdAt, details: item.resolution }));
+    if (view === 'conflicts') return openConflicts.map((item) => ({ id: item._id, name: item.prospectNo, matter: item.convertedToMatters, client: item.clientName, category: item.enquiryNature || 'Conflict Check', severity: item.conflictCheckStatus === 'Flagged' ? 'High' : 'Medium', status: item.conflictCheckStatus, responsible: typeof item.responsiblePartner === 'string' ? item.responsiblePartner : item.responsiblePartner?.name, date: item.conflictCheckDate, details: item.conflictCheckNotes }));
+    if (view === 'litigation-deadlines' || view === 'regulatory-deadlines') return events.filter((event) => { const text = clean(`${event.title} ${event.description} ${event.type} ${matters.get(String(event.caseId))?.caseType}`); return view === 'litigation-deadlines' ? text.includes('litigation') : text.includes('regulatory'); }).map((event) => ({ id: String(event._id), name: event.title, matter: matters.get(String(event.caseId))?.caseNo, client: matters.get(String(event.caseId))?.parties, category: 'Deadline', severity: 'Critical', status: overdueEvents.includes(event) ? 'Past due' : 'Upcoming', responsible: matters.get(String(event.caseId))?.assignedTo, date: event.date, details: event.description }));
+    if (view === 'firm-risk' || view === 'management-alerts') return [];
+    return [];
+  }, [cases, complaints, events, invoices, matters, openConflicts, overdueEvents, overdueTasks, redFlags, tasks, view]);
+
+  const filtered = rows.filter((row) => !query || JSON.stringify(row).toLowerCase().includes(query.toLowerCase())); useEffect(() => setPage(1), [query, view]);
+  if (!MANAGEMENT_ROLES.includes(userRole)) return <div className="rounded-lg border border-gray-200 bg-white p-6"><h1 className="text-xl font-semibold">Access denied</h1><p className="mt-2 text-gray-600">You do not have permission to view Risk & Compliance.</p></div>;
+  if (loading) return <div className="space-y-4"><div className="h-8 w-64 animate-pulse rounded bg-gray-200" /><div className="h-28 animate-pulse rounded-lg bg-white" /><div className="h-72 animate-pulse rounded-lg bg-white" /></div>;
+  const critical = rows.filter((row) => row.severity === 'Critical').length; const high = rows.filter((row) => row.severity === 'High').length;
+
+  return <div className="space-y-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><Link to="/" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Management Dashboard</Link><h1 className="text-2xl font-semibold text-gray-900">{titles[view]}</h1><p className="mt-1 text-gray-600">Existing matter, finance, task, deadline, prospect, and client-experience data.</p></div><ShieldAlert className="text-gray-500" /></div>{error && <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={16} />{error}</div>}<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Metric label="Records" value={filtered.length} /><Metric label="Critical" value={critical} /><Metric label="High" value={high} /><Metric label="Open complaints / flags" value={openComplaints.length + openFlags.length} /></div>{view === 'compliance' && <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-4 text-sm text-yellow-900">Compliance requirements and completion records are not configured in the available application data sources.</div>}{view === 'management-alerts' && <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-4 text-sm text-yellow-900">No dedicated management alert engine is exposed by the available application data sources.</div>}<div className="rounded-lg border border-gray-200 bg-white p-4"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search risk records..." className="w-full max-w-sm rounded border border-gray-300 px-3 py-2 text-sm" /><span className="text-xs text-gray-500">Search runs before pagination · 10 records per page</span></div><RiskTable rows={filtered} view={view} page={page} setPage={setPage} /></div></div>;
+}

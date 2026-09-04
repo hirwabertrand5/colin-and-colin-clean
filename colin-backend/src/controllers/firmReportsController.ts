@@ -34,6 +34,7 @@ function computeRange(range?: string) {
   else if (r === 'weekly') from.setDate(from.getDate() - 7);
   else if (r === 'quarterly') from.setMonth(from.getMonth() - 3);
   else if (r === 'yearly') from.setFullYear(from.getFullYear() - 1);
+  else if (r === 'ytd') from.setMonth(0, 1);
   else from.setMonth(from.getMonth() - 1); // monthly default
 
   from.setHours(0, 0, 0, 0);
@@ -272,8 +273,8 @@ const getPerformanceZone = (task: any): { zone: PerformanceZone; usedPercent: nu
 // GET /api/reports/firm?range=weekly|monthly|quarterly|yearly&from=YYYY-MM-DD&to=YYYY-MM-DD
 export const getFirmReports = async (req: AuthRequest, res: Response) => {
   try {
-    // Safety (route also has authorize) — allow managing director and executive assistant
-    if (!['managing_director', 'executive_assistant'].includes(String(req.user?.role || ''))) {
+    // Safety (route also has authorize) — align with management reporting navigation.
+    if (!['managing_director', 'managing_partner', 'executive_managing_partner', 'executive_assistant'].includes(String(req.user?.role || ''))) {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 

@@ -59,7 +59,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
   const [selectedReport, setSelectedReport] = useState<
     'overview' | 'financial' | 'productivity' | 'cases' | 'clientProfitability' | 'staffRevenue' | 'staffProfitability'
   >('overview');
-  const [dateRange, setDateRange] = useState<FirmReportRange>('monthly');
+  const [dateRange, setDateRange] = useState<FirmReportRange>('ytd');
   const [dateBasis, setDateBasis] = useState<FirmReportDateBasis>('invoiceDate');
   const [teamMembers, setTeamMembers] = useState<User[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string | undefined>(undefined);
@@ -688,6 +688,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               <option value="monthly">Last Month</option>
               <option value="quarterly">Last Quarter</option>
               <option value="yearly">Last Year</option>
+              <option value="ytd">Year to Date</option>
               <option value="custom">Custom Range</option>
             </select>
 

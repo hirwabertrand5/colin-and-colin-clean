@@ -877,7 +877,7 @@ export default function ManagingPartnerDashboard() {
           </div>
         </DashboardCard>
 
-        <DashboardCard title="Risk & Compliance Overview" action="View all" to="/reports" className="mp-span-3">
+        <DashboardCard title="Risk & Compliance Overview" action="View all" to="/management/risk-compliance?view=risk-overview" className="mp-span-3">
           <div className="mp-risk-list">
             <ValueRow color="#ef4444" label="High Risk Matters" value={formatCount(highRiskMatters)} />
             <ValueRow color="#ef4444" label="Conflicts Requiring Review" value={formatCount(conflictReviews)} />
@@ -907,7 +907,7 @@ export default function ManagingPartnerDashboard() {
           </ResponsiveContainer>
         </DashboardCard>
 
-        <DashboardCard title="Management Alerts" action="View all" to="/reports" className="mp-span-4">
+        <DashboardCard title="Management Alerts" action="View all" to="/management/risk-compliance?view=management-alerts" className="mp-span-4">
           <div className="mp-alerts">
             {managementAlerts.length ? (
               managementAlerts.map((alert) => (

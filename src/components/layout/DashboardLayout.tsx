@@ -19,6 +19,7 @@ import {
   Sun,
   Moon,
   ChevronDown,
+  ChevronRight,
   Search,
   Plus,
   FilePlus2,
@@ -252,15 +253,37 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
       ],
     },
     {
-      name: 'Risk & Compliance', href: managementView('risk-compliance', 'risk-overview'), icon: ShieldAlert, roles: managementRoles, submenu: ['Risk Overview', 'Matter Risk', 'Financial Risk', 'Operational Risk', 'Client Issues', 'Complaints', 'Conflicts', 'Red Flags', 'Management Alerts', 'Critical Matters', 'Litigation Deadlines', 'Regulatory Deadlines', 'Compliance', 'Complaints', 'Conflicts', 'Firm Risk']
-        .map((name, index) => managementItem(name, `${managementView('risk-compliance', name.toLowerCase().replace(/ /g, '-'))}&item=${index}`, index === 12 ? ClipboardCheck : index === 10 || index === 11 ? FileClock : ShieldAlert)),
+      name: 'Risk & Compliance', href: managementView('risk-compliance', 'risk-overview'), icon: ShieldAlert, roles: managementRoles, submenu: [
+        managementItem('Risk Overview', managementView('risk-compliance', 'risk-overview'), ShieldAlert),
+        managementItem('Matter Risk', managementView('risk-compliance', 'matter-risk'), ShieldAlert),
+        managementItem('Financial Risk', managementView('risk-compliance', 'financial-risk'), ShieldAlert),
+        managementItem('Operational Risk', managementView('risk-compliance', 'operational-risk'), ShieldAlert),
+        managementItem('Client Issues', managementView('risk-compliance', 'client-issues'), ShieldAlert),
+        managementItem('Complaints', managementView('risk-compliance', 'complaints'), ShieldAlert),
+        managementItem('Conflicts', managementView('risk-compliance', 'conflicts'), ShieldAlert),
+        managementItem('Red Flags', managementView('risk-compliance', 'red-flags'), ShieldAlert),
+        managementItem('Management Alerts', managementView('risk-compliance', 'management-alerts'), ShieldAlert),
+        {
+          name: 'Critical Matters', href: managementView('risk-compliance', 'critical-matters'), icon: ShieldAlert, submenu: [
+            managementItem('Litigation Deadlines', managementView('risk-compliance', 'litigation-deadlines'), FileClock),
+            managementItem('Regulatory Deadlines', managementView('risk-compliance', 'regulatory-deadlines'), FileClock),
+            managementItem('Compliance', managementView('risk-compliance', 'compliance'), ClipboardCheck),
+            managementItem('Complaints', managementView('risk-compliance', 'complaints'), ShieldAlert),
+            managementItem('Conflicts', managementView('risk-compliance', 'conflicts'), ShieldAlert),
+            managementItem('Firm Risk', managementView('risk-compliance', 'firm-risk'), ShieldAlert),
+          ],
+        },
+      ],
     },
     {
       name: 'Reports & Analytics', href: managementView('reports-analytics', 'reporting'), icon: BarChart3, roles: managementRoles, submenu: [
-        {
-          name: 'Reports', href: managementView('reports-analytics', 'weekly-transaction-reports'), icon: FileBarChart, submenu: ['Weekly Transaction Reports', 'Monthly Litigation Reports', 'Significant Updates', 'Reporting Compliance', 'Reporting Triggers']
-            .map((name, index) => managementItem(name, managementView('reports-analytics', `report-${index}`), index === 3 ? ClipboardCheck : index === 4 ? Activity : FileBarChart)),
-        },
+        { name: 'Reports', href: managementView('reports-analytics', 'reporting'), icon: FileBarChart, submenu: [
+          managementItem('Weekly Transaction Reports', managementView('reports-analytics', 'report-0'), FileBarChart),
+          managementItem('Monthly Litigation Reports', managementView('reports-analytics', 'report-1'), FileBarChart),
+          managementItem('Significant Updates', managementView('reports-analytics', 'report-2'), FileBarChart),
+          managementItem('Reporting Compliance', managementView('reports-analytics', 'report-3'), ClipboardCheck),
+          managementItem('Reporting Triggers', managementView('reports-analytics', 'report-4'), Activity),
+        ] },
         { name: 'Firm Trends', href: managementView('reports-analytics', 'firm-trends'), icon: TrendingUp, submenu: ['Revenue Trend', 'Collections Trend', 'Profitability Trend', 'Matter Volume Trend', 'New Client Trend', 'Staff Productivity Trend'].map((name, index) => managementItem(name, managementView('reports-analytics', `firm-trend-${index}`), index === 1 ? Banknote : index === 2 ? ChartNoAxesCombined : TrendingUp)) },
         { name: 'Period Comparison', href: managementView('reports-analytics', 'period-comparison'), icon: Activity, submenu: ['Current vs Previous Period', 'Month-on-Month', 'Quarter-on-Quarter', 'Year-on-Year', 'Budget / Target vs Actual'].map((name, index) => managementItem(name, managementView('reports-analytics', `period-${index}`), index === 4 ? Target : Activity)) },
         { name: 'Historical Analysis', href: managementView('reports-analytics', 'historical-analysis'), icon: FileClock, submenu: ['Revenue History', 'Collections History', 'Profit History', 'Matter History', 'Client Growth History', 'Staff Performance History'].map((name, index) => managementItem(name, managementView('reports-analytics', `history-${index}`), FileClock)) },
@@ -314,7 +337,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
 
     if (hasSubmenu) {
       return (
-        <div key={`${item.name}-${item.href}`}>
+        <div key={`${item.name}-${item.href}`} className={depth > 0 ? 'group relative' : undefined}>
           <button
             onClick={() => setExpandedManagementMenus(current => isExpanded
               ? current.filter(href => href !== item.href)
@@ -322,10 +345,14 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
             className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded transition-colors ${isActive || isExpanded ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100' : 'text-slate-100/90 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#061a3a]'}`}
           >
             <span className="flex items-center"><Icon className="w-5 h-5 mr-3" />{item.name}</span>
-            <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+            {depth > 0 ? (
+              <ChevronRight className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+            ) : (
+              <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+            )}
           </button>
           {isExpanded && (
-            <div className={depth === 0 ? 'mt-2 ml-3 rounded-lg border border-white/10 bg-[#0a1d3e]/80 p-2 shadow-none' : 'ml-3 mt-1'}>
+            <div className={depth === 0 ? 'mt-2 ml-3 rounded-lg border border-white/10 bg-[#0a1d3e]/80 p-2 shadow-none' : 'absolute left-full top-0 z-50 ml-2 min-w-64 rounded-lg border border-white/10 bg-[#0a1d3e] p-2 shadow-xl'}>
               <div className="space-y-1">{item.submenu!.map(child => renderManagementItem(child, depth + 1))}</div>
             </div>
           )}

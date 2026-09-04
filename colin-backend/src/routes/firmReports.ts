@@ -22,6 +22,13 @@ const STAFF_REPORT_ROLES = [
   'intern',
 ];
 
+const MANAGEMENT_REPORT_ROLES = [
+  'managing_director',
+  'managing_partner',
+  'executive_managing_partner',
+  'executive_assistant',
+];
+
 router.get(
   '/reports/my-productivity',
   authenticate,
@@ -32,7 +39,7 @@ router.get(
 router.get(
   '/reports/firm',
   authenticate,
-  authorize(['managing_director', 'executive_assistant']),
+  authorize(MANAGEMENT_REPORT_ROLES),
   getFirmReports
 );
 
