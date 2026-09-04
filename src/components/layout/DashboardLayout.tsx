@@ -293,7 +293,6 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
         { name: 'People & Productivity Analytics', href: managementView('reports-analytics', 'people-productivity'), icon: Activity, submenu: ['Productivity Trends', 'Workload Trends', 'Timeliness Trends', 'Revenue Contribution Trends', 'Performance vs Target'].map((name, index) => managementItem(name, managementView('reports-analytics', `people-${index}`), index === 4 ? Target : Activity)) },
         { name: 'Operational & Reporting Analytics', href: managementView('reports-analytics', 'operational-reporting'), icon: ClipboardCheck, submenu: ['Task Completion', 'Deadline Compliance', 'Matter Timeliness', 'Reporting Compliance', 'Significant Update Compliance'].map((name, index) => managementItem(name, managementView('reports-analytics', `operations-${index}`), ClipboardCheck)) },
         { name: 'Forecast & Projection', href: managementView('reports-analytics', 'forecast'), icon: ChartNoAxesCombined, submenu: ['Revenue Forecast', 'Collection Forecast', 'Matter Pipeline Forecast', 'Profit Forecast'].map((name, index) => managementItem(name, managementView('reports-analytics', `forecast-${index}`), ChartNoAxesCombined)) },
-        { name: 'Custom Analysis', href: managementView('reports-analytics', 'custom-analysis'), icon: FileSearch, submenu: ['Build Report', 'Compare Dimensions', 'Filter & Segment', 'Save Report', 'Export'].map((name, index) => managementItem(name, managementView('reports-analytics', `custom-${index}`), index === 4 ? FileBarChart : FileSearch)) },
       ],
     },
   ];
@@ -352,7 +351,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
             )}
           </button>
           {isExpanded && (
-            <div className={depth === 0 ? 'mt-2 ml-3 rounded-lg border border-white/10 bg-[#0a1d3e]/80 p-2 shadow-none' : 'absolute left-full top-0 z-50 ml-2 min-w-64 rounded-lg border border-white/10 bg-[#0a1d3e] p-2 shadow-xl'}>
+            <div className={depth === 0 ? 'mt-2 ml-3 rounded-lg border border-white/10 bg-[#0a1d3e]/80 p-2 shadow-none' : 'mt-1 ml-3 rounded-lg border border-white/10 bg-[#0a1d3e]/80 p-2 shadow-none'}>
               <div className="space-y-1">{item.submenu!.map(child => renderManagementItem(child, depth + 1))}</div>
             </div>
           )}

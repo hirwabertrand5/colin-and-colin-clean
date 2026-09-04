@@ -153,6 +153,37 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
     return Math.max(1, Math.ceil(invoices.length / PAGE_SIZE));
   }, [invoices.length]);
 
+  const exportInvoices = () => {
+    if (!invoices.length) {
+      setError('No invoices available to export.');
+      return;
+    }
+
+    const escapeCsv = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const rows = [
+      ['Invoice', 'Matter', 'Client', 'Amount', 'Status', 'Date', 'Notes'],
+      ...invoices.map((invoice) => [
+        invoice.invoiceNo,
+        invoice.case?.caseNo || '',
+        invoice.case?.parties || '',
+        invoice.amount,
+        invoice.status,
+        invoice.date,
+        invoice.notes || '',
+      ]),
+    ];
+    const csv = rows.map((row) => row.map(escapeCsv).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `invoices-${filterStatus.toLowerCase()}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const paginatedInvoices = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
     return invoices.slice(start, start + PAGE_SIZE);
@@ -216,9 +247,9 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
 
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={exportInvoices}
               className="inline-flex items-center px-4 py-2 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50"
-              title="Quick export (print)"
+              title="Export filtered invoices as CSV"
             >
               <Download className="w-4 h-4 mr-2" />
               Export

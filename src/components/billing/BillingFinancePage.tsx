@@ -86,6 +86,7 @@ export default function BillingFinancePage({ view, userRole }: { view: BillingFi
   const pages = Math.max(1, Math.ceil(filteredInvoices.length / 10));
   const visibleInvoices = filteredInvoices.slice((page - 1) * 10, page * 10);
   useEffect(() => setPage(1), [view]);
+  useEffect(() => setPage((currentPage) => Math.min(currentPage, pages)), [pages]);
 
   const directCosts = summary?.directMatterCosts ?? expenses.filter((expense) => expense.chargeType === 'client').reduce((sum, expense) => sum + Math.max(0, amount(expense.amount) - amount(expense.refundAmount)), 0);
   const operatingExpenses = summary?.firmOperatingExpenses ?? expenses.filter((expense) => expense.chargeType !== 'client').reduce((sum, expense) => sum + Math.max(0, amount(expense.amount) - amount(expense.refundAmount)), 0);

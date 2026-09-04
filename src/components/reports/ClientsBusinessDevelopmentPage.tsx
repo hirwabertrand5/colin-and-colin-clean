@@ -29,7 +29,7 @@ const viewDetails: Record<ViewKey, { title: string; description: string; kind: '
   'business-4': { title: 'Conversion', description: 'Conversion performance from qualified and converted prospect records.', kind: 'pipeline' },
   'business-5': { title: 'Lost Opportunities', description: 'Non-converted prospects and their recorded estimated fee values.', kind: 'pipeline' },
   'business-6': { title: 'Referral Sources', description: 'Prospect pipeline grouped by the referral source stored at intake.', kind: 'pipeline' },
-  'business-7': { title: 'Revenue Forecast', description: 'Expected prospect fees. Probability is unavailable because no authoritative probability field or mapping exists.', kind: 'pipeline' },
+  'business-7': { title: 'Revenue Forecast', description: 'Revenue forecast from the active prospect pipeline.', kind: 'pipeline' },
   'experience-0': { title: 'Lost Prospect Feedback', description: 'Feedback records linked to non-converted prospects.', kind: 'experience' },
   'experience-1': { title: 'Mid-Matter Feedback', description: 'Feedback requests linked to active matters.', kind: 'experience' },
   'experience-2': { title: 'Matter Completion Feedback', description: 'Feedback requests linked to completed matters.', kind: 'experience' },
@@ -132,6 +132,7 @@ export default function ClientsBusinessDevelopmentPage({ userRole }: { userRole:
   const pages = Math.max(1, Math.ceil(tableRows.length / PAGE_SIZE));
   const visibleRows = tableRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   useEffect(() => setPage(1), [search, view, range]);
+  useEffect(() => setPage((currentPage) => Math.min(currentPage, pages)), [pages]);
 
   if (!permitted) return <div className="rounded-lg border border-gray-200 bg-white p-6"><h1 className="text-xl font-semibold text-gray-900">Access denied</h1><p className="mt-2 text-gray-600">You do not have permission to view Clients & Business Development.</p></div>;
   if (loading) return <LoadingSkeleton />;

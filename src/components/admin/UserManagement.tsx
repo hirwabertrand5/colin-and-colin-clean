@@ -286,6 +286,9 @@ export default function UserManagement() {
   );
 
   const totalPages = Math.ceil(sortedUsers.length / usersPerPage);
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, Math.max(1, totalPages)));
+  }, [totalPages]);
 
   return (
     <div>

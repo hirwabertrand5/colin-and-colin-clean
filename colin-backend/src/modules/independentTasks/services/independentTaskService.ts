@@ -464,17 +464,19 @@ export const independentTaskService = {
     const sortBy = query.sortBy || 'dueDate';
     const sortDir = query.sortDir === 'desc' ? -1 : 1;
 
-    const [items, total] = await Promise.all([
-      IndependentTask.find(filter)
-        .sort(sortBy === 'priority' ? { priority: sortDir, dueDate: 1 } : { [sortBy]: sortDir })
-        .skip((page - 1) * limit)
-        .limit(limit),
-      IndependentTask.countDocuments(filter),
-    ]);
+    const candidates = await IndependentTask.find(filter)
+      .sort(sortBy === 'priority' ? { priority: sortDir, dueDate: 1 } : { [sortBy]: sortDir });
 
+    const visibleCandidates = [];
+    for (const item of candidates) {
+      if (await isVisibleToUser(req, item)) visibleCandidates.push(item);
+    }
+
+    const total = visibleCandidates.length;
+    const items = visibleCandidates.slice((page - 1) * limit, page * limit);
     const hydrated = [];
     for (const item of items) {
-      if (await isVisibleToUser(req, item)) hydrated.push(await hydrateTask(item));
+      hydrated.push(await hydrateTask(item));
     }
 
     return { items: hydrated, total, page, limit };

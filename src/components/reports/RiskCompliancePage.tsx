@@ -69,6 +69,8 @@ export default function RiskCompliancePage({ userRole }: { userRole: UserRole })
   }, [cases, complaints, events, invoices, matters, openConflicts, overdueEvents, overdueTasks, redFlags, tasks, view]);
 
   const filtered = rows.filter((row) => !query || JSON.stringify(row).toLowerCase().includes(query.toLowerCase())); useEffect(() => setPage(1), [query, view]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / 10));
+  useEffect(() => setPage((currentPage) => Math.min(currentPage, totalPages)), [totalPages]);
   if (!MANAGEMENT_ROLES.includes(userRole)) return <div className="rounded-lg border border-gray-200 bg-white p-6"><h1 className="text-xl font-semibold">Access denied</h1><p className="mt-2 text-gray-600">You do not have permission to view Risk & Compliance.</p></div>;
   if (loading) return <div className="space-y-4"><div className="h-8 w-64 animate-pulse rounded bg-gray-200" /><div className="h-28 animate-pulse rounded-lg bg-white" /><div className="h-72 animate-pulse rounded-lg bg-white" /></div>;
   const critical = rows.filter((row) => row.severity === 'Critical').length; const high = rows.filter((row) => row.severity === 'High').length;
