@@ -307,6 +307,13 @@ function App() {
                   <Route path="/billing/invoices" element={<InvoiceManagement userRole={user.role} />} />
                   {isManagementDashboardRole && (
                     <>
+                      <Route path="/billing/finance/financial-dashboard" element={<BillingFinancePage view="financial-dashboard" userRole={user.role} />} />
+                      <Route path="/billing/finance/invoicing" element={<BillingFinancePage view="invoicing" userRole={user.role} />} />
+                      <Route path="/billing/finance/collections" element={<BillingFinancePage view="collections" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability" element={<BillingFinancePage view="profitability" userRole={user.role} />} />
+                      <Route path="/billing/finance/cash-flow" element={<BillingFinancePage view="cash-flow" userRole={user.role} />} />
+                      <Route path="/billing/finance/expenses" element={<BillingFinancePage view="expenses" userRole={user.role} />} />
+                      <Route path="/billing/finance/remuneration" element={<BillingFinancePage view="remuneration" userRole={user.role} />} />
                       <Route path="/billing/finance/financial-dashboard/contract-value" element={<BillingFinancePage view="contract-value" userRole={user.role} />} />
                       <Route path="/billing/finance/financial-dashboard/total-billed" element={<BillingFinancePage view="total-billed" userRole={user.role} />} />
                       <Route path="/billing/finance/financial-dashboard/total-collected" element={<BillingFinancePage view="total-collected" userRole={user.role} />} />

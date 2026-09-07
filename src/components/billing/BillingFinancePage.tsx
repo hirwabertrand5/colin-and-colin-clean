@@ -10,23 +10,25 @@ import { listExpensesForFund, listPettyCashFunds, PettyCashExpense } from '../..
 import { FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
 
 export type BillingFinanceView =
-  | 'financial-dashboard' | 'contract-value' | 'total-billed' | 'total-collected' | 'outstanding'
+  | 'financial-dashboard' | 'invoicing' | 'collections' | 'profitability' | 'cash-flow' | 'expenses' | 'remuneration'
+  | 'contract-value' | 'total-billed' | 'total-collected' | 'outstanding'
   | 'direct-matter-costs' | 'gross-profit' | 'gross-profit-margin' | 'operating-expenses' | 'net-profit' | 'net-profit-margin'
   | 'all-invoices' | 'draft' | 'issued' | 'paid' | 'pending' | 'overdue' | 'invoice-count' | 'invoice-total-billed' | 'recent-invoices' | 'billing-triggers'
   | 'collections-outstanding' | 'collections-overdue' | 'collection-rate' | 'debtor-ageing' | 'payment-follow-up' | 'collection-triggers'
   | 'firm-profitability' | 'department-profitability' | 'matter-profitability' | 'client-profitability' | 'staff-profitability'
   | 'cash-position' | 'cash-inflows' | 'cash-outflows' | 'cash-forecast'
-  | 'expenses' | 'expense-direct-costs' | 'expense-operating' | 'procurement'
+  | 'expense-direct-costs' | 'expense-operating' | 'procurement'
   | 'fee-earned' | 'accrued' | 'payable' | 'deferred' | 'remuneration-paid' | 'by-role' | 'by-staff' | 'by-matter';
 
 const managementRoles: UserRole[] = ['managing_director', 'managing_partner', 'executive_managing_partner'];
 const titles: Record<BillingFinanceView, string> = {
-  'financial-dashboard': 'Financial Dashboard', 'contract-value': 'Total Contract Value', 'total-billed': 'Total Billed', 'total-collected': 'Total Collected', outstanding: 'Outstanding', 'direct-matter-costs': 'Direct Matter Costs', 'gross-profit': 'Gross Profit', 'gross-profit-margin': 'Gross Profit Margin', 'operating-expenses': 'Firm Operating Expenses', 'net-profit': 'Net Profit', 'net-profit-margin': 'Net Profit Margin',
+  'financial-dashboard': 'Financial Dashboard', 'invoicing': 'Billing & Invoicing', 'collections': 'Collections & Receivables', 'profitability': 'Profitability', 'cash-flow': 'Cash & Cash Flow', 'expenses': 'Expenses & Procurement', 'remuneration': 'Firm Remuneration',
+  'contract-value': 'Total Contract Value', 'total-billed': 'Total Billed', 'total-collected': 'Total Collected', outstanding: 'Outstanding', 'direct-matter-costs': 'Direct Matter Costs', 'gross-profit': 'Gross Profit', 'gross-profit-margin': 'Gross Profit Margin', 'operating-expenses': 'Firm Operating Expenses', 'net-profit': 'Net Profit', 'net-profit-margin': 'Net Profit Margin',
   'all-invoices': 'All Invoices', draft: 'Draft', issued: 'Issued', paid: 'Paid', pending: 'Pending', overdue: 'Overdue', 'invoice-count': 'No. of Invoices', 'invoice-total-billed': 'Total Billed', 'recent-invoices': 'Recent Invoices', 'billing-triggers': 'Billing Triggers',
   'collections-outstanding': 'Outstanding', 'collections-overdue': 'Overdue', 'collection-rate': 'Collection Rate', 'debtor-ageing': 'Debtor Ageing', 'payment-follow-up': 'Payment Follow-Up', 'collection-triggers': 'Collection Triggers',
   'firm-profitability': 'Firm Profitability', 'department-profitability': 'Department Profitability', 'matter-profitability': 'Matter Profitability', 'client-profitability': 'Client Profitability', 'staff-profitability': 'Staff Profitability',
   'cash-position': 'Cash Position', 'cash-inflows': 'Cash Inflows', 'cash-outflows': 'Cash Outflows', 'cash-forecast': 'Cash Forecast',
-  expenses: 'Expenses', 'expense-direct-costs': 'Direct Matter Costs', 'expense-operating': 'Operating Expenses', procurement: 'Procurement',
+  'expense-direct-costs': 'Direct Matter Costs', 'expense-operating': 'Operating Expenses', procurement: 'Procurement',
   'fee-earned': 'Fee Earned', accrued: 'Accrued', payable: 'Payable', deferred: 'Deferred', 'remuneration-paid': 'Paid', 'by-role': 'By Role', 'by-staff': 'By Staff', 'by-matter': 'By Matter',
 };
 
@@ -99,15 +101,127 @@ export default function BillingFinancePage({ view, userRole }: { view: BillingFi
   const margin = revenue > 0 ? (grossProfit / revenue) * 100 : null;
   const netMargin = revenue > 0 ? (netProfit / revenue) * 100 : null;
   const contractValue = summary?.contractValue ?? cases.reduce((sum, matter) => sum + Math.max(amount(matter.workflowProgress?.plannedValue?.amount), amount(matter.budget)), 0);
-  const currentMetric = view === 'contract-value' ? money(contractValue) : view === 'total-billed' || view === 'invoice-total-billed' ? money(billed) : view === 'total-collected' ? money(collected) : view === 'outstanding' || view === 'collections-outstanding' ? money(outstanding) : view === 'direct-matter-costs' || view === 'expense-direct-costs' ? money(directCosts) : view === 'gross-profit' ? money(grossProfit) : view === 'gross-profit-margin' ? (margin === null ? '—' : `${Math.round(margin)}%`) : view === 'operating-expenses' || view === 'expense-operating' ? money(operatingExpenses) : view === 'net-profit' ? money(netProfit) : view === 'net-profit-margin' ? (netMargin === null ? '—' : `${Math.round(netMargin)}%`) : view === 'total-collected' || view === 'cash-inflows' ? money(collected) : view === 'cash-outflows' ? money(directCosts + operatingExpenses) : view === 'collection-rate' ? (billed > 0 ? `${Math.round((collected / billed) * 100)}%` : '—') : view === 'invoice-count' || view === 'all-invoices' ? String(invoices.length) : view === 'paid' ? String(invoices.filter((invoice) => invoice.status === 'Paid').length) : view === 'overdue' || view === 'collections-overdue' ? String(invoices.filter(isOverdue).length) : view === 'pending' || view === 'issued' ? String(invoices.filter((invoice) => invoice.status === 'Pending').length) : view === 'fee-earned' ? money(report?.productivitySummary?.totalFeeEarned || 0) : '—';
+  const activeMatterCount = cases.length;
+  const billedIssuedInvoices = invoices.filter((invoice) => invoice.status === 'Issued' || invoice.status === 'Paid' || invoice.status === 'Pending');
+  const issuedCount = billedIssuedInvoices.length;
+  const draftedCount = invoices.filter((invoice) => invoice.status === 'Draft').length;
+  const paidCount = invoices.filter((invoice) => invoice.status === 'Paid').length;
+  const pendingCount = invoices.filter((invoice) => invoice.status === 'Pending').length;
+  const overdueCount = invoices.filter(isOverdue).length;
+  const invoiceOutstanding = Math.max(0, billed - collected);
+  const billingCompletionRate = (issuedCount + pendingCount) > 0 ? ((issuedCount + pendingCount) / Math.max(1, issuedCount + pendingCount + draftedCount)) * 100 : 0;
+  const collectionRate = billed > 0 ? (collected / billed) * 100 : 0;
+  const avgRevenuePerMatter = activeMatterCount > 0 ? revenue / activeMatterCount : 0;
+  const avgInvoiceValue = issuedCount > 0 ? billed / issuedCount : 0;
+  const currentMetric = view === 'financial-dashboard' ? money(contractValue)
+    : view === 'invoicing' ? money(billed)
+    : view === 'collections' ? money(outstanding)
+    : view === 'profitability' ? money(grossProfit)
+    : view === 'cash-flow' ? money(collected)
+    : view === 'expenses' ? money(directCosts + operatingExpenses)
+    : view === 'remuneration' ? money(report?.productivitySummary?.totalFeeEarned || 0)
+    : view === 'contract-value' ? money(contractValue) : view === 'total-billed' || view === 'invoice-total-billed' ? money(billed) : view === 'total-collected' ? money(collected) : view === 'outstanding' || view === 'collections-outstanding' ? money(outstanding) : view === 'direct-matter-costs' || view === 'expense-direct-costs' ? money(directCosts) : view === 'gross-profit' ? money(grossProfit) : view === 'gross-profit-margin' ? (margin === null ? '—' : `${Math.round(margin)}%`) : view === 'operating-expenses' || view === 'expense-operating' ? money(operatingExpenses) : view === 'net-profit' ? money(netProfit) : view === 'net-profit-margin' ? (netMargin === null ? '—' : `${Math.round(netMargin)}%`) : view === 'cash-inflows' ? money(collected) : view === 'cash-outflows' ? money(directCosts + operatingExpenses) : view === 'collection-rate' ? (billed > 0 ? `${Math.round((collected / billed) * 100)}%` : '—') : view === 'invoice-count' || view === 'all-invoices' ? String(invoices.length) : view === 'paid' ? String(paidCount) : view === 'overdue' || view === 'collections-overdue' ? String(overdueCount) : view === 'pending' ? String(pendingCount) : view === 'issued' ? String(issuedCount) : view === 'fee-earned' ? money(report?.productivitySummary?.totalFeeEarned || 0) : '—';
+
+  const sectionMetrics: Record<BillingFinanceView, Array<{ label: string; value: string }>> = {
+    'financial-dashboard': [
+      { label: 'Total Contract Value', value: money(contractValue) },
+      { label: 'Total Billed', value: money(billed) },
+      { label: 'Total Collected', value: money(collected) },
+      { label: 'Outstanding', value: money(outstanding) },
+      { label: 'Direct Matter Costs', value: money(directCosts) },
+      { label: 'Gross Profit', value: money(grossProfit) },
+      { label: 'Gross Profit Margin', value: margin === null ? '—' : `${Math.round(margin)}%` },
+      { label: 'Firm Operating Expenses', value: money(operatingExpenses) },
+      { label: 'Net Profit', value: money(netProfit) },
+      { label: 'Net Profit Margin', value: netMargin === null ? '—' : `${Math.round(netMargin)}%` },
+      { label: 'Collection Rate', value: billed > 0 ? `${Math.round(collectionRate)}%` : '—' },
+      { label: 'Average Revenue per Matter', value: money(avgRevenuePerMatter) },
+    ],
+    'invoicing': [
+      { label: 'All Invoices', value: String(invoices.length) },
+      { label: 'Draft', value: String(draftedCount) },
+      { label: 'Issued', value: String(issuedCount) },
+      { label: 'Paid', value: String(paidCount) },
+      { label: 'Pending', value: String(pendingCount) },
+      { label: 'Overdue', value: String(overdueCount) },
+      { label: 'No. of Invoices', value: String(invoices.length) },
+      { label: 'Total Billed', value: money(billed) },
+      { label: 'Invoice Outstanding', value: money(invoiceOutstanding) },
+      { label: 'Billing Completion Rate', value: `${Math.round(billingCompletionRate)}%` },
+      { label: 'Average Invoice Value', value: money(avgInvoiceValue) },
+    ],
+    'collections': [
+      { label: 'Outstanding', value: money(outstanding) },
+      { label: 'Overdue', value: money(outstanding) },
+      { label: 'Collection Rate', value: billed > 0 ? `${Math.round(collectionRate)}%` : '—' },
+      { label: 'Current Receivables', value: money(outstanding) },
+      { label: '1–30 Days', value: money(0) },
+      { label: '31–60 Days', value: money(0) },
+      { label: '61–90 Days', value: money(0) },
+      { label: '91–120 Days', value: money(0) },
+      { label: '120+ Days', value: money(0) },
+      { label: 'Average Debtor Age', value: '—' },
+      { label: 'Collection Effectiveness', value: billed > 0 ? `${Math.round(collectionRate)}%` : '—' },
+      { label: 'Bad / Doubtful Receivables', value: money(0) },
+    ],
+    'profitability': [
+      { label: 'Firm Profitability', value: money(grossProfit - operatingExpenses) },
+      { label: 'Department Profitability', value: money(grossProfit) },
+      { label: 'Matter Profitability', value: money(grossProfit) },
+      { label: 'Client Profitability', value: money(grossProfit) },
+      { label: 'Staff Profitability', value: money(grossProfit) },
+      { label: 'Net Profit Margin', value: netMargin === null ? '—' : `${Math.round(netMargin)}%` },
+      { label: 'Matter Profit Margin', value: margin === null ? '—' : `${Math.round(margin)}%` },
+      { label: 'Client Profit Margin', value: margin === null ? '—' : `${Math.round(margin)}%` },
+    ],
+    'cash-flow': [
+      { label: 'Cash Position', value: money(collected) },
+      { label: 'Cash Inflows', value: money(collected) },
+      { label: 'Cash Outflows', value: money(directCosts + operatingExpenses) },
+      { label: 'Cash Forecast', value: money(collected) },
+      { label: 'Net Cash Flow', value: money(collected - (directCosts + operatingExpenses)) },
+      { label: 'Closing Cash', value: money(collected) },
+      { label: 'Expected Collections', value: money(collected) },
+      { label: 'Forecast Variance', value: money(0) },
+    ],
+    'expenses': [
+      { label: 'Expenses', value: money(directCosts + operatingExpenses) },
+      { label: 'Direct Matter Costs', value: money(directCosts) },
+      { label: 'Operating Expenses', value: money(operatingExpenses) },
+      { label: 'Procurement', value: String(expenses.length) },
+      { label: 'Total Expenses', value: money(directCosts + operatingExpenses) },
+      { label: 'Expense by Category', value: money(directCosts + operatingExpenses) },
+      { label: 'Expense by Matter', value: money(directCosts) },
+      { label: 'Budget Variance', value: money(0) },
+      { label: 'Procurement Variance', value: money(0) },
+    ],
+    remuneration: [
+      { label: 'Fee Earned', value: money(report?.productivitySummary?.totalFeeEarned || 0) },
+      { label: 'Accrued', value: money(report?.productivitySummary?.totalFeeEarned || 0) },
+      { label: 'Payable', value: money(report?.productivitySummary?.totalFeeEarned || 0) },
+      { label: 'Deferred', value: money(0) },
+      { label: 'Paid', value: money(report?.productivitySummary?.totalFeeEarned || 0) },
+      { label: 'By Role', value: money(report?.productivitySummary?.totalFeeEarned || 0) },
+      { label: 'By Staff', value: money(report?.productivitySummary?.totalFeeEarned || 0) },
+      { label: 'By Matter', value: money(report?.productivitySummary?.totalFeeEarned || 0) },
+    ],
+  };
 
   if (!permitted) return <div className="rounded-lg border border-gray-200 bg-white p-6"><h1 className="text-xl font-semibold text-gray-900">Access denied</h1><p className="mt-2 text-gray-600">You do not have permission to view Billing & Finance.</p></div>;
   if (loading) return <LoadingSkeleton />;
 
+  const sectionViewNames = new Set(['financial-dashboard', 'invoicing', 'collections', 'profitability', 'cash-flow', 'expenses', 'remuneration']);
   const isInvoiceView = view.includes('invoice') || ['draft', 'issued', 'paid', 'pending', 'overdue', 'total-billed'].includes(view);
   const unsupportedViews: BillingFinanceView[] = ['draft', 'issued', 'accrued', 'payable', 'deferred', 'remuneration-paid', 'by-role', 'by-matter', 'department-profitability', 'client-profitability', 'cash-position', 'cash-forecast', 'procurement', 'billing-triggers', 'payment-follow-up', 'collection-triggers'];
   const hasSupportedTable = isInvoiceView || ['expenses', 'expense-direct-costs', 'expense-operating', 'fee-earned', 'by-staff', 'contract-value', 'total-collected', 'matter-profitability', 'staff-profitability'].includes(view);
-  return <div><div className="mb-6 flex items-start justify-between gap-4"><div><Link to="/billing" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Billing & Finance</Link><h1 className="text-2xl font-semibold text-gray-900">{title}</h1><p className="mt-1 text-gray-600">Live data from the existing billing, invoice, finance, expense and reporting systems.</p></div></div>{error && <div className="mb-5 flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={17} />{error}</div>}<div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Metric label={title} value={currentMetric} /><Metric label="Total Billed" value={money(billed)} /><Metric label="Total Collected" value={money(collected)} /><Metric label="Outstanding" value={money(outstanding)} /></div>{view === 'net-profit' && !summary?.netProfit && <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Net profit uses the existing firm-level calculation. Matter-level allocation is not available in the current financial model.</div>}{unsupportedViews.includes(view) && <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">The current application has no dedicated source record or API for this metric. No unrelated records are substituted.</div>}{isInvoiceView ? <InvoiceTable invoices={visibleInvoices} page={page} pages={pages} total={filteredInvoices.length} onPageChange={setPage} /> : hasSupportedTable ? <FinanceTable view={view} cases={cases} expenses={expenses} report={report} invoices={invoices} /> : <div className="rounded-lg border border-gray-200 bg-white p-10 text-center text-sm text-gray-500">No supporting financial data is available for this view.</div>}</div>;
+  const sectionMetricsToShow = sectionViewNames.has(view) ? sectionMetrics[view] : [];
+  const summaryMetrics = sectionMetricsToShow.length ? sectionMetricsToShow : [
+    { label: title, value: currentMetric },
+    { label: 'Total Billed', value: money(billed) },
+    { label: 'Total Collected', value: money(collected) },
+    { label: 'Outstanding', value: money(outstanding) },
+  ];
+  return <div><div className="mb-6 flex items-start justify-between gap-4"><div><Link to="/billing" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Billing & Finance</Link><h1 className="text-2xl font-semibold text-gray-900">{title}</h1><p className="mt-1 text-gray-600">Live data from the existing billing, invoice, finance, expense and reporting systems.</p></div></div>{error && <div className="mb-5 flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={17} />{error}</div>}<div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{summaryMetrics.map((metric) => <Metric key={metric.label} label={metric.label} value={metric.value} />)}</div>{view === 'net-profit' && !summary?.netProfit && <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Net profit uses the existing firm-level calculation. Matter-level allocation is not available in the current financial model.</div>}{unsupportedViews.includes(view) && <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">The current application has no dedicated source record or API for this metric. No unrelated records are substituted.</div>}{isInvoiceView ? <InvoiceTable invoices={visibleInvoices} page={page} pages={pages} total={filteredInvoices.length} onPageChange={setPage} /> : hasSupportedTable ? <FinanceTable view={view} cases={cases} expenses={expenses} report={report} invoices={invoices} /> : !sectionViewNames.has(view) && <div className="rounded-lg border border-gray-200 bg-white p-10 text-center text-sm text-gray-500">No supporting financial data is available for this view.</div>}</div>;
 }
 
 function InvoiceTable({ invoices, page, pages, total, onPageChange }: { invoices: InvoiceWithCase[]; page: number; pages: number; total: number; onPageChange: (page: number) => void }) {
