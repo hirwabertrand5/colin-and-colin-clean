@@ -15,6 +15,8 @@ export interface Invoice {
   invoiceFileUrl?: string;
 
   notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 const getToken = () => localStorage.getItem('token');
