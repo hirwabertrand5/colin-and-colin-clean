@@ -7,7 +7,7 @@ import { getBillingSummary, BillingSummary } from '../../services/billingService
 import { InvoiceWithCase, listInvoices } from '../../services/invoiceService';
 import { getAllCases, CaseData } from '../../services/caseService';
 import { listExpensesForFund, listPettyCashFunds, PettyCashExpense } from '../../services/pettyCashService';
-import { FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
+import { FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
 
 export type BillingFinanceView =
   | 'financial-dashboard' | 'invoicing' | 'collections' | 'profitability' | 'cash-flow' | 'expenses' | 'remuneration'
@@ -37,6 +37,7 @@ const amount = (value: unknown) => typeof value === 'number' && Number.isFinite(
 const dayKey = (value?: string) => value ? value.slice(0, 10) : '';
 const today = () => dayKey(new Date().toISOString());
 const isOverdue = (invoice: InvoiceWithCase) => Boolean(invoice.date && invoice.status !== 'Paid' && invoice.date < today());
+const isWithinRange = (value: string | undefined, from: string, to: string) => Boolean(value && value.slice(0, 10) >= from && value.slice(0, 10) <= to);
 
 function Metric({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-gray-200 bg-white p-4"><div className="text-xs uppercase tracking-[0.16em] text-gray-500">{label}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div></div>;
@@ -59,24 +60,49 @@ export default function BillingFinancePage({ view, userRole }: { view: BillingFi
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dateRange, setDateRange] = useState<FirmReportRange>('ytd');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [period, setPeriod] = useState<{ from: string; to: string } | null>(null);
   const permitted = managementRoles.includes(userRole);
   const title = titles[view];
 
   useEffect(() => {
     if (!permitted) return;
+    if (dateRange === 'custom' && (!customFrom || !customTo)) {
+      setLoading(false);
+      setPeriod(null);
+      return;
+    }
     let mounted = true;
     (async () => {
       try {
-        const [billing, invoiceData, caseData, funds, firmReport] = await Promise.all([
-          getBillingSummary(), listInvoices(), getAllCases(), listPettyCashFunds().catch(() => []), getFirmReports({ range: 'yearly', basis: 'invoiceDate' }).catch(() => null),
+        setLoading(true);
+        const firmReport = await getFirmReports({
+          range: dateRange,
+          from: dateRange === 'custom' ? customFrom : undefined,
+          to: dateRange === 'custom' ? customTo : undefined,
+          basis: 'invoiceDate',
+        });
+        const { from, to } = firmReport.range;
+        const [billing, invoiceData, caseData, funds] = await Promise.all([
+          getBillingSummary({ from, to }),
+          listInvoices({ from, to }),
+          getAllCases(),
+          listPettyCashFunds().catch(() => []),
         ]);
         const expenseData = (await Promise.all(funds.map((fund) => listExpensesForFund(fund._id).catch(() => [])))).flat();
         if (!mounted) return;
-        setSummary(billing); setInvoices(invoiceData); setCases(caseData); setExpenses(expenseData); setReport(firmReport);
+        setSummary(billing);
+        setInvoices(invoiceData);
+        setCases(caseData.filter((matter) => isWithinRange(matter.updatedAt || matter.createdAt, from, to)));
+        setExpenses(expenseData.filter((expense) => isWithinRange(expense.date, from, to)));
+        setReport(firmReport);
+        setPeriod({ from, to });
       } catch (loadError: any) { if (mounted) setError(loadError?.message || 'Failed to load finance data.'); } finally { if (mounted) setLoading(false); }
     })();
     return () => { mounted = false; };
-  }, [permitted]);
+  }, [permitted, dateRange, customFrom, customTo]);
 
   const filteredInvoices = useMemo(() => {
     if (view === 'paid') return invoices.filter((invoice) => invoice.status === 'Paid');
@@ -221,7 +247,7 @@ export default function BillingFinancePage({ view, userRole }: { view: BillingFi
     { label: 'Total Collected', value: money(collected) },
     { label: 'Outstanding', value: money(outstanding) },
   ];
-  return <div><div className="mb-6 flex items-start justify-between gap-4"><div><Link to="/billing" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Billing & Finance</Link><h1 className="text-2xl font-semibold text-gray-900">{title}</h1><p className="mt-1 text-gray-600">Live data from the existing billing, invoice, finance, expense and reporting systems.</p></div></div>{error && <div className="mb-5 flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={17} />{error}</div>}<div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{summaryMetrics.map((metric) => <Metric key={metric.label} label={metric.label} value={metric.value} />)}</div>{view === 'net-profit' && !summary?.netProfit && <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Net profit uses the existing firm-level calculation. Matter-level allocation is not available in the current financial model.</div>}{unsupportedViews.includes(view) && <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">The current application has no dedicated source record or API for this metric. No unrelated records are substituted.</div>}{isInvoiceView ? <InvoiceTable invoices={visibleInvoices} page={page} pages={pages} total={filteredInvoices.length} onPageChange={setPage} /> : hasSupportedTable ? <FinanceTable view={view} cases={cases} expenses={expenses} report={report} invoices={invoices} /> : !sectionViewNames.has(view) && <div className="rounded-lg border border-gray-200 bg-white p-10 text-center text-sm text-gray-500">No supporting financial data is available for this view.</div>}</div>;
+  return <div><div className="mb-6 flex flex-wrap items-start justify-between gap-4"><div><Link to="/billing" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Billing & Finance</Link><h1 className="text-2xl font-semibold text-gray-900">{title}</h1><p className="mt-1 text-gray-600">{period ? `Period: ${period.from} → ${period.to}` : 'Select a reporting period.'}</p></div><div className="flex flex-wrap items-end gap-3"><label className="flex flex-col text-sm text-gray-700">Period<select value={dateRange} onChange={(event) => setDateRange(event.target.value as FirmReportRange)} className="mt-1 rounded border border-gray-300 bg-white px-3 py-2 text-gray-900"><option value="daily">Last Day</option><option value="weekly">Last Week</option><option value="monthly">Last Month</option><option value="quarterly">Last Quarter</option><option value="yearly">Last Year</option><option value="ytd">Year to Date</option><option value="custom">Custom Range</option></select></label>{dateRange === 'custom' && <><label className="flex flex-col text-sm text-gray-700">From<input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 rounded border border-gray-300 bg-white px-3 py-2 text-gray-900" /></label><label className="flex flex-col text-sm text-gray-700">To<input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="mt-1 rounded border border-gray-300 bg-white px-3 py-2 text-gray-900" /></label></>}</div></div>{error && <div className="mb-5 flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={17} />{error}</div>}<div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{summaryMetrics.map((metric) => <Metric key={metric.label} label={metric.label} value={metric.value} />)}</div>{view === 'net-profit' && !summary?.netProfit && <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Net profit uses the existing firm-level calculation. Matter-level allocation is not available in the current financial model.</div>}{unsupportedViews.includes(view) && <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">The current application has no dedicated source record or API for this metric. No unrelated records are substituted.</div>}{isInvoiceView ? <InvoiceTable invoices={visibleInvoices} page={page} pages={pages} total={filteredInvoices.length} onPageChange={setPage} /> : hasSupportedTable ? <FinanceTable view={view} cases={cases} expenses={expenses} report={report} invoices={invoices} /> : !sectionViewNames.has(view) && <div className="rounded-lg border border-gray-200 bg-white p-10 text-center text-sm text-gray-500">No supporting financial data is available for this view.</div>}</div>;
 }
 
 function InvoiceTable({ invoices, page, pages, total, onPageChange }: { invoices: InvoiceWithCase[]; page: number; pages: number; total: number; onPageChange: (page: number) => void }) {
