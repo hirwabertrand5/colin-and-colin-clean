@@ -349,13 +349,24 @@ const ensureInstanceStepActions = async (inst: any, step: any) => {
 const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   if (!isAssociateLike(req.user?.role)) return false;
 
-  if (caseMatchesAssignee(foundCase, req.user?.name) || caseMatchesAssignee(foundCase, req.user?.email)) return true;
+  if (isPublicYellowCase(foundCase)) return true;
 
-  const me = (req.user?.name || '').trim();
-  if (!me) return false;
+  const meName = normalizeIdentity(req.user?.name);
+  const meEmail = normalizeIdentity(req.user?.email);
+  if (!meName && !meEmail) return false;
 
-  const hasTask = await Task.exists({ caseId: foundCase._id, assignee: me });
-  return Boolean(hasTask);
+  if (caseMatchesAssignee(foundCase, meName) || caseMatchesAssignee(foundCase, meEmail)) return true;
+
+  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor taskStages').lean();
+  return tasks.some((task: any) => {
+    const assignee = normalizeIdentity(task?.assignee);
+    const supervisor = normalizeIdentity(task?.supervisor);
+    const stageMatch = (task?.taskStages || []).some((stage: any) => {
+      const staffMember = normalizeIdentity(stage?.staffMember);
+      return staffMember && [meName, meEmail].includes(staffMember);
+    });
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
+  });
 };
 
 const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) => {
@@ -363,11 +374,15 @@ const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) =>
   const meEmail = normalizeIdentity(req.user?.email);
   if (!meName && !meEmail) return false;
 
-  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor').lean();
+  const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor taskStages').lean();
   return tasks.some((task: any) => {
     const assignee = normalizeIdentity(task?.assignee);
     const supervisor = normalizeIdentity(task?.supervisor);
-    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail));
+    const stageMatch = (task?.taskStages || []).some((stage: any) => {
+      const staffMember = normalizeIdentity(stage?.staffMember);
+      return staffMember && [meName, meEmail].includes(staffMember);
+    });
+    return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
   });
 };
 
@@ -978,9 +993,11 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
     if (!c) return res.status(404).json({ message: 'Case not found.' });
 
     if (!isAdmin(req.user?.role)) {
-      const allowed = await canAssociateLikeAccessCase(req, c);
-      if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
-        return res.status(403).json({ message: 'Forbidden.' });
+      if (!isPublicYellowCase(c)) {
+        const allowed = await canAssociateLikeAccessCase(req, c);
+        if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
+          return res.status(403).json({ message: 'Forbidden.' });
+        }
       }
     }
 

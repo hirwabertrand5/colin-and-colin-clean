@@ -1588,22 +1588,35 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     const plannedAmount = getPlannedAmount(latestCase);
                     const currency = getPlannedCurrency(latestCase);
                     const progress = calculateWorkflowActionProgress(latestWf, plannedAmount, currency);
-                    const syncedCase = await updateCase(caseData._id, {
-                      workflowProgress: {
-                        ...(latestCase.workflowProgress || {}),
-                        percent: progress.percent,
-                        plannedValue: { amount: plannedAmount, currency },
-                        completedValue: progress.completedValue,
-                      },
-                      billingSettings: {
-                        ...(latestCase.billingSettings || {}),
-                        currency,
-                        prepaidTotal: 0,
-                        prepaidRemaining: 0,
-                        accruedUnbilled: progress.completedValue.amount,
-                      },
-                    });
-                    setCaseData(syncedCase);
+                    // The workflow toggle/complete endpoints already persist workflowProgress and
+                    // billingSettings server-side. This extra updateCase sync is admin-only, so
+                    // only run it for privileged roles and never let a sync failure surface as an
+                    // error on the checklist. Otherwise non-admins (e.g. interns) would see
+                    // "Forbidden" even though their key action was toggled successfully.
+                    if (canManageCase) {
+                      try {
+                        const syncedCase = await updateCase(caseData._id, {
+                          workflowProgress: {
+                            ...(latestCase.workflowProgress || {}),
+                            percent: progress.percent,
+                            plannedValue: { amount: plannedAmount, currency },
+                            completedValue: progress.completedValue,
+                          },
+                          billingSettings: {
+                            ...(latestCase.billingSettings || {}),
+                            currency,
+                            prepaidTotal: 0,
+                            prepaidRemaining: 0,
+                            accruedUnbilled: progress.completedValue.amount,
+                          },
+                        });
+                        if (syncedCase) setCaseData(syncedCase);
+                      } catch {
+                        setCaseData(latestCase);
+                      }
+                    } else {
+                      setCaseData(latestCase);
+                    }
                   } else if (latestCase) {
                     setCaseData(latestCase);
                   }
