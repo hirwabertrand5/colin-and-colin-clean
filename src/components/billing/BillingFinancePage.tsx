@@ -742,14 +742,25 @@ export default function BillingFinancePage({
     isInvoiceView ||
     [
       "financial-dashboard",
+      "contract-value",
+      "total-collected",
+      "outstanding",
+      "collections-outstanding",
+      "direct-matter-costs",
+      "operating-expenses",
+      "gross-profit",
+      "gross-profit-margin",
+      "invoicing",
+      "collections",
+      "profitability",
+      "matter-profitability",
+      "cash-flow",
       "expenses",
       "expense-direct-costs",
       "expense-operating",
+      "remuneration",
       "fee-earned",
       "by-staff",
-      "contract-value",
-      "total-collected",
-      "matter-profitability",
       "staff-profitability",
     ].includes(view);
   const sectionMetricsToShow = sectionViewNames.has(view)
@@ -896,7 +907,6 @@ export default function BillingFinancePage({
           expenses={classificationExpenses}
           report={report}
           invoices={classificationInvoices}
-          period={period}
         />
       ) : (
         !sectionViewNames.has(view) && (
@@ -987,224 +997,116 @@ function InvoiceTable({
   );
 }
 
-const MEASURE_OPTIONS: Array<{ key: string; label: string }> = [
-  { key: "contract-value", label: "Total Contract Value" },
-  { key: "total-billed", label: "Total Billed" },
-  { key: "total-collected", label: "Total Collected" },
-  { key: "outstanding", label: "Outstanding" },
-  { key: "direct-matter-costs", label: "Direct Matter Costs" },
-  { key: "operating-expenses", label: "Firm Operating Expenses" },
-  { key: "gross-profit", label: "Gross Profit" },
-];
-
-type DashboardDetailRecord = {
-  measure: string;
-  measureLabel: string;
-  recordId: string;
-  description: string;
-  value: number;
-  date: string;
-  timestamp?: string;
-  actor?: string;
+type DetailRecord = {
+  typeKey: string;
+  typeLabel: string;
   reference: string;
+  description?: string;
+  value: number;
+  valueText?: string;
+  timestamp?: string;
+  doneBy?: string;
 };
 
-const measureChipClass = (key: string) =>
-  key === "direct-matter-costs" || key === "operating-expenses"
-    ? "border-amber-100 bg-amber-50 text-amber-700"
-    : key === "total-billed"
-      ? "border-blue-200 bg-blue-50 text-blue-700"
-      : key === "contract-value" || key === "gross-profit"
-        ? "border-green-100 bg-green-50 text-green-700"
-        : "border-indigo-100 bg-indigo-50 text-indigo-700";
+type DetailType = {
+  key: string;
+  label: string;
+  chipClass: string;
+};
 
-function FinancialDashboardDetailTable({
-  cases,
-  invoices,
-  expenses,
+const GREEN_CHIP = "border-green-100 bg-green-50 text-green-700";
+const BLUE_CHIP = "border-blue-200 bg-blue-50 text-blue-700";
+const INDIGO_CHIP = "border-indigo-100 bg-indigo-50 text-indigo-700";
+const AMBER_CHIP = "border-amber-100 bg-amber-50 text-amber-700";
+const RED_CHIP = "border-red-100 bg-red-50 text-red-700";
+const ORANGE_CHIP = "border-orange-100 bg-orange-50 text-orange-700";
+const GRAY_CHIP = "border-gray-200 bg-gray-100 text-gray-700";
+
+const matterActorLabel = (matter: CaseData) =>
+  matter.caseAssignments?.initiator ||
+  matter.caseAssignments?.reviewer ||
+  matter.caseAssignments?.signerApprover ||
+  matter.assignedTo ||
+  matter.takeRequestState?.decisionByName ||
+  "";
+
+const makeMatterIndex = (cases: CaseData[]) => {
+  const map = new Map<string, CaseData>();
+  for (const matter of cases) {
+    if (matter._id) map.set(String(matter._id), matter);
+  }
+  return map;
+};
+
+const invoiceActor = (
+  invoice: InvoiceWithCase,
+  matterByCaseId: Map<string, CaseData>,
+) => {
+  const matter = invoice.caseId
+    ? matterByCaseId.get(String(invoice.caseId))
+    : undefined;
+  return matter ? matterActorLabel(matter) || "System" : "System";
+};
+
+const invoiceDescription = (
+  invoice: InvoiceWithCase,
+  matterByCaseId: Map<string, CaseData>,
+) => {
+  const matter = invoice.caseId
+    ? matterByCaseId.get(String(invoice.caseId))
+    : undefined;
+  const label = matter
+    ? matter.caseNo
+    : invoice.case?.caseNo || "Matter unavailable";
+  const client = matter
+    ? matter.parties
+    : invoice.case?.parties || "Client unavailable";
+  return `${label} — ${client}`;
+};
+
+const expenseNet = (expense: PettyCashExpense) =>
+  Math.max(0, amount(expense.amount) - amount(expense.refundAmount));
+
+function DetailTable({
+  records,
+  types,
+  defaultType = "all",
 }: {
-  cases: CaseData[];
-  invoices: InvoiceWithCase[];
-  expenses: PettyCashExpense[];
+  records: DetailRecord[];
+  types: DetailType[];
+  defaultType?: string;
 }) {
-  const [measure, setMeasure] = useState("all");
+  const [measure, setMeasure] = useState(defaultType);
   const [page, setPage] = useState(1);
 
-  const matterByCaseId = new Map<string, CaseData>();
-  for (const matter of cases) {
-    if (matter._id) matterByCaseId.set(String(matter._id), matter);
-  }
-  const matterLabel = (matter?: CaseData) => (matter ? matter.caseNo : "");
-  const clientLabel = (matter?: CaseData) => (matter ? matter.parties : "");
-  const matterActor = (matter?: CaseData) =>
-    matter ? matterActorLabel(matter) : "";
-  const expenseNet = (expense: PettyCashExpense) =>
-    Math.max(0, amount(expense.amount) - amount(expense.refundAmount));
-  const contractValueOf = (matter: CaseData) =>
-    Math.max(
-      amount(matter.workflowProgress?.plannedValue?.amount),
-      amount(matter.budget),
-    );
-  const invoiceDetail = (invoice: InvoiceWithCase) => {
-    const matter = invoice.caseId
-      ? matterByCaseId.get(String(invoice.caseId))
-      : undefined;
-    return `${matterLabel(matter) || invoice.case?.caseNo || "Matter unavailable"} — ${clientLabel(matter) || invoice.case?.parties || "Client unavailable"}`;
-  };
-
-  const records: DashboardDetailRecord[] = [
-    // Total Contract Value — one row per matter
-    ...cases.map((matter) => ({
-      measure: "contract-value",
-      measureLabel: "Total Contract Value",
-      recordId: matter.caseNo,
-      description: matter.parties,
-      value: contractValueOf(matter),
-      date: dayKey(matter.createdAt || matter.updatedAt || ""),
-      timestamp: matter.updatedAt || matter.createdAt,
-      actor: matterActor(matter) || "System",
-      reference: matter.status || "Status unavailable",
-    })),
-    // Total Billed — one row per invoice
-    ...invoices.map((invoice) => {
-      const matter = invoice.caseId
-        ? matterByCaseId.get(String(invoice.caseId))
-        : undefined;
-      return {
-        measure: "total-billed",
-        measureLabel: "Total Billed",
-        recordId: invoice.invoiceNo,
-        description: invoiceDetail(invoice),
-        value: amount(invoice.amount),
-        date: invoice.date,
-        timestamp: invoice.createdAt || invoice.updatedAt,
-        actor: matterActor(matter) || "System",
-        reference: invoice.status,
-      };
-    }),
-    // Total Collected — one row per paid invoice
-    ...invoices
-      .filter((invoice) => invoice.status === "Paid")
-      .map((invoice) => {
-        const matter = invoice.caseId
-          ? matterByCaseId.get(String(invoice.caseId))
-          : undefined;
-        return {
-          measure: "total-collected",
-          measureLabel: "Total Collected",
-          recordId: invoice.invoiceNo,
-          description: invoiceDetail(invoice),
-          value: amount(invoice.amount),
-          date: invoice.date,
-          timestamp: invoice.updatedAt || invoice.createdAt,
-          actor: matterActor(matter) || "System",
-          reference: "Paid",
-        };
-      }),
-    // Outstanding — one row per unpaid invoice
-    ...invoices
-      .filter((invoice) => invoice.status !== "Paid")
-      .map((invoice) => {
-        const matter = invoice.caseId
-          ? matterByCaseId.get(String(invoice.caseId))
-          : undefined;
-        return {
-          measure: "outstanding",
-          measureLabel: "Outstanding",
-          recordId: invoice.invoiceNo,
-          description: invoiceDetail(invoice),
-          value: amount(invoice.amount),
-          date: invoice.date,
-          timestamp: invoice.createdAt || invoice.updatedAt,
-          actor: matterActor(matter) || "System",
-          reference: `Due ${invoice.date}`,
-        };
-      }),
-    // Direct Matter Costs — one row per client-tagged expense
-    ...expenses
-      .filter((expense) => expense.chargeType === "client")
-      .map((expense) => ({
-        measure: "direct-matter-costs",
-        measureLabel: "Direct Matter Costs",
-        recordId: expense.receiptRef || expense.expenseId || "Expense",
-        description: expense.caseNoSnapshot
-          ? `${expense.title} — ${expense.caseNoSnapshot}`
-          : expense.title,
-        value: expenseNet(expense),
-        date: expense.date,
-        timestamp: expense.createdAt,
-        actor: expense.createdByName || "System",
-        reference: expense.category || "Unclassified",
-      })),
-    // Firm Operating Expenses — one row per internal expense
-    ...expenses
-      .filter((expense) => expense.chargeType !== "client")
-      .map((expense) => ({
-        measure: "operating-expenses",
-        measureLabel: "Firm Operating Expenses",
-        recordId: expense.receiptRef || expense.expenseId || "Expense",
-        description: expense.title,
-        value: expenseNet(expense),
-        date: expense.date,
-        timestamp: expense.createdAt,
-        actor: expense.createdByName || "System",
-        reference: expense.category || "Unclassified",
-      })),
-    // Gross Profit — one row per matter (collected − direct costs)
-    ...cases.map((matter) => {
-      const key = String(matter._id);
-      const matterCollected = invoices
-        .filter(
-          (invoice) =>
-            String(invoice.caseId) === key && invoice.status === "Paid",
-        )
-        .reduce((sum, invoice) => sum + amount(invoice.amount), 0);
-      const matterCosts = expenses
-        .filter(
-          (expense) =>
-            expense.caseId &&
-            String(expense.caseId) === key &&
-            expense.chargeType === "client",
-        )
-        .reduce((sum, expense) => sum + expenseNet(expense), 0);
-      return {
-        measure: "gross-profit",
-        measureLabel: "Gross Profit",
-        recordId: matter.caseNo,
-        description: matter.parties,
-        value: matterCollected - matterCosts,
-        date: dayKey(matter.updatedAt || matter.createdAt || ""),
-        timestamp: matter.updatedAt || matter.createdAt,
-        actor: matterActor(matter) || "System",
-        reference: matter.status || "Status unavailable",
-      };
-    }),
-  ];
-const totals = new Map<string, { count: number; total: number }>();
+  const totals = new Map<string, { count: number; total: number }>();
   for (const record of records) {
-    const entry = totals.get(record.measure) || { count: 0, total: 0 };
+    const entry = totals.get(record.typeKey) || { count: 0, total: 0 };
     entry.count += 1;
     entry.total += record.value;
-    totals.set(record.measure, entry);
+    totals.set(record.typeKey, entry);
   }
-  // Sort by the selected card's value (highest first); in "All" mode group by card.
+
   const visibleRecords =
     measure === "all"
-      ? [...records].sort(
-          (a, b) =>
-            a.measure === b.measure
-              ? b.value - a.value
-              : a.measure.localeCompare(b.measure),
-        )
+      ? [...records].sort((a, b) => {
+          const orderA = types.findIndex((type) => type.key === a.typeKey);
+          const orderB = types.findIndex((type) => type.key === b.typeKey);
+          const indexA = orderA === -1 ? 999 : orderA;
+          const indexB = orderB === -1 ? 999 : orderB;
+          return indexA !== indexB ? indexA - indexB : b.value - a.value;
+        })
       : records
-          .filter((record) => record.measure === measure)
+          .filter((record) => record.typeKey === measure)
           .sort((a, b) => b.value - a.value);
 
   const totalPages = Math.max(1, Math.ceil(visibleRecords.length / 12));
   const pageRecords = visibleRecords.slice((page - 1) * 12, page * 12);
   useEffect(() => setPage(1), [measure, visibleRecords.length]);
 
-  return (
+  const chipClassOf = (typeKey: string) =>
+    types.find((type) => type.key === typeKey)?.chipClass || GRAY_CHIP;
+return (
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-3">
         <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -1213,21 +1115,25 @@ const totals = new Map<string, { count: number; total: number }>();
         <button
           type="button"
           onClick={() => setMeasure("all")}
-          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${measure === "all" ? "border-gray-800 bg-gray-800 text-white" : "border-gray-300 bg-white text-gray-600"}`}
+          className={`inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1 text-sm font-medium ${measure === "all" ? "border-gray-800 bg-gray-800 text-white" : "border-gray-300 bg-white text-gray-600"}`}
         >
           All ({records.length})
         </button>
-        {MEASURE_OPTIONS.map((option) => {
-          const entry = totals.get(option.key);
+        {types.map((type) => {
+          const entry = totals.get(type.key);
           return (
             <button
-              key={option.key}
+              key={type.key}
               type="button"
-              onClick={() => setMeasure(option.key)}
-              className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${measure === option.key ? "border-gray-800 bg-gray-800 text-white" : "border-gray-300 bg-white text-gray-700"}`}
-              title={`Sort by ${option.label}`}
+              onClick={() => setMeasure(type.key)}
+              className={
+                measure === type.key
+                  ? "inline-flex items-center whitespace-nowrap rounded-full border border-gray-800 bg-gray-800 px-3 py-1 text-sm font-medium text-white"
+                  : `inline-flex items-center whitespace-nowrap rounded-full border ${type.chipClass} px-3 py-1 text-sm font-medium`
+              }
+              title={`Sort by ${type.label}`}
             >
-              {option.label} ({entry ? entry.count : 0})
+              {type.label} ({entry ? entry.count : 0})
             </button>
           );
         })}
@@ -1248,14 +1154,13 @@ const totals = new Map<string, { count: number; total: number }>();
             {pageRecords.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-5 py-10 text-center text-gray-500">
-                  No supporting records are available for this card in the selected
-                  period.
+                  No supporting records are available in this period.
                 </td>
               </tr>
             ) : (
               pageRecords.map((record, index) => (
                 <tr
-                  key={`${record.measure}-${record.recordId}-${index}`}
+                  key={`${record.typeKey}-${record.reference}-${index}`}
                   className="border-t border-gray-100 align-top transition-colors hover:bg-gray-50/60"
                 >
                   <td className="px-5 py-3.5 text-gray-500">
@@ -1263,23 +1168,21 @@ const totals = new Map<string, { count: number; total: number }>();
                   </td>
                   <td className="whitespace-nowrap px-5 py-3.5">
                     <span
-                      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${measureChipClass(record.measure)}`}
+                      className={`inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1 text-sm font-medium ${chipClassOf(record.typeKey)}`}
                     >
-                      {record.measureLabel}
+                      {record.typeLabel}
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <div className="font-medium text-gray-900">{record.recordId}</div>
+                    <div className="font-medium text-gray-900">{record.reference}</div>
                     {record.description ? (
-                      <div className="text-xs text-gray-500">
-                        {record.description}
-                      </div>
+                      <div className="text-xs text-gray-500">{record.description}</div>
                     ) : null}
                   </td>
                   <td
-                    className={`whitespace-nowrap px-5 py-3.5 text-right font-semibold tabular-nums ${record.measure === "gross-profit" && record.value < 0 ? "text-red-700" : "text-gray-900"}`}
+                    className={`whitespace-nowrap px-5 py-3.5 text-right font-semibold tabular-nums ${record.value < 0 ? "text-red-700" : "text-gray-900"}`}
                   >
-                    {money(record.value)}
+                    {record.valueText ?? money(record.value)}
                   </td>
                   <td className="whitespace-nowrap px-5 py-3.5 text-gray-600">
                     {record.timestamp
@@ -1287,7 +1190,7 @@ const totals = new Map<string, { count: number; total: number }>();
                       : "—"}
                   </td>
                   <td className="px-5 py-3.5 font-medium text-gray-800">
-                    {record.actor || "—"}
+                    {record.doneBy || "—"}
                   </td>
                 </tr>
               ))
@@ -1306,6 +1209,469 @@ const totals = new Map<string, { count: number; total: number }>();
     </div>
   );
 }
+// ---------------- Type configurations per page ----------------
+const FIN_DASH_TYPES: DetailType[] = [
+  { key: "contract-value", label: "Total Contract Value", chipClass: GREEN_CHIP },
+  { key: "total-billed", label: "Total Billed", chipClass: BLUE_CHIP },
+  { key: "total-collected", label: "Total Collected", chipClass: INDIGO_CHIP },
+  { key: "outstanding", label: "Outstanding", chipClass: INDIGO_CHIP },
+  { key: "direct-matter-costs", label: "Direct Matter Costs", chipClass: AMBER_CHIP },
+  { key: "operating-expenses", label: "Firm Operating Expenses", chipClass: AMBER_CHIP },
+  { key: "gross-profit", label: "Gross Profit", chipClass: GREEN_CHIP },
+];
+
+const INVOICING_TYPES: DetailType[] = [
+  { key: "paid", label: "Paid", chipClass: GREEN_CHIP },
+  { key: "pending", label: "Issued / Pending", chipClass: INDIGO_CHIP },
+  { key: "overdue", label: "Overdue", chipClass: RED_CHIP },
+  { key: "outstanding", label: "Outstanding", chipClass: INDIGO_CHIP },
+];
+
+const COLLECTIONS_TYPES: DetailType[] = [
+  { key: "current", label: "Current", chipClass: INDIGO_CHIP },
+  { key: "1-30", label: "1–30 Days", chipClass: AMBER_CHIP },
+  { key: "31-60", label: "31–60 Days", chipClass: AMBER_CHIP },
+  { key: "61-90", label: "61–90 Days", chipClass: ORANGE_CHIP },
+  { key: "91-120", label: "91–120 Days", chipClass: ORANGE_CHIP },
+  { key: "120+", label: "120+ Days", chipClass: RED_CHIP },
+];
+
+// ---------------- Record builders ----------------
+const buildFinancialDashboardRecords = (
+  cases: CaseData[],
+  invoices: InvoiceWithCase[],
+  expenses: PettyCashExpense[],
+  matterByCaseId: Map<string, CaseData>,
+): DetailRecord[] => {
+  const contractValueOf = (matter: CaseData) =>
+    Math.max(
+      amount(matter.workflowProgress?.plannedValue?.amount),
+      amount(matter.budget),
+    );
+  return [
+    ...cases.map((matter) => ({
+      typeKey: "contract-value",
+      typeLabel: "Total Contract Value",
+      reference: matter.caseNo,
+      description: matter.parties,
+      value: contractValueOf(matter),
+      timestamp: matter.updatedAt || matter.createdAt,
+      doneBy: matterActorLabel(matter) || "System",
+    })),
+    ...invoices.map((invoice) => ({
+      typeKey: "total-billed",
+      typeLabel: "Total Billed",
+      reference: invoice.invoiceNo,
+      description: invoiceDescription(invoice, matterByCaseId),
+      value: amount(invoice.amount),
+      timestamp: invoice.createdAt || invoice.updatedAt,
+      doneBy: invoiceActor(invoice, matterByCaseId),
+    })),
+    ...invoices
+      .filter((invoice) => invoice.status === "Paid")
+      .map((invoice) => ({
+        typeKey: "total-collected",
+        typeLabel: "Total Collected",
+        reference: invoice.invoiceNo,
+        description: invoiceDescription(invoice, matterByCaseId),
+        value: amount(invoice.amount),
+        timestamp: invoice.updatedAt || invoice.createdAt,
+        doneBy: invoiceActor(invoice, matterByCaseId),
+      })),
+    ...invoices
+      .filter((invoice) => invoice.status !== "Paid")
+      .map((invoice) => ({
+        typeKey: "outstanding",
+        typeLabel: "Outstanding",
+        reference: invoice.invoiceNo,
+        description: invoiceDescription(invoice, matterByCaseId),
+        value: amount(invoice.amount),
+        timestamp: invoice.createdAt || invoice.updatedAt,
+        doneBy: invoiceActor(invoice, matterByCaseId),
+      })),
+    ...expenses
+      .filter((expense) => expense.chargeType === "client")
+      .map((expense) => ({
+        typeKey: "direct-matter-costs",
+        typeLabel: "Direct Matter Costs",
+        reference: expense.receiptRef || expense.expenseId || "Expense",
+        description: expense.caseNoSnapshot
+          ? `${expense.title} — ${expense.caseNoSnapshot}`
+          : expense.title,
+        value: expenseNet(expense),
+        timestamp: expense.createdAt,
+        doneBy: expense.createdByName || "System",
+      })),
+    ...expenses
+      .filter((expense) => expense.chargeType !== "client")
+      .map((expense) => ({
+        typeKey: "operating-expenses",
+        typeLabel: "Firm Operating Expenses",
+        reference: expense.receiptRef || expense.expenseId || "Expense",
+        description: expense.title,
+        value: expenseNet(expense),
+        timestamp: expense.createdAt,
+        doneBy: expense.createdByName || "System",
+      })),
+    ...cases.map((matter) => {
+      const key = String(matter._id);
+      const collected = invoices
+        .filter(
+          (invoice) =>
+            String(invoice.caseId) === key && invoice.status === "Paid",
+        )
+        .reduce((sum, invoice) => sum + amount(invoice.amount), 0);
+      const costs = expenses
+        .filter(
+          (expense) =>
+            expense.caseId &&
+            String(expense.caseId) === key &&
+            expense.chargeType === "client",
+        )
+        .reduce((sum, expense) => sum + expenseNet(expense), 0);
+      return {
+        typeKey: "gross-profit",
+        typeLabel: "Gross Profit",
+        reference: matter.caseNo,
+        description: matter.parties,
+        value: collected - costs,
+        timestamp: matter.updatedAt || matter.createdAt,
+        doneBy: matterActorLabel(matter) || "System",
+      };
+    }),
+  ];
+};
+const buildInvoicingRecords = (
+  invoices: InvoiceWithCase[],
+  matterByCaseId: Map<string, CaseData>,
+): DetailRecord[] => {
+  const rows: DetailRecord[] = [];
+  for (const invoice of invoices) {
+    const isPaid = invoice.status === "Paid";
+    const isOverdue = !isPaid && Boolean(invoice.date && invoice.date < today());
+    const base = {
+      reference: invoice.invoiceNo,
+      description: invoiceDescription(invoice, matterByCaseId),
+      value: amount(invoice.amount),
+      timestamp: invoice.createdAt || invoice.updatedAt,
+      doneBy: invoiceActor(invoice, matterByCaseId),
+    };
+    if (isPaid) rows.push({ ...base, typeKey: "paid", typeLabel: "Paid" });
+    if (!isPaid) {
+      rows.push({ ...base, typeKey: "pending", typeLabel: "Issued / Pending" });
+      rows.push({ ...base, typeKey: "outstanding", typeLabel: "Outstanding" });
+    }
+    if (isOverdue) rows.push({ ...base, typeKey: "overdue", typeLabel: "Overdue" });
+  }
+  return rows;
+};
+
+const buildCollectionsRecords = (
+  invoices: InvoiceWithCase[],
+  matterByCaseId: Map<string, CaseData>,
+): DetailRecord[] => {
+  const overdueDaysOf = (dateStr: string) => {
+    const due = Date.parse(dateStr);
+    const anchor = Date.parse(today());
+    if (Number.isNaN(due)) return 0;
+    return Math.floor((anchor - due) / 86400000);
+  };
+  const bucketOf = (invoice: InvoiceWithCase) => {
+    const days = overdueDaysOf(invoice.date);
+    if (days <= 0) return { key: "current", label: "Current" };
+    if (days <= 30) return { key: "1-30", label: "1–30 Days" };
+    if (days <= 60) return { key: "31-60", label: "31–60 Days" };
+    if (days <= 90) return { key: "61-90", label: "61–90 Days" };
+    if (days <= 120) return { key: "91-120", label: "91–120 Days" };
+    return { key: "120+", label: "120+ Days" };
+  };
+  const rows: DetailRecord[] = [];
+  for (const invoice of invoices.filter((item) => item.status !== "Paid")) {
+    const bucket = bucketOf(invoice);
+    rows.push({
+      typeKey: bucket.key,
+      typeLabel: bucket.label,
+      reference: invoice.invoiceNo,
+      description: invoiceDescription(invoice, matterByCaseId),
+      value: amount(invoice.amount),
+      timestamp: invoice.createdAt || invoice.updatedAt,
+      doneBy: invoiceActor(invoice, matterByCaseId),
+    });
+  }
+  return rows;
+};
+const PROFITABILITY_TYPES: DetailType[] = [
+  { key: "profit", label: "Matter Profit", chipClass: GREEN_CHIP },
+  { key: "revenue", label: "Matter Revenue", chipClass: BLUE_CHIP },
+  { key: "costs", label: "Direct Costs", chipClass: AMBER_CHIP },
+  { key: "margin", label: "Profit Margin", chipClass: INDIGO_CHIP },
+];
+
+const CASH_FLOW_TYPES: DetailType[] = [
+  { key: "inflows", label: "Cash Inflows", chipClass: GREEN_CHIP },
+  { key: "outflows", label: "Cash Outflows", chipClass: AMBER_CHIP },
+];
+
+const EXPENSE_TYPES: DetailType[] = [
+  { key: "client", label: "Direct Matter Costs", chipClass: AMBER_CHIP },
+  { key: "internal", label: "Operating Expenses", chipClass: AMBER_CHIP },
+];
+
+const REMUNERATION_TYPES: DetailType[] = [
+  { key: "fee-earned", label: "Fee Earned", chipClass: GREEN_CHIP },
+  { key: "revenue", label: "Revenue Attributed", chipClass: BLUE_CHIP },
+  { key: "firm-retained", label: "Firm Retained", chipClass: INDIGO_CHIP },
+  { key: "contribution", label: "Contribution Margin", chipClass: GREEN_CHIP },
+];
+
+const buildProfitabilityRecords = (
+  cases: CaseData[],
+  invoices: InvoiceWithCase[],
+  expenses: PettyCashExpense[],
+  matterByCaseId: Map<string, CaseData>,
+): DetailRecord[] => {
+  const rows: DetailRecord[] = [];
+  for (const matter of cases) {
+    const key = String(matter._id);
+    const collected = invoices
+      .filter(
+        (invoice) =>
+          String(invoice.caseId) === key && invoice.status === "Paid",
+      )
+      .reduce((sum, invoice) => sum + amount(invoice.amount), 0);
+    const costs = expenses
+      .filter(
+        (expense) =>
+          expense.caseId &&
+          String(expense.caseId) === key &&
+          expense.chargeType === "client",
+      )
+      .reduce((sum, expense) => sum + expenseNet(expense), 0);
+    const profit = collected - costs;
+    const margin = collected > 0 ? (profit / collected) * 100 : null;
+    const base = {
+      reference: matter.caseNo,
+      description: matter.parties,
+      timestamp: matter.updatedAt || matter.createdAt,
+      doneBy: matterActorLabel(matter) || "System",
+    };
+    rows.push({ ...base, typeKey: "profit", typeLabel: "Matter Profit", value: profit });
+    rows.push({ ...base, typeKey: "revenue", typeLabel: "Matter Revenue", value: collected });
+    rows.push({ ...base, typeKey: "costs", typeLabel: "Direct Costs", value: costs });
+    rows.push({
+      ...base,
+      typeKey: "margin",
+      typeLabel: "Profit Margin",
+      value: margin === null ? 0 : margin,
+      valueText: margin === null ? "—" : `${Math.round(margin)}%`,
+    });
+  }
+  return rows;
+};
+
+const buildCashFlowRecords = (
+  invoices: InvoiceWithCase[],
+  expenses: PettyCashExpense[],
+  matterByCaseId: Map<string, CaseData>,
+): DetailRecord[] => [
+  ...invoices
+    .filter((invoice) => invoice.status === "Paid")
+    .map((invoice) => ({
+      typeKey: "inflows",
+      typeLabel: "Cash Inflows",
+      reference: invoice.invoiceNo,
+      description: invoiceDescription(invoice, matterByCaseId),
+      value: amount(invoice.amount),
+      timestamp: invoice.updatedAt || invoice.createdAt,
+      doneBy: invoiceActor(invoice, matterByCaseId),
+    })),
+  ...expenses.map((expense) => ({
+    typeKey: "outflows",
+    typeLabel: "Cash Outflows",
+    reference: expense.receiptRef || expense.expenseId || "Expense",
+    description: expense.title,
+    value: expenseNet(expense),
+    timestamp: expense.createdAt,
+    doneBy: expense.createdByName || "System",
+  })),
+];
+
+const buildExpenseRecords = (
+  expenses: PettyCashExpense[],
+): DetailRecord[] => {
+  const rows: DetailRecord[] = [];
+  const pushEntry = (expense: PettyCashExpense, clientCharged: boolean) => {
+    rows.push({
+      typeKey: clientCharged ? "client" : "internal",
+      typeLabel: clientCharged ? "Direct Matter Costs" : "Operating Expenses",
+      reference: expense.receiptRef || expense.expenseId || "Expense",
+      description: expense.caseNoSnapshot
+        ? `${expense.title} — ${expense.caseNoSnapshot}`
+        : expense.title,
+      value: expenseNet(expense),
+      timestamp: expense.createdAt,
+      doneBy: expense.createdByName || "System",
+    });
+  };
+  for (const expense of expenses) pushEntry(expense, expense.chargeType === "client");
+  return rows;
+};
+
+const buildRemunerationRecords = (
+  report: FirmReportResponse | null,
+): DetailRecord[] => {
+  const rows: DetailRecord[] = [];
+  for (const member of report?.team || []) {
+    const base = {
+      reference: member.name,
+      description: member.role,
+      doneBy: member.name,
+    };
+    rows.push({
+      ...base,
+      typeKey: "fee-earned",
+      typeLabel: "Fee Earned",
+      value: member.earnedFees || member.revenueAttributed || 0,
+    });
+    rows.push({
+      ...base,
+      typeKey: "revenue",
+      typeLabel: "Revenue Attributed",
+      value: member.revenueAttributed || 0,
+    });
+    rows.push({
+      ...base,
+      typeKey: "firm-retained",
+      typeLabel: "Firm Retained",
+      value: member.firmRetainedEarnings || 0,
+    });
+    rows.push({
+      ...base,
+      typeKey: "contribution",
+      typeLabel: "Contribution Margin",
+      value: member.contributionMargin || 0,
+      valueText: `${Math.round(member.contributionMargin || 0)}%`,
+    });
+  }
+  return rows;
+};
+const buildDetailConfig = (
+  view: BillingFinanceView,
+  data: {
+    cases: CaseData[];
+    invoices: InvoiceWithCase[];
+    expenses: PettyCashExpense[];
+    report: FirmReportResponse | null;
+    matterByCaseId: Map<string, CaseData>;
+  },
+): { records: DetailRecord[]; types: DetailType[]; defaultType: string } | null => {
+  const { cases, invoices, expenses, report, matterByCaseId } = data;
+  switch (view) {
+    case "financial-dashboard":
+      return {
+        types: FIN_DASH_TYPES,
+        records: buildFinancialDashboardRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: "all",
+      };
+    case "contract-value":
+      return {
+        types: FIN_DASH_TYPES,
+        records: buildFinancialDashboardRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: "contract-value",
+      };
+    case "total-collected":
+      return {
+        types: FIN_DASH_TYPES,
+        records: buildFinancialDashboardRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: "total-collected",
+      };
+    case "outstanding":
+    case "collections-outstanding":
+      return {
+        types: FIN_DASH_TYPES,
+        records: buildFinancialDashboardRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: "outstanding",
+      };
+    case "direct-matter-costs":
+      return {
+        types: FIN_DASH_TYPES,
+        records: buildFinancialDashboardRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: "direct-matter-costs",
+      };
+    case "operating-expenses":
+      return {
+        types: FIN_DASH_TYPES,
+        records: buildFinancialDashboardRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: "operating-expenses",
+      };
+    case "gross-profit":
+      return {
+        types: FIN_DASH_TYPES,
+        records: buildFinancialDashboardRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: "gross-profit",
+      };
+    case "invoicing":
+      return {
+        types: INVOICING_TYPES,
+        records: buildInvoicingRecords(invoices, matterByCaseId),
+        defaultType: "all",
+      };
+    case "collections":
+      return {
+        types: COLLECTIONS_TYPES,
+        records: buildCollectionsRecords(invoices, matterByCaseId),
+        defaultType: "all",
+      };
+    case "profitability":
+    case "matter-profitability":
+      return {
+        types: PROFITABILITY_TYPES,
+        records: buildProfitabilityRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: view === "matter-profitability" ? "profit" : "all",
+      };
+    case "gross-profit-margin":
+      return {
+        types: PROFITABILITY_TYPES,
+        records: buildProfitabilityRecords(cases, invoices, expenses, matterByCaseId),
+        defaultType: "margin",
+      };
+    case "cash-flow":
+      return {
+        types: CASH_FLOW_TYPES,
+        records: buildCashFlowRecords(invoices, expenses, matterByCaseId),
+        defaultType: "all",
+      };
+    case "expenses":
+    case "expense-direct-costs":
+    case "expense-operating":
+      return {
+        types: EXPENSE_TYPES,
+        records: buildExpenseRecords(expenses),
+        defaultType:
+          view === "expense-direct-costs"
+            ? "client"
+            : view === "expense-operating"
+              ? "internal"
+              : "all",
+      };
+    case "remuneration":
+    case "fee-earned":
+    case "by-staff":
+    case "staff-profitability":
+      return {
+        types: REMUNERATION_TYPES,
+        records: buildRemunerationRecords(report),
+        defaultType:
+          view === "fee-earned" || view === "by-staff"
+            ? "fee-earned"
+            : view === "staff-profitability"
+              ? "revenue"
+              : "all",
+      };
+    default:
+      return null;
+  }
+};
 
 function FinanceTable({
   view,
@@ -1313,173 +1679,28 @@ function FinanceTable({
   expenses,
   report,
   invoices,
-  period,
 }: {
   view: BillingFinanceView;
   cases: CaseData[];
   expenses: PettyCashExpense[];
   report: FirmReportResponse | null;
   invoices: InvoiceWithCase[];
-  period: { from: string; to: string } | null;
 }) {
-  const rows =
-    view === "financial-dashboard"
-      ? []
-      : view === "expenses" ||
-    view === "expense-direct-costs" ||
-    view === "expense-operating"
-      ? expenses
-          .filter((expense) =>
-            view === "expense-direct-costs"
-              ? expense.chargeType === "client"
-              : view === "expense-operating"
-                ? expense.chargeType !== "client"
-                : true,
-          )
-          .map((expense) => ({
-            label: expense.title,
-            detail: `${expense.date} • ${expense.category || "Unclassified"} • ${expense.chargeType === "client" ? "Client" : "Internal"}`,
-            value: money(
-              Math.max(
-                0,
-                amount(expense.amount) - amount(expense.refundAmount),
-              ),
-            ),
-            date: expense.date,
-            timestamp: expense.createdAt,
-            actor: expense.createdByName,
-            reference:
-              expense.receiptRef || expense.caseNoSnapshot || "No reference",
-          }))
-      : view === "staff-profitability" ||
-          view === "fee-earned" ||
-          view === "by-staff"
-        ? (report?.team || []).map((member) => ({
-            label: member.name,
-            detail: member.role,
-            value: money(member.earnedFees || member.revenueAttributed || 0),
-            date: "Period total",
-            timestamp: undefined,
-            actor: member.name,
-            reference: `${member.tasksCompleted} tasks`,
-          }))
-        : cases.map((matter) => {
-            const matterInvoices = invoices.filter(
-              (invoice) => String(invoice.caseId) === String(matter._id),
-            );
-            const matterBilled = matterInvoices.reduce(
-              (sum, invoice) => sum + amount(invoice.amount),
-              0,
-            );
-            const matterCollected = matterInvoices
-              .filter((invoice) => invoice.status === "Paid")
-              .reduce((sum, invoice) => sum + amount(invoice.amount), 0);
-            return {
-              label: matter.caseNo,
-              detail: matter.parties,
-              value: money(
-                view === "contract-value"
-                  ? Math.max(
-                      amount(matter.workflowProgress?.plannedValue?.amount),
-                      amount(matter.budget),
-                    )
-                  : view === "total-collected"
-                    ? matterCollected
-                    : matterBilled,
-              ),
-              date: matter.updatedAt || matter.createdAt || "Date unavailable",
-              timestamp: matter.updatedAt || matter.createdAt,
-              actor: matterActorLabel(matter) || "System",
-              reference: matter.status || "Status unavailable",
-            };
-          });
-  const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(rows.length / 10));
-  const visibleRows = rows.slice((page - 1) * 10, page * 10);
-  useEffect(() => setPage(1), [view, rows.length]);
-
-  return view === "financial-dashboard" ? (
-    <FinancialDashboardDetailTable
-      cases={cases}
-      invoices={invoices}
-      expenses={expenses}
+  const matterByCaseId = makeMatterIndex(cases);
+  const config = buildDetailConfig(view, {
+    cases,
+    invoices,
+    expenses,
+    report,
+    matterByCaseId,
+  });
+  if (!config) return null;
+  return (
+    <DetailTable
+      key={view}
+      records={config.records}
+      types={config.types}
+      defaultType={config.defaultType}
     />
-  ) : (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-            <tr>
-              <th className="px-5 py-3">#</th>
-              <th className="px-5 py-3">Record</th>
-              <th className="px-5 py-3">Details</th>
-              <th className="px-5 py-3">Value</th>
-              <th className="px-5 py-3">Date</th>
-              <th className="px-5 py-3">Timestamp</th>
-              <th className="px-5 py-3">Recorded By</th>
-              <th className="px-5 py-3">Reference</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="px-5 py-10 text-center text-gray-500"
-                >
-                  No supporting records are available.
-                </td>
-              </tr>
-            ) : (
-              visibleRows.map((row, index) => (
-                <tr
-                  key={`${row.label}-${index}`}
-                  className="border-t border-gray-100"
-                >
-                  <td className="px-5 py-4 text-gray-500">
-                    {(page - 1) * 10 + index + 1}
-                  </td>
-                  <td className="px-5 py-4 font-medium text-gray-900">
-                    {row.label || "Unavailable"}
-                  </td>
-                  <td className="px-5 py-4 text-gray-600">
-                    {row.detail || "Unavailable"}
-                  </td>
-                  <td className="px-5 py-4 font-semibold text-gray-900">
-                    {row.value}
-                  </td>
-                  <td className="px-5 py-4">{row.date}</td>
-                  <td className="px-5 py-4">
-                    {row.timestamp
-                      ? new Date(row.timestamp).toLocaleString()
-                      : "Timestamp unavailable"}
-                  </td>
-                  <td className="px-5 py-4">
-                    {row.actor || "Actor unavailable"}
-                  </td>
-                  <td className="px-5 py-4 text-gray-600">{row.reference}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-      {rows.length > 0 && (
-        <Pagination
-          page={page}
-          pages={totalPages}
-          total={rows.length}
-          onChange={setPage}
-        />
-      )}
-    </div>
   );
 }
-
-const matterActorLabel = (matter: CaseData) =>
-  matter.caseAssignments?.initiator ||
-  matter.caseAssignments?.reviewer ||
-  matter.caseAssignments?.signerApprover ||
-  matter.assignedTo ||
-  matter.takeRequestState?.decisionByName ||
-  "";
