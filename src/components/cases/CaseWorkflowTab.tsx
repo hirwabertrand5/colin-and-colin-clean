@@ -487,7 +487,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                           {isDone ? <span className="text-white text-xs">✓</span> : null}
                         </div>
                       )}
-                      <div className={`min-w-0 flex-1 text-sm ${isDone ? 'text-gray-500 line-through' : 'text-gray-700 dark:text-gray-200'}`}>
+                      <div className={`min-w-0 flex-1 text-sm ${isDone ? 'text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>
                         {label}
                       </div>
                       {canManageActions ? (

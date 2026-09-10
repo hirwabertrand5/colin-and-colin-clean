@@ -157,6 +157,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   // Checklist
   const [newChecklistItem, setNewChecklistItem] = useState('');
   const [checklistLoading, setChecklistLoading] = useState(false);
+  const [checklistBusyKey, setChecklistBusyKey] = useState('');
   const [qualityScoreDraft, setQualityScoreDraft] = useState('');
   const [qualityScoreLoading, setQualityScoreLoading] = useState(false);
 
@@ -488,10 +489,17 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   // Checklist
   // --------------------
   const refreshWorkflowContext = async (caseId: string) => {
-    const [workflowResult, invoicesResult] = await Promise.allSettled([
+    // Also refresh the case: the toggle/complete endpoints persist workflowProgress and
+    // billingSettings server-side, so pulling the case keeps the progress bar / fees in sync.
+    const [caseResult, workflowResult, invoicesResult] = await Promise.allSettled([
+      getCaseById(caseId),
       getWorkflowForCase(caseId),
       getInvoicesForCase(caseId),
     ]);
+
+    if (caseResult.status === 'fulfilled') {
+      setCaseData(caseResult.value);
+    }
 
     if (workflowResult.status === 'fulfilled') {
       setWorkflowInstance(workflowResult.value);
@@ -504,12 +512,50 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
   const onToggleChecklist = async (item: DerivedChecklistItem | TaskChecklistItem) => {
     if (!task?._id) return;
+
+    // Workflow-derived key actions are shared with the case workspace: flip the checkbox
+    // optimistically so it responds instantly, persist with a single PATCH, then re-sync in the
+    // background. Never block the UI on the extra workflow/case/invoice round-trips.
+    if (
+      workflowChecklistItems.length > 0 &&
+      caseData?._id &&
+      'stepKey' in item &&
+      item.stepKey &&
+      typeof item.actionIndex === 'number'
+    ) {
+      const snapshot = workflowInstance;
+      if (!snapshot) return;
+      setChecklistBusyKey(item.id);
+      setError('');
+      setWorkflowInstance({
+        ...snapshot,
+        steps: snapshot.steps.map((s) =>
+          s.stepKey === item.stepKey
+            ? {
+                ...s,
+                actions: (s.actions || []).map((a, i) =>
+                  i === item.actionIndex ? { ...a, done: !Boolean(a.done) } : a
+                ),
+              }
+            : s
+        ),
+      });
+      try {
+        await toggleWorkflowStepAction(caseData._id, item.stepKey, item.actionIndex);
+        setChecklistBusyKey('');
+        void refreshWorkflowContext(task.caseId);
+      } catch (err: any) {
+        setWorkflowInstance(snapshot); // revert the optimistic flip
+        setChecklistBusyKey('');
+        setError(err.message || 'Failed to update checklist');
+      }
+      window.dispatchEvent(new CustomEvent('task-report-updated', { detail: { taskId: task._id } }));
+      return;
+    }
+
     try {
       setChecklistLoading(true);
-      if (workflowChecklistItems.length > 0 && caseData?._id && 'stepKey' in item && item.stepKey && typeof item.actionIndex === 'number') {
-        await toggleWorkflowStepAction(caseData._id, item.stepKey, item.actionIndex);
-        await refreshWorkflowContext(task.caseId);
-      } else if ('_id' in item) {
+      if ('_id' in item) {
         const updated = await toggleChecklistItem(task._id, item._id);
         setTask(updated);
       }
@@ -1061,7 +1107,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                         type="checkbox"
                         checked={item.completed}
                         onChange={() => onToggleChecklist(item)}
-                        disabled={!canToggleChecklist || checklistLoading}
+                        disabled={!canToggleChecklist || checklistLoading || checklistBusyKey === item.id}
                         className="mt-1 h-4 w-4 rounded border-gray-300"
                       />
                       <div className="min-w-0 flex-1">
