@@ -151,22 +151,6 @@ const getPlannedAmount = (caseData?: CaseData | null) =>
 const getPlannedCurrency = (caseData?: CaseData | null) =>
   caseData?.workflowProgress?.plannedValue?.currency || caseData?.billingSettings?.currency || 'RWF';
 
-const calculateWorkflowActionProgress = (wf: WorkflowInstance | null, plannedAmount: number, currency: string) => {
-  const actions = (wf?.steps || []).flatMap((step) => step.actions || []);
-  const checked = actions.filter((action) => Boolean(action.done)).length;
-  const total = actions.length;
-  const percent = total > 0 ? Math.round((checked / total) * 100) : 0;
-  return {
-    checked,
-    total,
-    percent,
-    completedValue: {
-      amount: Math.round((plannedAmount * percent) / 100),
-      currency,
-    },
-  };
-};
-
 const getInvoiceStatusChip = (status: Invoice['status']) => {
   return status === 'Paid' ? 'bg-green-50 text-green-700' : 'bg-yellow-400 text-black';
 };
@@ -1571,56 +1555,17 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 canToggleActions={canWorkOnWorkflowActions}
                 canUpload={true}
                 onWorkflowChanged={async () => {
-                  if (!caseData._id) return;
-                  let latestCase: CaseData | null = null;
-                  let latestWf: WorkflowInstance | null = null;
-                  try {
-                    latestCase = await getCaseById(caseData._id);
-                  } catch {
-                    // ignore
-                  }
-                  try {
-                    latestWf = await getWorkflowForCase(caseData._id);
-                  } catch {
-                    // ignore
-                  }
-                  if (latestCase && latestWf) {
-                    const plannedAmount = getPlannedAmount(latestCase);
-                    const currency = getPlannedCurrency(latestCase);
-                    const progress = calculateWorkflowActionProgress(latestWf, plannedAmount, currency);
-                    // The workflow toggle/complete endpoints already persist workflowProgress and
-                    // billingSettings server-side. This extra updateCase sync is admin-only, so
-                    // only run it for privileged roles and never let a sync failure surface as an
-                    // error on the checklist. Otherwise non-admins (e.g. interns) would see
-                    // "Forbidden" even though their key action was toggled successfully.
-                    if (canManageCase) {
-                      try {
-                        const syncedCase = await updateCase(caseData._id, {
-                          workflowProgress: {
-                            ...(latestCase.workflowProgress || {}),
-                            percent: progress.percent,
-                            plannedValue: { amount: plannedAmount, currency },
-                            completedValue: progress.completedValue,
-                          },
-                          billingSettings: {
-                            ...(latestCase.billingSettings || {}),
-                            currency,
-                            prepaidTotal: 0,
-                            prepaidRemaining: 0,
-                            accruedUnbilled: progress.completedValue.amount,
-                          },
-                        });
-                        if (syncedCase) setCaseData(syncedCase);
-                      } catch {
-                        setCaseData(latestCase);
-                      }
-                    } else {
-                      setCaseData(latestCase);
-                    }
-                  } else if (latestCase) {
-                    setCaseData(latestCase);
-                  }
-                  if (latestWf) setWorkflowInstance(latestWf);
+                  if (!caseData?._id) return;
+                  // The workflow endpoints (toggle/complete/reopen/amend) already persist the case's
+                  // workflowProgress and billingSettings server-side, so this callback only needs to
+                  // re-sync local state. Run both fetches in parallel and keep it fire-and-forget so
+                  // the checklist stays instant.
+                  const [caseRes, wfRes] = await Promise.allSettled([
+                    getCaseById(caseData._id),
+                    getWorkflowForCase(caseData._id),
+                  ]);
+                  if (caseRes.status === 'fulfilled' && caseRes.value) setCaseData(caseRes.value);
+                  if (wfRes.status === 'fulfilled' && wfRes.value) setWorkflowInstance(wfRes.value);
                 }}
               />
             ) : (

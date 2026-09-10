@@ -92,13 +92,31 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
   const toggleAction = async (stepKey: string, index: number) => {
     if (!canToggleActions) return;
+    const snapshot = wf;
+    if (!snapshot) return;
+    const snapshotStep = snapshot.steps.find((s) => s.stepKey === stepKey);
+    const snapshotAction = Array.isArray(snapshotStep?.actions) ? snapshotStep.actions[index] : undefined;
+    if (snapshotAction === undefined) return;
+
+    const nextDone = !Boolean(snapshotAction.done);
+    // Optimistic flip: reflect the change instantly so the UI never waits on the network.
+    setWf({
+      ...snapshot,
+      steps: snapshot.steps.map((s) =>
+        s.stepKey === stepKey
+          ? { ...s, actions: (s.actions || []).map((a, i) => (i === index ? { ...a, done: nextDone } : a)) }
+          : s
+      ),
+    });
+    setBusyKey(`action:${stepKey}:${index}`);
+    setErr('');
     try {
-      setBusyKey(`action:${stepKey}:${index}`);
-      setErr('');
       const updated = await toggleWorkflowStepAction(caseId, stepKey, index);
       setWf(updated);
-      await onWorkflowChanged?.();
+      // Reconcile case progress in the background — never block the checkbox on extra round-trips.
+      void onWorkflowChanged?.();
     } catch (e: any) {
+      setWf(snapshot); // revert the optimistic flip
       setErr(e.message || 'Failed to update key action');
     } finally {
       setBusyKey('');
@@ -133,8 +151,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           ? await addWorkflowStepAction(caseId, actionEditor.stepKey, text, actionEditor.position)
           : await updateWorkflowStepAction(caseId, actionEditor.stepKey, Number(actionEditor.index), { text });
       setWf(updated);
-      await onWorkflowChanged?.();
       setActionEditor(null);
+      void onWorkflowChanged?.();
     } catch (e: any) {
       setErr(e.message || 'Failed to save key action');
     } finally {
@@ -149,7 +167,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await deleteWorkflowStepAction(caseId, stepKey, index);
       setWf(updated);
-      await onWorkflowChanged?.();
+      void onWorkflowChanged?.();
     } catch (e: any) {
       setErr(e.message || 'Failed to delete key action');
     } finally {
@@ -164,7 +182,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await completeWorkflowStep(caseId, stepKey);
       setWf(updated);
-      await onWorkflowChanged?.();
+      void onWorkflowChanged?.();
     } catch (e: any) {
       setErr(e.message || 'Failed to complete step');
     } finally {
@@ -179,7 +197,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await reopenWorkflowStep(caseId, stepKey);
       setWf(updated);
-      await onWorkflowChanged?.();
+      void onWorkflowChanged?.();
     } catch (e: any) {
       setErr(e.message || 'Failed to reopen step');
     } finally {
@@ -213,7 +231,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await amendWorkflowStepDeadline(caseId, stepKey, selected.toISOString(), amendReason);
       setWf(updated);
-      await onWorkflowChanged?.();
+      void onWorkflowChanged?.();
       setAmendOpenFor('');
       setAmendDate('');
       setAmendReason('');
