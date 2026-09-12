@@ -64,7 +64,7 @@ export interface Prospect {
   engagementNotes?: string;
   conversionReason?: string;
   assignedTo: string | { _id: string; name: string; email?: string };
-  createdBy: string;
+  createdBy?: string | { _id: string; name: string; email?: string } | null;
   isActive: boolean;
   convertedToMatters?: string;
   createdAt: Date;

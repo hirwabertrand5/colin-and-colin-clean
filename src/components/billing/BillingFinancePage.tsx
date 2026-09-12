@@ -241,6 +241,86 @@ function LoadingSkeleton() {
   );
 }
 
+// ---------------- Sorting helpers ----------------
+type SortDir = "asc" | "desc";
+
+function SortableHeader({
+  label,
+  column,
+  sortKey,
+  sortDir,
+  onSort,
+  className = "px-5 py-3.5 font-medium",
+}: {
+  label: string;
+  column: string;
+  sortKey: string;
+  sortDir: SortDir;
+  onSort: (column: string) => void;
+  className?: string;
+}) {
+  const active = sortKey === column;
+  return (
+    <th
+      className={`${className} select-none cursor-pointer`}
+      onClick={() => onSort(column)}
+      title={`Sort ${label.toLowerCase()} (currently ${sortDir === "asc" ? "ascending" : "descending"})`}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span
+          className={active ? "text-gray-800" : "text-gray-300"}
+          aria-hidden="true"
+        >
+          {active ? (sortDir === "asc" ? "▲" : "▼") : "▲▼"}
+        </span>
+      </span>
+    </th>
+  );
+}
+
+const compareCellValues = (a: unknown, b: unknown) => {
+  if (a === b) return 0;
+  if (a === null || a === undefined || a === "") return 1;
+  if (b === null || b === undefined || b === "") return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+};
+
+const sortRows = <T,>(
+  rows: T[],
+  key: string,
+  dir: SortDir,
+  valueOf: (row: T) => unknown,
+): T[] => {
+  if (!key) return rows;
+  const copy = [...rows];
+  copy.sort((a, b) => {
+    const cmp = compareCellValues(valueOf(a), valueOf(b));
+    return dir === "asc" ? cmp : -cmp;
+  });
+  return copy;
+};
+
+const invoiceSortValueOf = (invoice: InvoiceWithCase, key: string): unknown => {
+  switch (key) {
+    case "invoiceNo":
+      return invoice.invoiceNo;
+    case "case":
+      return `${invoice.case?.caseNo || ""} ${invoice.case?.parties || ""}`;
+    case "amount":
+      return amount(invoice.amount);
+    case "status":
+      return invoice.status || "";
+    case "date":
+      return invoice.date || invoice.createdAt || "";
+    case "recorded":
+      return invoice.createdAt || "";
+    default:
+      return invoice.invoiceNo;
+  }
+};
+
 function Pagination({
   page,
   pages,
@@ -305,6 +385,8 @@ export default function BillingFinancePage({
   const [report, setReport] = useState<FirmReportResponse | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [dateRange, setDateRange] = useState<FirmReportRange>("ytd");
   const [customFrom, setCustomFrom] = useState("");
@@ -312,6 +394,8 @@ export default function BillingFinancePage({
   const [period, setPeriod] = useState<{ from: string; to: string } | null>(
     null,
   );
+  const [invoiceSortKey, setInvoiceSortKey] = useState("date");
+  const [invoiceSortDir, setInvoiceSortDir] = useState<SortDir>("desc");
   const [classificationPath, setClassificationPath] = useState<string[]>([]);
   const permitted = managementRoles.includes(userRole);
   const title = titles[view];
@@ -320,55 +404,69 @@ export default function BillingFinancePage({
     if (!permitted) return;
     if (dateRange === "custom" && (!customFrom || !customTo)) {
       setLoading(false);
-      setPeriod(null);
+      setRefreshing(false);
       return;
     }
     let mounted = true;
-    (async () => {
-      try {
-        setLoading(true);
-        const firmReport = await getFirmReports({
-          range: dateRange,
-          from: dateRange === "custom" ? customFrom : undefined,
-          to: dateRange === "custom" ? customTo : undefined,
-          basis: "invoiceDate",
-        });
-        const { from, to } = firmReport.range;
-        const [billing, invoiceData, caseData, funds] = await Promise.all([
-          getBillingSummary({ from, to }),
-          listInvoices({ from, to }),
-          getAllCases(),
-          listPettyCashFunds().catch(() => []),
-        ]);
-        const expenseData = (
-          await Promise.all(
-            funds.map((fund) => listExpensesForFund(fund._id).catch(() => [])),
-          )
-        ).flat();
-        if (!mounted) return;
-        setSummary(billing);
-        setInvoices(invoiceData);
-        setCases(
-          caseData.filter((matter) =>
-            isWithinRange(matter.updatedAt || matter.createdAt, from, to),
-          ),
-        );
-        setExpenses(
-          expenseData.filter((expense) =>
-            isWithinRange(expense.date, from, to),
-          ),
-        );
-        setReport(firmReport);
-        setPeriod({ from, to });
-      } catch (loadError: any) {
-        if (mounted)
-          setError(loadError?.message || "Failed to load finance data.");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
+    const timer = setTimeout(
+      () => {
+        (async () => {
+          try {
+            setLoading(true);
+            setRefreshing(ready);
+            setError("");
+            const firmReport = await getFirmReports({
+              range: dateRange,
+              from: dateRange === "custom" ? customFrom : undefined,
+              to: dateRange === "custom" ? customTo : undefined,
+              basis: "invoiceDate",
+            });
+            const { from, to } = firmReport.range;
+            const [billing, invoiceData, caseData, funds] = await Promise.all([
+              getBillingSummary({ from, to }),
+              listInvoices({ from, to }),
+              getAllCases(),
+              listPettyCashFunds().catch(() => []),
+            ]);
+            const expenseData = (
+              await Promise.all(
+                funds.map((fund) =>
+                  listExpensesForFund(fund._id).catch(() => []),
+                ),
+              )
+            ).flat();
+            if (!mounted) return;
+            setSummary(billing);
+            setInvoices(invoiceData);
+            setCases(
+              caseData.filter((matter) =>
+                isWithinRange(matter.updatedAt || matter.createdAt, from, to),
+              ),
+            );
+            setExpenses(
+              expenseData.filter((expense) =>
+                isWithinRange(expense.date, from, to),
+              ),
+            );
+            setReport(firmReport);
+            setPeriod({ from, to });
+            setReady(true);
+          } catch (loadError: any) {
+            if (mounted)
+              setError(loadError?.message || "Failed to load finance data.");
+          } finally {
+            if (mounted) {
+              setLoading(false);
+              setRefreshing(false);
+            }
+          }
+        })();
+      },
+      dateRange === "custom" ? 350 : 0,
+    );
     return () => {
       mounted = false;
+      clearTimeout(timer);
     };
   }, [permitted, dateRange, customFrom, customTo]);
 
@@ -413,9 +511,30 @@ export default function BillingFinancePage({
         .slice(0, 10);
     return classificationInvoices;
   }, [classificationInvoices, view]);
-  const pages = Math.max(1, Math.ceil(filteredInvoices.length / 10));
-  const visibleInvoices = filteredInvoices.slice((page - 1) * 10, page * 10);
-  useEffect(() => setPage(1), [classificationPath, view]);
+  const sortedInvoices = useMemo(
+    () =>
+      sortRows(
+        filteredInvoices,
+        invoiceSortKey,
+        invoiceSortDir,
+        (invoice) => invoiceSortValueOf(invoice, invoiceSortKey),
+      ),
+    [filteredInvoices, invoiceSortKey, invoiceSortDir],
+  );
+  const handleInvoiceSort = (column: string) => {
+    if (invoiceSortKey === column) {
+      setInvoiceSortDir(invoiceSortDir === "asc" ? "desc" : "asc");
+    } else {
+      setInvoiceSortKey(column);
+      setInvoiceSortDir("asc");
+    }
+  };
+  const pages = Math.max(1, Math.ceil(sortedInvoices.length / 10));
+  const visibleInvoices = sortedInvoices.slice((page - 1) * 10, page * 10);
+  useEffect(
+    () => setPage(1),
+    [classificationPath, view, invoiceSortKey, invoiceSortDir],
+  );
   useEffect(
     () => setPage((currentPage) => Math.min(currentPage, pages)),
     [pages],
@@ -704,7 +823,7 @@ export default function BillingFinancePage({
         </p>
       </div>
     );
-  if (loading) return <LoadingSkeleton />;
+  if (loading && !ready) return <LoadingSkeleton />;
 
   const sectionViewNames = new Set([
     "financial-dashboard",
@@ -789,6 +908,12 @@ export default function BillingFinancePage({
             {period
               ? `Period: ${period.from} → ${period.to}`
               : "Select a reporting period."}
+            {refreshing && (
+              <span className="ml-2 inline-flex animate-pulse items-center gap-1 text-xs font-medium text-indigo-600">
+                <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                Updating…
+              </span>
+            )}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -897,8 +1022,11 @@ export default function BillingFinancePage({
           invoices={visibleInvoices}
           page={page}
           pages={pages}
-          total={filteredInvoices.length}
+          total={sortedInvoices.length}
           onPageChange={setPage}
+          sortKey={invoiceSortKey}
+          sortDir={invoiceSortDir}
+          onSort={handleInvoiceSort}
         />
       ) : hasSupportedTable ? (
         <FinanceTable
@@ -925,12 +1053,18 @@ function InvoiceTable({
   pages,
   total,
   onPageChange,
+  sortKey,
+  sortDir,
+  onSort,
 }: {
   invoices: InvoiceWithCase[];
   page: number;
   pages: number;
   total: number;
   onPageChange: (page: number) => void;
+  sortKey: string;
+  sortDir: SortDir;
+  onSort: (column: string) => void;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
@@ -944,12 +1078,12 @@ function InvoiceTable({
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-5 py-3">#</th>
-                <th className="px-5 py-3">Invoice</th>
-                <th className="px-5 py-3">Matter / Client</th>
-                <th className="px-5 py-3">Amount</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Invoice Date</th>
-                <th className="px-5 py-3">Recorded</th>
+                <SortableHeader label="Invoice" column="invoiceNo" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-5 py-3" />
+                <SortableHeader label="Matter / Client" column="case" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-5 py-3" />
+                <SortableHeader label="Amount" column="amount" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-5 py-3" />
+                <SortableHeader label="Status" column="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-5 py-3" />
+                <SortableHeader label="Invoice Date" column="date" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-5 py-3" />
+                <SortableHeader label="Recorded" column="recorded" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-5 py-3" />
                 <th className="px-5 py-3">Recorded By</th>
               </tr>
             </thead>
@@ -1078,6 +1212,17 @@ function DetailTable({
 }) {
   const [measure, setMeasure] = useState(defaultType);
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState("");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const toggleSort = (column: string) => {
+    if (sortKey === column) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(column);
+      setSortDir("asc");
+    }
+  };
 
   const totals = new Map<string, { count: number; total: number }>();
   for (const record of records) {
@@ -1087,7 +1232,7 @@ function DetailTable({
     totals.set(record.typeKey, entry);
   }
 
-  const visibleRecords =
+  const baseRecords =
     measure === "all"
       ? [...records].sort((a, b) => {
           const orderA = types.findIndex((type) => type.key === a.typeKey);
@@ -1099,6 +1244,18 @@ function DetailTable({
       : records
           .filter((record) => record.typeKey === measure)
           .sort((a, b) => b.value - a.value);
+
+  const visibleRecords = sortRows(baseRecords, sortKey, sortDir, (record) =>
+    sortKey === "type"
+      ? record.typeLabel
+      : sortKey === "reference"
+        ? record.reference
+        : sortKey === "value"
+          ? record.value
+          : sortKey === "timestamp"
+            ? record.timestamp
+            : record.doneBy,
+  );
 
   const totalPages = Math.max(1, Math.ceil(visibleRecords.length / 12));
   const pageRecords = visibleRecords.slice((page - 1) * 12, page * 12);
@@ -1143,11 +1300,11 @@ return (
           <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
             <tr>
               <th className="px-5 py-3.5 font-medium">#</th>
-              <th className="px-5 py-3.5 font-medium">Type</th>
-              <th className="px-5 py-3.5 font-medium">Reference</th>
-              <th className="px-5 py-3.5 text-right font-medium">Value</th>
-              <th className="px-5 py-3.5 font-medium">Timestamp</th>
-              <th className="px-5 py-3.5 font-medium">Done By</th>
+              <SortableHeader label="Type" column="type" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortableHeader label="Reference" column="reference" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortableHeader label="Value" column="value" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="px-5 py-3.5 text-right font-medium" />
+              <SortableHeader label="Timestamp" column="timestamp" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortableHeader label="Done By" column="doneBy" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>

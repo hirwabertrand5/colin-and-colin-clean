@@ -16,6 +16,63 @@ const formatRwf = (n: number) => `RWF ${Math.round(n).toLocaleString('en-US')}`;
 
 const PAGE_SIZE = 5;
 
+type InvoiceSortDir = 'asc' | 'desc';
+
+function SortHeader({
+  label,
+  column,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  column: string;
+  sortKey: string;
+  sortDir: InvoiceSortDir;
+  onSort: (column: string) => void;
+}) {
+  const active = sortKey === column;
+  return (
+    <th
+      className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase select-none cursor-pointer hover:text-gray-900"
+      onClick={() => onSort(column)}
+      title={`Sort by ${label}`}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className={active ? 'text-gray-900' : 'text-gray-400'} aria-hidden="true">
+          {active ? (sortDir === 'asc' ? '▲' : '▼') : '▲▼'}
+        </span>
+      </span>
+    </th>
+  );
+}
+
+const compareInvoiceCells = (a: unknown, b: unknown): number => {
+  if (a === b) return 0;
+  if (a === null || a === undefined || a === '') return 1;
+  if (b === null || b === undefined || b === '') return -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+};
+
+const invoiceSortValue = (invoice: InvoiceWithCase, key: string): unknown => {
+  switch (key) {
+    case 'invoiceNo':
+      return invoice.invoiceNo;
+    case 'case':
+      return `${invoice.case?.caseNo || ''} ${invoice.case?.parties || ''}`;
+    case 'amount':
+      return Number(invoice.amount) || 0;
+    case 'status':
+      return invoice.status || '';
+    case 'date':
+      return invoice.date || '';
+    default:
+      return invoice.notes || '';
+  }
+};
+
 export default function InvoiceManagement({ userRole }: InvoiceManagementProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'Paid' | 'Pending'>('all');
@@ -27,6 +84,19 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
 
   // Pagination
   const [page, setPage] = useState(1);
+
+  // Sorting
+  const [sortKey, setSortKey] = useState('date');
+  const [sortDir, setSortDir] = useState<InvoiceSortDir>('desc');
+
+  const handleSort = (column: string) => {
+    if (sortKey === column) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(column);
+      setSortDir('asc');
+    }
+  };
 
   // Create invoice modal
   const [showCreate, setShowCreate] = useState(false);
@@ -184,14 +254,28 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
     URL.revokeObjectURL(url);
   };
 
+  const sortedInvoices = useMemo(() => {
+    const copy = [...invoices];
+    copy.sort((a, b) => {
+      const cmp = compareInvoiceCells(invoiceSortValue(a, sortKey), invoiceSortValue(b, sortKey));
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }, [invoices, sortKey, sortDir]);
+
   const paginatedInvoices = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
-    return invoices.slice(start, start + PAGE_SIZE);
-  }, [invoices, page]);
+    return sortedInvoices.slice(start, start + PAGE_SIZE);
+  }, [sortedInvoices, page]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortKey, sortDir]);
 
   if (!canAccessBilling(userRole)) {
     return (
@@ -292,12 +376,12 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Invoice</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Case</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Amount</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Status</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Date</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Notes</th>
+                  <SortHeader label="Invoice" column="invoiceNo" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Case" column="case" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Amount" column="amount" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Status" column="status" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Date" column="date" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+                  <SortHeader label="Notes" column="notes" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 </tr>
               </thead>
 

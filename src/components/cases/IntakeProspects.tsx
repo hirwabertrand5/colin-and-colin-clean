@@ -198,6 +198,40 @@ export default function IntakeProspects() {
 
   const getCurrentStageLabel = (prospect: Prospect) => prospect.stage || 'Inquiry';
 
+  const formatDoneAt = (value: unknown): string => {
+    if (!value) return '—';
+    const date = new Date(value as string | number | Date);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  };
+
+  const personNameOf = (value: unknown): string => {
+    if (!value) return '';
+    if (typeof value === 'string') return value.trim();
+    const maybeName = (value as { name?: unknown })?.name;
+    return typeof maybeName === 'string' ? maybeName.trim() : '';
+  };
+
+  const getDoneByName = (prospect: Prospect): string => {
+    const candidates: unknown[] = [
+      prospect.createdBy,
+      prospect.responsibleAssociate,
+      prospect.responsiblePartner,
+      prospect.assignedTo,
+    ];
+    for (const src of candidates) {
+      const name = personNameOf(src);
+      if (name) return name;
+    }
+    return '';
+  };
+
   const pageNumbers = useMemo(() => {
     return Array.from({ length: totalPages }, (_, index) => index + 1);
   }, [totalPages]);
@@ -302,11 +336,16 @@ export default function IntakeProspects() {
                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Legal Classification</th>
                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Estimated Fee Value</th>
                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Current Stage</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Done At</th>
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Done By</th>
                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {paginatedProspects.map((prospect, index) => (
+                  {paginatedProspects.map((prospect, index) => {
+                    const doneAt = formatDoneAt(prospect.createdAt || prospect.dateReceived || prospect.updatedAt);
+                    const doneByName = getDoneByName(prospect);
+                    return (
                     <tr key={prospect._id} className="align-top transition-colors hover:bg-gray-50/70 dark:hover:bg-gray-700/40">
                       <td className="px-4 py-4 text-sm font-semibold text-gray-500 dark:text-gray-400">
                         {(currentPage - 1) * PROSPECTS_PER_PAGE + index + 1}
@@ -321,9 +360,12 @@ export default function IntakeProspects() {
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{getLegalClassificationLabel(prospect)}</td>
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{formatEstimatedValue(prospect)}</td>
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{getCurrentStageLabel(prospect)}</td>
+                      <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{doneAt}</td>
+                      <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{doneByName || '—'}</td>
                       <td className="px-5 py-4">{getActionButton(prospect)}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
