@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CalendarPlus, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { TaskData } from '../../services/taskService';
 import {
   getWorkflowForCase,
   completeWorkflowStep,
@@ -26,21 +28,14 @@ type Props = {
   canToggleActions: boolean;
   canUpload: boolean;
   onWorkflowChanged?: () => void | Promise<void>;
+  tasks?: TaskData[];
+  currentUserName?: string;
+  currentUserEmail?: string;
 };
 
-const formatWorkflowStepFee = (step: WorkflowInstance['steps'][number]) => {
-  const currency = step.feeCurrency || 'RWF';
-  if (typeof step.feeRangeMin === 'number' && typeof step.feeRangeMax === 'number') {
-    return `${currency} ${Math.round(step.feeRangeMin).toLocaleString()} - ${Math.round(step.feeRangeMax).toLocaleString()}`;
-  }
-  if (typeof step.feeAmount === 'number') {
-    return `${currency} ${Math.round(step.feeAmount).toLocaleString()}`;
-  }
-  return step.feeText || 'No fee set';
-};
-
-export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged }: Props) {
+export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged, tasks, currentUserName, currentUserEmail }: Props) {
   void canUpload;
+  const navigate = useNavigate();
   const [wf, setWf] = useState<WorkflowInstance | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
@@ -90,6 +85,35 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     // eslint-disable-next-line
   }, [caseId]);
 
+  const goToTaskDetail = (actionText: string) => {
+    try {
+      const meName = String(currentUserName || '').trim().toLowerCase();
+      const meEmail = String(currentUserEmail || '').trim().toLowerCase();
+      if (!meName && !meEmail) return;
+      const mine = (tasks || []).filter((t) => {
+        if (String(t.caseId || '') !== String(caseId)) return false;
+        const assignee = String(t.assignee || '').trim().toLowerCase();
+        const supervisor = String(t.supervisor || '').trim().toLowerCase();
+        const identityMatch =
+          (meName && (assignee === meName || supervisor === meName)) ||
+          (meEmail && (assignee === meEmail || supervisor === meEmail));
+        return identityMatch && String(t.status || '').toLowerCase() !== 'completed';
+      });
+      if (!mine.length) return;
+      const wanted = String(actionText || '').trim().toLowerCase();
+      const byTitle = wanted
+        ? mine.find((t) => {
+            const title = String(t.title || '').trim().toLowerCase();
+            return title && (title.includes(wanted) || wanted.includes(title));
+          })
+        : undefined;
+      const target = byTitle || mine[0];
+      if (target?._id) navigate(`/tasks/${target._id}`);
+    } catch {
+      // Navigation is a best-effort convenience; never break the toggle flow.
+    }
+  };
+
   const toggleAction = async (stepKey: string, index: number) => {
     if (!canToggleActions) return;
     const snapshot = wf;
@@ -115,6 +139,9 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setWf(updated);
       // Reconcile case progress in the background — never block the checkbox on extra round-trips.
       void onWorkflowChanged?.();
+      // When the user ticks a key action on the case workspace, take them to the related task
+      // detail (their own assigned task on this matter) so they can complete and submit it.
+      if (nextDone) goToTaskDetail(snapshotAction?.text || '');
     } catch (e: any) {
       setWf(snapshot); // revert the optimistic flip
       setErr(e.message || 'Failed to update key action');
@@ -380,9 +407,6 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 {s.dueAt ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Due {formatDeadlineDateTime(s.dueAt)}</span>
                 ) : null}
-                <span className="text-xs text-gray-700 dark:text-gray-300 font-medium">
-                  Fee / range: {formatWorkflowStepFee(s)}
-                </span>
                 {s.slaMinutes ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Duration: {Math.round(s.slaMinutes / 60)}h</span>
                 ) : s.slaText ? (

@@ -222,7 +222,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const canManageDocuments = isAdminRole;
   const currentUser = useMemo(() => {
     try {
-      return JSON.parse(localStorage.getItem('user') || '{}') as { id?: string; _id?: string; name?: string; role?: string };
+      return JSON.parse(localStorage.getItem('user') || '{}') as { id?: string; _id?: string; name?: string; email?: string; role?: string };
     } catch {
       return {};
     }
@@ -284,21 +284,11 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   const canWorkOnWorkflowActions = useMemo(() => {
     if (!caseData?._id) return false;
-    if (canManageCase) return true;
     const meName = normalizeIdentity(currentUser?.name);
     const meEmail = normalizeIdentity(currentUser?.email);
-    if (!meName && !meEmail) return false;
-    if (caseMatchesAssignee(caseData, currentUser?.name) || caseMatchesAssignee(caseData, currentUser?.email)) return true;
-    return tasks.some((task) => {
-      const taskAssignee = normalizeIdentity(task.assignee);
-      const taskSupervisor = normalizeIdentity(task.supervisor);
-      const stageMatch = (task.taskStages || []).some((stage) => {
-        const staffMember = normalizeIdentity(stage.staffMember);
-        return staffMember && (staffMember === meName || staffMember === meEmail);
-      });
-      return [taskAssignee, taskSupervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
-    });
-  }, [caseData?._id, canManageCase, currentUser?.email, currentUser?.name, tasks]);
+    // Every signed-in user who can view the matter may tick key actions.
+    return Boolean(meName || meEmail);
+  }, [caseData?._id, currentUser?.email, currentUser?.name]);
 
   const [newTask, setNewTask] = useState<
     Omit<TaskData, '_id' | 'caseId' | 'createdAt' | 'updatedAt'> & { description?: string }
@@ -1554,6 +1544,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 canCompleteSteps={canManageCase}
                 canToggleActions={canWorkOnWorkflowActions}
                 canUpload={true}
+                tasks={tasks}
+                currentUserName={currentUser?.name}
+                currentUserEmail={currentUser?.email}
                 onWorkflowChanged={async () => {
                   if (!caseData?._id) return;
                   // The workflow endpoints (toggle/complete/reopen/amend) already persist the case's

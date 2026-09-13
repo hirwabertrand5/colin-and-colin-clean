@@ -215,17 +215,11 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const canToggleChecklist = useMemo(() => {
     if (!task) return false;
     if (isApprovedLocked) return false;
-    if (isManagingDirector) return true;
     const meName = normalizeIdentity(currentUser?.name);
     const meEmail = normalizeIdentity(currentUser?.email);
-    const assignee = normalizeIdentity(task.assignee);
-    const supervisor = normalizeIdentity(task.supervisor);
-    const stageMatch = sortedTaskStages.some((stage) => {
-      const staffMember = normalizeIdentity(stage.staffMember);
-      return Boolean(staffMember && (staffMember === meName || staffMember === meEmail));
-    });
-    return Boolean([assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch);
-  }, [sortedTaskStages, task, isManagingDirector, currentUser?.email, currentUser?.name, isApprovedLocked]);
+    // Every signed-in user may tick key actions / checklist items so work is never blocked.
+    return Boolean(meName || meEmail);
+  }, [task, isApprovedLocked, currentUser?.email, currentUser?.name]);
 
   const canSetQualityScore = useMemo(() => {
     if (!task) return false;
@@ -307,10 +301,22 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     return paidInvoices.reduce((sum, invoice) => sum + (Number(invoice.amount) || 0), 0);
   }, [invoices]);
 
-  const taskFeeCollected = useMemo(
-    () => Math.round((matterCollectedFee * workflowProgressPercentage) / 100),
-    [matterCollectedFee, workflowProgressPercentage]
+  const taskIsLetter = useMemo(
+    () => /letter/i.test(`${task?.title || ''} ${task?.description || ''}`),
+    [task?.title, task?.description]
   );
+
+  const matterContractValue = useMemo(() => {
+    const planned = Number(caseData?.workflowProgress?.plannedValue?.amount || 0);
+    const budget = Number(caseData?.budget || 0);
+    return planned > 0 ? planned : budget;
+  }, [caseData?.budget, caseData?.workflowProgress?.plannedValue?.amount]);
+
+  const taskFeeCollected = useMemo(() => {
+    // A letter task is worth 10% of the matter contract value; other tasks keep the progress-based formula.
+    if (taskIsLetter) return Math.round(matterContractValue * 0.1);
+    return Math.round((matterCollectedFee * workflowProgressPercentage) / 100);
+  }, [matterCollectedFee, workflowProgressPercentage, matterContractValue, taskIsLetter]);
 
   const formatMoney = (amount: number) =>
     `${billingCurrency} ${Math.round((Number(amount) || 0) * 100) / 100}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -1090,7 +1096,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                 <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Task Fee Collected</div>
                 <div className="mt-2 text-lg font-semibold text-green-700">{formatMoney(taskFeeCollected)}</div>
-                <div className="text-xs text-gray-500">Collected x workflow progress</div>
+                <div className="text-xs text-gray-500">{taskIsLetter ? 'Letter task · 10% of contract value' : 'Collected x workflow progress'}</div>
               </div>
             </div>
 

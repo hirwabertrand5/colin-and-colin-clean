@@ -207,6 +207,18 @@ const getTaskWorkflowProgressPercent = (matter: any, task: any) => {
   return getTaskChecklistCompletionPercent(task);
 };
 
+const LETTER_TASK_FEE_SHARE_PERCENT = 10;
+const isLetterTask = (task: any) =>
+  /letter/i.test(`${String(task?.title || '')} ${String(task?.description || '')}`);
+
+const getTaskFeeCollectedValue = (matter: any, task: any, collectedFee: number): number => {
+  // A task that involves writing a letter is worth 10% of the matter contract value.
+  if (isLetterTask(task)) {
+    return roundMoney(getContractValue(matter) * (LETTER_TASK_FEE_SHARE_PERCENT / 100));
+  }
+  return roundMoney(collectedFee * (getTaskWorkflowProgressPercent(matter, task) / 100));
+};
+
 const getTimelinessScore = (task: any) => {
   const taskStatus = String(task?.status || '').toLowerCase();
   const assignedAt = parseTaskDate(task?.startDate) || parseTaskDate(task?.createdAt) || parseTaskDate(task?.updatedAt) || parseTaskDate(task?.completedAt);
@@ -317,7 +329,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, allTaskLinks, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
       Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
-      Task.find(tasksByDateQuery).select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt checklist qualityScore').lean(),
+      Task.find(tasksByDateQuery).select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore').lean(),
       Task.find().select('caseId assignee supervisor').lean(),
       User.find({ isActive: { $ne: false } }).select('name role').lean(),
       Prospect.aggregate([
@@ -489,7 +501,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const matter = taskCaseMap.get(String(task.caseId || ''));
       const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
       const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
-      const taskFeeCollected = Math.round((collectedFee * (taskProgressPercent / 100)) * 100) / 100;
+      const taskFeeCollected = getTaskFeeCollectedValue(matter, task, collectedFee);
       const timeliness = getTimelinessScore(task);
       const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Math.max(0, Math.round(Number(task.qualityScore))) : null;
       const feeEarned =
@@ -558,8 +570,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .map((u) => {
         const name = String(u.name || '—').trim();
         const normalizedName = normalizeName(name);
+        const memberKey = baseNameFromLabel(name);
         const roleShare = roleEarningShare(u.role);
-        const taskCount = completedTasksByName.get(normalizedName) || 0;
+        const taskCount = completedTasksByName.get(memberKey) || 0;
         const prospectCount = prospectCountsByUser.get(String(u._id)) || 0;
         const reportCount = reportCountsByUser.get(String(u._id)) || 0;
         const assistantProductivity = roleShare.label.includes('Executive Assistant')
@@ -577,21 +590,21 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           assistantTasksCompleted: taskCount,
           prospectsCreated: prospectCount,
           reportsGenerated: reportCount,
-          invoicePaymentsReceived: Math.round((grossHandledByName.get(normalizedName) || 0) * 100) / 100,
-          earnedFees: Math.round((earnedByName.get(normalizedName) || 0) * 100) / 100,
-          revenueAttributed: Math.round((earnedByName.get(normalizedName) || 0) * 100) / 100,
-          grossFeesHandled: Math.round((grossHandledByName.get(normalizedName) || 0) * 100) / 100,
-          firmRetainedEarnings: Math.round((firmRetainedByName.get(normalizedName) || 0) * 100) / 100,
-          earlyTasks: earlyByName.get(normalizedName) || 0,
-          onTimeTasks: onTimeByName.get(normalizedName) || 0,
-          lateTasks: lateByName.get(normalizedName) || 0,
-          overdueTasks: overdueByName.get(normalizedName) || 0,
-          excellentTasks: excellentByName.get(normalizedName) || 0,
-          goodTasks: goodByName.get(normalizedName) || 0,
-          delayedTasks: delayedByName.get(normalizedName) || 0,
-          riskTasks: riskByName.get(normalizedName) || 0,
+          invoicePaymentsReceived: Math.round((grossHandledByName.get(memberKey) || 0) * 100) / 100,
+          earnedFees: Math.round((earnedByName.get(memberKey) || 0) * 100) / 100,
+          revenueAttributed: Math.round((earnedByName.get(memberKey) || 0) * 100) / 100,
+          grossFeesHandled: Math.round((grossHandledByName.get(memberKey) || 0) * 100) / 100,
+          firmRetainedEarnings: Math.round((firmRetainedByName.get(memberKey) || 0) * 100) / 100,
+          earlyTasks: earlyByName.get(memberKey) || 0,
+          onTimeTasks: onTimeByName.get(memberKey) || 0,
+          lateTasks: lateByName.get(memberKey) || 0,
+          overdueTasks: overdueByName.get(memberKey) || 0,
+          excellentTasks: excellentByName.get(memberKey) || 0,
+          goodTasks: goodByName.get(memberKey) || 0,
+          delayedTasks: delayedByName.get(memberKey) || 0,
+          riskTasks: riskByName.get(memberKey) || 0,
           averageTimeUsedPercent: (() => {
-            const values = usedPercentByName.get(normalizedName) || [];
+            const values = usedPercentByName.get(memberKey) || [];
             if (!values.length) return null;
             return Math.round((values.reduce((s, v) => s + v, 0) / values.length) * 10) / 10;
           })(),
@@ -1149,7 +1162,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         const keyActionsTotal = checklist.length;
         const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
         const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
-        const taskFeeCollected = roundMoney(collectedFee * (taskProgressPercent / 100));
+        const taskFeeCollected = getTaskFeeCollectedValue(matter, task, collectedFee);
         const timeliness = getTimelinessScore(task);
         const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Math.max(0, Math.round(Number(task.qualityScore))) : null;
         const feeEarned =

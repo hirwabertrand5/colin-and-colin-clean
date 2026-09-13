@@ -24,7 +24,7 @@ import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
 import { getAllTasks, TaskData } from '../../services/taskService';
-import { FirmReportDateBasis, getFirmReports, getMyProductivityEarningsReport, MyProductivityEarningsResponse } from '../../services/firmReportsService';
+import { FirmReportDateBasis, FirmReportRange, getFirmReports, getMyProductivityEarningsReport, MyProductivityEarningsResponse } from '../../services/firmReportsService';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import { baseNameFromLabel, computeMemberFeeEarnedFromRows, computeTaskFeeCollectedFromRows } from '../../utils/productivity';
 import './AssociateDashboard.css';
@@ -203,6 +203,8 @@ const safeNum = (value: unknown) => {
 };
 
 const formatRwf = (value: number) => `RWF ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatFees = (value: number) => `RWF ${Math.round(Number.isFinite(value) ? value : 0).toLocaleString('en-US')}`;
+
 const formatPeriodDate = (value?: string) => {
   if (!value) return 'N/A';
   const d = new Date(`${value}T00:00:00`);
@@ -333,7 +335,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const next30Days = useMemo(() => addDaysISO(today, 30), [today]);
   const meName = useMemo(() => baseNameFromLabel(me?.name), [me?.name]);
   const meId = me?._id || me?.id;
-  const earningsRange = 'monthly' as const;
+  const [earningsRange, setEarningsRange] = useState<FirmReportRange>('monthly');
   const earningsBasis: FirmReportDateBasis = 'invoiceDate';
 
   useEffect(() => {
@@ -379,9 +381,21 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     return () => {
       mounted = false;
     };
-  }, [next30Days, today]);
+  }, [earningsRange, next30Days, today]);
 
-  const visibleCaseIds = useMemo(() => new Set(tasks.map((task) => String(task.caseId || '')).filter(Boolean)), [tasks]);
+  const ownTasks = useMemo(
+    () =>
+      meName
+        ? tasks.filter((task) => baseNameFromLabel(task.assignee) === meName)
+        : tasks,
+    [meName, tasks],
+  );
+
+  const visibleCaseIds = useMemo(
+    () =>
+      new Set(ownTasks.map((task) => String(task.caseId || '')).filter(Boolean)),
+    [ownTasks],
+  );
 
   const authorisedCases = useMemo(() => {
     const scoped = cases.filter((matter) => {
@@ -392,34 +406,34 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
   const tasksByCase = useMemo(() => {
     const map = new Map<string, TaskData[]>();
-    tasks.forEach((task) => {
+    ownTasks.forEach((task) => {
       const caseId = String(task.caseId || '');
       if (!caseId) return;
       map.set(caseId, [...(map.get(caseId) || []), task]);
     });
     return map;
-  }, [tasks]);
+  }, [ownTasks]);
 
   const taskSignals = useMemo(() => {
-    const open = tasks.filter((task) => task.status !== 'Completed');
-    const completed = tasks.filter((task) => task.status === 'Completed');
+    const open = ownTasks.filter((task) => task.status !== 'Completed');
+    const completed = ownTasks.filter((task) => task.status === 'Completed');
     const dueSoon = open.filter((task) => task.dueDate >= today && task.dueDate <= addDaysISO(today, 7));
     const overdue = open.filter((task) => {
       const dueAt = getTaskDate(task.dueDate);
       return (dueAt ? dueAt.getTime() < Date.now() : task.dueDate < today) || getTimelinessBand(task, today) === 'late';
     });
-    const awaitingReview = tasks.filter(
+    const awaitingReview = ownTasks.filter(
       (task) => task.workflowStage === 'Awaiting Review' || (task.requiresApproval && task.approvalStatus === 'Pending')
     );
-    const awaitingExternal = tasks.filter((task) => task.workflowStage === 'Awaiting External Action');
-    const bandCounts = tasks.reduce(
+    const awaitingExternal = ownTasks.filter((task) => task.workflowStage === 'Awaiting External Action');
+    const bandCounts = ownTasks.reduce(
       (acc, task) => {
         acc[getTimelinessBand(task, today)] += 1;
         return acc;
       },
       { excellent: 0, good: 0, warning: 0, poor: 0, late: 0 } as Record<string, number>
     );
-    const scoredQuality = tasks.filter((task) => Number.isFinite(Number(task.qualityScore)));
+    const scoredQuality = ownTasks.filter((task) => Number.isFinite(Number(task.qualityScore)));
     const qualityAverage =
       performance?.averageQualityScore != null
         ? Math.round(performance.averageQualityScore)
@@ -429,18 +443,18 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     const timelinessAverage =
       performance?.averageTimelinessScore != null
         ? Math.round(performance.averageTimelinessScore)
-        : tasks.length
-          ? Math.round(tasks.reduce((sum, task) => sum + getTimelinessScore(task, today), 0) / tasks.length)
+        : ownTasks.length
+          ? Math.round(ownTasks.reduce((sum, task) => sum + getTimelinessScore(task, today), 0) / ownTasks.length)
           : 0;
     const onTimeRate = performance?.onTimeCompletionPct ?? 0;
     const completionRate = performance?.tasksTotal
       ? Math.round((performance.tasksCompleted / performance.tasksTotal) * 100)
-      : tasks.length
-        ? Math.round((completed.length / tasks.length) * 100)
+      : ownTasks.length
+        ? Math.round((completed.length / ownTasks.length) * 100)
         : 0;
 
     return { open, completed, dueSoon, overdue, awaitingReview, awaitingExternal, bandCounts, qualityAverage, timelinessAverage, onTimeRate, completionRate };
-  }, [performance?.averageQualityScore, performance?.averageTimelinessScore, performance?.onTimeCompletionPct, performance?.tasksCompleted, performance?.tasksTotal, tasks, today]);
+  }, [ownTasks, performance?.averageQualityScore, performance?.averageTimelinessScore, performance?.onTimeCompletionPct, performance?.tasksCompleted, performance?.tasksTotal, today]);
 
   const matterRows = useMemo<MatterRow[]>(() => {
     return authorisedCases
@@ -539,23 +553,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const reportTaskFeeCollected = earningsRows.length
     ? computeTaskFeeCollectedFromRows(earningsRows, { meId, meName: me?.name })
     : earningsSummary?.totalTaskFeeCollected ?? earningsSummary?.totalTaskFee ?? 0;
-  const reportFeeEarned = earningsRows.length
-    ? computeMemberFeeEarnedFromRows(earningsRows, { meId, meName: me?.name })
-    : earningsMember?.feesEarned ?? earningsSummary?.totalFeeEarned ?? earningsTeamRow?.earnedFees ?? 0;
-  useEffect(() => {
-    if (!earningsRows.length) return;
-    const ownRowCount = earningsRows.filter((row) => {
-      const staffId = String(row.staffId || '').trim();
-      return (meId && staffId && staffId === String(meId)) || baseNameFromLabel(row.staff) === baseNameFromLabel(me?.name);
-    }).length;
-    console.debug({
-      reportBasis: earningsReport?.dateBasis,
-      computedFromRows: reportFeeEarned,
-      selectedMemberFees: earningsMember?.feesEarned,
-      summaryTotal: earningsSummary?.totalFeeEarned,
-      ownRowCount,
-    });
-  }, [earningsMember?.feesEarned, earningsReport?.dateBasis, earningsRows, earningsSummary?.totalFeeEarned, me?.name, meId, reportFeeEarned]);
+  const reportFeeEarned = earningsMember?.feesEarned
+    ?? earningsTeamRow?.earnedFees
+    ?? (earningsRows.length
+      ? computeMemberFeeEarnedFromRows(earningsRows, { meId, meName: me?.name })
+      : earningsSummary?.totalFeeEarned ?? 0)
+    ?? 0;
   const reportTasksCompleted = earningsSummary?.completedTasks ?? performance?.tasksCompleted ?? taskSignals.completed.length;
   const reportTpaPercent =
     earningsReport?.productivityRows?.find((row) => row.tpaPercent != null)?.tpaPercent ??
@@ -572,11 +575,11 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       { label: 'Overdue Tasks', value: String(taskSignals.overdue.length), helper: taskSignals.overdue.length ? 'Action required' : 'No overdue work', icon: AlertTriangle, tone: taskSignals.overdue.length ? 'red' : 'green', href: '/tasks' },
       { label: 'On-Time Completion', value: `${taskSignals.onTimeRate}%`, helper: 'Matches productivity report', icon: Clock, tone: taskSignals.onTimeRate >= 80 ? 'green' : 'amber', href: '/performance' },
       { label: 'Quality Score', value: reportQualityScore == null ? 'Pending' : `${reportQualityScore}%`, helper: `Firm report period: ${earningsPeriod}`, icon: Award, tone: 'purple', href: '/performance' },
-      { label: 'Tasks Completed', value: String(reportTasksCompleted), helper: `Completed in ${earningsPeriod}`, icon: TrendingUp, tone: 'green', href: '/performance' },
+      { label: 'Tasks Completed', value: String(reportTasksCompleted), helper: `Matches People & Capacity · ${earningsPeriod}`, icon: TrendingUp, tone: 'green', href: '/performance' },
       profile.financialScope === 'own'
         ? { label: 'TPA', value: `${reportTpaPercent}%`, helper: 'Role remuneration configuration', icon: DollarSign, tone: 'green' }
         : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Authorised matter values', icon: DollarSign, tone: 'green' },
-      { label: 'Fee Earned Signal', value: earningsReport ? formatRwf(reportFeeEarned) : 'Pending', helper: `Firm report formula, ${earningsPeriod}`, icon: DollarSign, tone: reportFeeEarned > 0 ? 'green' : 'amber' },
+      { label: 'Fees Earned', value: earningsReport ? formatFees(reportFeeEarned) : 'Pending', helper: `Matches Staff Contribution in People & Capacity · ${earningsPeriod}`, icon: DollarSign, tone: reportFeeEarned > 0 ? 'green' : 'amber' },
     ];
     return stats;
   }, [authorisedCases, earningsPeriod, financials.contractValue, profile, reportFeeEarned, reportQualityScore, reportTasksCompleted, reportTpaPercent, taskSignals]);
@@ -590,8 +593,23 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             <h1 className="mt-1 text-2xl font-semibold text-gray-900">{profile.title}</h1>
             <p className="mt-1 text-gray-600">{me?.name ? `Welcome, ${me.name}. ` : ''}{profile.purpose}</p>
           </div>
-          <div className="rounded-full bg-gray-900 px-4 py-2 text-xs font-semibold text-white">
-            TPA {profile.tpa}% · {profile.financialScope} scope
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-2">
+              <label htmlFor="staff-earnings-range" className="text-xs text-gray-600">Period</label>
+              <select
+                id="staff-earnings-range"
+                value={earningsRange}
+                onChange={(event) => setEarningsRange(event.target.value as FirmReportRange)}
+                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700"
+              >
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            <div className="rounded-full bg-gray-900 px-4 py-2 text-xs font-semibold text-white">
+              TPA {profile.tpa}% · {profile.financialScope} scope
+            </div>
           </div>
         </div>
       </div>
@@ -854,7 +872,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         )}
 
         <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
-          <SectionHeader title={profile.labels.earnings} description={`Own remuneration for ${earningsPeriod}, calculated with the same task productivity formula used in Firm Reports.`} />
+          <SectionHeader title={profile.labels.earnings} description={`Fees earned for ${earningsPeriod}, using the same task productivity formula as People & Capacity (Staff Contribution).`} />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
               ['Task Fee Collected', formatRwf(reportTaskFeeCollected), 'Paid invoice value allocated to completed tasks'],
@@ -870,7 +888,47 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             ))}
           </div>
           <div className="mt-4 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white">
-            Fee Earned for {earningsPeriod}: {formatRwf(reportFeeEarned)} = Task Fee Collected x {reportTpaPercent}% x Timeliness Score x Quality Score
+            Fees Earned for {earningsPeriod}: {formatFees(reportFeeEarned)} = Task Fee Collected × {reportTpaPercent}% × Timeliness × Quality
+          </div>
+
+          <div className="mt-5 border-t border-gray-200 pt-3">
+            <div className="mb-2 text-sm font-medium text-gray-900">Fee breakdown by completed task</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3">Matter</th>
+                    <th className="px-4 py-3">Task</th>
+                    <th className="px-4 py-3 text-right">Task Fee</th>
+                    <th className="px-4 py-3 text-right">TPA</th>
+                    <th className="px-4 py-3 text-right">Timeliness</th>
+                    <th className="px-4 py-3 text-right">Quality</th>
+                    <th className="px-4 py-3 text-right">Fee Earned</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {earningsRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                        No completed tasks with fee financials in this period.
+                      </td>
+                    </tr>
+                  ) : (
+                    earningsRows.slice(0, 12).map((row) => (
+                      <tr key={row.id} className="align-top">
+                        <td className="px-4 py-3 text-gray-700">{row.matter}</td>
+                        <td className="px-4 py-3 text-gray-700">{row.task}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.taskFeeCollected || row.taskFee || 0)}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.tpaPercent}%</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.timelinessScore == null ? '—' : `${row.timelinessScore}%`}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.qualityScore == null ? '—' : `${row.qualityScore}%`}</td>
+                        <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.feeEarned == null ? 'Pending' : formatRwf(row.feeEarned)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
