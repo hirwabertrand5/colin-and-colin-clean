@@ -157,6 +157,18 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
     String(c.takeRequestState?.status || '').toLowerCase() === 'pending' &&
     (!c.takeRequestState?.lockExpiresAt || Date.parse(c.takeRequestState.lockExpiresAt) > now);
 
+  // A matter is "requestable" when its next deadline is at YELLOW urgency (at risk).
+  // This mirrors the backend isPublicYellowCase rule and the matter detail page logic.
+  const isYellowCase = (c: CaseData) => {
+    if (String(c.status || '').toLowerCase() === 'closed') return false;
+    if (String(c.status || '').toLowerCase() === 'temporarily closed') return false;
+    if (String(c.workflowProgress?.status || '').toLowerCase() === 'completed') return false;
+    if (String(c.takeRequestState?.status || '').toLowerCase() === 'claimed') return false;
+    const due = c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt;
+    const start = c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt;
+    return getUrgencyColorForDueDate(due, start) === 'yellow';
+  };
+
   const getDeadlinePillClassForCase = (c: CaseData) => {
     // Prefer current step due date when the current step exists and the case is not completed.
     const hasCurrent = Boolean(c.workflowProgress?.currentStepTitle || c.workflowProgress?.currentStepKey);
@@ -323,6 +335,11 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                   ? 'Your assigned matters plus yellow urgent matters visible across the firm'
                   : 'Track firm-wide matters, assignments, and progress'}
             </p>
+            {assocLike && !isTemporaryClosedMode && (
+              <p className="mt-1 text-sm text-amber-700">
+                Matters with a yellow next-deadline are visible firm-wide and can be requested for assignment.
+              </p>
+            )}
           </div>
 
           {canManageCases && (
@@ -501,6 +518,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                       </Link>
 
                       {!canManageCases &&
+                        isYellowCase(item) &&
                         !caseMatchesAssignee(item, currentUser.name) &&
                         !caseMatchesAssignee(item, currentUser.email) &&
                         item.takeRequestState?.status !== 'claimed' &&
@@ -510,10 +528,11 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                             type="button"
                             onClick={() => handleRequestTakeCase(item._id)}
                             disabled={requestingCaseId === item._id}
+                            title="Request to be assigned to this yellow urgent matter"
                             className="inline-flex items-center gap-1.5 rounded-full border border-gray-900 bg-gray-900 px-2.5 py-1 text-[10px] font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {requestingCaseId === item._id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldQuestion className="w-3 h-3" />}
-                            <span>Request</span>
+                            <span>Request assignment</span>
                           </button>
                         </>
                       )}
