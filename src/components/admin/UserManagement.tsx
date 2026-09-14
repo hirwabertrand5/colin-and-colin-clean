@@ -385,7 +385,7 @@ export default function UserManagement() {
       {!loading && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="min-w-[900px] w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">No.</th>

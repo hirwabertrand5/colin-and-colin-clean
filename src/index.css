@@ -1972,20 +1972,32 @@ html {
   initial-value: 0 0 #0000;
 }
 
-.overflow-x-auto > table,
-.overflow-x-auto > * > table {
+/* Responsive tables:
+   Tables are allowed to keep a sensible minimum width (set per table via the
+   Tailwind `min-w-[...]` utilities) and scroll horizontally INSIDE their
+   `overflow-x-auto` wrapper on small screens. This replaces a previous global
+   rule that forced `table-layout: fixed` and `max-width: 0` on every cell,
+   which crushed columns into unreadable slivers on mobile. */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
   max-width: 100%;
-  table-layout: fixed;
-  width: 100%;
+  overscroll-behavior-x: contain;
 }
 
-.overflow-x-auto > table th,
-.overflow-x-auto > table td,
-.overflow-x-auto > * > table th,
-.overflow-x-auto > * > table td {
-  max-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.overflow-x-auto > table,
+.overflow-x-auto > * > table {
+  /* Allow tables wider than their container so the wrapper scrolls instead of
+     compressing every column to fit the (mobile) viewport width. */
+  max-width: none;
+}
+
+/* Safety net: keep individual table scrolling from ever pushing the whole page
+   horizontally. `clip` keeps position:sticky (bottom) toolbars working because
+   it does not create a scroll container. */
+.main-content {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .mb-5.flex.flex-col.gap-3 + .overflow-hidden,

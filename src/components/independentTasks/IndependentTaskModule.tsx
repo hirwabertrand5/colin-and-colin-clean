@@ -614,7 +614,7 @@ const taskMatterLabel = (task: IndependentTask) =>
 
           <div className="mt-4 overflow-hidden rounded-2xl border border-gray-200">
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
+              <table className="min-w-[1150px] w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
                     <th className="px-4 py-3">#</th>

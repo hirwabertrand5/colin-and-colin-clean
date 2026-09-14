@@ -919,7 +919,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               <div className="px-5 py-10 text-gray-500">No data.</div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="min-w-[1400px] w-full">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
@@ -1217,7 +1217,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               <div className="px-5 py-10 text-gray-500">No data.</div>
             ) : (
               <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="min-w-[900px] w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>

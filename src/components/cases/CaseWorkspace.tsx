@@ -1771,7 +1771,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
             <div className="px-5 py-8 text-gray-500">No tasks yet for this case.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="min-w-[1024px] w-full">
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-600 uppercase">No.</th>

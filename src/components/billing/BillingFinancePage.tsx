@@ -1096,7 +1096,7 @@ function InvoiceTable({
             No invoices found.
           </div>
         ) : (
-          <table className="min-w-full text-left text-sm">
+          <table className="min-w-[1120px] w-full text-left text-sm">
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-5 py-3">#</th>
@@ -1335,7 +1335,7 @@ return (
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+        <table className="min-w-[1024px] w-full text-left text-sm">
           <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
             <tr>
               <th className="px-5 py-3.5 font-medium">#</th>
@@ -1370,7 +1370,7 @@ return (
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <div className="font-medium text-gray-900">{record.reference}</div>
+                    <div className="font-medium text-gray-900" title={record.reference}>{record.reference}</div>
                     {record.description ? (
                       <div className="text-xs text-gray-500">{record.description}</div>
                     ) : null}
@@ -1385,7 +1385,10 @@ return (
                       ? new Date(record.timestamp).toLocaleString()
                       : "—"}
                   </td>
-                  <td className="px-5 py-3.5 font-medium text-gray-800">
+                  <td
+                    className="px-5 py-3.5 font-medium text-gray-800"
+                    title={record.doneBy || undefined}
+                  > 
                     {record.doneBy || "—"}
                   </td>
                 </tr>

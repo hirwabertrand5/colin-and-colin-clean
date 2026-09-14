@@ -928,7 +928,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           <div className="mt-5 border-t border-gray-200 pt-3">
             <div className="mb-2 text-sm font-medium text-gray-900">Fee breakdown by completed task</div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="min-w-[1024px] w-full text-left text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                   <tr>
                     <SortableHeader label="Matter" column="matter" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3" />

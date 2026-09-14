@@ -596,7 +596,7 @@ export default function PettyCashDashboard() {
                 </div>
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
+                <table className="min-w-[1150px] w-full text-sm">
                   <thead>
                     <tr className="text-left text-slate-600 dark:text-slate-400">
                       <th className="px-3 py-2">#</th>
