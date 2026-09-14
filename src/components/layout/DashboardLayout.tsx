@@ -157,8 +157,6 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
         managementItem('Matter Gross Profit', matterFinancialView('gross-profit'), TrendingUp),
         managementItem('Matter Net Profit', matterFinancialView('net-profit'), ChartNoAxesCombined),
         managementItem('Matter Gross Profit Margin', matterFinancialView('gross-profit-margin'), Gauge),
-        managementItem('Amount Billed', matterFinancialView('amount-billed'), ReceiptText),
-        managementItem('Amount Collected', matterFinancialView('amount-collected'), Banknote),
         managementItem('Matter Profitability', matterFinancialView('profitability'), ChartNoAxesCombined),
         managementItem('Matter Direct Cost Workload', matterFinancialView('direct-cost-workload'), ClipboardList),
         managementItem('Matter Gross Profit Matter Timeliness', matterFinancialView('timeliness'), FileClock),

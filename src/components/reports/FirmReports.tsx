@@ -5,6 +5,8 @@ import { FirmReportDateBasis, FirmReportRange, FirmReportResponse, getFirmReport
 import { getStaffUsers, User } from '../../services/userService';
 import usePageTitle from '../../hooks/usePageTitle';
 import { downloadWorkbook } from '../../utils/excelExport';
+import SortableHeader from '../ui/SortableHeader';
+import { sortRows, SortDir } from '../../utils/tableSort';
 
 interface FirmReportsProps {
   userRole: UserRole;
@@ -274,6 +276,114 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
       return (b.activeCases || 0) - (a.activeCases || 0);
     });
   }, [data]);
+
+  const [teamSortKey, setTeamSortKey] = useState('');
+  const [teamSortDir, setTeamSortDir] = useState<SortDir>('asc');
+  const handleTeamSort = (column: string) => {
+    if (teamSortKey === column) {
+      setTeamSortDir(teamSortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setTeamSortKey(column);
+      setTeamSortDir('asc');
+    }
+  };
+  const teamSortValueOf = (member: any, key: string): unknown => {
+    switch (key) {
+      case 'name':
+        return member?.name || '';
+      case 'role':
+        return member?.earningRoleLabel || member?.role || '';
+      case 'activeCases':
+        return member?.activeCases || 0;
+      case 'tasksCompleted':
+        return member?.tasksCompleted || 0;
+      case 'share':
+        return member?.earningSharePercent ?? 0;
+      case 'collected':
+        return pickMoney(member?.invoicePaymentsReceived);
+      case 'revenueAttributed':
+        return pickMoney(member?.revenueAttributed, member?.earnedFees);
+      case 'grossFees':
+        return pickMoney(member?.grossFeesHandled, member?.invoicePaymentsReceived);
+      case 'retained':
+        return pickMoney(member?.firmRetainedEarnings);
+      default:
+        return member?.name || '';
+    }
+  };
+  const sortedTeam = useMemo(
+    () => sortRows(orderedTeam, teamSortKey, teamSortDir, (member) => teamSortValueOf(member, teamSortKey)),
+    [orderedTeam, teamSortKey, teamSortDir],
+  );
+
+  const [productivitySortKey, setProductivitySortKey] = useState('');
+  const [productivitySortDir, setProductivitySortDir] = useState<SortDir>('asc');
+  const handleProductivitySort = (column: string) => {
+    if (productivitySortKey === column) {
+      setProductivitySortDir(productivitySortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setProductivitySortKey(column);
+      setProductivitySortDir('asc');
+    }
+  };
+  const productivityRows = data?.productivityRows || [];
+  const sortedProductivityRows = useMemo(
+    () => sortRows(productivityRows, productivitySortKey, productivitySortDir, (row: any) => {
+      switch (productivitySortKey) {
+        case 'datetime':
+          return row?.completedAt || '';
+        case 'staff':
+          return row?.staff || '';
+        case 'matter':
+          return row?.matter || '';
+        case 'task':
+          return row?.task || row?.taskTitle || '';
+        case 'taskFeeCollected':
+          return Number(row?.taskFeeCollected ?? row?.taskFee ?? 0);
+        case 'tpa':
+          return Number(row?.tpaPercent ?? 0);
+        case 'timeliness':
+          return row?.timelinessScore == null ? -1 : Number(row.timelinessScore);
+        case 'quality':
+          return row?.qualityScore == null ? -1 : Number(row.qualityScore);
+        case 'feeEarned':
+          return row?.feeEarned == null ? -1 : Number(row.feeEarned);
+        default:
+          return row?.completedAt || '';
+      }
+    }),
+    [productivityRows, productivitySortKey, productivitySortDir],
+  );
+
+  const [caseSortKey, setCaseSortKey] = useState('');
+  const [caseSortDir, setCaseSortDir] = useState<SortDir>('asc');
+  const handleCaseSort = (column: string) => {
+    if (caseSortKey === column) {
+      setCaseSortDir(caseSortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setCaseSortKey(column);
+      setCaseSortDir('asc');
+    }
+  };
+  const sortedCaseTypes = useMemo(
+    () => sortRows(data?.caseTypes || [], caseSortKey, caseSortDir, (item: any) => {
+      switch (caseSortKey) {
+        case 'type':
+          return item?.type || '';
+        case 'active':
+          return item?.active || 0;
+        case 'closed':
+          return item?.closed || 0;
+        case 'avgDuration':
+          return item?.avgDurationDays ?? -1;
+        case 'revenueBilled':
+          return item?.revenueBilled || 0;
+        default:
+          return item?.type || '';
+      }
+    }),
+    [data, caseSortKey, caseSortDir],
+  );
 
   const staffPerformanceRows = useMemo(
     () =>
@@ -566,11 +676,11 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                   ['Overdue Tasks', staffProfitabilitySummary.totalOverdueTasks],
                   [
                     'Average Contribution Margin (%)',
-                    staffProfitabilitySummary.averageContributionMargin == null ? 'â€”' : `${staffProfitabilitySummary.averageContributionMargin}%`,
+                    staffProfitabilitySummary.averageContributionMargin == null ? '—' : `${staffProfitabilitySummary.averageContributionMargin}%`,
                   ],
                   [
                     'Average Contribution Ratio (%)',
-                    staffProfitabilitySummary.averageContributionRatio == null ? 'â€”' : `${staffProfitabilitySummary.averageContributionRatio}%`,
+                    staffProfitabilitySummary.averageContributionRatio == null ? '—' : `${staffProfitabilitySummary.averageContributionRatio}%`,
                   ],
                 ]),
               },
@@ -605,8 +715,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     member.goodTasks || 0,
                     member.delayedTasks || 0,
                     member.riskTasks || 0,
-                    member.contributionMargin == null ? 'â€”' : `${member.contributionMargin}%`,
-                    member.contributionRatio == null ? 'â€”' : `${member.contributionRatio}%`,
+                    member.contributionMargin == null ? '—' : `${member.contributionMargin}%`,
+                    member.contributionRatio == null ? '—' : `${member.contributionRatio}%`,
                   ])
                 ),
               },
@@ -813,19 +923,19 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Team member</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Role</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Active cases</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tasks completed</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Share</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Total Collected</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Revenue attributed</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Gross fees handled</th>
-                      <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Firm retained earnings</th>
+                      <SortableHeader label="Team member" column="name" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Role" column="role" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Active cases" column="activeCases" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Tasks completed" column="tasksCompleted" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Share" column="share" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Total Collected" column="collected" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Revenue attributed" column="revenueAttributed" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Gross fees handled" column="grossFees" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Firm retained earnings" column="retained" sortKey={teamSortKey} sortDir={teamSortDir} onSort={handleTeamSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {orderedTeam.map((member, index) => (
+                    {sortedTeam.map((member, index) => (
                       <tr key={member.id || member.name} className="hover:bg-gray-50">
                         <td className="px-5 py-4 text-sm text-gray-500">{index + 1}</td>
                         <td className="px-5 py-4 text-sm font-medium text-gray-900">{member.name}</td>
@@ -1053,20 +1163,20 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Date / Time</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Staff</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Matter</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Task</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Task Fee Collected</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">TPA</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Timeliness Score</th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase">Quality Score</th>
+                      <SortableHeader label="Date / Time" column="datetime" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Staff" column="staff" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Matter" column="matter" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Task" column="task" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Task Fee Collected" column="taskFeeCollected" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="right" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="TPA" column="tpa" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Timeliness Score" column="timeliness" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Quality Score" column="quality" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Formula</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Fee Earned</th>
+                      <SortableHeader label="Fee Earned" column="feeEarned" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="right" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {(data.productivityRows || []).map((row, index) => (
+                    {sortedProductivityRows.map((row, index) => (
                       <tr key={row.id || `${row.staff}-${row.completedAt}-${index}`} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm text-gray-500">{index + 1}</td>
                         <td className="px-4 py-3 text-sm text-gray-700">{fmtDateTime(row.completedAt)}</td>
@@ -1111,15 +1221,15 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
-                    <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Practice Path</th>
-                    <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Active</th>
-                    <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Closed</th>
-                    <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Avg Duration</th>
-                    <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase">Revenue Billed</th>
+                    <SortableHeader label="Practice Path" column="type" sortKey={caseSortKey} sortDir={caseSortDir} onSort={handleCaseSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                    <SortableHeader label="Active" column="active" sortKey={caseSortKey} sortDir={caseSortDir} onSort={handleCaseSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                    <SortableHeader label="Closed" column="closed" sortKey={caseSortKey} sortDir={caseSortDir} onSort={handleCaseSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                    <SortableHeader label="Avg Duration" column="avgDuration" sortKey={caseSortKey} sortDir={caseSortDir} onSort={handleCaseSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                    <SortableHeader label="Revenue Billed" column="revenueBilled" sortKey={caseSortKey} sortDir={caseSortDir} onSort={handleCaseSort} className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                    {data.caseTypes.map((item, index) => (
+                    {sortedCaseTypes.map((item, index) => (
                       <tr key={item.type} className="hover:bg-gray-50">
                         <td className="px-5 py-4 text-sm text-gray-500">{index + 1}</td>
                         <td className="px-5 py-4 text-sm font-medium text-gray-900">{item.type}</td>

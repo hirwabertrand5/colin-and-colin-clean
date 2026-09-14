@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, CheckCircle2, Clock3, Search, UserRound } from 'lucide-react';
 
 import usePageTitle from '../../hooks/usePageTitle';
+import SortableHeader from '../ui/SortableHeader';
+import TableExport from '../ui/TableExport';
+import { sortRows, SortDir } from '../../utils/tableSort';
 import { CaseData, getAllCases, isTemporarilyClosedCase } from '../../services/caseService';
 import { getAllTasks, TaskData, TaskWorkflowStage } from '../../services/taskService';
 import { formatDeadlineDateTime, getDeadlinePillClass, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
@@ -86,6 +89,16 @@ export default function TaskManagementPage({ view }: { view: TaskManagementView 
   const [priority, setPriority] = useState('all');
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState('dueDate');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const handleSort = (column: string) => {
+    if (sortKey === column) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(column);
+      setSortDir('asc');
+    }
+  };
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -134,9 +147,29 @@ export default function TaskManagementPage({ view }: { view: TaskManagementView 
     });
   }, [caseMap, permittedTasks, priority, search, status, view]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
-  const paginatedTasks = filteredTasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => setPage(1), [priority, search, status, view]);
+  const taskSortValueOf = (task: TaskData, key: string): unknown => {
+    switch (key) {
+      case 'task':
+        return `${task.taskNo || ''} ${task.title || ''}`;
+      case 'matter':
+        return `${caseMap.get(task.caseId)?.caseNo || ''} ${task.relatedClient || caseMap.get(task.caseId)?.parties || ''}`;
+      case 'assignee':
+        return `${task.assignee || ''} ${task.supervisor || ''}`;
+      case 'priority':
+        return task.priority || '';
+      case 'dueDate':
+        return task.dueDate ? resolveDeadlineDateTime(task.dueDate)?.getTime() ?? 0 : 0;
+      case 'status':
+        return `${stageFor(task)} ${task.status || ''}`;
+      default:
+        return task.title || '';
+    }
+  };
+  const sortedTasks = sortRows(filteredTasks, sortKey, sortDir, (task) => taskSortValueOf(task, sortKey));
+
+  const totalPages = Math.max(1, Math.ceil(sortedTasks.length / PAGE_SIZE));
+  const paginatedTasks = sortedTasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => setPage(1), [priority, search, sortDir, sortKey, status, view]);
   useEffect(() => setPage((currentPage) => Math.min(currentPage, totalPages)), [totalPages]);
 
   const performance = useMemo(() => {
@@ -171,8 +204,8 @@ export default function TaskManagementPage({ view }: { view: TaskManagementView 
     <div>
       <div className="mb-6 flex items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold text-gray-900">{detail.title}</h1><p className="mt-1 text-gray-600">{detail.description}</p></div><Link to="/tasks" className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Task board</Link></div>
       {error && <div className="mb-4 flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={17} />{error}</div>}
-      <div className="mb-6 flex flex-col gap-3 xl:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search task, matter, client, assignee..." className="w-full rounded-md border border-gray-300 py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-gray-400" /></div><select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-md border border-gray-300 px-3 py-2"><option value="all">All statuses</option><option>Not Started</option><option>In Progress</option><option>Completed</option><option>Awaiting Review</option><option>Awaiting External Action</option><option>Closed</option></select><select value={priority} onChange={(event) => setPriority(event.target.value)} className="rounded-md border border-gray-300 px-3 py-2"><option value="all">All priorities</option><option>High</option><option>Medium</option><option>Low</option></select></div>
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white"><div className="overflow-x-auto">{paginatedTasks.length === 0 ? <div className="p-12 text-center text-sm text-gray-500">{emptyMessage}</div> : <table className="min-w-full text-left text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Task</th><th className="px-4 py-3">Matter / Client</th><th className="px-4 py-3">Description</th><th className="px-4 py-3">Assignee / Supervisor</th><th className="px-4 py-3">Priority</th><th className="px-4 py-3">Dates</th><th className="px-4 py-3">Status / Confirmation</th><th className="px-4 py-3">Actions</th></tr></thead><tbody>{paginatedTasks.map((task, index) => { const relatedCase = caseMap.get(task.caseId); const stage = stageFor(task); const confirmed = task.approvalStatus || 'Not Required'; return <tr key={task._id} className="border-t border-gray-100 align-top hover:bg-gray-50"><td className="px-4 py-4 text-gray-500">{(page - 1) * PAGE_SIZE + index + 1}</td><td className="px-4 py-4"><Link to={`/tasks/${task._id}`} className="font-medium text-blue-700 hover:underline">{task.taskNo || 'Task'}</Link><div className="mt-1 font-semibold text-gray-900">{task.title}</div></td><td className="px-4 py-4"><div className="text-gray-900">{relatedCase?.caseNo || task.caseId || 'Matter unavailable'}</div><div className="text-xs text-gray-500">{task.relatedClient || relatedCase?.parties || 'Client unavailable'}</div></td><td className="max-w-xs whitespace-pre-line px-4 py-4 text-gray-600">{task.description || '—'}</td><td className="px-4 py-4"><div>{task.assignee || 'Unassigned'}</div><div className="text-xs text-gray-500">{task.supervisor || 'No supervisor'}</div></td><td className="px-4 py-4"><Pill className={task.priority === 'High' ? 'border-red-100 bg-red-50 text-red-700' : task.priority === 'Medium' ? 'border-yellow-100 bg-yellow-50 text-yellow-800' : 'border-green-100 bg-green-50 text-green-700'}>{task.priority}</Pill></td><td className="px-4 py-4 text-xs text-gray-600"><div>Start: {formatDate(task.startDate)}</div><div className={`mt-1 rounded px-1 py-0.5 ${getDeadlinePillClass(task.dueDate, task.startDate)}`}>Due: {formatDeadlineDateTime(task.dueDate)}</div><div>Done: {formatDate(task.completedAt)}</div></td><td className="px-4 py-4"><Pill className={stage === 'Awaiting Review' ? 'border-amber-100 bg-amber-50 text-amber-700' : stage === 'Awaiting External Action' ? 'border-orange-100 bg-orange-50 text-orange-700' : stage === 'Completed' ? 'border-green-100 bg-green-50 text-green-700' : stage === 'Closed' ? 'border-gray-900 bg-gray-900 text-white' : 'border-blue-100 bg-blue-50 text-blue-700'}>{stage}</Pill><div className="mt-1 text-xs text-gray-500">Confirmation: {confirmed}</div></td><td className="px-4 py-4"><Link to={`/tasks/${task._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">Open</Link></td></tr>; })}</tbody></table>}</div>{filteredTasks.length > 0 && <Pagination page={page} totalPages={totalPages} total={filteredTasks.length} onPageChange={setPage} />}</div>
+      <div className="mb-6 flex flex-col gap-3 xl:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search task, matter, client, assignee..." className="w-full rounded-md border border-gray-300 py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-gray-400" /></div><select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-md border border-gray-300 px-3 py-2"><option value="all">All statuses</option><option>Not Started</option><option>In Progress</option><option>Completed</option><option>Awaiting Review</option><option>Awaiting External Action</option><option>Closed</option></select><select value={priority} onChange={(event) => setPriority(event.target.value)} className="rounded-md border border-gray-300 px-3 py-2"><option value="all">All priorities</option><option>High</option><option>Medium</option><option>Low</option></select>{sortedTasks.length > 0 && <TableExport filename={`tasks_${view}`} title={detail.title} subtitle={`${sortedTasks.length} tasks`} columns={[{ label: 'Task No.', value: (t: TaskData) => t.taskNo || '' }, { label: 'Task', value: (t: TaskData) => t.title || '' }, { label: 'Matter', value: (t: TaskData) => caseMap.get(t.caseId)?.caseNo || t.caseId || '' }, { label: 'Client', value: (t: TaskData) => t.relatedClient || caseMap.get(t.caseId)?.parties || '' }, { label: 'Assignee', value: (t: TaskData) => t.assignee || '' }, { label: 'Supervisor', value: (t: TaskData) => t.supervisor || '' }, { label: 'Priority', value: (t: TaskData) => t.priority || '' }, { label: 'Due Date', value: (t: TaskData) => t.dueDate || '' }, { label: 'Status', value: (t: TaskData) => `${stageFor(t)} ${t.status || ''}`.trim() }]} rows={sortedTasks} />}</div>
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white"><div className="overflow-x-auto">{paginatedTasks.length === 0 ? <div className="p-12 text-center text-sm text-gray-500">{emptyMessage}</div> : <table className="min-w-full text-left text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-4 py-3">#</th><SortableHeader label="Task" column="task" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} /><SortableHeader label="Matter / Client" column="matter" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} /><th className="px-4 py-3">Description</th><SortableHeader label="Assignee / Supervisor" column="assignee" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} /><SortableHeader label="Priority" column="priority" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} /><SortableHeader label="Dates" column="dueDate" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} /><SortableHeader label="Status / Confirmation" column="status" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} /><th className="px-4 py-3">Actions</th></tr></thead><tbody>{paginatedTasks.map((task, index) => { const relatedCase = caseMap.get(task.caseId); const stage = stageFor(task); const confirmed = task.approvalStatus || 'Not Required'; return <tr key={task._id} className="border-t border-gray-100 align-top hover:bg-gray-50"><td className="px-4 py-4 text-gray-500">{(page - 1) * PAGE_SIZE + index + 1}</td><td className="px-4 py-4"><Link to={`/tasks/${task._id}`} className="font-medium text-blue-700 hover:underline">{task.taskNo || 'Task'}</Link><div className="mt-1 font-semibold text-gray-900">{task.title}</div></td><td className="px-4 py-4"><div className="text-gray-900">{relatedCase?.caseNo || task.caseId || 'Matter unavailable'}</div><div className="text-xs text-gray-500">{task.relatedClient || relatedCase?.parties || 'Client unavailable'}</div></td><td className="max-w-xs whitespace-pre-line px-4 py-4 text-gray-600">{task.description || '—'}</td><td className="px-4 py-4"><div>{task.assignee || 'Unassigned'}</div><div className="text-xs text-gray-500">{task.supervisor || 'No supervisor'}</div></td><td className="px-4 py-4"><Pill className={task.priority === 'High' ? 'border-red-100 bg-red-50 text-red-700' : task.priority === 'Medium' ? 'border-yellow-100 bg-yellow-50 text-yellow-800' : 'border-green-100 bg-green-50 text-green-700'}>{task.priority}</Pill></td><td className="px-4 py-4 text-xs text-gray-600"><div>Start: {formatDate(task.startDate)}</div><div className={`mt-1 rounded px-1 py-0.5 ${getDeadlinePillClass(task.dueDate, task.startDate)}`}>Due: {formatDeadlineDateTime(task.dueDate)}</div><div>Done: {formatDate(task.completedAt)}</div></td><td className="px-4 py-4"><Pill className={stage === 'Awaiting Review' ? 'border-amber-100 bg-amber-50 text-amber-700' : stage === 'Awaiting External Action' ? 'border-orange-100 bg-orange-50 text-orange-700' : stage === 'Completed' ? 'border-green-100 bg-green-50 text-green-700' : stage === 'Closed' ? 'border-gray-900 bg-gray-900 text-white' : 'border-blue-100 bg-blue-50 text-blue-700'}>{stage}</Pill><div className="mt-1 text-xs text-gray-500">Confirmation: {confirmed}</div></td><td className="px-4 py-4"><Link to={`/tasks/${task._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">Open</Link></td></tr>; })}</tbody></table>}</div>{filteredTasks.length > 0 && <Pagination page={page} totalPages={totalPages} total={filteredTasks.length} onPageChange={setPage} />}</div>
     </div>
   );
 }

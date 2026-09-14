@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Plus, Download } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
 import { UserRole } from '../../App';
+import TableExport from '../ui/TableExport';
 import { getAllCases, CaseData } from '../../services/caseService';
 import { addInvoiceToCase } from '../../services/invoiceService';
 import { listInvoices, InvoiceWithCase } from '../../services/invoiceService';
@@ -223,37 +224,6 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
     return Math.max(1, Math.ceil(invoices.length / PAGE_SIZE));
   }, [invoices.length]);
 
-  const exportInvoices = () => {
-    if (!invoices.length) {
-      setError('No invoices available to export.');
-      return;
-    }
-
-    const escapeCsv = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-    const rows = [
-      ['Invoice', 'Matter', 'Client', 'Amount', 'Status', 'Date', 'Notes'],
-      ...invoices.map((invoice) => [
-        invoice.invoiceNo,
-        invoice.case?.caseNo || '',
-        invoice.case?.parties || '',
-        invoice.amount,
-        invoice.status,
-        invoice.date,
-        invoice.notes || '',
-      ]),
-    ];
-    const csv = rows.map((row) => row.map(escapeCsv).join(',')).join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `invoices-${filterStatus.toLowerCase()}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  };
-
   const sortedInvoices = useMemo(() => {
     const copy = [...invoices];
     copy.sort((a, b) => {
@@ -329,15 +299,21 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
               <option value="Paid">Paid</option>
             </select>
 
-            <button
-              type="button"
-              onClick={exportInvoices}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50"
-              title="Export filtered invoices as CSV"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Export
-            </button>
+            <TableExport
+              filename={`invoices-${filterStatus.toLowerCase()}`}
+              title="Invoice Management"
+              subtitle={`${invoices.length} invoices${filterStatus !== 'all' ? ` - ${filterStatus}` : ''}`}
+              columns={[
+                { label: 'Invoice', value: (inv: InvoiceWithCase) => inv.invoiceNo },
+                { label: 'Matter', value: (inv: InvoiceWithCase) => inv.case?.caseNo || '' },
+                { label: 'Client', value: (inv: InvoiceWithCase) => inv.case?.parties || '' },
+                { label: 'Amount', value: (inv: InvoiceWithCase) => Number(inv.amount) || 0, type: 'money' },
+                { label: 'Status', value: (inv: InvoiceWithCase) => inv.status },
+                { label: 'Date', value: (inv: InvoiceWithCase) => inv.date || '' },
+                { label: 'Notes', value: (inv: InvoiceWithCase) => inv.notes || '' },
+              ]}
+              rows={invoices}
+            />
           </div>
         </div>
       </div>

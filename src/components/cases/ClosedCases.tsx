@@ -13,6 +13,8 @@ import {
 } from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
 import { formatCaseAssignedTo } from '../../utils/caseAssignments';
+import SortableHeader from '../ui/SortableHeader';
+import TableExport from '../ui/TableExport';
 
 interface ClosedCasesProps {
   userRole: UserRole;
@@ -29,6 +31,24 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortKey, setSortKey] = useState<'nextDeadline' | 'createdAt' | 'caseNo' | 'parties' | 'workflow' | 'currentStep'>('nextDeadline');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const COLUMN_SORT_KEYS: Record<string, string> = {
+    caseNo: 'caseNo',
+    parties: 'parties',
+    workflow: 'workflow',
+    currentStep: 'currentStep',
+    createdAt: 'createdAt',
+    nextDeadline: 'nextDeadline',
+  };
+  const handleSort = (column: string) => {
+    const nextKey = COLUMN_SORT_KEYS[column];
+    if (!nextKey) return;
+    if (sortKey === nextKey) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(nextKey as any);
+      setSortDir('asc');
+    }
+  };
   const [cases, setCases] = useState<CaseData[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -105,6 +125,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
       createdAtMs: toMs(c.createdAt),
       workflowLabel: getCasePracticePath(c).toLowerCase(),
       currentStepLabel: String(c.workflowProgress?.currentStepTitle || '').toLowerCase(),
+      assignedToLabel: formatCaseAssignedTo(c).toLowerCase(),
       deadlineRank: urgencyRank(c),
       nextDueAtMs: nextDueAtMs(c),
     }));
@@ -132,10 +153,13 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
           break;
         }
         case 'caseNo':
-          cmp = collator.compare(a.c.caseNo ?? '', b.c.caseNo ?? '');
+          cmp = collator.compare(String(a.c.caseNo ?? ''), String(b.c.caseNo ?? ''));
           break;
         case 'parties':
-          cmp = collator.compare(a.c.parties ?? '', b.c.parties ?? '');
+          cmp = collator.compare(String(a.c.parties ?? ''), String(b.c.parties ?? ''));
+          break;
+        case 'assignedTo':
+          cmp = collator.compare(a.assignedToLabel, b.assignedToLabel);
           break;
         case 'workflow':
           cmp = collator.compare(a.workflowLabel, b.workflowLabel);
@@ -216,8 +240,25 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
               <ArrowUpDown className="w-4 h-4 mr-2" />
               {sortDir === 'asc' ? 'Asc' : 'Desc'}
             </button>
-          </div>
 
+            {indexedCases.length > 0 && (
+              <TableExport
+                filename="closed_matters"
+                title="Closed Matters"
+                subtitle={`${filteredSortedCases.length} matters`}
+                columns={[
+                  { label: 'Case No.', value: (c: CaseData) => c.caseNo || '' },
+                  { label: 'Parties', value: (c: CaseData) => c.parties || '' },
+                  { label: 'Workflow', value: (c: CaseData) => c.workflow || c.matterType || c.caseType || '' },
+                  { label: 'Current Step', value: (c: CaseData) => (c.workflowProgress?.status === 'Completed' ? 'Completed' : c.workflowProgress?.currentStepTitle || '') },
+                  { label: 'Assigned To', value: (c: CaseData) => formatCaseAssignedTo(c) },
+                  { label: 'Date Created', value: (c: CaseData) => c.createdAt || '' },
+                  { label: 'Next Deadline', value: (c: CaseData) => c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt || '' },
+                ]}
+                rows={filteredSortedCases}
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -230,9 +271,15 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
           <table className="w-full">
             <thead className="bg-gray-50 border-b">
               <tr>
-                {['No.', 'Case No.', 'Parties', 'Workflow', 'Current Step', 'Assigned To', 'Date Created', 'Next Deadline', 'Actions'].map((header) => (
-                  <th key={header} className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">{header}</th>
-                ))}
+                <th className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">No.</th>
+                <SortableHeader label="Case No." column="caseNo" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Parties" column="parties" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Workflow" column="workflow" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Current Step" column="currentStep" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Assigned To" column="assignedTo" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Date Created" column="createdAt" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Next Deadline" column="nextDeadline" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <th className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
 

@@ -11,6 +11,9 @@ import {
   User,
   NewUserData,
 } from '../../services/userService';
+import SortableHeader from '../ui/SortableHeader';
+import TableExport from '../ui/TableExport';
+import { sortRows, SortDir } from '../../utils/tableSort';
 
 const ROLE_OPTIONS = [
   { value: 'intern', label: 'Intern' },
@@ -253,6 +256,16 @@ export default function UserManagement() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const usersPerPage = 5;
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const handleSort = (column: string) => {
+    if (sortKey === column) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(column);
+      setSortDir('asc');
+    }
+  };
 
   // Role hierarchy for sorting
   const roleOrder: Record<string, number> = {
@@ -280,12 +293,29 @@ export default function UserManagement() {
     return a.name?.localeCompare(b.name || '') || 0;
   });
 
-  const paginatedUsers = sortedUsers.slice(
+  const userSortValueOf = (u: any, key: string): unknown => {
+    switch (key) {
+      case 'name':
+        return u?.name || '';
+      case 'email':
+        return u?.email || '';
+      case 'role':
+        return roleOrder[u?.role] ?? 999;
+      case 'status':
+        return u?.isActive === false ? 1 : 0;
+      default:
+        return u?.name || '';
+    }
+  };
+
+  const sortedUsersFinal = sortRows(sortedUsers, sortKey, sortDir, (u) => userSortValueOf(u, sortKey));
+
+  const paginatedUsers = sortedUsersFinal.slice(
     (currentPage - 1) * usersPerPage,
     currentPage * usersPerPage
   );
 
-  const totalPages = Math.ceil(sortedUsers.length / usersPerPage);
+  const totalPages = Math.ceil(sortedUsersFinal.length / usersPerPage);
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, Math.max(1, totalPages)));
   }, [totalPages]);
@@ -334,6 +364,20 @@ export default function UserManagement() {
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
           />
         </div>
+        {filteredUsers.length > 0 && (
+          <TableExport
+            filename="user_management"
+            title="User Management"
+            subtitle={`${filteredUsers.length} users`}
+            columns={[
+              { label: 'User', value: (u: any) => u?.name || '' },
+              { label: 'Email', value: (u: any) => u?.email || '' },
+              { label: 'Role', value: (u: any) => u?.role || '' },
+              { label: 'Status', value: (u: any) => (u?.isActive === false ? 'Inactive' : 'Active') },
+            ]}
+            rows={filteredUsers}
+          />
+        )}
       </div>
 
       {loading && <div className="text-center py-8 text-gray-600">Loading users...</div>}
@@ -345,9 +389,9 @@ export default function UserManagement() {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">No.</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">User</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Role</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Status</th>
+                  <SortableHeader label="User" column="name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-medium text-gray-700 uppercase tracking-wider" />
+                  <SortableHeader label="Role" column="role" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-medium text-gray-700 uppercase tracking-wider" />
+                  <SortableHeader label="Status" column="status" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-medium text-gray-700 uppercase tracking-wider" />
                   
                   {canManageUsers && (
                     <th className="px-5 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Actions</th>

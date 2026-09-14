@@ -29,6 +29,7 @@ import {
   LEGAL_SERVICES_TREE,
   ServiceNode,
 } from "../../constants/legalServicesTree";
+import TableExport from "../ui/TableExport";
 
 export type BillingFinanceView =
   | "financial-dashboard"
@@ -1020,6 +1021,7 @@ export default function BillingFinancePage({
       {isInvoiceView ? (
         <InvoiceTable
           invoices={visibleInvoices}
+          exportInvoices={sortedInvoices}
           page={page}
           pages={pages}
           total={sortedInvoices.length}
@@ -1049,6 +1051,7 @@ export default function BillingFinancePage({
 
 function InvoiceTable({
   invoices,
+  exportInvoices,
   page,
   pages,
   total,
@@ -1058,6 +1061,7 @@ function InvoiceTable({
   onSort,
 }: {
   invoices: InvoiceWithCase[];
+  exportInvoices: InvoiceWithCase[];
   page: number;
   pages: number;
   total: number;
@@ -1067,6 +1071,24 @@ function InvoiceTable({
   onSort: (column: string) => void;
 }) {
   return (
+    <div>
+      <div className="mb-3 flex items-center justify-end">
+        <TableExport
+          filename="billing_invoices"
+          title="Billing & Invoices"
+          subtitle={`${total} invoices`}
+          columns={[
+            { label: 'Invoice', value: (invoice: InvoiceWithCase) => invoice.invoiceNo || '' },
+            { label: 'Matter', value: (invoice: InvoiceWithCase) => invoice.case?.caseNo || '' },
+            { label: 'Client', value: (invoice: InvoiceWithCase) => invoice.case?.parties || '' },
+            { label: 'Amount', value: (invoice: InvoiceWithCase) => amount(invoice.amount) },
+            { label: 'Status', value: (invoice: InvoiceWithCase) => invoice.status || '' },
+            { label: 'Invoice Date', value: (invoice: InvoiceWithCase) => invoice.date || '' },
+            { label: 'Recorded', value: (invoice: InvoiceWithCase) => (invoice.createdAt ? new Date(invoice.createdAt).toLocaleString() : '') },
+          ]}
+          rows={exportInvoices}
+        />
+      </div>
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
       <div className="overflow-x-auto">
         {invoices.length === 0 ? (
@@ -1127,6 +1149,7 @@ function InvoiceTable({
           onChange={onPageChange}
         />
       )}
+    </div>
     </div>
   );
 }
@@ -1294,6 +1317,22 @@ return (
             </button>
           );
         })}
+        <div className="ml-auto">
+          <TableExport
+            filename="billing_finance_detail"
+            title="Billing & Finance Detail"
+            subtitle={`${visibleRecords.length} records${measure !== "all" ? ` · ${types.find((type) => type.key === measure)?.label || ""}` : ""}`}
+            columns={[
+              { label: 'Type', value: (record: DetailRecord) => record.typeLabel },
+              { label: 'Reference', value: (record: DetailRecord) => record.reference },
+              { label: 'Description', value: (record: DetailRecord) => record.description || '' },
+              { label: 'Value', value: (record: DetailRecord) => record.value },
+              { label: 'Timestamp', value: (record: DetailRecord) => (record.timestamp ? new Date(record.timestamp).toLocaleString() : '') },
+              { label: 'Done By', value: (record: DetailRecord) => record.doneBy || '' },
+            ]}
+            rows={visibleRecords}
+          />
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">

@@ -8,6 +8,9 @@ import { Invoice, listInvoices } from '../../services/invoiceService';
 import { listExpensesForCase, PettyCashExpense } from '../../services/pettyCashService';
 import { getAllTasks, TaskData } from '../../services/taskService';
 import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
+import SortableHeader from '../ui/SortableHeader';
+import TableExport from '../ui/TableExport';
+import { SortDir, sortRows } from '../../utils/tableSort';
 
 type MatterFinancialView =
   | 'financial-status'
@@ -110,7 +113,18 @@ export default function MatterFinancialStatusPage({ view }: { view: MatterFinanc
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const detail = viewDetails[view];
+
+  const handleSort = (column: string) => {
+    if (sortKey === column) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(column);
+      setSortDir('asc');
+    }
+  };
 
   usePageTitle(detail.title);
 
@@ -179,25 +193,53 @@ export default function MatterFinancialStatusPage({ view }: { view: MatterFinanc
     };
   }), [cases, expensesByMatter, invoices, tasks]);
 
-  const sortedRows = useMemo(() => [...rows].sort((left, right) => {
-    const metric = (row: MatterRow) => view === 'contract-value' || view === 'financial-status' ? row.contractValue
-      : view === 'amount-billed' ? row.billed
-        : view === 'amount-collected' ? row.collected
-          : view === 'outstanding-balance' ? row.outstanding
-            : view === 'direct-cost' || view === 'direct-cost-workload' ? row.directCost
-              : view === 'gross-profit' || view === 'net-profit' ? row.grossProfit
-                : view === 'gross-profit-margin' ? row.grossProfitMargin || 0
-                  : view === 'profitability' ? row.profitability || 0
-                    : row.timeliness === 'On time' ? 100 : row.timeliness === 'Late' ? 0 : -1;
-    return metric(right) - metric(left);
-  }), [rows, view]);
+  const metricNumber = (row: MatterRow) =>
+    view === 'amount-billed' ? row.billed
+      : view === 'amount-collected' ? row.collected
+        : view === 'outstanding-balance' ? row.outstanding
+          : view === 'direct-cost' || view === 'direct-cost-workload' ? row.directCost
+            : view === 'gross-profit' || view === 'net-profit' ? row.grossProfit
+              : view === 'gross-profit-margin' ? row.grossProfitMargin || 0
+                : view === 'profitability' ? row.profitability || 0
+                  : view === 'timeliness' ? (row.timeliness === 'On time' ? 100 : row.timeliness === 'Late' ? 0 : -1)
+                    : row.contractValue;
 
-  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
-  const paginatedRows = sortedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const sortedRows = useMemo(
+    () => [...rows].sort((left, right) => metricNumber(right) - metricNumber(left)),
+    [rows, view],
+  );
+
+  const rowSortValueOf = (row: MatterRow, key: string): unknown => {
+    switch (key) {
+      case 'matter':
+        return row.matter.caseNo || row.matterId;
+      case 'client':
+        return row.matter.parties || '';
+      case 'detail':
+        return view === 'amount-billed' || view === 'amount-collected' ? row.invoices.length : row.tasks.length;
+      case 'metric':
+        return metricNumber(row);
+      case 'status':
+        return row.matter.status || '';
+      default:
+        return row.matter.caseNo || row.matterId;
+    }
+  };
+
+  const displayRows = useMemo(
+    () =>
+      sortKey
+        ? sortRows(sortedRows, sortKey, sortDir, (row) => rowSortValueOf(row, sortKey))
+        : sortedRows,
+    [sortedRows, sortKey, sortDir, view],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(displayRows.length / PAGE_SIZE));
+  const paginatedRows = displayRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   useEffect(() => {
     setPage(1);
-  }, [view]);
+  }, [view, sortKey, sortDir]);
 
   useEffect(() => {
     setPage((currentPage) => Math.min(currentPage, totalPages));
@@ -262,9 +304,9 @@ export default function MatterFinancialStatusPage({ view }: { view: MatterFinanc
             </div>
 
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-              <div className="border-b border-gray-200 px-5 py-4"><h2 className="font-semibold text-gray-900">{detail.title} by matter</h2></div>
-              {sortedRows.length === 0 ? <div className="p-10 text-center text-sm text-gray-500">No matter records are available.</div> : <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-5 py-3">#</th><th className="px-5 py-3">Matter</th><th className="px-5 py-3">Client</th><th className="px-5 py-3">{view === 'amount-billed' ? 'Invoices / Dates' : view === 'amount-collected' ? 'Payments / Last Payment' : view === 'direct-cost-workload' ? 'Direct Cost / Workload' : view === 'timeliness' ? 'Completion / Deadline' : 'Revenue / Direct Cost'}</th><th className="px-5 py-3">{detail.metricLabel}</th><th className="px-5 py-3">Status</th></tr></thead><tbody>{paginatedRows.map((row, index) => <tr key={row.matterId} className="border-t border-gray-100 align-top hover:bg-gray-50"><td className="px-5 py-4 text-gray-500">{(page - 1) * PAGE_SIZE + index + 1}</td><td className="px-5 py-4"><Link to={`/matters/${row.matterId}`} className="font-medium text-blue-700 hover:underline">{row.matter.caseNo || row.matterId}</Link><div className="mt-1 text-xs text-gray-500">{row.matter.status || 'Status unavailable'}</div></td><td className="px-5 py-4 text-gray-700">{row.matter.parties || 'Client unavailable'}</td><td className="px-5 py-4 text-gray-700">{view === 'amount-billed' ? <div>{row.invoices.length} invoice{row.invoices.length === 1 ? '' : 's'}<div className="mt-1 text-xs text-gray-500">{row.invoices.map((invoice) => `${invoice.date} (${invoice.status})`).join(', ') || 'No invoices'}</div></div> : view === 'amount-collected' ? <div>{row.invoices.filter((invoice) => invoice.status === 'Paid').length} payment{row.invoices.filter((invoice) => invoice.status === 'Paid').length === 1 ? '' : 's'}<div className="mt-1 text-xs text-gray-500">{row.invoices.filter((invoice) => invoice.status === 'Paid').map((invoice) => invoice.updatedAt || invoice.date).join(', ') || 'No confirmed payments'}</div></div> : view === 'direct-cost-workload' ? <div>{money(row.directCost)}<div className="mt-1 text-xs text-gray-500">{row.openTasks} open / {row.tasks.length} total tasks{row.tasks.length ? ` · ${Array.from(new Set(row.tasks.map((task) => task.assignee).filter(Boolean)).values()).join(', ')}` : ''}</div></div> : view === 'timeliness' ? <div>{row.completionDate ? `Completed ${row.completionDate.slice(0, 10)}` : 'Not completed'}<div className="mt-1 text-xs text-gray-500">{row.requiredDeadline ? `Deadline ${row.requiredDeadline}` : 'Deadline unavailable'}</div></div> : <div>{money(row.collected)} revenue<div className="mt-1 text-xs text-gray-500">{money(row.directCost)} direct cost</div></div>}</td><td className="px-5 py-4 font-semibold text-gray-900">{metricValue(row)}</td><td className="px-5 py-4">{view === 'timeliness' ? <span className={row.timeliness === 'On time' ? 'text-green-700' : row.timeliness === 'Late' ? 'text-red-700' : 'text-gray-500'}>{row.timeliness}</span> : view === 'net-profit' ? <span className="text-gray-500">Unavailable</span> : row.matter.status || 'Unavailable'}</td></tr>)}</tbody></table></div>}
-              {sortedRows.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-5 py-4 text-sm text-gray-600"><span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sortedRows.length)} of {sortedRows.length}</span><div className="flex items-center gap-1"><button type="button" onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))} disabled={page === 1} className="rounded border border-gray-300 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40">Previous</button>{Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => <button type="button" key={pageNumber} onClick={() => setPage(pageNumber)} className={`rounded border px-3 py-1.5 ${pageNumber === page ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}>{pageNumber}</button>)}<button type="button" onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))} disabled={page === totalPages} className="rounded border border-gray-300 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></div>}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-4"><h2 className="font-semibold text-gray-900">{detail.title} by matter</h2>{displayRows.length > 0 && <TableExport filename={`matter-financial-${view}`} title={detail.title} subtitle={`${displayRows.length} matters`} columns={[{ label: 'Matter', value: (row: MatterRow) => row.matter.caseNo || row.matterId }, { label: 'Client', value: (row: MatterRow) => row.matter.parties || '' }, { label: 'Matter Status', value: (row: MatterRow) => row.matter.status || '' }, { label: 'Timeliness', value: (row: MatterRow) => row.timeliness }, { label: detail.metricLabel, value: (row: MatterRow) => metricValue(row) }]} rows={displayRows} />}</div>
+              {sortedRows.length === 0 ? <div className="p-10 text-center text-sm text-gray-500">No matter records are available.</div> : <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-5 py-3">#</th><SortableHeader label="Matter" column="matter" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3" /><SortableHeader label="Client" column="client" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3" /><SortableHeader label={view === 'amount-billed' ? 'Invoices / Dates' : view === 'amount-collected' ? 'Payments / Last Payment' : view === 'direct-cost-workload' ? 'Direct Cost / Workload' : view === 'timeliness' ? 'Completion / Deadline' : 'Revenue / Direct Cost'} column="detail" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3" /><SortableHeader label={detail.metricLabel} column="metric" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3" /><SortableHeader label="Status" column="status" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3" /></tr></thead><tbody>{paginatedRows.map((row, index) => <tr key={row.matterId} className="border-t border-gray-100 align-top hover:bg-gray-50"><td className="px-5 py-4 text-gray-500">{(page - 1) * PAGE_SIZE + index + 1}</td><td className="px-5 py-4"><Link to={`/matters/${row.matterId}`} className="font-medium text-blue-700 hover:underline">{row.matter.caseNo || row.matterId}</Link><div className="mt-1 text-xs text-gray-500">{row.matter.status || 'Status unavailable'}</div></td><td className="px-5 py-4 text-gray-700">{row.matter.parties || 'Client unavailable'}</td><td className="px-5 py-4 text-gray-700">{view === 'amount-billed' ? <div>{row.invoices.length} invoice{row.invoices.length === 1 ? '' : 's'}<div className="mt-1 text-xs text-gray-500">{row.invoices.map((invoice) => `${invoice.date} (${invoice.status})`).join(', ') || 'No invoices'}</div></div> : view === 'amount-collected' ? <div>{row.invoices.filter((invoice) => invoice.status === 'Paid').length} payment{row.invoices.filter((invoice) => invoice.status === 'Paid').length === 1 ? '' : 's'}<div className="mt-1 text-xs text-gray-500">{row.invoices.filter((invoice) => invoice.status === 'Paid').map((invoice) => invoice.updatedAt || invoice.date).join(', ') || 'No confirmed payments'}</div></div> : view === 'direct-cost-workload' ? <div>{money(row.directCost)}<div className="mt-1 text-xs text-gray-500">{row.openTasks} open / {row.tasks.length} total tasks{row.tasks.length ? ` · ${Array.from(new Set(row.tasks.map((task) => task.assignee).filter(Boolean)).values()).join(', ')}` : ''}</div></div> : view === 'timeliness' ? <div>{row.completionDate ? `Completed ${row.completionDate.slice(0, 10)}` : 'Not completed'}<div className="mt-1 text-xs text-gray-500">{row.requiredDeadline ? `Deadline ${row.requiredDeadline}` : 'Deadline unavailable'}</div></div> : <div>{money(row.collected)} revenue<div className="mt-1 text-xs text-gray-500">{money(row.directCost)} direct cost</div></div>}</td><td className="px-5 py-4 font-semibold text-gray-900">{metricValue(row)}</td><td className="px-5 py-4">{view === 'timeliness' ? <span className={row.timeliness === 'On time' ? 'text-green-700' : row.timeliness === 'Late' ? 'text-red-700' : 'text-gray-500'}>{row.timeliness}</span> : view === 'net-profit' ? <span className="text-gray-500">Unavailable</span> : row.matter.status || 'Unavailable'}</td></tr>)}</tbody></table></div>}
+              {displayRows.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-5 py-4 text-sm text-gray-600"><span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, displayRows.length)} of {displayRows.length}</span><div className="flex items-center gap-1"><button type="button" onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))} disabled={page === 1} className="rounded border border-gray-300 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40">Previous</button>{Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => <button type="button" key={pageNumber} onClick={() => setPage(pageNumber)} className={`rounded border px-3 py-1.5 ${pageNumber === page ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}>{pageNumber}</button>)}<button type="button" onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))} disabled={page === totalPages} className="rounded border border-gray-300 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-40">Next</button></div></div>}
             </div>
           </>
         )}

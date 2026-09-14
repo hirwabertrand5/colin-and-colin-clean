@@ -13,6 +13,8 @@ import {
 } from '../../utils/workflowDeadline';
 import { getCasePracticePath } from '../../utils/caseLabels';
 import { caseMatchesAssignee, formatCaseAssignedTo } from '../../utils/caseAssignments';
+import SortableHeader from '../ui/SortableHeader';
+import TableExport from '../ui/TableExport';
 
 interface CaseListProps {
   userRole: UserRole;
@@ -48,6 +50,25 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('nextDeadline');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const COLUMN_SORT_KEYS: Record<string, SortKey> = {
+    caseNo: 'caseNo',
+    parties: 'parties',
+    workflow: 'workflow',
+    currentStep: 'currentStep',
+    assignedTo: 'assignedTo',
+    createdAt: 'createdAt',
+    nextDeadline: 'nextDeadline',
+  };
+  const handleSort = (column: string) => {
+    const nextKey = COLUMN_SORT_KEYS[column];
+    if (!nextKey) return;
+    if (sortKey === nextKey) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(nextKey);
+      setSortDir('asc');
+    }
+  };
   const [cases, setCases] = useState<CaseData[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -356,8 +377,25 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
               <ArrowUpDown className="w-4 h-4 mr-2" />
               {sortDir === 'asc' ? 'Asc' : 'Desc'}
             </button>
-          </div>
 
+            {indexedCases.length > 0 && (
+              <TableExport
+                filename="matters_list"
+                title={isTemporaryClosedMode ? 'Temporarily Closed Matters' : 'Matters'}
+                subtitle={`${filteredSortedCases.length} matters`}
+                columns={[
+                  { label: 'Case No.', value: (c: CaseData) => c.caseNo || '' },
+                  { label: 'Parties', value: (c: CaseData) => c.parties || '' },
+                  { label: 'Workflow', value: (c: CaseData) => c.workflow || c.matterType || c.caseType || '' },
+                  { label: 'Current Step', value: (c: CaseData) => (c.workflowProgress && (c.workflowProgress as any).status === 'Completed' ? 'Completed' : (c.workflowProgress as any)?.currentStepTitle || '') },
+                  { label: 'Assigned To', value: (c: CaseData) => formatCaseAssignedTo(c) },
+                  { label: 'Date Created', value: (c: CaseData) => c.createdAt || '' },
+                  { label: 'Next Deadline', value: (c: CaseData) => ((c.workflowProgress as any)?.currentStepDueAt || (c.workflowProgress as any)?.nextDueAt || '') },
+                ]}
+                rows={filteredSortedCases}
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -380,26 +418,17 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
           <table className="w-full">
             <thead className="bg-gray-50 border-b">
               <tr>
-                {[
-                  'No.',
-                  'Case No.',
-                  'Parties',
-                  'Workflow',
-                  'Current Step',
-                  'Assigned To',
-                  'Date Created',
-                  'Contract Value',
-                  'Task Fee',
-                  'Next Deadline',
-                  'Actions',
-                ].map((header) => (
-                  <th
-                    key={header}
-                    className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider"
-                  >
-                    {header}
-                  </th>
-                ))}
+                <th className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">No.</th>
+                <SortableHeader label="Case No." column="caseNo" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Parties" column="parties" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Workflow" column="workflow" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Current Step" column="currentStep" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Assigned To" column="assignedTo" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <SortableHeader label="Date Created" column="createdAt" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <th className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Contract Value</th>
+                <th className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Task Fee</th>
+                <SortableHeader label="Next Deadline" column="nextDeadline" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-6 py-4 text-xs font-medium text-gray-600 uppercase tracking-wider" />
+                <th className="px-6 py-4 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
 

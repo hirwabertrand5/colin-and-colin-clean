@@ -10,6 +10,9 @@ import {
 
 import WorkflowTemplates from './WorkflowTemplates';
 import { listAllWorkflowTemplates, WorkflowTemplate } from '../../services/workflowService';
+import SortableHeader from '../ui/SortableHeader';
+import TableExport from '../ui/TableExport';
+import { sortRows, SortDir } from '../../utils/tableSort';
 import {
   getIntakeAutomationConfig,
   updateIntakeAutomationConfig,
@@ -74,21 +77,64 @@ function CellList({ text }: { text: string }) {
 }
 
 function WorkflowTable({ rows }: { rows: WorkflowRow[] }) {
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const handleSort = (column: string) => {
+    if (sortKey === column) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(column);
+      setSortDir('asc');
+    }
+  };
+  const workflowSortValueOf = (r: WorkflowRow, key: string): unknown => {
+    switch (key) {
+      case 'stage':
+        return r.stage;
+      case 'keyActions':
+        return r.keyActions;
+      case 'output':
+        return r.output;
+      case 'legalBasis':
+        return r.legalBasis;
+      case 'legalFees':
+        return r.legalFees;
+      default:
+        return r.timeline;
+    }
+  };
+  const sortedRows = sortRows(rows, sortKey, sortDir, (r) => workflowSortValueOf(r, sortKey));
   return (
     <div className="overflow-x-auto border border-gray-200 rounded-lg">
+      <div className="mb-2 flex items-center justify-end">
+        <TableExport
+          filename="workflow_template"
+          title="Workflow Stages & Key Actions"
+          subtitle={`${rows.length} stages`}
+          columns={[
+            { label: 'Stage', value: (r: WorkflowRow) => r.stage },
+            { label: 'Key Actions', value: (r: WorkflowRow) => r.keyActions },
+            { label: 'Output', value: (r: WorkflowRow) => r.output },
+            { label: 'Legal Basis', value: (r: WorkflowRow) => r.legalBasis },
+            { label: 'Legal Fees', value: (r: WorkflowRow) => r.legalFees },
+            { label: 'Timeline', value: (r: WorkflowRow) => r.timeline },
+          ]}
+          rows={rows}
+        />
+      </div>
       <table className="min-w-[1100px] w-full text-sm">
         <thead className="bg-gray-50 text-gray-700">
           <tr>
-            <th className="text-left p-3 border-b">Stage</th>
-            <th className="text-left p-3 border-b">Key Actions</th>
-            <th className="text-left p-3 border-b">Output</th>
-            <th className="text-left p-3 border-b">Legal Basis</th>
-            <th className="text-left p-3 border-b">Legal Fees</th>
-            <th className="text-left p-3 border-b">Timeline</th>
+            <SortableHeader label="Stage" column="stage" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
+            <SortableHeader label="Key Actions" column="keyActions" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
+            <SortableHeader label="Output" column="output" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
+            <SortableHeader label="Legal Basis" column="legalBasis" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
+            <SortableHeader label="Legal Fees" column="legalFees" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
+            <SortableHeader label="Timeline" column="timeline" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
           </tr>
         </thead>
         <tbody className="bg-white">
-          {rows.map((r, idx) => (
+          {sortedRows.map((r, idx) => (
             <tr key={idx} className="align-top">
               <td className="p-3 border-b font-medium text-gray-900 whitespace-pre-wrap">{r.stage}</td>
               <td className="p-3 border-b text-gray-700">

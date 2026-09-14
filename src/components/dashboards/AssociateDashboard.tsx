@@ -27,6 +27,8 @@ import { getAllTasks, TaskData } from '../../services/taskService';
 import { FirmReportDateBasis, FirmReportRange, getFirmReports, getMyProductivityEarningsReport, MyProductivityEarningsResponse } from '../../services/firmReportsService';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import { baseNameFromLabel, computeMemberFeeEarnedFromRows, computeTaskFeeCollectedFromRows } from '../../utils/productivity';
+import SortableHeader from '../ui/SortableHeader';
+import { SortDir, sortRows } from '../../utils/tableSort';
 import './AssociateDashboard.css';
 
 type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
@@ -550,6 +552,38 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const earningsMember = earningsReport?.selectedMember;
   const earningsTeamRow = earningsReport?.team?.[0];
   const earningsRows = earningsReport?.productivityRows || [];
+  const [feeSortKey, setFeeSortKey] = useState('');
+  const [feeSortDir, setFeeSortDir] = useState<SortDir>('asc');
+  const handleFeeSort = (column: string) => {
+    if (feeSortKey === column) {
+      setFeeSortDir(feeSortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setFeeSortKey(column);
+      setFeeSortDir('asc');
+    }
+  };
+  const sortedEarningsRows = useMemo(
+    () =>
+      sortRows(earningsRows, feeSortKey, feeSortDir, (row: any) => {
+        switch (feeSortKey) {
+          case 'matter':
+            return row.matter || '';
+          case 'task':
+            return row.task || '';
+          case 'taskFee':
+            return row.taskFeeCollected || row.taskFee || 0;
+          case 'tpa':
+            return row.tpaPercent ?? 0;
+          case 'timeliness':
+            return row.timelinessScore ?? -1;
+          case 'quality':
+            return row.qualityScore ?? -1;
+          default:
+            return row.feeEarned ?? -1;
+        }
+      }),
+    [earningsRows, feeSortKey, feeSortDir],
+  );
   const reportTaskFeeCollected = earningsRows.length
     ? computeTaskFeeCollectedFromRows(earningsRows, { meId, meName: me?.name })
     : earningsSummary?.totalTaskFeeCollected ?? earningsSummary?.totalTaskFee ?? 0;
@@ -897,13 +931,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               <table className="w-full text-left text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                   <tr>
-                    <th className="px-4 py-3">Matter</th>
-                    <th className="px-4 py-3">Task</th>
-                    <th className="px-4 py-3 text-right">Task Fee</th>
-                    <th className="px-4 py-3 text-right">TPA</th>
-                    <th className="px-4 py-3 text-right">Timeliness</th>
-                    <th className="px-4 py-3 text-right">Quality</th>
-                    <th className="px-4 py-3 text-right">Fee Earned</th>
+                    <SortableHeader label="Matter" column="matter" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3" />
+                    <SortableHeader label="Task" column="task" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3" />
+                    <SortableHeader label="Task Fee" column="taskFee" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
+                    <SortableHeader label="TPA" column="tpa" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
+                    <SortableHeader label="Timeliness" column="timeliness" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
+                    <SortableHeader label="Quality" column="quality" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
+                    <SortableHeader label="Fee Earned" column="feeEarned" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -914,7 +948,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                       </td>
                     </tr>
                   ) : (
-                    earningsRows.slice(0, 12).map((row) => (
+                    sortedEarningsRows.slice(0, 12).map((row) => (
                       <tr key={row.id} className="align-top">
                         <td className="px-4 py-3 text-gray-700">{row.matter}</td>
                         <td className="px-4 py-3 text-gray-700">{row.task}</td>

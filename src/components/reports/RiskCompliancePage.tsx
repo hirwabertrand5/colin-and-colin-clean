@@ -10,6 +10,9 @@ import { getAllProspects, Prospect } from '../../services/prospectService';
 import { getAllTasks, TaskData } from '../../services/taskService';
 import usePageTitle from '../../hooks/usePageTitle';
 import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
+import { SortDir, sortRows } from '../../utils/tableSort';
+import SortableHeader from '../ui/SortableHeader';
+import TableExport from '../ui/TableExport';
 
 const PAGE_SIZE = 10;
 const MANAGEMENT_ROLES: UserRole[] = ['managing_director', 'managing_partner', 'executive_managing_partner'];
@@ -34,11 +37,33 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   return <div className="min-h-24 rounded-lg border border-gray-200 bg-white p-4 shadow-sm"><div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">{label}</div><div className="mt-3 text-2xl font-semibold text-gray-900">{value}</div></div>;
 }
 
-function RiskTable({ rows, view, page, setPage }: { rows: Row[]; view: ViewKey; page: number; setPage: (page: number) => void }) {
+function RiskTable({ rows, view, page, setPage, sortKey, sortDir, onSort, exportRows, exportTitle }: { rows: Row[]; view: ViewKey; page: number; setPage: (page: number) => void; sortKey: string; sortDir: SortDir; onSort: (column: string) => void; exportRows: Row[]; exportTitle: string }) {
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   if (!paged.length) return <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">No records found for this view.</div>;
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  return <div className="overflow-hidden rounded-lg border border-gray-200 bg-white"><div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Risk / Record</th><th className="px-4 py-3">Matter</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Severity</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Responsible / Date</th></tr></thead><tbody>{paged.map((row, index) => <tr key={row.id} className="border-t border-gray-100 align-top hover:bg-gray-50"><td className="px-4 py-4 text-gray-500">{(page - 1) * PAGE_SIZE + index + 1}</td><td className="px-4 py-4"><div className="font-medium text-gray-900">{String(row.name || row.title || row.risk || row.reason || row.alert || 'Record')}</div><div className="mt-1 text-xs text-gray-500">{String(row.details || row.source || '')}</div></td><td className="px-4 py-4 text-gray-600">{String(row.matter || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.client || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.category || row.type || '—')}</td><td className="px-4 py-4">{row.severity ? <span className={`rounded-full border px-2 py-1 text-xs font-medium ${badgeClass(String(row.severity))}`}>{String(row.severity)}</span> : '—'}</td><td className="px-4 py-4 text-gray-600">{String(row.status || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.responsible || row.owner || '—')}<br /><span className="text-xs">{dateLabel(row.date || row.dueDate || row.createdAt)}</span></td></tr>)}</tbody></table></div>{pages > 1 && <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 text-sm text-gray-600"><span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, rows.length)} of {rows.length}</span><div className="flex gap-2"><button type="button" disabled={page === 1} onClick={() => setPage(page - 1)} className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40">Previous</button><button type="button" disabled={page === pages} onClick={() => setPage(page + 1)} className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40">Next</button></div></div>}</div>;
+  const riskSortValueOf = (row: Row, key: string): unknown => {
+    switch (key) {
+      case 'record':
+        return String(row.name || row.title || row.risk || row.reason || row.alert || row.id || '');
+      case 'matter':
+        return String(row.matter || '');
+      case 'client':
+        return String(row.client || '');
+      case 'category':
+        return String(row.category || row.type || '');
+      case 'severity': {
+        const rank: Record<string, number> = { critical: 0, high: 1, medium: 2, moderate: 2, low: 3 };
+        return rank[String(row.severity || '').toLowerCase()] ?? 99;
+      }
+      case 'status':
+        return String(row.status || '');
+      case 'responsible':
+        return String(row.responsible || row.owner || '') + ' ' + String(row.date || row.dueDate || row.createdAt || '');
+      default:
+        return String(row.name || row.id || '');
+    }
+  };
+  return <div className="overflow-hidden rounded-lg border border-gray-200 bg-white"><div className="flex items-center justify-end border-b border-gray-200 bg-gray-50 px-4 py-2">{exportRows.length > 0 && <TableExport filename={`risk_compliance_${view}`} title={exportTitle} subtitle={`${exportRows.length} records`} columns={[{ label: 'Risk / Record', value: (row: Row) => String(row.name || row.title || row.risk || row.reason || row.alert || '') }, { label: 'Matter', value: (row: Row) => String(row.matter || '') }, { label: 'Client', value: (row: Row) => String(row.client || '') }, { label: 'Category', value: (row: Row) => String(row.category || row.type || '') }, { label: 'Severity', value: (row: Row) => String(row.severity || '') }, { label: 'Status', value: (row: Row) => String(row.status || '') }, { label: 'Responsible', value: (row: Row) => String(row.responsible || row.owner || '') }, { label: 'Date', value: (row: Row) => dateLabel(row.date || row.dueDate || row.createdAt) }, { label: 'Details', value: (row: Row) => String(row.details || row.source || '') }]} rows={exportRows} />}</div><div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-4 py-3">#</th><SortableHeader label="Risk / Record" column="record" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-4 py-3" /><SortableHeader label="Matter" column="matter" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-4 py-3" /><SortableHeader label="Client" column="client" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-4 py-3" /><SortableHeader label="Category" column="category" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-4 py-3" /><SortableHeader label="Severity" column="severity" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-4 py-3" /><SortableHeader label="Status" column="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-4 py-3" /><SortableHeader label="Responsible / Date" column="responsible" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="px-4 py-3" /></tr></thead><tbody>{paged.map((row, index) => <tr key={row.id} className="border-t border-gray-100 align-top hover:bg-gray-50"><td className="px-4 py-4 text-gray-500">{(page - 1) * PAGE_SIZE + index + 1}</td><td className="px-4 py-4"><div className="font-medium text-gray-900">{String(row.name || row.title || row.risk || row.reason || row.alert || 'Record')}</div><div className="mt-1 text-xs text-gray-500">{String(row.details || row.source || '')}</div></td><td className="px-4 py-4 text-gray-600">{String(row.matter || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.client || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.category || row.type || '—')}</td><td className="px-4 py-4">{row.severity ? <span className={`rounded-full border px-2 py-1 text-xs font-medium ${badgeClass(String(row.severity))}`}>{String(row.severity)}</span> : '—'}</td><td className="px-4 py-4 text-gray-600">{String(row.status || '—')}</td><td className="px-4 py-4 text-gray-600">{String(row.responsible || row.owner || '—')}<br /><span className="text-xs">{dateLabel(row.date || row.dueDate || row.createdAt)}</span></td></tr>)}</tbody></table></div>{pages > 1 && <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 text-sm text-gray-600"><span>Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, rows.length)} of {rows.length}</span><div className="flex gap-2"><button type="button" disabled={page === 1} onClick={() => setPage(page - 1)} className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40">Previous</button><button type="button" disabled={page === pages} onClick={() => setPage(page + 1)} className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40">Next</button></div></div>}</div>;
 }
 
 export default function RiskCompliancePage({ userRole }: { userRole: UserRole }) {
@@ -69,11 +94,26 @@ export default function RiskCompliancePage({ userRole }: { userRole: UserRole })
   }, [cases, complaints, events, invoices, matters, openConflicts, overdueEvents, overdueTasks, redFlags, tasks, view]);
 
   const filtered = rows.filter((row) => !query || JSON.stringify(row).toLowerCase().includes(query.toLowerCase())); useEffect(() => setPage(1), [query, view]);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / 10));
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const handleSort = (column: string) => {
+    if (sortKey === column) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(column);
+      setSortDir('asc');
+    }
+  };
+  const sorted = useMemo(
+    () => sortRows(filtered, sortKey, sortDir, (row) => String(row.name || row.id || '')),
+    [filtered, sortDir, sortKey],
+  );
+  useEffect(() => setPage(1), [sortDir, sortKey]);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / 10));
   useEffect(() => setPage((currentPage) => Math.min(currentPage, totalPages)), [totalPages]);
   if (!MANAGEMENT_ROLES.includes(userRole)) return <div className="rounded-lg border border-gray-200 bg-white p-6"><h1 className="text-xl font-semibold">Access denied</h1><p className="mt-2 text-gray-600">You do not have permission to view Risk & Compliance.</p></div>;
   if (loading) return <div className="space-y-4"><div className="h-8 w-64 animate-pulse rounded bg-gray-200" /><div className="h-28 animate-pulse rounded-lg bg-white" /><div className="h-72 animate-pulse rounded-lg bg-white" /></div>;
   const critical = rows.filter((row) => row.severity === 'Critical').length; const high = rows.filter((row) => row.severity === 'High').length;
 
-  return <div className="space-y-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><Link to="/" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Management Dashboard</Link><h1 className="text-2xl font-semibold text-gray-900">{titles[view]}</h1><p className="mt-1 text-gray-600">Existing matter, finance, task, deadline, prospect, and client-experience data.</p></div><ShieldAlert className="text-gray-500" /></div>{error && <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={16} />{error}</div>}<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Metric label="Records" value={filtered.length} /><Metric label="Critical" value={critical} /><Metric label="High" value={high} /><Metric label="Open complaints / flags" value={openComplaints.length + openFlags.length} /></div>{view === 'compliance' && <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-4 text-sm text-yellow-900">Compliance requirements and completion records are not configured in the available application data sources.</div>}{view === 'management-alerts' && <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-4 text-sm text-yellow-900">No dedicated management alert engine is exposed by the available application data sources.</div>}<div className="rounded-lg border border-gray-200 bg-white p-4"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search risk records..." className="w-full max-w-sm rounded border border-gray-300 px-3 py-2 text-sm" /><span className="text-xs text-gray-500">Search runs before pagination · 10 records per page</span></div><RiskTable rows={filtered} view={view} page={page} setPage={setPage} /></div></div>;
+  return <div className="space-y-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><Link to="/" className="mb-3 inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft size={16} /> Management Dashboard</Link><h1 className="text-2xl font-semibold text-gray-900">{titles[view]}</h1><p className="mt-1 text-gray-600">Existing matter, finance, task, deadline, prospect, and client-experience data.</p></div><ShieldAlert className="text-gray-500" /></div>{error && <div className="flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={16} />{error}</div>}<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Metric label="Records" value={filtered.length} /><Metric label="Critical" value={critical} /><Metric label="High" value={high} /><Metric label="Open complaints / flags" value={openComplaints.length + openFlags.length} /></div>{view === 'compliance' && <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-4 text-sm text-yellow-900">Compliance requirements and completion records are not configured in the available application data sources.</div>}{view === 'management-alerts' && <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-4 text-sm text-yellow-900">No dedicated management alert engine is exposed by the available application data sources.</div>}<div className="rounded-lg border border-gray-200 bg-white p-4"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search risk records..." className="w-full max-w-sm rounded border border-gray-300 px-3 py-2 text-sm" /><span className="text-xs text-gray-500">Search runs before pagination · 10 records per page</span></div><RiskTable rows={sorted} view={view} page={page} setPage={setPage} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} exportRows={sorted} exportTitle={titles[view]} /></div></div>;
 }

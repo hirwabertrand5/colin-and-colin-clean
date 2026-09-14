@@ -34,6 +34,7 @@ import {
   updateIndependentTask,
 } from '../../services/independentTaskService';
 import usePageTitle from '../../hooks/usePageTitle';
+import TableExport from '../ui/TableExport';
 import {
   formatDeadlineDateTime,
   formatDueCountdown,
@@ -367,42 +368,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     }
   };
 
-  const exportCsv = () => {
-    const rows = [
-      ['Task Number', 'Title', 'Related Matter', 'Related Client', 'Assignee', 'Supervisor', 'Deadline Used %', 'Status', 'Due Date', 'Created Date'],
-      ...tasks.map((task) => [
-        task.taskNumber || '',
-        task.title || '',
-        task.relatedMatter?.caseNo ? [task.relatedMatter.caseNo, task.relatedMatter.parties].filter(Boolean).join(' • ') : task.relatedMatterLabel || '',
-        task.relatedClient || '',
-        task.assignee || '',
-        task.supervisor || '',
-        (() => {
-          const deadline = getDeadlineUsage(task);
-          return typeof deadline.usedPercent === 'number' ? `${deadline.usedPercent}%` : '';
-        })(),
-        task.status || '',
-        task.dueDate || '',
-        task.createdAt ? new Date(task.createdAt).toLocaleDateString() : '',
-      ]),
-    ];
-    const csv = rows
-      .map((row) =>
-        row
-          .map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`)
-          .join(',')
-      )
-      .join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'independent-tasks.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const taskMatterLabel = (task: IndependentTask) =>
+const taskMatterLabel = (task: IndependentTask) =>
     task.relatedMatter?.caseNo
       ? [task.relatedMatter.caseNo, task.relatedMatter.parties].filter(Boolean).join(' • ')
       : task.relatedMatterLabel || '—';
@@ -537,14 +503,26 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
               <h2 className="text-lg font-semibold text-gray-900">Task List</h2>
               <p className="text-sm text-gray-500">Search, filter, sort, paginate, and export.</p>
             </div>
-            <button
-              type="button"
-              onClick={exportCsv}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <Download className="h-4 w-4" />
-              Export CSV
-            </button>
+            {tasks.length > 0 && (
+              <TableExport
+                filename="independent_tasks"
+                title="Independent Tasks"
+                subtitle={`Page ${page} of ${Math.max(1, Math.ceil(taskTotal / limit))} · ${taskTotal} tasks${statusFilter !== 'all' ? ` · Status: ${statusFilter}` : ''}`}
+                columns={[
+                  { label: 'Task Number', value: (t: IndependentTask) => t.taskNumber || '' },
+                  { label: 'Title', value: (t: IndependentTask) => t.title || '' },
+                  { label: 'Related Matter', value: (t: IndependentTask) => t.relatedMatter?.caseNo ? [t.relatedMatter.caseNo, t.relatedMatter.parties].filter(Boolean).join(' • ') : t.relatedMatterLabel || '' },
+                  { label: 'Related Client', value: (t: IndependentTask) => t.relatedClient || '' },
+                  { label: 'Assignee', value: (t: IndependentTask) => t.assignee || '' },
+                  { label: 'Supervisor', value: (t: IndependentTask) => t.supervisor || '' },
+                  { label: 'Deadline Used %', value: (t: IndependentTask) => { const deadline = getDeadlineUsage(t); return typeof deadline.usedPercent === 'number' ? `${deadline.usedPercent}%` : ''; } },
+                  { label: 'Status', value: (t: IndependentTask) => t.status || '' },
+                  { label: 'Due Date', value: (t: IndependentTask) => t.dueDate || '' },
+                  { label: 'Created Date', value: (t: IndependentTask) => t.createdAt ? new Date(t.createdAt).toLocaleDateString() : '' },
+                ]}
+                rows={tasks}
+              />
+            )}
           </div>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-5">

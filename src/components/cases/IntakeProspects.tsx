@@ -4,8 +4,52 @@ import { Link } from 'react-router-dom';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getAllProspects, getProspectStats, deleteProspect, convertProspectToMatter, Prospect } from '../../services/prospectService';
 import ProspectForm from './ProspectForm';
+import SortableHeader from '../ui/SortableHeader';
+import TableExport from '../ui/TableExport';
+import { SortDir, sortRows, toggleSortKey } from '../../utils/tableSort';
+import { ReportColumn } from '../../utils/reportExport';
 
 const ADMIN_ROLES = ['managing_director', 'managing_partner', 'senior_partner', 'partner', 'associate_partner'];
+
+const personNameValue = (value: unknown): string => {
+  if (!value) return '';
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object') {
+    const name = (value as { name?: unknown }).name;
+    return typeof name === 'string' ? name.trim() : '';
+  }
+  return '';
+};
+
+const prospectDoneByName = (p: Prospect): string => {
+  const sources: unknown[] = [p.createdBy, p.responsibleAssociate, p.responsiblePartner, p.assignedTo];
+  for (const src of sources) {
+    const name = personNameValue(src);
+    if (name) return name;
+  }
+  return '';
+};
+
+const prospectSortValueOf = (p: Prospect, key: string): unknown => {
+  switch (key) {
+    case 'clientName':
+      return p.clientName;
+    case 'contact':
+      return p.contact?.name || '';
+    case 'classification':
+      return p.legalServicePath?.map((item) => item.label).join(' / ') || 'Not selected';
+    case 'fee':
+      return Number(p.estimatedFeeValue || 0) || Number(p.estimatedMatterValue || 0) || 0;
+    case 'stage':
+      return ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Quotation Preparation', 'Conversion Assessment', 'Quotation Issued', 'Awaiting Client Decision', 'Final Follow-Up', 'Engagement'].indexOf(p.stage || '');
+    case 'doneAt':
+      return p.createdAt || p.dateReceived || p.updatedAt || '';
+    case 'doneBy':
+      return prospectDoneByName(p);
+    default:
+      return p.clientName;
+  }
+};
 
 const getErrorMessage = (error: any, fallback: string) =>
   error?.response?.data?.message || error?.message || fallback;
@@ -22,6 +66,13 @@ export default function IntakeProspects() {
   const [filterStage, setFilterStage] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const handleSort = (column: string) => {
+    const next = toggleSortKey(sortKey, sortDir, column);
+    setSortKey(next.key);
+    setSortDir(next.dir);
+  };
   const currentRole = (() => {
     try {
       return JSON.parse(localStorage.getItem('user') || '{}')?.role as string | undefined;
@@ -136,14 +187,19 @@ export default function IntakeProspects() {
   }, [filterStage, prospects, searchTerm]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProspects.length / PROSPECTS_PER_PAGE));
+  const sortedProspects = useMemo(
+    () => sortRows(filteredProspects, sortKey, sortDir, (p) => prospectSortValueOf(p, sortKey)),
+    [filteredProspects, sortKey, sortDir]
+  );
+
   const paginatedProspects = useMemo(
-    () => filteredProspects.slice((currentPage - 1) * PROSPECTS_PER_PAGE, currentPage * PROSPECTS_PER_PAGE),
-    [currentPage, filteredProspects]
+    () => sortedProspects.slice((currentPage - 1) * PROSPECTS_PER_PAGE, currentPage * PROSPECTS_PER_PAGE),
+    [currentPage, sortedProspects]
   );
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterStage, searchTerm]);
+  }, [filterStage, searchTerm, sortKey, sortDir]);
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
@@ -286,6 +342,24 @@ export default function IntakeProspects() {
                   : `${filteredProspects.length} active prospects`}
               </p>
             </div>
+            {filteredProspects.length > 0 && (
+              <TableExport
+                filename="intake_and_prospects"
+                title="Intake & Prospects"
+                subtitle={`${filteredProspects.length} prospects · ${filterStage || 'all stages'}`}
+                columns={[
+                  { label: 'Prospect Name', value: (p: Prospect) => p.clientName },
+                  { label: 'Prospect No', value: (p: Prospect) => p.prospectNo },
+                  { label: 'Contact Person', value: (p: Prospect) => p.contact?.name || '' },
+                  { label: 'Legal Classification', value: (p: Prospect) => getLegalClassificationLabel(p) },
+                  { label: 'Estimated Fee Value', value: (p: Prospect) => formatEstimatedValue(p) },
+                  { label: 'Current Stage', value: (p: Prospect) => getCurrentStageLabel(p) },
+                  { label: 'Done At', value: (p: Prospect) => formatDoneAt(p.createdAt || p.dateReceived || p.updatedAt) },
+                  { label: 'Done By', value: (p: Prospect) => getDoneByName(p) || '' },
+                ]}
+                rows={filteredProspects}
+              />
+            )}
             <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
               <div className="relative w-full lg:w-80">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -331,13 +405,13 @@ export default function IntakeProspects() {
                 <thead className="bg-gray-50/80 dark:bg-gray-900/60">
                   <tr className="border-b border-gray-200 dark:border-gray-700">
                     <th className="w-16 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">#</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Prospect Name</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Contact Person</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Legal Classification</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Estimated Fee Value</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Current Stage</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Done At</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Done By</th>
+                    <SortableHeader label="Prospect Name" column="clientName" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Contact Person" column="contact" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Legal Classification" column="classification" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Estimated Fee Value" column="fee" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Current Stage" column="stage" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Done At" column="doneAt" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Done By" column="doneBy" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Actions</th>
                   </tr>
                 </thead>
