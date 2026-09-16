@@ -29,8 +29,8 @@ export const seedAllWorkflowTemplates = async () => {
   await seedVehicleOwnershipTransferTemplate();
   await seedClientExperienceTemplates();
 
-  // Guarantee every template has percentages (total = 100) so earned-fee
-  // calculations are deterministic even for templates saved before this feature.
+  // Clamp any manual percentages already stored on the templates so earned-fee
+  // calculations always read valid 0–100 values (manual values are preserved).
   const templates: any[] = await WorkflowTemplate.find({}).lean();
   for (const template of templates) {
     normalizeTemplatePercentages(template);

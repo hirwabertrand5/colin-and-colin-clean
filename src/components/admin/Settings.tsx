@@ -26,6 +26,7 @@ type WorkflowRow = {
   legalBasis: string;
   legalFees: string;
   timeline: string;
+  percentage?: number;
 };
 
 type WorkflowDoc = {
@@ -99,6 +100,8 @@ function WorkflowTable({ rows }: { rows: WorkflowRow[] }) {
         return r.legalBasis;
       case 'legalFees':
         return r.legalFees;
+      case 'percentage':
+        return r.percentage;
       default:
         return r.timeline;
     }
@@ -117,6 +120,7 @@ function WorkflowTable({ rows }: { rows: WorkflowRow[] }) {
             { label: 'Output', value: (r: WorkflowRow) => r.output },
             { label: 'Legal Basis', value: (r: WorkflowRow) => r.legalBasis },
             { label: 'Legal Fees', value: (r: WorkflowRow) => r.legalFees },
+            { label: 'Percentage', value: (r: WorkflowRow) => (r.percentage != null ? `${r.percentage}%` : '—') },
             { label: 'Timeline', value: (r: WorkflowRow) => r.timeline },
           ]}
           rows={rows}
@@ -130,6 +134,7 @@ function WorkflowTable({ rows }: { rows: WorkflowRow[] }) {
             <SortableHeader label="Output" column="output" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
             <SortableHeader label="Legal Basis" column="legalBasis" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
             <SortableHeader label="Legal Fees" column="legalFees" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
+            <SortableHeader label="Percentage" column="percentage" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
             <SortableHeader label="Timeline" column="timeline" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
           </tr>
         </thead>
@@ -143,6 +148,9 @@ function WorkflowTable({ rows }: { rows: WorkflowRow[] }) {
               <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{r.output}</td>
               <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{r.legalBasis}</td>
               <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{r.legalFees}</td>
+              <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">
+                {r.percentage != null ? `${r.percentage}%` : '—'}
+              </td>
               <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{r.timeline}</td>
             </tr>
           ))}
@@ -277,6 +285,8 @@ export default function Settings() {
             legalBasis: normalizeLegalBasis(s.legalBasis),
             legalFees: normalizeFee(s.fee),
             timeline: normalizeSla(s.sla),
+            percentage:
+              typeof s.percentage === 'number' && Number.isFinite(s.percentage) ? s.percentage : undefined,
           };
         }),
       };

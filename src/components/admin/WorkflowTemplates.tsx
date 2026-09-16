@@ -15,6 +15,7 @@ type TemplateStepForm = {
   stageKey?: string;
   title?: string;
   responsibleRole?: string;
+  percentage?: number;
   actionsText?: string; // one per line
   outputsText?: string; // one per line
   legalBasisText?: string; // one per line
@@ -71,6 +72,10 @@ function templateToForm(t: Template): TemplateForm {
       order: typeof s?.order === 'number' ? s.order : undefined,
       stageKey: typeof s?.stageKey === 'string' ? s.stageKey : undefined,
       title: typeof s?.title === 'string' ? s.title : undefined,
+      percentage:
+        typeof s?.percentage === 'number' && Number.isFinite(s.percentage)
+          ? Math.max(0, Math.min(100, s.percentage))
+          : undefined,
       responsibleRole: typeof s?.responsibleRole === 'string' ? s.responsibleRole : undefined,
       actionsText: joinLines(Array.isArray(s?.actions) ? s.actions : []),
       outputsText: joinLines(
@@ -152,6 +157,9 @@ function formToPayload(form: TemplateForm) {
         order: typeof s.order === 'number' ? s.order : 0,
         stageKey: s.stageKey || '',
         title: s.title || '',
+        ...(typeof s.percentage === 'number' && Number.isFinite(s.percentage)
+          ? { percentage: Math.max(0, Math.min(100, s.percentage)) }
+          : {}),
         ...(s.responsibleRole?.trim() ? { responsibleRole: s.responsibleRole.trim() } : {}),
         ...(actions.length ? { actions } : { actions: [] }),
         ...(outputs.length ? { outputs } : { outputs: [] }),
@@ -186,30 +194,17 @@ function stagePercentTotal(form: TemplateForm | null): number {
   return (form?.stages || []).reduce((sum, stage) => sum + (Number(stage.percentage) || 0), 0);
 }
 
-/** Derived percentage for one step of a stage (stage% ÷ steps in the stage). */
-function derivedStepPercent(stageKey: string | undefined, form: TemplateForm | null): number | undefined {
-  if (!stageKey) return undefined;
-  const stage = (form?.stages || []).find((s) => s.key === stageKey);
-  const pct = Number(stage?.percentage);
-  if (!Number.isFinite(pct) || pct <= 0) return undefined;
-  const count = (form?.steps || []).filter((step) => step.stageKey === stageKey).length;
-  if (!count) return Math.round(pct * 100) / 100;
-  return Math.round((pct / count) * 100) / 100;
-}
-
-/** "Percentages: Intake 50% · Execution 50%" summary for a template card. */
+/** "Intake 50% · Execution 50%" summary for the template table. */
 function stageSummaryOf(t: Template): string {
   const stages = Array.isArray(t?.stages) ? t.stages : [];
-  if (!stages.length) return 'Stages: none — add stages in the editor';
   const parts = stages
     .filter((s: any) => s?.key)
     .map((s: any) => {
       const label = s?.title || s?.key;
       const pct = Number(s?.percentage);
-      return Number.isFinite(pct) && pct > 0 ? `${label} ${pct}%` : `${label} auto`;
+      return Number.isFinite(pct) && pct > 0 ? `${label} ${pct}%` : label;
     });
-  if (!parts.length) return 'Stages: none';
-  return `Percentages: ${parts.join(' · ')}`;
+  return parts.length ? parts.join(' · ') : '—';
 }
 
 /** Distribute 100 evenly (largest-remainder method) across every stage. */
@@ -546,14 +541,14 @@ export default function WorkflowTemplates() {
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <div className="text-sm font-semibold text-gray-900">2 · Percentages</div>
-                            <div className="text-xs text-gray-500">Each stage carries a % of the matter's fee (total 100%). Steps inside a stage share that % automatically.</div>
+                            <div className="text-xs text-gray-500">Enter manually how much of the matter's fee each stage is worth. Percentages are free — they don't have to total 100.</div>
                           </div>
                           <div className="flex items-center gap-2">
                             <span
-                              className={`text-xs font-semibold ${Math.abs(stagePercentTotal(form) - 100) < 0.01 ? 'text-green-700' : 'text-amber-700'}`}
-                              title="Stages should total 100%. Leave blanks to auto-distribute."
+                              className={`text-xs font-semibold ${Math.abs(stagePercentTotal(form) - 100) < 0.01 ? 'text-green-700' : 'text-gray-500'}`}
+                              title="Total of the percentages you entered. This is informational — stages don't have to total 100."
                             >
-                              {stagePercentTotal(form) > 0 ? `${Math.round(stagePercentTotal(form) * 100) / 100}%` : 'Auto %'}
+                              {stagePercentTotal(form) > 0 ? `${Math.round(stagePercentTotal(form) * 100) / 100}%` : '0%'}
                             </span>
                             <button
                               type="button"
@@ -649,7 +644,7 @@ export default function WorkflowTemplates() {
                                     max={100}
                                     step={0.01}
                                     value={s.percentage ?? ''}
-                                    placeholder="auto"
+                                    placeholder="0–100"
                                     onChange={(e) =>
                                       setForm((f) => {
                                         if (!f) return f;
@@ -663,7 +658,7 @@ export default function WorkflowTemplates() {
                                       })
                                     }
                                     className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-                                    title="Share (0–100) of the matter's fee earned when this stage's steps are completed. All stages should total 100."
+                                    title="Enter this stage's percentage of the matter's fee. Used for display and reporting only — step percentages are entered manually on each step."
                                   />
                                 </div>
                                 <div className="md:col-span-1 flex justify-end">
@@ -692,7 +687,7 @@ export default function WorkflowTemplates() {
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <div className="text-sm font-semibold text-gray-900">3 · Workflow steps</div>
-                            <div className="text-xs text-gray-500">One step = one row in the case workflow. The % shown is auto-derived from its stage.</div>
+                            <div className="text-xs text-gray-500">One step = one row in the case workflow. Enter a percentage for each step — that's the worth used to pay staff for the work they completed.</div>
                           </div>
                           <button
                             type="button"
@@ -740,9 +735,8 @@ export default function WorkflowTemplates() {
                                   <span className="text-xs text-gray-500">
                                     {(() => {
                                       const st = stageOptions.find((o) => o.key === s.stageKey);
-                                      const pct = derivedStepPercent(s.stageKey, form);
                                       if (!st) return 'Select a stage';
-                                      return `${st.title}${pct != null ? ` · step ≈ ${pct}%` : ''}`;
+                                      return `${st.title}${s.percentage != null ? ` · ${s.percentage}%` : ''}`;
                                     })()}
                                   </span>
                                 </div>
@@ -765,6 +759,31 @@ export default function WorkflowTemplates() {
                                         })
                                       }
                                       className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+                                    />
+                                  </div>
+                                  <div className="md:col-span-2">
+                                    <label className="block text-xs text-gray-600 mb-1">Percentage</label>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={100}
+                                      step={0.01}
+                                      value={s.percentage ?? ''}
+                                      placeholder="0–100"
+                                      onChange={(e) =>
+                                        setForm((f) => {
+                                          if (!f) return f;
+                                          const next = [...f.steps];
+                                          const val = e.target.value === '' ? undefined : Number(e.target.value);
+                                          next[idx] = {
+                                            ...next[idx],
+                                            percentage: Number.isFinite(val as number) ? (val as number) : undefined,
+                                          };
+                                          return { ...f, steps: next };
+                                        })
+                                      }
+                                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+                                      title="Enter this step's percentage manually — how much of the matter's fee this step is worth. This is what staff are paid against when the step is completed."
                                     />
                                   </div>
                                   <div className="md:col-span-4">

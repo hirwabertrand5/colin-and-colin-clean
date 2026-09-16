@@ -1,14 +1,14 @@
 /**
  * Workflow stage/step percentage engine + earned-fee formulas.
  *
- * Every workflow template can define a percentage weight (0–100) per stage.
- * Steps inside a stage derive their percentage automatically
- * (stagePercentage ÷ number of steps in the stage) so that completed steps can
- * be translated into a percentage of the matter's contract value.
+ * Every workflow template carries MANUAL percentages — a percentage on each
+ * stage and a percentage on each step, typed by the firm (they represent how
+ * much of the matter's fee that stage/step is worth). Nothing is auto-derived
+ * and percentages never need to total 100.
  *
  * The earned-fee calculation mirrors the Firm Reports → Productivity formula:
  *   earnedFee = TaskFeeCollected × TPA% × Timeliness% × Quality%
- * where, for a matter, TaskFeeCollected = contractValue × workflowCompleted%.
+ * where, for a matter, TaskFeeCollected = contractValue × completed step %.
  */
 
 export type StagePercentRow = {
@@ -47,98 +47,54 @@ export const getTpaPercent = (role?: string) =>
 const round2 = (n: number) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
 
-/** Split 100 into `count` parts (largest-remainder method) so the parts always sum to 100. */
-const distributeEvenly = (count: number): number[] => {
-  if (count <= 0) return [];
-  const exact = 100 / count;
-  const base = Math.floor(exact * 100) / 100;
-  const parts = new Array<number>(count).fill(base);
-  let remainder = Math.round((100 - base * count) * 100);
-  let cursor = 0;
-  while (remainder > 0) {
-    const index = cursor % count;
-    parts[index] = round2((parts[index] ?? 0) + 0.01);
-    remainder -= 1;
-    cursor += 1;
-  }
-  return parts;
-};
+/**
+ * Manual percentages of every stage (0–100). The value entered on the template
+ * is returned as-is (clamped); stages without a value return 0. Nothing is
+ * auto-distributed and totals are never forced.
+ */
 export const resolveStagePercentages = (template: any): Map<string, number> => {
   const stages: any[] = Array.isArray(template?.stages) ? template.stages : [];
   const result = new Map<string, number>();
-  if (!stages.length) return result;
-
-  const entries = stages.map((stage: any) => {
+  for (const stage of stages) {
     const raw = Number(stage?.percentage);
     const valid = Number.isFinite(raw) && raw >= 0;
-    return {
-      key: String(stage?.key || ''),
-      value: valid ? raw : 0,
-      explicit: valid,
-    };
-  });
-
-  const hasAnyExplicit = entries.some((entry) => entry.explicit);
-  if (!hasAnyExplicit) {
-    const shares = distributeEvenly(entries.length);
-    entries.forEach((entry, index) => {
-      result.set(entry.key, shares[index] ?? 0);
-    });
-    return result;
+    result.set(String(stage?.key || ''), valid ? clamp(raw) : 0);
   }
-
-  const total = entries.reduce((sum, entry) => sum + entry.value, 0);
-  const scale = total > 0 ? 100 / total : 0;
-  const scaled = entries.map((entry) => ({
-    key: entry.key,
-    value: round2(clamp(entry.value * scale)),
-  }));
-
-  // Fix rounding drift so the total equals exactly 100.
-  const drift = 100 - scaled.reduce((sum, row) => sum + row.value, 0);
-  if (scaled[0] && Math.abs(drift) >= 0.005) {
-    scaled[0] = { key: scaled[0].key, value: round2(scaled[0].value + drift) };
-  }
-
-  scaled.forEach((row) => result.set(row.key, row.value));
   return result;
 };
+
+/**
+ * Manual percentage of every step (0–100). The value entered on the template
+ * is returned as-is (clamped); steps without a value return 0. Step
+ * percentages are NOT derived from their stage — each step keeps the worth the
+ * firm typed for it.
+ */
 export const resolveStepPercentages = (template: any): Map<string, number> => {
   const steps: any[] = Array.isArray(template?.steps) ? template.steps : [];
-  const stagePercentages = resolveStagePercentages(template);
-
-  const stepsPerStage = new Map<string, number>();
-  for (const step of steps) {
-    const stageKey = String(step?.stageKey || '');
-    stepsPerStage.set(stageKey, (stepsPerStage.get(stageKey) || 0) + 1);
-  }
-
   const result = new Map<string, number>();
   for (const step of steps) {
-    const stepKey = String(step?.key || '');
-    const stageKey = String(step?.stageKey || '');
-    const stagePercent = stagePercentages.get(stageKey) ?? 0;
-
-    const explicit = Number(step?.percentage);
-    if (Number.isFinite(explicit) && explicit >= 0 && explicit <= 100) {
-      result.set(stepKey, round2(explicit));
-    } else {
-      const count = stepsPerStage.get(stageKey) || 1;
-      result.set(stepKey, round2(count > 0 ? stagePercent / count : 0));
-    }
+    const raw = Number(step?.percentage);
+    const valid = Number.isFinite(raw) && raw >= 0 && raw <= 100;
+    result.set(String(step?.key || ''), valid ? raw : 0);
   }
   return result;
 };
 
-/** Fill any missing percentages on a template in place. */
+/**
+ * Clamp the manual percentages already present on a template in place.
+ * Manual values are preserved — nothing is auto-filled or forced to total 100.
+ */
 export const normalizeTemplatePercentages = (template: any) => {
   if (!template || !Array.isArray(template.stages)) return template;
-  const stagePercentages = resolveStagePercentages(template);
-  const stages: any[] = template.stages;
-  for (const stage of stages) {
-    const key = String(stage?.key || '');
-    const resolved = stagePercentages.get(key);
-    if (typeof resolved === 'number') stage.percentage = resolved;
+  for (const stage of template.stages) {
+    const raw = Number(stage?.percentage);
+    if (Number.isFinite(raw) && raw >= 0) stage.percentage = clamp(raw);
+  }
+  if (Array.isArray(template.steps)) {
+    for (const step of template.steps) {
+      const raw = Number(step?.percentage);
+      if (Number.isFinite(raw) && raw >= 0) step.percentage = clamp(raw);
+    }
   }
   return template;
 };
