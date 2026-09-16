@@ -43,6 +43,13 @@ export interface IWorkflowStepTemplate {
   legalBasis: ILegalBasisRef[];
   fee?: IFeeSpec;
   sla?: ISlaSpec;
+
+  /**
+   * Optional step-level percentage weight (0–100) of the matter value earned
+   * when this step is completed. When omitted, the step inherits an equal
+   * share of its stage percentage.
+   */
+  percentage?: number;
 }
 
 export interface IWorkflowStageTemplate {
@@ -50,6 +57,13 @@ export interface IWorkflowStageTemplate {
   order: number;
   title: string;
   description?: string;
+
+  /**
+   * Percentage weight (0–100) this stage contributes to the matter's earned
+   * value. Stage percentages are expected to total 100. When omitted, template
+   * percentages are auto-distributed evenly across stages.
+   */
+  percentage?: number;
 }
 
 export interface IWorkflowTemplate extends Document {
@@ -119,6 +133,7 @@ const StepSchema = new Schema<IWorkflowStepTemplate>(
     legalBasis: { type: [LegalBasisSchema], default: [] },
     fee: { type: FeeSpecSchema, required: false },
     sla: { type: SlaSpecSchema, required: false },
+    percentage: { type: Number, min: 0, max: 100 },
   },
   { _id: false }
 );
@@ -129,6 +144,7 @@ const StageSchema = new Schema<IWorkflowStageTemplate>(
     order: { type: Number, required: true },
     title: { type: String, required: true },
     description: { type: String },
+    percentage: { type: Number, min: 0, max: 100 },
   },
   { _id: false }
 );

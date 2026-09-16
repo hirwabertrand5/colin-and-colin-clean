@@ -12,6 +12,7 @@ import { sendEmailResend } from '../services/emailResendService';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { buildInstanceSteps } from '../utils/workflowCompute';
+import { computeCompletedPercentFromInstance } from '../utils/workflowPercentages';
 import { buildYearlySequence } from '../utils/counter';
 import { isPublicYellowCase } from '../utils/caseVisibility';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
@@ -1037,11 +1038,16 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
           (req.body as any).workflowProgress.plannedValue.currency || updated.billingSettings?.currency || 'RWF';
         const inst: any = await WorkflowInstance.findOne({ caseId: updated._id }).lean();
         const actionProgress = calculateActionProgress(inst?.steps || [], plannedAmount);
+        // Prefer the stage-weighted completion % (updated when steps on the template
+        // were changed); fall back to the action-based progress for legacy instances.
+        const weightedPercent = computeCompletedPercentFromInstance(inst?.steps || []);
+        const percent = weightedPercent > 0 ? weightedPercent : actionProgress.percent;
+        const completedAmount = Math.round((plannedAmount * percent) / 100);
         updated.workflowProgress = {
           ...(updated.workflowProgress || {}),
           plannedValue: { amount: plannedAmount, currency: plannedCurrency },
-          percent: actionProgress.percent,
-          completedValue: { amount: actionProgress.completedAmount, currency: plannedCurrency },
+          percent,
+          completedValue: { amount: completedAmount, currency: plannedCurrency },
         };
         updated.billingSettings = {
           ...(updated.billingSettings || {}),

@@ -102,6 +102,13 @@ export interface ICase extends Document {
     };
     percent?: number;
     nextDueAt?: Date;
+    stagePercent?: Array<{
+      stageKey: string;
+      title: string;
+      percentage: number;
+      completedSteps: number;
+      totalSteps: number;
+    }>;
     plannedValue?: {
       amount?: number;
       currency?: string;
@@ -273,6 +280,21 @@ const CaseSchema = new Schema<ICase>(
         },
         percent: { type: Number, min: 0, max: 100, default: 0 },
         nextDueAt: { type: Date },
+        stagePercent: {
+          type: [
+            new Schema(
+              {
+                stageKey: { type: String, required: true },
+                title: { type: String },
+                percentage: { type: Number, min: 0, max: 100, default: 0 },
+                completedSteps: { type: Number, min: 0, default: 0 },
+                totalSteps: { type: Number, min: 0, default: 0 },
+              },
+              { _id: false }
+            ),
+          ],
+          default: [],
+        },
         plannedValue: {
           type: {
             amount: { type: Number, min: 0 },

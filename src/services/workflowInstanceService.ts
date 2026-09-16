@@ -43,6 +43,11 @@ export type WorkflowInstance = {
     slaText?: string;
 
     responsibleRole?: string;
+
+    stageTitle?: string;
+    stagePercentage?: number;
+    percentage?: number;
+
     outputs: Array<{
       key: string;
       name: string;
@@ -59,6 +64,43 @@ export const getWorkflowForCase = async (caseId: string): Promise<WorkflowInstan
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to load workflow');
+  return res.json();
+};
+
+export type CaseStagePercent = {
+  stageKey: string;
+  title: string;
+  percentage: number;
+  completedSteps: number;
+  totalSteps: number;
+};
+
+export type CaseTeamEarnedFee = {
+  key: 'initiator' | 'reviewer' | 'approver';
+  role: string;
+  name: string;
+  userRole: string | null;
+  tpaPercent: number;
+  timelinessScore: number | null;
+  qualityScore: number | null;
+  taskFeeCollected: number;
+  earnedFee: number | null;
+};
+
+export type CaseEarnedFees = {
+  contractValue: number;
+  currency: string;
+  completedPercent: number;
+  earnedValue: number;
+  stages: CaseStagePercent[];
+  team: CaseTeamEarnedFee[];
+};
+
+export const getCaseEarnedFees = async (caseId: string): Promise<CaseEarnedFees> => {
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/earned-fees`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to load earned fees');
   return res.json();
 };
 

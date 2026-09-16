@@ -115,6 +115,9 @@ export const resetUserPassword = async (req: AuthRequest, res: Response) => {
     }
 
     user.passwordHash = newPassword;
+    // Clear any failed-attempt/lock state so the account can sign in immediately.
+    user.loginAttempts = 0;
+    user.lockUntil = undefined as any;
     await user.save();
 
     res.json({ message: 'Password reset successfully.' });

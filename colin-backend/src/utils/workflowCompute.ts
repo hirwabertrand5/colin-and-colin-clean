@@ -1,4 +1,5 @@
 import { IFeeSpec, ISlaSpec, IWorkflowTemplate } from '../models/workflowTemplateModel';
+import { resolveStagePercentages, resolveStepPercentages } from './workflowPercentages';
 
 export type WorkflowMoney = {
   amount?: number;
@@ -128,6 +129,13 @@ export const addMinutes = (start: Date, minutes: number | undefined) => {
 
 export const buildInstanceSteps = (template: IWorkflowTemplate | any, startDate: Date) => {
   const sorted = (template?.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+  const stagePercentages = resolveStagePercentages(template);
+  const stepPercentages = resolveStepPercentages(template);
+  const stagesByKey: Map<string, any> = new Map(
+    ((Array.isArray(template?.stages) ? template.stages : []) as any[]).map(
+      (stage: any) => [String(stage?.key || ''), stage] as [string, any]
+    )
+  );
 
   let cursor = new Date(startDate);
 
@@ -145,10 +153,18 @@ export const buildInstanceSteps = (template: IWorkflowTemplate | any, startDate:
     const feeRangeMax = feeType === 'range' && typeof s?.fee?.max === 'number' ? s.fee.max : undefined;
     const feeInputRequired = false;
 
+    const stageKey = String(s?.stageKey || '');
+    const stageTitle = String(stagesByKey.get(stageKey)?.title || stageKey);
+    const stagePercentage = stagePercentages.get(stageKey) ?? 0;
+    const stepPercentage = stepPercentages.get(String(s?.key || '')) ?? 0;
+
     return {
       stepKey: s.key,
       title: s.title,
-      stageKey: s.stageKey,
+      stageKey,
+      stageTitle,
+      stagePercentage,
+      percentage: stepPercentage,
       order: s.order,
       status: idx === 0 ? 'In Progress' : 'Not Started',
 

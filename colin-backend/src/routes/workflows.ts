@@ -8,6 +8,7 @@ import {
   updateTemplate,
   deleteTemplate,
   getWorkflowForCase,
+  getCaseEarnedFees,
   initWorkflowForCase,
   auditCaseWorkflowMismatches,
   fixCaseWorkflowMismatches,
@@ -50,6 +51,7 @@ router.delete('/templates/:templateId', authenticate, authorize(ADMIN_ROLES), de
 
 // Instances
 router.get('/cases/:caseId', authenticate, getWorkflowForCase);
+router.get('/cases/:caseId/earned-fees', authenticate, getCaseEarnedFees);
 router.post('/cases/:caseId/init', authenticate, authorize(ADMIN_ROLES), initWorkflowForCase);
 
 // Add a step to a workflow instance (admin only)

@@ -6,13 +6,22 @@ import WorkflowInstance from '../models/workflowInstanceModel';
 import Case from '../models/caseModel';
 import Document from '../models/documentModel';
 import Task from '../models/taskModel';
+import User from '../models/userModel';
 import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps } from '../utils/workflowCompute';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
+import {
+  computeCompletedPercentFromInstance,
+  computeEarnedFee,
+  computeStageBreakdownFromInstance,
+  getTpaPercent,
+  normalizeTemplatePercentages,
+} from '../utils/workflowPercentages';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
+import { getContractValue } from '../utils/financialMetrics';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -143,9 +152,19 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   const actions = (inst.steps || []).flatMap((step: any) => (Array.isArray(step.actions) ? step.actions : []));
   const checkedActions = actions.filter((action: any) => Boolean(action?.done)).length;
   const actionTotal = actions.length;
-  const percent = actionTotal > 0 ? Math.round((checkedActions / actionTotal) * 100) : 0;
+  const actionPercent = actionTotal > 0 ? Math.round((checkedActions / actionTotal) * 100) : 0;
+
+  // Stage-weighted completion percent — the source of truth for earned fees.
+  // Completed steps are weighted by their stage's percentage of the workflow.
+  const stageBreakdown = computeStageBreakdownFromInstance(inst?.steps || []);
+  const stageWeightedPercent = computeCompletedPercentFromInstance(inst?.steps || []);
+  // Fall back to the action-based percent for legacy instances without percentages.
+  const percent = stageWeightedPercent > 0 ? stageWeightedPercent : actionPercent;
   const actionCompletedAmount =
-    actionTotal > 0 ? Math.round((existingPlannedAmount * percent) / 100) : completedAmount;
+    actionTotal > 0 ? Math.round((existingPlannedAmount * actionPercent) / 100) : completedAmount;
+  const stageCompletedAmount =
+    existingPlannedAmount > 0 ? Math.round((existingPlannedAmount * stageWeightedPercent) / 100) : completedAmount;
+  const completedValueAmount = stageWeightedPercent > 0 ? stageCompletedAmount : actionCompletedAmount;
 
   c.workflowProgress = {
     status: inst.status === 'Completed' ? 'Completed' : 'In Progress',
@@ -174,8 +193,9 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
       : undefined,
     percent,
     nextDueAt,
+    stagePercent: stageBreakdown,
     plannedValue: { amount: existingPlannedAmount || undefined, currency: existingCurrency },
-    completedValue: { amount: actionCompletedAmount || 0, currency: existingCurrency },
+    completedValue: { amount: completedValueAmount || 0, currency: existingCurrency },
   };
 
   if (inst.status === 'Completed') {
@@ -423,8 +443,10 @@ export const createTemplate = async (req: AuthRequest, res: Response) => {
   try {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
 
-    const created = await WorkflowTemplate.create(req.body);
+    // Auto-fill any missing stage percentages (even distribution when none set).
+    normalizeTemplatePercentages(req.body);
 
+    const created = await WorkflowTemplate.create(req.body);
     // NOTE: We avoid writing audit here because your audit log requires a caseId.
     res.status(201).json(created);
   } catch (e: any) {
@@ -438,7 +460,12 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
 
     const { templateId } = req.params as any;
     const before = await WorkflowTemplate.findById(templateId).lean();
-    const updated = await WorkflowTemplate.findByIdAndUpdate(templateId, req.body, { new: true });
+
+    // Normalize stage percentages so the payload is always consistent (totals 100).
+    const payload = { ...req.body };
+    normalizeTemplatePercentages(payload);
+
+    const updated = await WorkflowTemplate.findByIdAndUpdate(templateId, payload, { new: true });
     if (!updated) return res.status(404).json({ message: 'Template not found.' });
 
     const affectedCases = await Case.find({ workflowTemplateId: templateId }).select('_id workflowStartDate createdAt').lean();
@@ -520,6 +547,155 @@ export const getWorkflowForCase = async (req: AuthRequest, res: Response) => {
     res.json(inst.toObject());
   } catch {
     res.status(500).json({ message: 'Failed to load workflow.' });
+  }
+};
+
+// ---------- Earned fees (Firm Reports → Productivity formula per matter) ----------
+export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
+  try {
+    const { caseId } = req.params as any;
+    const c: any = await Case.findById(caseId);
+    if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!isAdmin(req.user?.role)) {
+      if (!isPublicYellowCase(c)) {
+        const allowed = await canAssociateLikeAccessCase(req, c);
+        if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
+          return res.status(403).json({ message: 'Forbidden.' });
+        }
+      }
+    }
+
+    const inst: any = await WorkflowInstance.findOne({
+      caseId: new mongoose.Types.ObjectId(caseId),
+    }).lean();
+
+    const contractValue = getContractValue(c);
+    const currency = String(
+      c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF'
+    );
+    const stages = computeStageBreakdownFromInstance(inst?.steps || []);
+    const completedPercent = computeCompletedPercentFromInstance(inst?.steps || []);
+    const earnedValue = Math.round(contractValue * (completedPercent / 100) * 100) / 100;
+
+    const assignments: any = c.caseAssignments || {};
+    const teamSpecs = [
+      {
+        key: 'initiator',
+        label: 'Initiator',
+        name: String(assignments.initiator || c.assignedTo || '').trim(),
+      },
+      {
+        key: 'reviewer',
+        label: 'Reviewer',
+        name: String(assignments.reviewer || '').trim(),
+      },
+      {
+        key: 'approver',
+        label: 'Approver',
+        name: String(assignments.signerApprover || '').trim(),
+      },
+    ].filter((spec) => spec.name);
+
+    // Resolve each member's system role so TPA follows the role-based table.
+    const names = teamSpecs.map((spec) => spec.name);
+    const users: any[] = await User.find({ name: { $in: names } })
+      .select('name email role')
+      .lean();
+    const roleByName = new Map<string, string>();
+    for (const user of users || []) {
+      const key = String(user?.name || '').trim().toLowerCase();
+      if (key && !roleByName.has(key)) roleByName.set(key, String(user?.role || ''));
+    }
+
+    const tasks: any[] = await Task.find({ caseId }).lean();
+
+    const team = teamSpecs.map((spec) => {
+      const role = roleByName.get(spec.name.toLowerCase()) || '';
+      const me = spec.name.toLowerCase();
+      const mine = (tasks || []).filter((task: any) => {
+        const assignee = String(task?.assignee || '').trim().toLowerCase();
+        const supervisor = String(task?.supervisor || task?.supervisorReviewer || '').trim().toLowerCase();
+        const stageMembers = Array.isArray(task?.taskStages)
+          ? task.taskStages.map((st: any) => String(st?.staffMember || '').trim().toLowerCase())
+          : [];
+        return assignee === me || supervisor === me || stageMembers.includes(me);
+      });
+      const completedMine = mine.filter(
+        (task: any) => String(task?.status || '').toLowerCase() === 'completed'
+      );
+
+      // Timeliness: average computed timeliness of completed tasks (0–100), mirroring
+      // the productivity report (score = 100 − % of SLA consumed).
+      const timelinessScores: number[] = [];
+      for (const task of completedMine) {
+        const stageScores = Array.isArray(task?.taskStages)
+          ? task.taskStages
+              .map((st: any) => Number(st?.timelinessScore))
+              .filter((n: number) => Number.isFinite(n) && n >= 0 && n <= 100)
+          : [];
+        if (stageScores.length) {
+          timelinessScores.push(
+            Math.round(stageScores.reduce((a: number, b: number) => a + b, 0) / stageScores.length)
+          );
+          continue;
+        }
+        const assignedAt = resolveDeadlineDateTime(task?.startDate || task?.createdAt || task?.updatedAt);
+        const completedAt = resolveDeadlineDateTime(task?.completedAt || task?.updatedAt);
+        const dueAt = resolveDeadlineDateTime(task?.dueDate);
+        if (assignedAt && completedAt && dueAt && dueAt.getTime() > assignedAt.getTime()) {
+          const totalMs = dueAt.getTime() - assignedAt.getTime();
+          const usedMs = completedAt.getTime() - assignedAt.getTime();
+          if (totalMs > 0) {
+            const consumed = Math.round((usedMs / totalMs) * 1000) / 10;
+            timelinessScores.push(Math.max(0, Math.round(100 - consumed)));
+          }
+        }
+      }
+
+      const qualityScores = completedMine
+        .map((task: any) => Number(task?.qualityScore))
+        .filter((n: number) => Number.isFinite(n) && n >= 0 && n <= 100);
+
+      const timelinessScore = timelinessScores.length
+        ? Math.round((timelinessScores.reduce((a: number, b: number) => a + b, 0) / timelinessScores.length) * 10) / 10
+        : null;
+      const qualityScore = qualityScores.length
+        ? Math.round((qualityScores.reduce((a: number, b: number) => a + b, 0) / qualityScores.length) * 10) / 10
+        : null;
+
+      const tpaPercent = getTpaPercent(role);
+      // Missing scores never punish the team member — productivity formula default.
+      const effectiveTimeliness = timelinessScore ?? 100;
+      const effectiveQuality = qualityScore ?? 100;
+      const earnedFee = computeEarnedFee(earnedValue, tpaPercent, effectiveTimeliness, effectiveQuality);
+
+      return {
+        key: spec.key,
+        role: spec.label,
+        name: spec.name,
+        userRole: role || null,
+        tpaPercent,
+        timelinessScore,
+        qualityScore,
+        taskFeeCollected: earnedValue,
+        earnedFee,
+      };
+    });
+
+    return res.json({
+      contractValue,
+      currency,
+      completedPercent,
+      earnedValue,
+      stages: stages.map((stage) => ({
+        ...stage,
+        title: stage.title || stage.stageKey || 'Stage',
+      })),
+      team,
+    });
+  } catch (e: any) {
+    return res.status(500).json({ message: e?.message || 'Failed to compute earned fees.' });
   }
 };
 

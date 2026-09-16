@@ -11,6 +11,8 @@ import {
   addWorkflowStepAction,
   updateWorkflowStepAction,
   deleteWorkflowStepAction,
+  getCaseEarnedFees,
+  CaseEarnedFees,
   WorkflowInstance,
 } from '../../services/workflowInstanceService';
 import { getWorkflowTemplateById, WorkflowTemplate } from '../../services/workflowService';
@@ -33,6 +35,15 @@ type Props = {
   currentUserEmail?: string;
 };
 
+const formatMoney = (amount: number | null | undefined, currency?: string) => {
+  if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) return '—';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: String(currency || 'RWF'),
+    maximumFractionDigits: 0,
+  }).format(Number(amount));
+};
+
 export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged, tasks, currentUserName, currentUserEmail }: Props) {
   void canUpload;
   const navigate = useNavigate();
@@ -41,6 +52,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const [err, setErr] = useState('');
   const [busyKey, setBusyKey] = useState<string>('');
   const [template, setTemplate] = useState<WorkflowTemplate | null>(null);
+  const [earned, setEarned] = useState<CaseEarnedFees | null>(null);
   const [actionEditor, setActionEditor] = useState<{
     stepKey: string;
     stepTitle: string;
@@ -71,6 +83,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       } else {
         setTemplate(null);
       }
+      void refreshEarned();
     } catch (e: any) {
       setErr(e.message || 'Failed to load workflow');
       setWf(null);
@@ -78,6 +91,20 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     } finally {
       setLoading(false);
     }
+  };
+
+  const refreshEarned = async () => {
+    try {
+      const data = await getCaseEarnedFees(caseId);
+      setEarned(data);
+    } catch {
+      // Earned-fee projection is best-effort; never block the workflow tab on it.
+    }
+  };
+
+  const notifyWorkflowChanged = () => {
+    void onWorkflowChanged?.();
+    void refreshEarned();
   };
 
   useEffect(() => {
@@ -138,7 +165,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       const updated = await toggleWorkflowStepAction(caseId, stepKey, index);
       setWf(updated);
       // Reconcile case progress in the background — never block the checkbox on extra round-trips.
-      void onWorkflowChanged?.();
+      notifyWorkflowChanged();
       // When the user ticks a key action on the case workspace, take them to the related task
       // detail (their own assigned task on this matter) so they can complete and submit it.
       if (nextDone) goToTaskDetail(snapshotAction?.text || '');
@@ -179,7 +206,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           : await updateWorkflowStepAction(caseId, actionEditor.stepKey, Number(actionEditor.index), { text });
       setWf(updated);
       setActionEditor(null);
-      void onWorkflowChanged?.();
+      notifyWorkflowChanged();
     } catch (e: any) {
       setErr(e.message || 'Failed to save key action');
     } finally {
@@ -194,7 +221,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await deleteWorkflowStepAction(caseId, stepKey, index);
       setWf(updated);
-      void onWorkflowChanged?.();
+      notifyWorkflowChanged();
     } catch (e: any) {
       setErr(e.message || 'Failed to delete key action');
     } finally {
@@ -209,7 +236,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await completeWorkflowStep(caseId, stepKey);
       setWf(updated);
-      void onWorkflowChanged?.();
+      notifyWorkflowChanged();
     } catch (e: any) {
       setErr(e.message || 'Failed to complete step');
     } finally {
@@ -224,7 +251,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await reopenWorkflowStep(caseId, stepKey);
       setWf(updated);
-      void onWorkflowChanged?.();
+      notifyWorkflowChanged();
     } catch (e: any) {
       setErr(e.message || 'Failed to reopen step');
     } finally {
@@ -258,7 +285,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await amendWorkflowStepDeadline(caseId, stepKey, selected.toISOString(), amendReason);
       setWf(updated);
-      void onWorkflowChanged?.();
+      notifyWorkflowChanged();
       setAmendOpenFor('');
       setAmendDate('');
       setAmendReason('');
@@ -303,6 +330,99 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
   return (
     <div className="space-y-4">
+      {/* Earned fees — contract value × workflow completion, productivity formula (TPA × timeliness × quality) */}
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Earned Fees</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              Contract value × workflow completed, then TPA × Timeliness × Quality per team member
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs text-gray-500 dark:text-gray-400">Earned value</div>
+            <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {formatMoney(earned?.earnedValue, earned?.currency)}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Contract Value</div>
+            <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
+              {formatMoney(earned?.contractValue, earned?.currency)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Workflow Completed</div>
+            <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
+              {earned?.completedPercent ?? 0}%
+            </div>
+            <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Weighted by stage percentages
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Earned Value</div>
+            <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
+              {formatMoney(earned?.earnedValue, earned?.currency)}
+            </div>
+            <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Completed portion of the matter fee
+            </div>
+          </div>
+        </div>
+
+        {earned && earned.team.length > 0 ? (
+          <div className="overflow-hidden border border-gray-200 dark:border-gray-700 rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-900 text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Role</th>
+                  <th className="px-3 py-2 font-medium">Team member</th>
+                  <th className="px-3 py-2 text-right font-medium">TPA</th>
+                  <th className="px-3 py-2 text-right font-medium">Timeliness</th>
+                  <th className="px-3 py-2 text-right font-medium">Quality</th>
+                  <th className="px-3 py-2 text-right font-medium">Earned fee</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {earned.team.map((member) => {
+                  const fee = member.earnedFee;
+                  const noScores = member.timelinessScore == null && member.qualityScore == null;
+                  return (
+                    <tr key={member.key} className="bg-white dark:bg-gray-800">
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{member.role}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{member.name}</td>
+                      <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
+                        {member.tpaPercent > 0 ? `${member.tpaPercent}%` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
+                        {member.timelinessScore != null ? `${member.timelinessScore}%` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
+                        {member.qualityScore != null ? `${member.qualityScore}%` : '—'}
+                      </td>
+                      <td
+                        className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100"
+                        title={noScores ? 'Timeliness/quality not scored yet — treated as 100%' : ''}
+                      >
+                        {fee != null ? formatMoney(fee, earned.currency) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            No team assignments yet — assign an initiator, reviewer and approver to this matter to see earned fees.
+          </div>
+        )}
+      </div>
+
       <div className="bg-white border border-gray-200 rounded-lg p-5">
         <div className="flex items-center justify-between">
           <div>
@@ -371,6 +491,19 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 >
                   {formatDueCountdown(s.dueAt)}
                 </span>
+                {(s.stageTitle || s.stageKey) && (
+                  <span
+                    className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-xs font-semibold text-gray-700 dark:text-gray-300"
+                    title={
+                      s.stagePercentage != null
+                        ? `Stage '${s.stageTitle || s.stageKey}' — ${s.stagePercentage}% of the matter's fee`
+                        : `Stage: ${s.stageTitle || s.stageKey}`
+                    }
+                  >
+                    {s.stageTitle || s.stageKey}
+                    {s.stagePercentage != null ? ` • ${s.stagePercentage}%` : ''}
+                  </span>
+                )}
                 {!previousStepCompleted && !isCompleted && (
                   <span className="text-xs text-gray-500 dark:text-gray-400" title="Previous steps must be completed first">
                     ← Complete previous steps first
@@ -411,6 +544,11 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   <span className="text-xs text-gray-500 dark:text-gray-400">Duration: {Math.round(s.slaMinutes / 60)}h</span>
                 ) : s.slaText ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Duration: {s.slaText}</span>
+                ) : null}
+                {s.stagePercentage != null ? (
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    Stage: {s.stagePercentage}%
+                  </span>
                 ) : null}
               </div>
 

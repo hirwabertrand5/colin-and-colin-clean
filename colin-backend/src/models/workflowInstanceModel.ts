@@ -50,6 +50,13 @@ export interface IInstanceStep {
 
   responsibleRole?: string;
 
+  /** Title of the stage this step belongs to (snapshotted from the template). */
+  stageTitle?: string;
+  /** Weight of the stage this step belongs to (0–100). */
+  stagePercentage?: number;
+  /** Step-level weight (0–100) applied to this step when it is completed. */
+  percentage?: number;
+
   outputs: IInstanceOutput[];
 }
 
@@ -133,6 +140,10 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     slaText: { type: String },
 
     responsibleRole: { type: String, trim: true },
+
+    stageTitle: { type: String, trim: true },
+    stagePercentage: { type: Number, min: 0, max: 100 },
+    percentage: { type: Number, min: 0, max: 100 },
 
     outputs: { type: [InstanceOutputSchema], default: [] },
   },

@@ -11,6 +11,8 @@ import { seedImmigrationTemplate } from './seedImmigration';
 import { seedComprehensiveLegalWorkflows } from './seedComprehensiveLegalWorkflows';
 import { seedVehicleOwnershipTransferTemplate } from './seedVehicleOwnershipTransfer';
 import { seedClientExperienceTemplates } from './seedClientExperienceTemplates';
+import WorkflowTemplate from '../models/workflowTemplateModel';
+import { normalizeTemplatePercentages } from '../utils/workflowPercentages';
 
 export const seedAllWorkflowTemplates = async () => {
   await seedDueDiligenceTemplate();
@@ -26,4 +28,21 @@ export const seedAllWorkflowTemplates = async () => {
   await seedComprehensiveLegalWorkflows();
   await seedVehicleOwnershipTransferTemplate();
   await seedClientExperienceTemplates();
+
+  // Guarantee every template has stage percentages (total = 100) so earned-fee
+  // calculations are deterministic even for templates saved before this feature.
+  const templates: any[] = await WorkflowTemplate.find({}).lean();
+  for (const template of templates) {
+    normalizeTemplatePercentages(template);
+    const cast = template as any;
+    await WorkflowTemplate.updateOne(
+      { _id: template._id },
+      {
+        $set: {
+          stages: cast.stages,
+          steps: cast.steps,
+        },
+      }
+    );
+  }
 };

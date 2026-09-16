@@ -78,6 +78,11 @@ UserSchema.methods.comparePassword = async function (candidate: string) {
 UserSchema.pre<IUser>('save', async function () {
   if (!this.isModified('passwordHash')) return;
 
+  // NEVER re-hash an already-hashed bcrypt value. Without this guard, any code
+  // assigning a pre-hashed passwordHash (e.g. rehash-on-login) would store
+  // bcrypt(bcrypt(password)) and permanently break logins for that account.
+  if (/^\$2[abxy]\$\d{2}\$/.test(this.passwordHash)) return;
+
   this.passwordHash = await bcrypt.hash(this.passwordHash, BCRYPT_ROUNDS);
 });
 

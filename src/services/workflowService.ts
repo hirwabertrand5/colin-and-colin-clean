@@ -14,6 +14,7 @@ export type WorkflowTemplate = {
     name: string;
     order: number;
     title?: string;
+    percentage?: number;
     fee?: WorkflowFeeSpec;
     sla?: WorkflowSlaSpec;
     steps?: string[];
@@ -26,6 +27,7 @@ export type WorkflowTemplate = {
     order: number;
     description?: string;
     actions?: string[];
+    percentage?: number;
     fee?: WorkflowFeeSpec;
     sla?: WorkflowSlaSpec;
     outputs?: Array<{

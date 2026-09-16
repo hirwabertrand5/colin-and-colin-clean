@@ -6,7 +6,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "seed:workflows": "ts-node src/seed/runSeeds.ts",
-    "audit:workflows": "ts-node src/scripts/auditFixWorkflows.ts"
+    "audit:workflows": "ts-node src/scripts/auditFixWorkflows.ts",
+    "reset:password": "tsx src/scripts/resetUserPassword.ts"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

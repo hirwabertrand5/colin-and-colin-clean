@@ -21,21 +21,14 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
-    if (user.lockUntil && user.lockUntil > new Date()) {
-      return res.status(403).json({ message: 'Account is locked. Try later.' });
-    }
-
+    // Password lockout intentionally disabled — a failed login only returns
+    // Invalid credentials and never locks the account.
     const valid = await user.comparePassword(password);
     if (!valid) {
-      user.loginAttempts += 1;
-      if (user.loginAttempts >= 5) {
-        user.lockUntil = new Date(Date.now() + 30 * 60 * 1000);
-      }
-      await user.save();
-      return res.status(401).json({ message: 'Invalid credentials.' });
+      return res.status(401).json({ message: 'Invalid credentials. Please try again.' });
     }
 
-    // ✅ Reset lock/attempts, but only persist when something actually changed so
+    // ✅ Reset stale try/lock data, but only persist when something actually changed so
     // we don't write to the DB on every normal login (saves a network round-trip).
     const hadLoginAttempts = user.loginAttempts !== 0;
     const hadLockUntil = !!user.lockUntil;
@@ -44,11 +37,16 @@ export const login = async (req: Request, res: Response) => {
     user.lockUntil = undefined as any;
 
     // One-time cost migration: if this user's hash was created with a higher
-    // bcrypt cost (e.g. the old cost-12 hashes), re-hash it at the current
+    // bcrypt cost (e.g. the old cost-12 hashes), migrate it to the current
     // (cheaper) BCRYPT_ROUNDS so every *future* login verifies much faster.
+    //
+    // IMPORTANT: assign the PLAINTEXT password, never an already-hashed value.
+    // The model's pre-save hook hashes passwordHash exactly once on save — if we
+    // stored a hash here it would get hashed a second time, permanently breaking
+    // every future login.
     const rehashNeeded = bcrypt.getRounds(user.passwordHash) > BCRYPT_ROUNDS;
     if (rehashNeeded) {
-      user.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      user.passwordHash = password;
     }
 
     if (hadLoginAttempts || hadLockUntil || rehashNeeded) {
