@@ -130,7 +130,7 @@ export const resolveStepPercentages = (template: any): Map<string, number> => {
   return result;
 };
 
-/** Fill any missing stage percentages on a template in place. */
+/** Fill any missing percentages on a template in place. */
 export const normalizeTemplatePercentages = (template: any) => {
   if (!template || !Array.isArray(template.stages)) return template;
   const stagePercentages = resolveStagePercentages(template);

@@ -181,9 +181,35 @@ function formToPayload(form: TemplateForm) {
   };
 }
 
-/** Total of all stage percentages currently entered in the form (0 when using auto). */
+/** Total of all percentages currently entered in the form (0 when using auto). */
 function stagePercentTotal(form: TemplateForm | null): number {
   return (form?.stages || []).reduce((sum, stage) => sum + (Number(stage.percentage) || 0), 0);
+}
+
+/** Derived percentage for one step of a stage (stage% ÷ steps in the stage). */
+function derivedStepPercent(stageKey: string | undefined, form: TemplateForm | null): number | undefined {
+  if (!stageKey) return undefined;
+  const stage = (form?.stages || []).find((s) => s.key === stageKey);
+  const pct = Number(stage?.percentage);
+  if (!Number.isFinite(pct) || pct <= 0) return undefined;
+  const count = (form?.steps || []).filter((step) => step.stageKey === stageKey).length;
+  if (!count) return Math.round(pct * 100) / 100;
+  return Math.round((pct / count) * 100) / 100;
+}
+
+/** "Percentages: Intake 50% · Execution 50%" summary for a template card. */
+function stageSummaryOf(t: Template): string {
+  const stages = Array.isArray(t?.stages) ? t.stages : [];
+  if (!stages.length) return 'Stages: none — add stages in the editor';
+  const parts = stages
+    .filter((s: any) => s?.key)
+    .map((s: any) => {
+      const label = s?.title || s?.key;
+      const pct = Number(s?.percentage);
+      return Number.isFinite(pct) && pct > 0 ? `${label} ${pct}%` : `${label} auto`;
+    });
+  if (!parts.length) return 'Stages: none';
+  return `Percentages: ${parts.join(' · ')}`;
 }
 
 /** Distribute 100 evenly (largest-remainder method) across every stage. */
@@ -216,6 +242,8 @@ export default function WorkflowTemplates() {
 
   const [selected, setSelected] = useState<Template | null>(null);
   const [form, setForm] = useState<TemplateForm | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -274,8 +302,10 @@ export default function WorkflowTemplates() {
     if (!selected) return;
     try {
       setErr('');
+      setSavedMsg('');
       if (!form) return;
       if (validationError) throw new Error(validationError);
+      setSaving(true);
 
       const payload = formToPayload(form);
       if (selected._id === NEW_ID) {
@@ -283,16 +313,19 @@ export default function WorkflowTemplates() {
         await load();
         setSelected(created);
         setForm(templateToForm(created));
-        alert('Template created');
+        setSavedMsg('Template created — live cases now use these percentages.');
       } else {
         const updated = await updateWorkflowTemplate(selected._id, payload);
         await load();
         setSelected(updated);
         setForm(templateToForm(updated));
-        alert('Template saved');
+        setSavedMsg('Template saved — all linked cases & earned fees are now updated.');
       }
+      setTimeout(() => setSavedMsg(''), 4000);
     } catch (e: any) {
       setErr(e.message || 'Failed to save template');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -391,6 +424,7 @@ export default function WorkflowTemplates() {
                 {t.name} • {t.active ? 'Active' : 'Inactive'}
               </div>
               <div className="text-xs text-gray-500">CaseType: {t.caseType}</div>
+              <div className="mt-1 text-xs text-gray-500">{stageSummaryOf(t)}</div>
 
               <button
                 onClick={(e) => {
@@ -422,10 +456,20 @@ export default function WorkflowTemplates() {
                 <div className="font-semibold text-gray-900">
                   {selected._id === NEW_ID ? 'New Template' : 'Edit Template'}
                 </div>
-                <button onClick={onSave} className="px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800">
-                  Save
+                <button
+                  onClick={onSave}
+                  disabled={saving}
+                  className="px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
+                >
+                  {saving ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
+
+              {savedMsg && (
+                <div className="mb-2 px-3 py-2 bg-green-50 border border-green-200 text-green-800 rounded text-xs">
+                  {savedMsg}
+                </div>
+              )}
 
               <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
                 <div className="text-sm font-semibold text-gray-900">Guided template builder</div>
@@ -501,8 +545,8 @@ export default function WorkflowTemplates() {
                       <div className="border border-gray-200 rounded-lg p-4">
                         <div className="flex items-center justify-between mb-3">
                           <div>
-                            <div className="text-sm font-semibold text-gray-900">Stages</div>
-                            <div className="text-xs text-gray-500">Define stage keys used by steps. Every stage carries a % of the matter's fee.</div>
+                            <div className="text-sm font-semibold text-gray-900">2 · Percentages</div>
+                            <div className="text-xs text-gray-500">Each stage carries a % of the matter's fee (total 100%). Steps inside a stage share that % automatically.</div>
                           </div>
                           <div className="flex items-center gap-2">
                             <span
@@ -598,7 +642,7 @@ export default function WorkflowTemplates() {
                                   />
                                 </div>
                                 <div className="md:col-span-2">
-                                  <label className="block text-xs text-gray-600 mb-1">Stage %</label>
+                                  <label className="block text-xs text-gray-600 mb-1">Percentage</label>
                                   <input
                                     type="number"
                                     min={0}
@@ -647,8 +691,8 @@ export default function WorkflowTemplates() {
                       <div className="border border-gray-200 rounded-lg p-4">
                         <div className="flex items-center justify-between mb-3">
                           <div>
-                            <div className="text-sm font-semibold text-gray-900">Steps</div>
-                            <div className="text-xs text-gray-500">One step = one row in the case workflow.</div>
+                            <div className="text-sm font-semibold text-gray-900">3 · Workflow steps</div>
+                            <div className="text-xs text-gray-500">One step = one row in the case workflow. The % shown is auto-derived from its stage.</div>
                           </div>
                           <button
                             type="button"
@@ -691,6 +735,17 @@ export default function WorkflowTemplates() {
                           ) : (
                             form.steps.map((s, idx) => (
                               <div key={idx} className="border border-gray-200 rounded-lg p-3">
+                                <div className="flex items-center justify-between mb-2 rounded bg-gray-50 px-2 py-1">
+                                  <span className="text-xs font-semibold text-gray-700">Step {idx + 1}</span>
+                                  <span className="text-xs text-gray-500">
+                                    {(() => {
+                                      const st = stageOptions.find((o) => o.key === s.stageKey);
+                                      const pct = derivedStepPercent(s.stageKey, form);
+                                      if (!st) return 'Select a stage';
+                                      return `${st.title}${pct != null ? ` · step ≈ ${pct}%` : ''}`;
+                                    })()}
+                                  </span>
+                                </div>
                                 <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
                                   <div className="md:col-span-2">
                                     <label className="block text-xs text-gray-600 mb-1">Order</label>

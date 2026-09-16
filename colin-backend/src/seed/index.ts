@@ -29,7 +29,7 @@ export const seedAllWorkflowTemplates = async () => {
   await seedVehicleOwnershipTransferTemplate();
   await seedClientExperienceTemplates();
 
-  // Guarantee every template has stage percentages (total = 100) so earned-fee
+  // Guarantee every template has percentages (total = 100) so earned-fee
   // calculations are deterministic even for templates saved before this feature.
   const templates: any[] = await WorkflowTemplate.find({}).lean();
   for (const template of templates) {

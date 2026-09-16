@@ -18,6 +18,7 @@ import {
   computeStageBreakdownFromInstance,
   getTpaPercent,
   normalizeTemplatePercentages,
+  resolveStepPercentages,
 } from '../utils/workflowPercentages';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
@@ -443,7 +444,7 @@ export const createTemplate = async (req: AuthRequest, res: Response) => {
   try {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
 
-    // Auto-fill any missing stage percentages (even distribution when none set).
+    // Auto-fill any missing percentages (even distribution when none set).
     normalizeTemplatePercentages(req.body);
 
     const created = await WorkflowTemplate.create(req.body);
@@ -461,7 +462,7 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     const { templateId } = req.params as any;
     const before = await WorkflowTemplate.findById(templateId).lean();
 
-    // Normalize stage percentages so the payload is always consistent (totals 100).
+    // Normalize percentages so the payload is always consistent (totals 100).
     const payload = { ...req.body };
     normalizeTemplatePercentages(payload);
 
@@ -569,13 +570,39 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
     const inst: any = await WorkflowInstance.findOne({
       caseId: new mongoose.Types.ObjectId(caseId),
     }).lean();
+    const template: any = inst
+      ? await WorkflowTemplate.findById(inst.templateId).lean()
+      : null;
 
     const contractValue = getContractValue(c);
     const currency = String(
       c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF'
     );
-    const stages = computeStageBreakdownFromInstance(inst?.steps || []);
-    const completedPercent = computeCompletedPercentFromInstance(inst?.steps || []);
+
+    // Legacy instances (created before percentages existed) store no
+    // percentage on their steps — derive them from the template so percentages
+    // and earned values are still correct everywhere.
+    let effectiveSteps: any[] = Array.isArray(inst?.steps) ? inst.steps : [];
+    if (template && !effectiveSteps.some((step: any) => Number(step?.percentage) > 0)) {
+      const stepPercentages = resolveStepPercentages(template);
+      const stagePercentages: any = (template.stages || []).reduce(
+        (map: any, stage: any) => map.set(String(stage?.key || ''), stage),
+        new Map<string, any>()
+      );
+      effectiveSteps = effectiveSteps.map((step: any) => {
+        const stageKey = String(step?.stageKey || '');
+        const stage = stagePercentages.get(stageKey);
+        return {
+          ...step,
+          percentage: stepPercentages.get(String(step?.stepKey || '')) ?? 0,
+          stagePercentage: typeof stage?.percentage === 'number' ? stage.percentage : 0,
+          stageTitle: String(stage?.title || step?.stageTitle || stageKey || 'Stage'),
+        };
+      });
+    }
+
+    const stages = computeStageBreakdownFromInstance(effectiveSteps);
+    const completedPercent = computeCompletedPercentFromInstance(effectiveSteps);
     const earnedValue = Math.round(contractValue * (completedPercent / 100) * 100) / 100;
 
     const assignments: any = c.caseAssignments || {};

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarPlus, Plus, Pencil, Trash2, X } from 'lucide-react';
 import { TaskData } from '../../services/taskService';
@@ -105,6 +105,28 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const notifyWorkflowChanged = () => {
     void onWorkflowChanged?.();
     void refreshEarned();
+  };
+
+  // Stage metadata from the template — used as a fallback so percentages / titles
+  // render even for workflow instances created before percentages existed.
+  const stageMetaByKey = useMemo(() => {
+    const map = new Map<string, { title?: string; percentage?: number }>();
+    for (const stage of template?.stages || []) {
+      map.set(String(stage.key || ''), {
+        title: stage.title || stage.name,
+        percentage: stage.percentage,
+      });
+    }
+    return map;
+  }, [template]);
+
+  const stagePercentOf = (step: { stageKey?: string; stagePercentage?: number }): number | undefined => {
+    if (step.stagePercentage != null) return step.stagePercentage;
+    return stageMetaByKey.get(String(step.stageKey || ''))?.percentage;
+  };
+  const stageTitleOf = (step: { stageKey?: string; stageTitle?: string }): string => {
+    if (step.stageTitle) return step.stageTitle;
+    return stageMetaByKey.get(String(step.stageKey || ''))?.title || step.stageKey || 'Stage';
   };
 
   useEffect(() => {
@@ -360,7 +382,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               {earned?.completedPercent ?? 0}%
             </div>
             <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              Weighted by stage percentages
+              Weighted by percentages
             </div>
           </div>
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
@@ -491,19 +513,20 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 >
                   {formatDueCountdown(s.dueAt)}
                 </span>
-                {(s.stageTitle || s.stageKey) && (
-                  <span
-                    className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-xs font-semibold text-gray-700 dark:text-gray-300"
-                    title={
-                      s.stagePercentage != null
-                        ? `Stage '${s.stageTitle || s.stageKey}' — ${s.stagePercentage}% of the matter's fee`
-                        : `Stage: ${s.stageTitle || s.stageKey}`
-                    }
-                  >
-                    {s.stageTitle || s.stageKey}
-                    {s.stagePercentage != null ? ` • ${s.stagePercentage}%` : ''}
-                  </span>
-                )}
+                {(() => {
+                  const stageTitle = stageTitleOf(s);
+                  const pct = stagePercentOf(s);
+                  if (!stageTitle) return null;
+                  return (
+                    <span
+                      className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-1 text-xs font-semibold text-gray-700 dark:text-gray-300"
+                      title={pct != null ? `Stage '${stageTitle}' — ${pct}% of the matter's fee` : `Stage: ${stageTitle}`}
+                    >
+                      {stageTitle}
+                      {pct != null ? ` • ${pct}%` : ''}
+                    </span>
+                  );
+                })()}
                 {!previousStepCompleted && !isCompleted && (
                   <span className="text-xs text-gray-500 dark:text-gray-400" title="Previous steps must be completed first">
                     ← Complete previous steps first
@@ -545,11 +568,14 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 ) : s.slaText ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Duration: {s.slaText}</span>
                 ) : null}
-                {s.stagePercentage != null ? (
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    Stage: {s.stagePercentage}%
-                  </span>
-                ) : null}
+                {(() => {
+                  const pct = stagePercentOf(s);
+                  return pct != null ? (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      Percentage: {pct}%
+                    </span>
+                  ) : null;
+                })()}
               </div>
 
               {canAmendDeadlines && s.status !== 'Completed' && (
