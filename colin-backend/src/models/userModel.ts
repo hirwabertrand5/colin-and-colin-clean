@@ -1,5 +1,10 @@
 import mongoose, { Document, Schema } from 'mongoose';
-import bcrypt from 'bcryptjs'; // Using bcryptjs for better compatibility
+import bcrypt from 'bcrypt'; // native bcrypt — significantly faster than bcryptjs
+
+// bcrypt work factor for password hashing. OWASP recommends 10–12; we use 10 so
+// logins stay fast (each step of 1 doubles the CPU cost). Existing cost-12
+// hashes are re-hashed to this cost on the user's next successful login.
+export const BCRYPT_ROUNDS = 10;
 
 export type UserRole =
   | 'managing_director'
@@ -73,8 +78,7 @@ UserSchema.methods.comparePassword = async function (candidate: string) {
 UserSchema.pre<IUser>('save', async function () {
   if (!this.isModified('passwordHash')) return;
 
-  const salt = await bcrypt.genSalt(12);
-  this.passwordHash = await bcrypt.hash(this.passwordHash, salt);
+  this.passwordHash = await bcrypt.hash(this.passwordHash, BCRYPT_ROUNDS);
 });
 
 export default mongoose.model<IUser>('User', UserSchema);

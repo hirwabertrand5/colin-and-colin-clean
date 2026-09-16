@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import User from '../models/userModel.js';
+import bcrypt from 'bcrypt';
+import User, { BCRYPT_ROUNDS } from '../models/userModel.js';
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -34,9 +35,25 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
+    // ✅ Reset lock/attempts, but only persist when something actually changed so
+    // we don't write to the DB on every normal login (saves a network round-trip).
+    const hadLoginAttempts = user.loginAttempts !== 0;
+    const hadLockUntil = !!user.lockUntil;
+
     user.loginAttempts = 0;
     user.lockUntil = undefined as any;
-    await user.save();
+
+    // One-time cost migration: if this user's hash was created with a higher
+    // bcrypt cost (e.g. the old cost-12 hashes), re-hash it at the current
+    // (cheaper) BCRYPT_ROUNDS so every *future* login verifies much faster.
+    const rehashNeeded = bcrypt.getRounds(user.passwordHash) > BCRYPT_ROUNDS;
+    if (rehashNeeded) {
+      user.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    }
+
+    if (hadLoginAttempts || hadLockUntil || rehashNeeded) {
+      await user.save();
+    }
 
     const secret = process.env.JWT_SECRET as string;
     if (!secret) {
