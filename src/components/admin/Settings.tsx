@@ -35,7 +35,7 @@ type WorkflowDoc = {
   rows: WorkflowRow[];
 };
 
-type TemplateStage = { key: string; order?: number; title: string };
+type TemplateStage = { key: string; order?: number; title: string; percentage?: number };
 type TemplateOutput =
   | string
   | { key?: string; name?: string; required?: boolean; category?: string; text?: string; title?: string };
@@ -266,6 +266,9 @@ export default function Settings() {
       const steps = (t.steps || []) as TemplateStep[];
       const stepsSorted = [...steps].sort((a, b) => (a.order || 0) - (b.order || 0));
       const stageTitleByKey = stageTitleByTemplateId[t._id] || {};
+      const stagePercentageByKey = new Map(
+        ((t.stages || []) as TemplateStage[]).map((stage) => [stage.key, stage.percentage])
+      );
 
       return {
         id: t._id,
@@ -285,8 +288,10 @@ export default function Settings() {
             legalBasis: normalizeLegalBasis(s.legalBasis),
             legalFees: normalizeFee(s.fee),
             timeline: normalizeSla(s.sla),
-            percentage:
-              typeof s.percentage === 'number' && Number.isFinite(s.percentage) ? s.percentage : undefined,
+            percentage: (() => {
+              const value = stagePercentageByKey.get(String(s.stageKey || ''));
+              return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+            })(),
           };
         }),
       };
@@ -434,7 +439,7 @@ export default function Settings() {
         </div>
 
         {/* ✅ Workflow templates editor (your existing component) */}
-        <WorkflowTemplates />
+        <WorkflowTemplates onTemplateSaved={() => void loadWorkflowTemplates()} />
 
         {/* ✅ NEW: Workflows section (like the others) */}
         <div className="bg-white border border-gray-200 rounded-lg p-6">

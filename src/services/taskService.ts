@@ -79,6 +79,8 @@ export interface TaskData {
   startDate?: string;
   dueDate: string;
   description?: string;
+  workflowStageKey?: string;
+  workflowStepKey?: string;
   taskStages?: TaskStage[];
 
   requiresApproval: boolean;

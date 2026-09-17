@@ -264,6 +264,17 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   // Workflow template (for stage-specific fees and SLA)
   const [workflowTemplate, setWorkflowTemplate] = useState<WorkflowTemplate | null>(null);
   const [templateLoading, setTemplateLoading] = useState(false);
+  const workflowStageOptions = useMemo(
+    () =>
+      (workflowTemplate?.stages || [])
+        .map((stage) => ({
+          key: String(stage.key || ''),
+          title: String(stage.title || stage.name || stage.key || ''),
+          percentage: typeof stage.percentage === 'number' ? stage.percentage : undefined,
+        }))
+        .filter((stage) => stage.key),
+    [workflowTemplate]
+  );
 
   // Staff list
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
@@ -715,6 +726,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     }
     if (newTaskDateWarning) {
       setTasksError(newTaskDateWarning);
+      return;
+    }
+    if (workflowStageOptions.length && !newTask.workflowStageKey) {
+      setTasksError('Choose the matter workflow stage so the task fee can be calculated from its percentage.');
       return;
     }
 
@@ -1975,6 +1990,34 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
               </div>
 
+              {workflowStageOptions.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Matter Workflow Stage *</label>
+                  <select
+                    value={newTask.workflowStageKey || ''}
+                    onChange={(e) =>
+                      setNewTask((task) => ({
+                        ...task,
+                        workflowStageKey: e.target.value || undefined,
+                        workflowStepKey: undefined,
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                    required
+                  >
+                    <option value="">Select the work completed</option>
+                    {workflowStageOptions.map((stage) => (
+                      <option key={stage.key} value={stage.key}>
+                        {stage.title}{stage.percentage != null ? ` — ${stage.percentage}% of contract value` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    The productivity report uses this stage percentage × the matter contract value, then TPA × timeliness × quality.
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Assignee *</label>
@@ -2157,6 +2200,37 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 </div>
 
               </div>
+
+              {workflowStageOptions.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Matter Workflow Stage</label>
+                  <select
+                    value={editTask.workflowStageKey || ''}
+                    onChange={(e) =>
+                      setEditTask((task) =>
+                        task
+                          ? {
+                              ...task,
+                              workflowStageKey: e.target.value || undefined,
+                              workflowStepKey: undefined,
+                            }
+                          : task
+                      )
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded"
+                  >
+                    <option value="">Not linked (legacy task)</option>
+                    {workflowStageOptions.map((stage) => (
+                      <option key={stage.key} value={stage.key}>
+                        {stage.title}{stage.percentage != null ? ` — ${stage.percentage}% of contract value` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Link legacy tasks to a stage so their earned fee uses the current matter workflow percentage.
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>

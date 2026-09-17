@@ -1,14 +1,13 @@
 /**
  * Workflow stage/step percentage engine + earned-fee formulas.
  *
- * Every workflow template carries MANUAL percentages — a percentage on each
- * stage and a percentage on each step, typed by the firm (they represent how
- * much of the matter's fee that stage/step is worth). Nothing is auto-derived
- * and percentages never need to total 100.
+ * Every workflow template carries MANUAL percentages on its stages. A stage
+ * value is a literal percentage of the matter contract value: entering 5 or
+ * 5% means exactly five percent, never a proportion to be re-scaled.
  *
  * The earned-fee calculation mirrors the Firm Reports → Productivity formula:
  *   earnedFee = TaskFeeCollected × TPA% × Timeliness% × Quality%
- * where, for a matter, TaskFeeCollected = contractValue × completed step %.
+ * where, for a matter, TaskFeeCollected = contractValue × workflow-stage %.
  */
 
 export type StagePercentRow = {
@@ -47,6 +46,30 @@ export const getTpaPercent = (role?: string) =>
 const round2 = (n: number) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
 
+/** Accept the UI forms people naturally use: 5, "5", and "5%". */
+export const parsePercentage = (value: unknown): number | undefined => {
+  if (typeof value === 'number') return Number.isFinite(value) ? clamp(value) : undefined;
+  const raw = String(value ?? '').trim();
+  if (!raw) return undefined;
+  const numeric = raw.endsWith('%') ? raw.slice(0, -1).trim() : raw;
+  if (!/^\d+(?:\.\d+)?$/.test(numeric)) return undefined;
+  const parsed = Number(numeric);
+  return Number.isFinite(parsed) ? clamp(parsed) : undefined;
+};
+
+const normalizedText = (value: unknown) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+
+export type TaskStageAllocation = {
+  stageKey: string;
+  stageTitle: string;
+  percentage: number;
+};
+
 /**
  * Manual percentages of every stage (0–100). The value entered on the template
  * is returned as-is (clamped); stages without a value return 0. Nothing is
@@ -56,47 +79,89 @@ export const resolveStagePercentages = (template: any): Map<string, number> => {
   const stages: any[] = Array.isArray(template?.stages) ? template.stages : [];
   const result = new Map<string, number>();
   for (const stage of stages) {
-    const raw = Number(stage?.percentage);
-    const valid = Number.isFinite(raw) && raw >= 0;
-    result.set(String(stage?.key || ''), valid ? clamp(raw) : 0);
+    result.set(String(stage?.key || ''), parsePercentage(stage?.percentage) ?? 0);
   }
   return result;
 };
 
 /**
- * Manual percentage of every step (0–100). The value entered on the template
- * is returned as-is (clamped); steps without a value return 0. Step
- * percentages are NOT derived from their stage — each step keeps the worth the
- * firm typed for it.
+ * A workflow step represents a portion of its stage. This is used only for
+ * workflow-completion displays; staff earnings always use the full configured
+ * stage percentage through resolveTaskStageAllocation below.
  */
 export const resolveStepPercentages = (template: any): Map<string, number> => {
   const steps: any[] = Array.isArray(template?.steps) ? template.steps : [];
+  const stagePercentages = resolveStagePercentages(template);
+  const stepsByStage = new Map<string, number>();
+  for (const step of steps) {
+    const stageKey = String(step?.stageKey || '');
+    stepsByStage.set(stageKey, (stepsByStage.get(stageKey) || 0) + 1);
+  }
+
   const result = new Map<string, number>();
   for (const step of steps) {
-    const raw = Number(step?.percentage);
-    const valid = Number.isFinite(raw) && raw >= 0 && raw <= 100;
-    result.set(String(step?.key || ''), valid ? raw : 0);
+    const stageKey = String(step?.stageKey || '');
+    const stagePercentage = stagePercentages.get(stageKey) || 0;
+    const stepsInStage = stepsByStage.get(stageKey) || 1;
+    result.set(String(step?.key || ''), round2(stagePercentage / stepsInStage));
   }
   return result;
 };
 
 /**
- * Clamp the manual percentages already present on a template in place.
- * Manual values are preserved — nothing is auto-filled or forced to total 100.
+ * Normalize the percentages already present on a template in place. Values are
+ * literal and are never auto-filled, redistributed, or forced to total 100.
  */
 export const normalizeTemplatePercentages = (template: any) => {
   if (!template || !Array.isArray(template.stages)) return template;
   for (const stage of template.stages) {
-    const raw = Number(stage?.percentage);
-    if (Number.isFinite(raw) && raw >= 0) stage.percentage = clamp(raw);
-  }
-  if (Array.isArray(template.steps)) {
-    for (const step of template.steps) {
-      const raw = Number(step?.percentage);
-      if (Number.isFinite(raw) && raw >= 0) step.percentage = clamp(raw);
-    }
+    const percentage = parsePercentage(stage?.percentage);
+    if (percentage === undefined) delete stage.percentage;
+    else stage.percentage = percentage;
   }
   return template;
+};
+
+/**
+ * Finds the workflow stage for a task. New tasks persist the selected stage or
+ * step key. Older tasks still work when their title matches a template step or
+ * one of that step's key actions (for example, "Write letter").
+ */
+export const resolveTaskStageAllocation = (template: any, task: any): TaskStageAllocation | null => {
+  if (!template) return null;
+
+  const stages: any[] = Array.isArray(template.stages) ? template.stages : [];
+  const steps: any[] = Array.isArray(template.steps) ? template.steps : [];
+  const stageByKey = new Map(stages.map((stage) => [String(stage?.key || ''), stage]));
+  let stageKey = String(task?.workflowStageKey || '').trim();
+
+  if (!stageKey) {
+    const stepKey = String(task?.workflowStepKey || '').trim();
+    const linkedStep = stepKey ? steps.find((step) => String(step?.key || '') === stepKey) : undefined;
+    stageKey = String(linkedStep?.stageKey || '').trim();
+  }
+
+  if (!stageKey) {
+    const taskTitle = normalizedText(task?.title);
+    const taskDescription = normalizedText(task?.description);
+    const matchedStageKeys = new Set<string>();
+    for (const step of steps) {
+      const candidates = [step?.title, ...(Array.isArray(step?.actions) ? step.actions : [])]
+        .map(normalizedText)
+        .filter(Boolean);
+      if (taskTitle && candidates.includes(taskTitle)) matchedStageKeys.add(String(step?.stageKey || ''));
+      if (taskDescription && candidates.includes(taskDescription)) matchedStageKeys.add(String(step?.stageKey || ''));
+    }
+    if (matchedStageKeys.size === 1) stageKey = Array.from(matchedStageKeys)[0] || '';
+  }
+
+  const stage = stageByKey.get(stageKey);
+  if (!stage || !stageKey) return null;
+  return {
+    stageKey,
+    stageTitle: String(stage?.title || stageKey),
+    percentage: resolveStagePercentages(template).get(stageKey) ?? 0,
+  };
 };
 /**
  * Build the per-stage breakdown from a workflow *instance*.

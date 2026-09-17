@@ -10,6 +10,7 @@ import PettyCashExpense from '../models/pettyCashExpenseModel';
 import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
+import { resolveTaskStageAllocation } from '../utils/workflowPercentages';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
@@ -187,36 +188,19 @@ const getTaskParticipationAllocation = (role?: string) => {
   return TASK_TPA_SHARES[normalized] ?? 0;
 };
 
-const getTaskChecklistCompletionPercent = (task: any) => {
-  const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
-  const total = checklist.length;
-  if (!total) return 0;
-  const completed = checklist.filter((item: any) => Boolean(item?.completed)).length;
-  return Math.round((completed / total) * 100);
+const getTaskStageAllocation = (matter: any, task: any, template: any) => {
+  if (!matter || !template) return null;
+  return resolveTaskStageAllocation(template, task);
 };
 
-const getTaskWorkflowProgressPercent = (matter: any, task: any) => {
-  const workflowPercentValue = matter?.workflowProgress?.percent;
-  if (workflowPercentValue !== null && workflowPercentValue !== undefined) {
-    const parsed = Number(workflowPercentValue);
-    if (Number.isFinite(parsed)) {
-      return Math.max(0, parsed);
-    }
-  }
-
-  return getTaskChecklistCompletionPercent(task);
-};
-
-const LETTER_TASK_FEE_SHARE_PERCENT = 10;
-const isLetterTask = (task: any) =>
-  /letter/i.test(`${String(task?.title || '')} ${String(task?.description || '')}`);
-
-const getTaskFeeCollectedValue = (matter: any, task: any, collectedFee: number): number => {
-  // A task that involves writing a letter is worth 10% of the matter contract value.
-  if (isLetterTask(task)) {
-    return roundMoney(getContractValue(matter) * (LETTER_TASK_FEE_SHARE_PERCENT / 100));
-  }
-  return roundMoney(collectedFee * (getTaskWorkflowProgressPercent(matter, task) / 100));
+/**
+ * The productivity base is the configured workflow-stage share of the matter
+ * contract value. It deliberately does not depend on an invoice being paid.
+ */
+const getTaskFeeCollectedValue = (matter: any, task: any, template: any): number => {
+  const allocation = getTaskStageAllocation(matter, task, template);
+  if (!allocation) return 0;
+  return roundMoney(getContractValue(matter) * (allocation.percentage / 100));
 };
 
 const getTimelinessScore = (task: any) => {
@@ -329,7 +313,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, allTaskLinks, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
       Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
-      Task.find(tasksByDateQuery).select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore').lean(),
+      Task.find(tasksByDateQuery).select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore').lean(),
       Task.find().select('caseId assignee supervisor').lean(),
       User.find({ isActive: { $ne: false } }).select('name role').lean(),
       Prospect.aggregate([
@@ -351,11 +335,11 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const workflowTemplateIds = Array.from(new Set((allCases as any[])
       .map((c) => String(c.workflowTemplateId || '').trim())
       .filter(Boolean)));
+    const workflowTemplates = workflowTemplateIds.length
+      ? ((await WorkflowTemplate.find({ _id: { $in: workflowTemplateIds } }).select('_id matterType stages steps').lean()) as any[])
+      : [];
     const workflowTemplateMatterTypeById = new Map(
-      workflowTemplateIds.length
-        ? ((await WorkflowTemplate.find({ _id: { $in: workflowTemplateIds } }).select('_id matterType').lean()) as any[])
-          .map((template) => [String(template._id), String(template.matterType || '').trim()])
-        : []
+      workflowTemplates.map((template) => [String(template._id), String(template.matterType || '').trim()])
     );
 
     const linkedCaseIdsByName = new Map<string, Set<string>>();
@@ -393,6 +377,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         .lean()
       : [];
     const taskCaseMap = new Map((taskCases as any[]).map((matter) => [String(matter._id), matter]));
+    const workflowTemplateById = new Map(
+      workflowTemplates.map((template) => [String(template._id), template])
+    );
 
     const baseInvoices = dateBasis === 'paymentDate' ? invoicesByPaymentDate : invoicesByInvoiceDate;
     const productivityInvoices = dateBasis === 'invoiceDate'
@@ -499,9 +486,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const role = String(roleByName.get(baseNameFromLabel(staffName)) || '').trim();
       const tpaPercent = getTaskParticipationAllocation(role);
       const matter = taskCaseMap.get(String(task.caseId || ''));
-      const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
-      const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
-      const taskFeeCollected = getTaskFeeCollectedValue(matter, task, collectedFee);
+      const template = workflowTemplateById.get(String(matter?.workflowTemplateId || ''));
+      const stageAllocation = getTaskStageAllocation(matter, task, template);
+      const taskProgressPercent = stageAllocation?.percentage ?? 0;
+      const taskFeeCollected = getTaskFeeCollectedValue(matter, task, template);
       const timeliness = getTimelinessScore(task);
       const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Math.max(0, Math.round(Number(task.qualityScore))) : null;
       const feeEarned =
@@ -513,6 +501,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         role,
         tpaPercent,
         matter,
+        stageAllocation,
         taskFeeCollected,
         taskProgressPercent,
         timeliness,
@@ -692,6 +681,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           keyActionsCompleted: progressCompleted,
           keyActionsTotal: progressTotal,
           taskProgressPercent: financials.taskProgressPercent,
+          workflowStage: financials.stageAllocation?.stageTitle || 'Workflow stage not linked',
+          workflowStagePercent: financials.stageAllocation?.percentage ?? null,
           timelinessStatus: financials.timeliness ? financials.timeliness.status : 'Late',
         };
       })
@@ -1117,40 +1108,26 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       status: 'Completed',
       completedAt: { $gte: fromDate, $lte: toDate },
     })
-      .select('assignee supervisor title completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore status')
+      .select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore status')
       .lean();
     const memberTasksCompleted = (tasksCompleted as any[]).filter(
       (task) => baseNameFromLabel(task.assignee) === baseNameFromLabel(displayName)
     );
 
     const taskCaseIds = Array.from(new Set(memberTasksCompleted.map((task) => String(task.caseId || '')).filter(Boolean)));
-    const [taskCases, paidInvoices] = await Promise.all([
-      taskCaseIds.length
-        ? Case.find({ _id: { $in: taskCaseIds } })
-          .select('_id caseNo parties budget workflowProgress billingSettings matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
-          .lean()
-        : [],
-      taskCaseIds.length
-        ? Invoice.find({
-          status: 'Paid',
-          ...(dateBasis === 'invoiceDate'
-            ? { date: { $gte: fromISO, $lte: toISO } }
-            : { updatedAt: { $gte: fromDate, $lte: toDate } }),
-          caseId: { $in: taskCaseIds },
-        })
-          .select('amount status date caseId proofUrl createdAt updatedAt')
-          .lean()
-        : [],
-    ]);
+    const taskCases = taskCaseIds.length
+      ? await Case.find({ _id: { $in: taskCaseIds } })
+        .select('_id caseNo parties budget workflowProgress billingSettings matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
+        .lean()
+      : [];
 
     const taskCaseMap = new Map((taskCases as any[]).map((matter) => [String(matter._id), matter]));
-    const paidInvoicesByCaseId = new Map<string, number>();
-    for (const inv of paidInvoices as any[]) {
-      const caseId = String(inv.caseId || '');
-      if (!caseId) continue;
-      paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
-    }
-
+    const workflowTemplateById = new Map(
+      (await WorkflowTemplate.find({ _id: { $in: Array.from(new Set((taskCases as any[])
+        .map((matter) => String(matter.workflowTemplateId || ''))
+        .filter(Boolean))) } }).select('_id stages steps').lean() as any[])
+        .map((template) => [String(template._id), template])
+    );
     const rows = memberTasksCompleted
       .map((task) => {
         const matter = taskCaseMap.get(String(task.caseId || ''));
@@ -1160,9 +1137,10 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
         const keyActionsCompleted = checklist.filter((item: any) => Boolean(item?.completed)).length;
         const keyActionsTotal = checklist.length;
-        const taskProgressPercent = getTaskWorkflowProgressPercent(matter, task);
-        const collectedFee = paidInvoicesByCaseId.get(String(task.caseId || '')) || 0;
-        const taskFeeCollected = getTaskFeeCollectedValue(matter, task, collectedFee);
+        const template = workflowTemplateById.get(String(matter?.workflowTemplateId || ''));
+        const stageAllocation = getTaskStageAllocation(matter, task, template);
+        const taskProgressPercent = stageAllocation?.percentage ?? 0;
+        const taskFeeCollected = getTaskFeeCollectedValue(matter, task, template);
         const timeliness = getTimelinessScore(task);
         const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Math.max(0, Math.round(Number(task.qualityScore))) : null;
         const feeEarned =
@@ -1194,6 +1172,8 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
           keyActionsCompleted,
           keyActionsTotal,
           taskProgressPercent,
+          workflowStage: stageAllocation?.stageTitle || 'Workflow stage not linked',
+          workflowStagePercent: stageAllocation?.percentage ?? null,
           timelinessStatus: timeliness ? timeliness.status : 'Late',
         };
       })

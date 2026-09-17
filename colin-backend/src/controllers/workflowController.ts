@@ -444,7 +444,7 @@ export const createTemplate = async (req: AuthRequest, res: Response) => {
   try {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
 
-    // Auto-fill any missing percentages (even distribution when none set).
+    // Preserve literal stage percentages exactly as supplied by the template editor.
     normalizeTemplatePercentages(req.body);
 
     const created = await WorkflowTemplate.create(req.body);
@@ -462,7 +462,7 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     const { templateId } = req.params as any;
     const before = await WorkflowTemplate.findById(templateId).lean();
 
-    // Normalize percentages so the payload is always consistent (totals 100).
+    // Normalize literal percentages without redistributing them.
     const payload = { ...req.body };
     normalizeTemplatePercentages(payload);
 
@@ -470,18 +470,18 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     if (!updated) return res.status(404).json({ message: 'Template not found.' });
 
     const affectedCases = await Case.find({ workflowTemplateId: templateId }).select('_id workflowStartDate createdAt').lean();
-    for (const matter of affectedCases as any[]) {
+    await Promise.all((affectedCases as any[]).map(async (matter) => {
       const wfStart = resolveDeadlineDateTime(matter.workflowStartDate || matter.createdAt || new Date()) || new Date();
       const inst = await syncCaseWorkflowInstanceFromTemplate(String(matter._id), updated, wfStart);
-      if (!inst) continue;
+      if (!inst) return;
 
       const caseDoc: any = await Case.findById(matter._id);
-      if (!caseDoc) continue;
+      if (!caseDoc) return;
       caseDoc.workflowTemplateId = updated._id as any;
       caseDoc.matterType = updated.matterType;
       caseDoc.workflowStartDate = wfStart;
       await updateCaseWorkflowProgress(caseDoc, inst);
-    }
+    }));
 
     if (before && before.matterType !== updated.matterType) {
       // Keep the template metadata itself authoritative; the case sync above updates linked cases.

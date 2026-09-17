@@ -8,13 +8,14 @@ import {
 
 type CaseType = 'Transactional Cases' | 'Litigation Cases' | 'Labor Cases';
 
-type TemplateStageForm = { key: string; title: string; order?: number; percentage?: number };
+type TemplateStageForm = { key: string; title: string; order?: number; percentage?: number; percentageText?: string };
 type TemplateStepForm = {
   key?: string;
   order?: number;
   stageKey?: string;
   title?: string;
   responsibleRole?: string;
+  /** Legacy field retained only while old templates are re-saved. */
   percentage?: number;
   actionsText?: string; // one per line
   outputsText?: string; // one per line
@@ -41,6 +42,15 @@ type Template = any;
 
 const NEW_ID = '__new__';
 
+const percentageValue = (value: unknown): number | undefined => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return undefined;
+  const numeric = raw.endsWith('%') ? raw.slice(0, -1).trim() : raw;
+  if (!/^\d+(?:\.\d*)?$/.test(numeric)) return undefined;
+  const parsed = Number(numeric);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : undefined;
+};
+
 function splitLines(text: string | undefined) {
   return (text || '')
     .split('\n')
@@ -63,6 +73,8 @@ function templateToForm(t: Template): TemplateForm {
       order: typeof s?.order === 'number' ? s.order : undefined,
       percentage:
         typeof s?.percentage === 'number' && Number.isFinite(s.percentage) ? s.percentage : undefined,
+      percentageText:
+        typeof s?.percentage === 'number' && Number.isFinite(s.percentage) ? `${s.percentage}%` : '',
     }))
     .filter((s: TemplateStageForm) => s.key || s.title);
 
@@ -72,10 +84,6 @@ function templateToForm(t: Template): TemplateForm {
       order: typeof s?.order === 'number' ? s.order : undefined,
       stageKey: typeof s?.stageKey === 'string' ? s.stageKey : undefined,
       title: typeof s?.title === 'string' ? s.title : undefined,
-      percentage:
-        typeof s?.percentage === 'number' && Number.isFinite(s.percentage)
-          ? Math.max(0, Math.min(100, s.percentage))
-          : undefined,
       responsibleRole: typeof s?.responsibleRole === 'string' ? s.responsibleRole : undefined,
       actionsText: joinLines(Array.isArray(s?.actions) ? s.actions : []),
       outputsText: joinLines(
@@ -121,8 +129,8 @@ function formToPayload(form: TemplateForm) {
       key: (s.key || '').trim(),
       title: (s.title || '').trim(),
       order: typeof s.order === 'number' ? s.order : 0,
-      ...(typeof s.percentage === 'number' && Number.isFinite(s.percentage)
-        ? { percentage: Math.max(0, Math.min(100, s.percentage)) }
+      ...(percentageValue(s.percentageText ?? s.percentage) !== undefined
+        ? { percentage: percentageValue(s.percentageText ?? s.percentage) }
         : {}),
     }))
     .filter((s) => s.key && s.title);
@@ -157,9 +165,6 @@ function formToPayload(form: TemplateForm) {
         order: typeof s.order === 'number' ? s.order : 0,
         stageKey: s.stageKey || '',
         title: s.title || '',
-        ...(typeof s.percentage === 'number' && Number.isFinite(s.percentage)
-          ? { percentage: Math.max(0, Math.min(100, s.percentage)) }
-          : {}),
         ...(s.responsibleRole?.trim() ? { responsibleRole: s.responsibleRole.trim() } : {}),
         ...(actions.length ? { actions } : { actions: [] }),
         ...(outputs.length ? { outputs } : { outputs: [] }),
@@ -215,7 +220,7 @@ function distributeStagePercentages(form: TemplateForm | null): TemplateForm | n
   if (!count) return { ...form, stages };
   const exact = 100 / count;
   const base = Math.floor(exact * 100) / 100;
-  const next = stages.map((stage) => ({ ...stage, percentage: base }));
+  const next = stages.map((stage) => ({ ...stage, percentage: base, percentageText: `${base}%` }));
   let remainder = Math.round((100 - base * count) * 100);
   let cursor = 0;
   while (remainder > 0) {
@@ -223,6 +228,7 @@ function distributeStagePercentages(form: TemplateForm | null): TemplateForm | n
     next[cursor % count] = {
       ...current,
       percentage: Math.round(((Number(current.percentage) || 0) + 0.01) * 100) / 100,
+      percentageText: `${Math.round(((Number(current.percentage) || 0) + 0.01) * 100) / 100}%`,
     };
     remainder -= 1;
     cursor += 1;
@@ -230,7 +236,7 @@ function distributeStagePercentages(form: TemplateForm | null): TemplateForm | n
   return { ...form, stages: next };
 }
 
-export default function WorkflowTemplates() {
+export default function WorkflowTemplates({ onTemplateSaved }: { onTemplateSaved?: () => void }) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
@@ -306,12 +312,14 @@ export default function WorkflowTemplates() {
       if (selected._id === NEW_ID) {
         const created = await createWorkflowTemplate(payload);
         await load();
+        onTemplateSaved?.();
         setSelected(created);
         setForm(templateToForm(created));
         setSavedMsg('Template created — live cases now use these percentages.');
       } else {
         const updated = await updateWorkflowTemplate(selected._id, payload);
         await load();
+        onTemplateSaved?.();
         setSelected(updated);
         setForm(templateToForm(updated));
         setSavedMsg('Template saved — all linked cases & earned fees are now updated.');
@@ -639,19 +647,21 @@ export default function WorkflowTemplates() {
                                 <div className="md:col-span-2">
                                   <label className="block text-xs text-gray-600 mb-1">Percentage</label>
                                   <input
-                                    type="number"
+                                    type="text"
+                                    inputMode="decimal"
                                     min={0}
                                     max={100}
                                     step={0.01}
-                                    value={s.percentage ?? ''}
+                                    value={s.percentageText ?? (typeof s.percentage === 'number' ? String(s.percentage) : '')}
                                     placeholder="0–100"
                                     onChange={(e) =>
                                       setForm((f) => {
                                         if (!f) return f;
                                         const next = [...f.stages];
-                                        const val = e.target.value === '' ? undefined : Number(e.target.value);
+                                        const val = percentageValue(e.target.value);
                                         next[idx] = {
                                           ...next[idx],
+                                          percentageText: e.target.value,
                                           percentage: Number.isFinite(val as number) ? (val as number) : undefined,
                                         };
                                         return { ...f, stages: next };
@@ -761,7 +771,7 @@ export default function WorkflowTemplates() {
                                       className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
                                     />
                                   </div>
-                                  <div className="md:col-span-2">
+                                  <div className="hidden">
                                     <label className="block text-xs text-gray-600 mb-1">Percentage</label>
                                     <input
                                       type="number"

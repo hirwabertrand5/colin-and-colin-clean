@@ -65,6 +65,9 @@ export interface ITask extends Document {
   startDate?: string;
   dueDate: string; // YYYY-MM-DD
   description?: string;
+  /** Workflow-template link used to calculate the task's stage-based fee. */
+  workflowStageKey?: string;
+  workflowStepKey?: string;
   taskStages?: ITaskStage[];
 
   requiresApproval: boolean;
@@ -173,6 +176,8 @@ const TaskSchema = new Schema<ITask>(
     startDate: { type: String, trim: true },
     dueDate: { type: String, required: true },
     description: { type: String },
+    workflowStageKey: { type: String, trim: true, index: true },
+    workflowStepKey: { type: String, trim: true, index: true },
     taskStages: { type: [TaskStageSchema], default: [] },
 
     requiresApproval: { type: Boolean, default: false },
