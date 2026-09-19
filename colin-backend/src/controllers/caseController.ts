@@ -462,7 +462,7 @@ export const createCase = async (req: AuthRequest, res: Response) => {
           ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
           action: 'WORKFLOW_INSTANCE_CREATED',
           message: 'Workflow initialized from template',
-          detail: `${template.name} v${template.version}`,
+          detail: template.name,
         });
       }
     }

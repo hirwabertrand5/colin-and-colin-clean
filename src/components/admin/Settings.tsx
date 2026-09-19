@@ -52,6 +52,7 @@ type TemplateStep = {
   legalBasis?: TemplateLegalBasis[];
   fee?: TemplateFee;
   sla?: TemplateSla;
+  percentage?: number;
 };
 
 function CellList({ text }: { text: string }) {
@@ -259,7 +260,7 @@ export default function Settings() {
       const aMatter = (a.matterType || '').toLowerCase();
       const bMatter = (b.matterType || '').toLowerCase();
       if (aMatter !== bMatter) return aMatter.localeCompare(bMatter);
-      return (a.version || 0) - (b.version || 0);
+      return (a.name || '').localeCompare(b.name || '');
     });
 
     return templatesSorted.map((t) => {
@@ -289,7 +290,7 @@ export default function Settings() {
             legalFees: normalizeFee(s.fee),
             timeline: normalizeSla(s.sla),
             percentage: (() => {
-              const value = stagePercentageByKey.get(String(s.stageKey || ''));
+              const value = typeof s.percentage === 'number' ? s.percentage : stagePercentageByKey.get(String(s.stageKey || ''));
               return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
             })(),
           };

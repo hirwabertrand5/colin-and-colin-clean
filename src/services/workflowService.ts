@@ -8,12 +8,15 @@ export type WorkflowTemplate = {
   caseType: 'Transactional Cases' | 'Litigation Cases' | 'Labor Cases';
   version: number;
   active: boolean;
+  /** Draft templates are kept in the same template collection but are never active. */
+  draft?: boolean;
   stages: Array<{
     _id?: string;
     key: string;
-    name: string;
+    name?: string;
     order: number;
     title?: string;
+    description?: string;
     percentage?: number;
     fee?: WorkflowFeeSpec;
     sla?: WorkflowSlaSpec;
@@ -26,6 +29,7 @@ export type WorkflowTemplate = {
     stageKey: string;
     order: number;
     description?: string;
+    responsibleRole?: string;
     actions?: string[];
     percentage?: number;
     fee?: WorkflowFeeSpec;
@@ -35,6 +39,9 @@ export type WorkflowTemplate = {
       name: string;
       required: boolean;
       category?: string;
+    }>;
+    legalBasis?: Array<{
+      text: string;
     }>;
   }>;
 };

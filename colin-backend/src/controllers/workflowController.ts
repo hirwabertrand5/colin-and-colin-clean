@@ -49,6 +49,82 @@ const actorFromReq = (req: AuthRequest) => ({
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
 
+const literalPercentage = (value: unknown): number | undefined => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  const text = String(value ?? '').trim().replace(/%$/, '').trim();
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return undefined;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+/**
+ * The template editor is the only UI that creates these payloads, but this
+ * server-side guard keeps the global allocation rule true for direct API use
+ * too. It deliberately never adjusts a submitted percentage.
+ */
+const allocationValidationError = (payload: any) => {
+  const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+  const stages = Array.isArray(payload?.stages) ? payload.stages : [];
+  const stepValues = steps
+    .map((step: any) => literalPercentage(step?.percentage))
+    .filter((value: number | undefined): value is number => value !== undefined);
+
+  for (const value of stepValues) {
+    if (value < 0 || value > 100) return 'Each key-action percentage must be between 0% and 100%.';
+  }
+
+  // Legacy templates may have only stage allocations. New builder payloads
+  // carry a literal percentage on every key-action/step instead.
+  const values = stepValues.length
+    ? stepValues
+    : stages
+        .map((stage: any) => literalPercentage(stage?.percentage))
+        .filter((value: number | undefined): value is number => value !== undefined);
+  const total = values.reduce((sum: number, value: number) => sum + value, 0);
+  if (total > 100 + Number.EPSILON) {
+    return `Workflow allocation exceeds 100% by ${Math.round((total - 100) * 100) / 100}%.`;
+  }
+  return '';
+};
+
+const publicationValidationError = (payload: any) => {
+  if (!String(payload?.name || '').trim()) return 'Workflow name is required.';
+  if (!String(payload?.matterType || '').trim()) return 'Matter type is required.';
+  if (!['Transactional Cases', 'Litigation Cases', 'Labor Cases'].includes(String(payload?.caseType || '')))
+    return 'A valid case type is required.';
+  if (!Number.isFinite(Number(payload?.version)) || Number(payload.version) < 1)
+    return 'Version must be a positive number.';
+
+  const stages = Array.isArray(payload?.stages) ? payload.stages : [];
+  const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+  if (!stages.length) return 'Add at least one workflow stage.';
+  if (!steps.length) return 'Add at least one key action.';
+
+  const stageKeys = new Set<string>();
+  for (const stage of stages) {
+    const key = String(stage?.key || '').trim();
+    if (!key) return 'Every stage needs a key.';
+    if (!String(stage?.title || '').trim()) return 'Every stage needs a title.';
+    if (stageKeys.has(key)) return `Duplicate stage key: ${key}.`;
+    stageKeys.add(key);
+  }
+
+  const explicitActionPercentages = steps.some((step: any) => literalPercentage(step?.percentage) !== undefined);
+  const stepKeys = new Set<string>();
+  for (const [index, step] of steps.entries()) {
+    const key = String(step?.key || '').trim();
+    if (!key) return `Key action ${index + 1} needs a key.`;
+    if (stepKeys.has(key)) return `Duplicate key action key: ${key}.`;
+    stepKeys.add(key);
+    if (!String(step?.title || '').trim()) return `Key action ${index + 1} needs a description.`;
+    if (!stageKeys.has(String(step?.stageKey || '').trim())) return `Key action ${index + 1} must belong to a stage.`;
+    if (explicitActionPercentages && literalPercentage(step?.percentage) === undefined)
+      return `Key action ${index + 1} needs a valid percentage.`;
+  }
+
+  return allocationValidationError(payload);
+};
+
 const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: any, startDate: Date) => {
   const builtSteps = buildInstanceSteps(template, startDate);
   const existingByKey = new Map((existingSteps || []).map((step: any) => [String(step.stepKey), step]));
@@ -411,7 +487,7 @@ const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) =>
 export const listActiveTemplates = async (req: AuthRequest, res: Response) => {
   try {
     const templates = await WorkflowTemplate.find({ active: true })
-      .sort({ matterType: 1, version: -1 })
+      .sort({ matterType: 1, name: 1 })
       .lean();
     res.json(templates);
   } catch {
@@ -444,10 +520,15 @@ export const createTemplate = async (req: AuthRequest, res: Response) => {
   try {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
 
-    // Preserve literal stage percentages exactly as supplied by the template editor.
-    normalizeTemplatePercentages(req.body);
+    const payload: any = { ...req.body };
+    if (payload.draft) payload.active = false;
+    const validationError = payload.draft ? allocationValidationError(payload) : publicationValidationError(payload);
+    if (validationError) return res.status(400).json({ message: validationError });
 
-    const created = await WorkflowTemplate.create(req.body);
+    // Preserve literal stage and key-action percentages exactly as supplied.
+    normalizeTemplatePercentages(payload);
+
+    const created = await WorkflowTemplate.create(payload);
     // NOTE: We avoid writing audit here because your audit log requires a caseId.
     res.status(201).json(created);
   } catch (e: any) {
@@ -462,8 +543,12 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     const { templateId } = req.params as any;
     const before = await WorkflowTemplate.findById(templateId).lean();
 
-    // Normalize literal percentages without redistributing them.
     const payload = { ...req.body };
+    if (payload.draft) payload.active = false;
+    const validationError = payload.draft ? allocationValidationError(payload) : publicationValidationError(payload);
+    if (validationError) return res.status(400).json({ message: validationError });
+
+    // Normalize literal percentages without redistributing them.
     normalizeTemplatePercentages(payload);
 
     const updated = await WorkflowTemplate.findByIdAndUpdate(templateId, payload, { new: true });
@@ -770,7 +855,7 @@ export const initWorkflowForCase = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_INSTANCE_CREATED',
       message: 'Workflow initialized from template',
-      detail: `${template.name} v${template.version}`,
+      detail: template.name,
     });
 
     res.status(201).json(inst);

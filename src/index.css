@@ -2019,3 +2019,112 @@ html {
   margin-bottom: 1.5rem;
   padding-inline: 0.25rem;
 }
+
+/* Workflow template builder: the component deliberately uses the same neutral
+   palette as the rest of the admin experience. These selectors cover its
+   nested cards, inputs and summaries when next-themes applies `.dark` to the
+   document root, including components added dynamically by the builder. */
+.dark .workflow-template-builder {
+  color: rgb(243 244 246);
+}
+
+.dark .workflow-template-builder .bg-white {
+  background-color: rgb(31 41 55);
+}
+
+.dark .workflow-template-builder .bg-gray-50 {
+  background-color: rgb(17 24 39);
+}
+
+.dark .workflow-template-builder .bg-gray-100,
+.dark .workflow-template-builder .bg-gray-200 {
+  background-color: rgb(55 65 81);
+}
+
+.dark .workflow-template-builder .border-gray-100,
+.dark .workflow-template-builder .border-gray-200,
+.dark .workflow-template-builder .border-gray-300 {
+  border-color: rgb(75 85 99);
+}
+
+.dark .workflow-template-builder .text-gray-900 {
+  color: rgb(243 244 246);
+}
+
+.dark .workflow-template-builder .text-gray-700 {
+  color: rgb(209 213 219);
+}
+
+.dark .workflow-template-builder .text-gray-600,
+.dark .workflow-template-builder .text-gray-500,
+.dark .workflow-template-builder .text-gray-400 {
+  color: rgb(156 163 175);
+}
+
+.dark .workflow-template-builder input,
+.dark .workflow-template-builder textarea,
+.dark .workflow-template-builder select {
+  background-color: rgb(31 41 55);
+  border-color: rgb(75 85 99);
+  color: rgb(243 244 246);
+}
+
+.dark .workflow-template-builder input::placeholder,
+.dark .workflow-template-builder textarea::placeholder {
+  color: rgb(156 163 175);
+}
+
+.dark .workflow-template-builder .hover\:bg-gray-50:hover {
+  background-color: rgb(55 65 81);
+}
+
+.dark .workflow-template-builder .bg-blue-50 {
+  background-color: rgb(30 58 138 / 0.35);
+}
+
+.dark .workflow-template-builder .border-blue-100 {
+  border-color: rgb(30 64 175 / 0.7);
+}
+
+.dark .workflow-template-builder .text-blue-800 {
+  color: rgb(191 219 254);
+}
+
+.dark .workflow-template-builder .bg-green-50 {
+  background-color: rgb(6 78 59 / 0.35);
+}
+
+.dark .workflow-template-builder .bg-green-100 {
+  background-color: rgb(6 78 59 / 0.72);
+}
+
+.dark .workflow-template-builder .border-green-200,
+.dark .workflow-template-builder .border-green-300 {
+  border-color: rgb(5 150 105 / 0.6);
+}
+
+.dark .workflow-template-builder .text-green-800 {
+  color: rgb(167 243 208);
+}
+
+.dark .workflow-template-builder .bg-amber-100 {
+  background-color: rgb(120 53 15 / 0.72);
+}
+
+.dark .workflow-template-builder .text-amber-800 {
+  color: rgb(253 230 138);
+}
+
+.dark .workflow-template-builder .bg-red-50 {
+  background-color: rgb(127 29 29 / 0.35);
+}
+
+.dark .workflow-template-builder .border-red-200,
+.dark .workflow-template-builder .border-red-300 {
+  border-color: rgb(220 38 38 / 0.65);
+}
+
+.dark .workflow-template-builder .text-red-700,
+.dark .workflow-template-builder .text-red-800 {
+  color: rgb(252 165 165);
+}

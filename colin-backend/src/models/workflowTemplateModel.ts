@@ -72,6 +72,11 @@ export interface IWorkflowTemplate extends Document {
   caseType: 'Transactional Cases' | 'Litigation Cases' | 'Labor Cases';
   version: number;
   active: boolean;
+  /**
+   * Drafts use the same template collection and service as published workflows.
+   * They remain inactive until the builder publishes them.
+   */
+  draft?: boolean;
 
   stages: IWorkflowStageTemplate[];
   steps: IWorkflowStepTemplate[];
@@ -120,10 +125,13 @@ const OutputReqSchema = new Schema<IOutputRequirement>(
 
 const StepSchema = new Schema<IWorkflowStepTemplate>(
   {
-    key: { type: String, required: true },
-    order: { type: Number, required: true },
-    title: { type: String, required: true },
-    stageKey: { type: String, required: true },
+    // These fields are validated before publication. Keeping them optional at
+    // the schema level lets an administrator save a partially-built draft in
+    // this same authoritative template record.
+    key: { type: String },
+    order: { type: Number },
+    title: { type: String },
+    stageKey: { type: String },
 
     responsibleRole: { type: String, trim: true },
 
@@ -140,9 +148,10 @@ const StepSchema = new Schema<IWorkflowStepTemplate>(
 
 const StageSchema = new Schema<IWorkflowStageTemplate>(
   {
-    key: { type: String, required: true },
-    order: { type: Number, required: true },
-    title: { type: String, required: true },
+    // See StepSchema: incomplete values are valid only while draft is true.
+    key: { type: String },
+    order: { type: Number },
+    title: { type: String },
     description: { type: String },
     percentage: { type: Number, min: 0, max: 100 },
   },
@@ -160,6 +169,7 @@ const WorkflowTemplateSchema = new Schema<IWorkflowTemplate>(
     },
     version: { type: Number, default: 1 },
     active: { type: Boolean, default: true },
+    draft: { type: Boolean, default: false },
 
     stages: { type: [StageSchema], default: [] },
     steps: { type: [StepSchema], default: [] },

@@ -85,9 +85,13 @@ export const resolveStagePercentages = (template: any): Map<string, number> => {
 };
 
 /**
- * A workflow step represents a portion of its stage. This is used only for
- * workflow-completion displays; staff earnings always use the full configured
- * stage percentage through resolveTaskStageAllocation below.
+ * A workflow step represents a key action in the template builder. When a
+ * literal step percentage exists, it is authoritative and is returned exactly
+ * as entered. Older templates that only have stage percentages retain their
+ * historical equal-split behaviour.
+ *
+ * Staff earnings still use the configured stage percentage through
+ * resolveTaskStageAllocation below.
  */
 export const resolveStepPercentages = (template: any): Map<string, number> => {
   const steps: any[] = Array.isArray(template?.steps) ? template.steps : [];
@@ -101,9 +105,13 @@ export const resolveStepPercentages = (template: any): Map<string, number> => {
   const result = new Map<string, number>();
   for (const step of steps) {
     const stageKey = String(step?.stageKey || '');
+    const literalPercentage = parsePercentage(step?.percentage);
     const stagePercentage = stagePercentages.get(stageKey) || 0;
     const stepsInStage = stepsByStage.get(stageKey) || 1;
-    result.set(String(step?.key || ''), round2(stagePercentage / stepsInStage));
+    result.set(
+      String(step?.key || ''),
+      literalPercentage === undefined ? round2(stagePercentage / stepsInStage) : literalPercentage
+    );
   }
   return result;
 };
@@ -113,11 +121,16 @@ export const resolveStepPercentages = (template: any): Map<string, number> => {
  * literal and are never auto-filled, redistributed, or forced to total 100.
  */
 export const normalizeTemplatePercentages = (template: any) => {
-  if (!template || !Array.isArray(template.stages)) return template;
-  for (const stage of template.stages) {
+  if (!template) return template;
+  for (const stage of Array.isArray(template.stages) ? template.stages : []) {
     const percentage = parsePercentage(stage?.percentage);
     if (percentage === undefined) delete stage.percentage;
     else stage.percentage = percentage;
+  }
+  for (const step of Array.isArray(template.steps) ? template.steps : []) {
+    const percentage = parsePercentage(step?.percentage);
+    if (percentage === undefined) delete step.percentage;
+    else step.percentage = percentage;
   }
   return template;
 };
