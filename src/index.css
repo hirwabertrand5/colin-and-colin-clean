@@ -2128,3 +2128,36 @@ html {
 .dark .workflow-template-builder .text-red-800 {
   color: rgb(252 165 165);
 }
+
+/* Keep builder actions consistently aligned with the form controls. */
+.workflow-template-builder .justify-center {
+  justify-content: flex-end;
+}
+
+.workflow-template-builder .workflow-action-add {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+/* In a section, keep the add-action control directly after the latest key
+   action instead of leaving it in the section header. */
+.workflow-template-builder .space-y-5.p-4 > div:nth-child(3) {
+  display: flex;
+  flex-direction: column;
+}
+
+.workflow-template-builder .space-y-5.p-4 > div:nth-child(3) > .flex {
+  order: 2;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.workflow-template-builder .space-y-5.p-4 > div:nth-child(3) > .flex > h4 {
+  display: none;
+}
+
+.workflow-template-builder .space-y-5.p-4 > div:nth-child(3) > .space-y-3,
+.workflow-template-builder .space-y-5.p-4 > div:nth-child(3) > p {
+  order: 1;
+}

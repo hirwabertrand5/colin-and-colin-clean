@@ -18,6 +18,15 @@ export type WorkflowTemplate = {
     title?: string;
     description?: string;
     percentage?: number;
+    legalBasis?: Array<{
+      text: string;
+    }>;
+    outputs?: Array<{
+      key: string;
+      name: string;
+      required: boolean;
+      category?: string;
+    }>;
     fee?: WorkflowFeeSpec;
     sla?: WorkflowSlaSpec;
     steps?: string[];

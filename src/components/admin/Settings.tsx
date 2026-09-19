@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Save, Mail, Database, Shield, Bell, GitBranch, ChevronDown } from 'lucide-react';
 import { sendTestEmail } from '../../services/adminEmailService';
 import usePageTitle from '../../hooks/usePageTitle';
@@ -29,19 +29,39 @@ type WorkflowRow = {
   percentage?: number;
 };
 
-type WorkflowDoc = {
+type WorkflowSection = {
   id: string;
   title: string;
+  percentage?: number;
+  output: string;
+  legalBasis: string;
+  legalFees: string;
+  timeline: string;
   rows: WorkflowRow[];
 };
 
-type TemplateStage = { key: string; order?: number; title: string; percentage?: number };
+type WorkflowDoc = {
+  id: string;
+  title: string;
+  sections: WorkflowSection[];
+};
+
+type TemplateStage = {
+  key: string;
+  order?: number;
+  title: string;
+  percentage?: number;
+  outputs?: TemplateOutput[];
+  legalBasis?: TemplateLegalBasis[];
+  fee?: TemplateFee;
+  sla?: TemplateSla;
+};
 type TemplateOutput =
   | string
   | { key?: string; name?: string; required?: boolean; category?: string; text?: string; title?: string };
 type TemplateLegalBasis = string | { text?: string; title?: string };
-type TemplateFee = string | { text?: string };
-type TemplateSla = string | { text?: string };
+type TemplateFee = string | { text?: string; currency?: string; min?: number; max?: number; percentage?: number; type?: string };
+type TemplateSla = string | { text?: string; min?: number; max?: number; unit?: string };
 type TemplateStep = {
   key?: string;
   order?: number;
@@ -78,43 +98,35 @@ function CellList({ text }: { text: string }) {
   );
 }
 
-function WorkflowTable({ rows }: { rows: WorkflowRow[] }) {
+function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
+  // Legacy table markup remains below only for a gradual rendering change.
+  // The visible table is the grouped section table rendered before it.
+  const sortedRows: WorkflowRow[] = [];
   const [sortKey, setSortKey] = useState('');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const handleSort = (column: string) => {
-    if (sortKey === column) {
-      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortKey(column);
-      setSortDir('asc');
-    }
+    setSortKey((current) => current === column ? current : column);
+    setSortDir((current) => sortKey === column && current === 'asc' ? 'desc' : 'asc');
   };
-  const workflowSortValueOf = (r: WorkflowRow, key: string): unknown => {
-    switch (key) {
-      case 'stage':
-        return r.stage;
-      case 'keyActions':
-        return r.keyActions;
-      case 'output':
-        return r.output;
-      case 'legalBasis':
-        return r.legalBasis;
-      case 'legalFees':
-        return r.legalFees;
-      case 'percentage':
-        return r.percentage;
-      default:
-        return r.timeline;
-    }
-  };
-  const sortedRows = sortRows(rows, sortKey, sortDir, (r) => workflowSortValueOf(r, sortKey));
+  const exportRows = sections.flatMap((section) => {
+    const rows = section.rows.length ? section.rows : [{ stage: '', keyActions: '', output: '', legalBasis: '', legalFees: '', timeline: '', percentage: undefined }];
+    return rows.map((row, index) => ({
+      stage: index === 0 ? section.title : '',
+      keyActions: row.keyActions,
+      output: index === 0 ? section.output : '',
+      legalBasis: index === 0 ? section.legalBasis : '',
+      legalFees: index === 0 ? section.legalFees : '',
+      percentage: row.percentage,
+      timeline: index === 0 ? section.timeline : '',
+    }));
+  });
   return (
     <div className="overflow-x-auto border border-gray-200 rounded-lg">
       <div className="mb-2 flex items-center justify-end">
         <TableExport
           filename="workflow_template"
           title="Workflow Stages & Key Actions"
-          subtitle={`${rows.length} stages`}
+          subtitle={`${sections.length} sections`}
           columns={[
             { label: 'Stage', value: (r: WorkflowRow) => r.stage },
             { label: 'Key Actions', value: (r: WorkflowRow) => r.keyActions },
@@ -124,19 +136,63 @@ function WorkflowTable({ rows }: { rows: WorkflowRow[] }) {
             { label: 'Percentage', value: (r: WorkflowRow) => (r.percentage != null ? `${r.percentage}%` : '—') },
             { label: 'Timeline', value: (r: WorkflowRow) => r.timeline },
           ]}
-          rows={rows}
+          rows={exportRows}
         />
       </div>
       <table className="min-w-[1100px] w-full text-sm">
+        <thead className="bg-gray-900 text-white">
+          <tr>
+            <th className="p-3 text-left">STAGE</th>
+            <th className="p-3 text-left">LEGAL BASIS</th>
+            <th className="p-3 text-left">OUTPUT</th>
+            <th className="p-3 text-left">KEY ACTIONS</th>
+            <th className="p-3 text-left">PERCENTAGE</th>
+            <th className="p-3 text-left">FEES</th>
+            <th className="p-3 text-left">TIMELINES</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white">
+          {sections.map((section) => {
+            const rows = section.rows.length
+              ? section.rows
+              : [{ stage: '', keyActions: '', output: '', legalBasis: '', legalFees: '', timeline: '', percentage: undefined }];
+            return (
+              <Fragment key={section.id}>
+                <tr className="bg-gray-100">
+                  <td colSpan={7} className="px-4 py-2 text-center font-semibold text-gray-900">
+                    {section.title}{section.percentage != null ? ` ${section.percentage}%` : ''}
+                  </td>
+                </tr>
+                {rows.map((row, index) => (
+                  <tr key={`${section.id}-${index}`} className="align-top">
+                    {index === 0 && <>
+                      <td rowSpan={rows.length} className="p-3 border-b font-medium text-gray-900 whitespace-pre-wrap">{section.title}</td>
+                      <td rowSpan={rows.length} className="p-3 border-b text-gray-700"><CellList text={section.legalBasis} /></td>
+                      <td rowSpan={rows.length} className="p-3 border-b text-gray-700"><CellList text={section.output} /></td>
+                    </>}
+                    <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{row.keyActions || '—'}</td>
+                    <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{row.percentage != null ? `${row.percentage}%` : '—'}</td>
+                    {index === 0 && <>
+                      <td rowSpan={rows.length} className="p-3 border-b text-gray-700"><CellList text={section.legalFees} /></td>
+                      <td rowSpan={rows.length} className="p-3 border-b text-gray-700"><CellList text={section.timeline} /></td>
+                    </>}
+                  </tr>
+                ))}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+      <table className="hidden min-w-[1100px] w-full text-sm" aria-hidden="true">
         <thead className="bg-gray-50 text-gray-700">
           <tr>
-            <SortableHeader label="Stage" column="stage" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
-            <SortableHeader label="Key Actions" column="keyActions" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
-            <SortableHeader label="Output" column="output" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
-            <SortableHeader label="Legal Basis" column="legalBasis" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
-            <SortableHeader label="Legal Fees" column="legalFees" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
-            <SortableHeader label="Percentage" column="percentage" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
-            <SortableHeader label="Timeline" column="timeline" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-left p-3" />
+            <th className="p-3 text-left">STAGE</th>
+            <th className="p-3 text-left">LEGAL BASIS</th>
+            <th className="p-3 text-left">OUTPUT</th>
+            <th className="p-3 text-left">KEY ACTIONS</th>
+            <th className="p-3 text-left">PERCENTAGE</th>
+            <th className="p-3 text-left">FEES</th>
+            <th className="p-3 text-left">TIMELINES</th>
           </tr>
         </thead>
         <tbody className="bg-white">
@@ -247,13 +303,21 @@ export default function Settings() {
     const normalizeFee = (fee: TemplateFee | undefined) => {
       if (!fee) return '';
       if (typeof fee === 'string') return fee;
-      return fee.text || '';
+      if (fee.text) return fee.text;
+      if (fee.type === 'range' && typeof fee.min === 'number' && typeof fee.max === 'number') {
+        return `${fee.currency || 'RWF'} ${fee.min.toLocaleString()} - ${fee.max.toLocaleString()}`;
+      }
+      if (fee.type === 'fixed' && typeof fee.min === 'number') return `${fee.currency || 'RWF'} ${fee.min.toLocaleString()}`;
+      if (fee.type === 'percentage' && typeof fee.percentage === 'number') return `${fee.percentage}%`;
+      return '';
     };
 
     const normalizeSla = (sla: TemplateSla | undefined) => {
       if (!sla) return '';
       if (typeof sla === 'string') return sla;
-      return sla.text || '';
+      if (sla.text) return sla.text;
+      const range = [sla.min, sla.max].filter((value): value is number => typeof value === 'number').join(' - ');
+      return range ? `${range} ${sla.unit || 'days'}` : '';
     };
 
     const templatesSorted = [...workflowTemplates].sort((a, b) => {
@@ -266,33 +330,37 @@ export default function Settings() {
     return templatesSorted.map((t) => {
       const steps = (t.steps || []) as TemplateStep[];
       const stepsSorted = [...steps].sort((a, b) => (a.order || 0) - (b.order || 0));
-      const stageTitleByKey = stageTitleByTemplateId[t._id] || {};
-      const stagePercentageByKey = new Map(
-        ((t.stages || []) as TemplateStage[]).map((stage) => [stage.key, stage.percentage])
-      );
+      const stages = [...((t.stages || []) as TemplateStage[])].sort((a, b) => (a.order || 0) - (b.order || 0));
 
       return {
         id: t._id,
         title: `${t.matterType || t.name}${t.name && t.matterType !== t.name ? ` — ${t.name}` : ''} • ${
           t.active ? 'Active' : 'Inactive'
         }`,
-        rows: stepsSorted.map((s) => {
-          const stageTitle = (s.stageKey && stageTitleByKey[s.stageKey]) || s.stageKey || '';
-          const stepTitle = s.title || '';
-          const stageCell = [stageTitle, stepTitle].filter(Boolean).join('\n');
-          const keyActions = (s.actions || []).map((a, i) => `${i + 1}. ${a}`).join('\n');
-
+        sections: stages.map((stage, sectionIndex) => {
+          const sectionSteps = stepsSorted.filter((step) => String(step.stageKey || '') === stage.key);
+          const firstStep = sectionSteps[0];
+          const rows = sectionSteps.flatMap((step) => {
+            const actionItems = step.actions?.length ? step.actions : [step.title || ''];
+            return actionItems.map((action, actionIndex) => ({
+              stage: '',
+              keyActions: `${actionIndex + 1}. ${action}`.trim(),
+              output: '',
+              legalBasis: '',
+              legalFees: '',
+              timeline: '',
+              percentage: typeof step.percentage === 'number' ? step.percentage : undefined,
+            }));
+          });
           return {
-            stage: stageCell,
-            keyActions,
-            output: normalizeOutputs(s.outputs),
-            legalBasis: normalizeLegalBasis(s.legalBasis),
-            legalFees: normalizeFee(s.fee),
-            timeline: normalizeSla(s.sla),
-            percentage: (() => {
-              const value = typeof s.percentage === 'number' ? s.percentage : stagePercentageByKey.get(String(s.stageKey || ''));
-              return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-            })(),
+            id: `${t._id}_${stage.key}`,
+            title: `SECTION ${sectionIndex + 1}: ${stage.title || stage.key || 'Untitled Stage'}`,
+            percentage: typeof stage.percentage === 'number' ? stage.percentage : undefined,
+            output: normalizeOutputs(stage.outputs) || normalizeOutputs(firstStep?.outputs),
+            legalBasis: normalizeLegalBasis(stage.legalBasis) || normalizeLegalBasis(firstStep?.legalBasis),
+            legalFees: normalizeFee(stage.fee) || normalizeFee(firstStep?.fee),
+            timeline: normalizeSla(stage.sla) || normalizeSla(firstStep?.sla),
+            rows,
           };
         }),
       };
@@ -480,7 +548,7 @@ export default function Settings() {
 
                     {open && (
                       <div className="px-4 pb-4">
-                        <WorkflowTable rows={wf.rows} />
+                        <WorkflowTable sections={wf.sections} />
                       </div>
                     )}
                   </div>

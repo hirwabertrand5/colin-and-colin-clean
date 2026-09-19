@@ -59,6 +59,16 @@ export interface IWorkflowStageTemplate {
   description?: string;
 
   /**
+   * Reference-table fields are entered once for the whole section. They are
+   * also copied to its steps when a case workflow is initialized, preserving
+   * the existing step-based deadline, fee and document behaviour.
+   */
+  legalBasis?: ILegalBasisRef[];
+  outputs?: IOutputRequirement[];
+  fee?: IFeeSpec;
+  sla?: ISlaSpec;
+
+  /**
    * Percentage weight (0–100) this stage contributes to the matter's earned
    * value. Stage percentages are expected to total 100. When omitted, template
    * percentages are auto-distributed evenly across stages.
@@ -153,6 +163,10 @@ const StageSchema = new Schema<IWorkflowStageTemplate>(
     order: { type: Number },
     title: { type: String },
     description: { type: String },
+    legalBasis: { type: [LegalBasisSchema], default: [] },
+    outputs: { type: [OutputReqSchema], default: [] },
+    fee: { type: FeeSpecSchema, required: false },
+    sla: { type: SlaSpecSchema, required: false },
     percentage: { type: Number, min: 0, max: 100 },
   },
   { _id: false }
