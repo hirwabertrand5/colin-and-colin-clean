@@ -358,18 +358,21 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           <div>
             <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Earned Fees</div>
             <div className="text-xs text-gray-500 dark:text-gray-400">
+              Completed Key Actions are valued from the contract and capped by Paid invoice collections before TPA, timeliness and quality.
+            </div>
+            <div className="hidden">
               Contract value × workflow completed, then TPA × Timeliness × Quality per team member
             </div>
           </div>
           <div className="text-right">
-            <div className="text-xs text-gray-500 dark:text-gray-400">Earned value</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Eligible collected value</div>
             <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               {formatMoney(earned?.earnedValue, earned?.currency)}
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
             <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Contract Value</div>
             <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
@@ -382,16 +385,25 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               {earned?.completedPercent ?? 0}%
             </div>
             <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              Weighted by percentages
+              {earned?.completedKeyActions ?? 0} completed Key Action{earned?.completedKeyActions === 1 ? '' : 's'} weighted by percentage
             </div>
           </div>
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
-            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Earned Value</div>
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Completed Action Value</div>
+            <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
+              {formatMoney(earned?.completedValue, earned?.currency)}
+            </div>
+            <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Before collection cap
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Collected / Eligible</div>
             <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
               {formatMoney(earned?.earnedValue, earned?.currency)}
             </div>
             <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              Completed portion of the matter fee
+              Paid: {formatMoney(earned?.collectedAmount, earned?.currency)}
             </div>
           </div>
         </div>
@@ -406,6 +418,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   <th className="px-3 py-2 text-right font-medium">TPA</th>
                   <th className="px-3 py-2 text-right font-medium">Timeliness</th>
                   <th className="px-3 py-2 text-right font-medium">Quality</th>
+                  <th className="px-3 py-2 text-right font-medium">Collected base</th>
                   <th className="px-3 py-2 text-right font-medium">Earned fee</th>
                 </tr>
               </thead>
@@ -425,6 +438,9 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                       </td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
                         {member.qualityScore != null ? `${member.qualityScore}%` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
+                        {formatMoney(member.taskFeeCollected, earned.currency)}
                       </td>
                       <td
                         className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100"

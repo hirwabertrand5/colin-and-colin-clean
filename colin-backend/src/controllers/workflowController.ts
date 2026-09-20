@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import Case from '../models/caseModel';
+import Invoice from '../models/invoiceModel';
 import Document from '../models/documentModel';
 import Task from '../models/taskModel';
 import User from '../models/userModel';
@@ -22,7 +23,7 @@ import {
 } from '../utils/workflowPercentages';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
-import { getContractValue } from '../utils/financialMetrics';
+import { calculateCollectedKeyActionEarnings } from '../utils/keyActionEarnings';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -659,7 +660,6 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
       ? await WorkflowTemplate.findById(inst.templateId).lean()
       : null;
 
-    const contractValue = getContractValue(c);
     const currency = String(
       c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF'
     );
@@ -686,9 +686,29 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const [tasks, paidInvoices] = await Promise.all([
+      Task.find({ caseId }).lean(),
+      Invoice.find({ caseId, status: 'Paid' }).select('amount').lean(),
+    ]);
+    const collectedAmount = (paidInvoices || []).reduce(
+      (sum: number, invoice: any) => sum + Math.max(0, Number(invoice?.amount) || 0),
+      0
+    );
+    const keyActionEarnings = calculateCollectedKeyActionEarnings({
+      matter: c,
+      template,
+      workflowInstance: { ...(inst || {}), steps: effectiveSteps },
+      tasks,
+      collectedAmount,
+    });
+    const contractValue = keyActionEarnings.contractValue;
+    const completedPercent = keyActionEarnings.completedPercent;
+    const completedValue = keyActionEarnings.completedValue;
+    // This is the sole base for TPA/timeliness/quality. It is zero until cash
+    // is collected, and it can never exceed either the completed action value
+    // or actual paid invoices for the matter.
+    const earnedValue = keyActionEarnings.eligibleCollectedValue;
     const stages = computeStageBreakdownFromInstance(effectiveSteps);
-    const completedPercent = computeCompletedPercentFromInstance(effectiveSteps);
-    const earnedValue = Math.round(contractValue * (completedPercent / 100) * 100) / 100;
 
     const assignments: any = c.caseAssignments || {};
     const teamSpecs = [
@@ -719,8 +739,6 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
       const key = String(user?.name || '').trim().toLowerCase();
       if (key && !roleByName.has(key)) roleByName.set(key, String(user?.role || ''));
     }
-
-    const tasks: any[] = await Task.find({ caseId }).lean();
 
     const team = teamSpecs.map((spec) => {
       const role = roleByName.get(spec.name.toLowerCase()) || '';
@@ -800,6 +818,10 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
       currency,
       completedPercent,
       earnedValue,
+      completedValue,
+      collectedAmount: keyActionEarnings.collectedAmount,
+      eligibleCollectedValue: keyActionEarnings.eligibleCollectedValue,
+      completedKeyActions: keyActionEarnings.completedActions.length,
       stages: stages.map((stage) => ({
         ...stage,
         title: stage.title || stage.stageKey || 'Stage',

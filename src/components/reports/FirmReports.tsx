@@ -469,8 +469,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     );
     const productivitySummary = data.productivitySummary;
     const productivitySummaryRows = withRowNumbers([
-      ['Completed Tasks', String(productivitySummary?.completedTasks ?? productivityRows.length)],
-      ['Task Fee Collected', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? productivitySummary?.totalTaskFee ?? productivityRows.reduce((sum, row) => sum + ((row.taskFeeCollected ?? row.taskFee) || 0), 0))],
+      ['Completed Key Action Assignments', String(productivitySummary?.completedTasks ?? productivityRows.length)],
+      ['Collected Key Action Base', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? productivitySummary?.totalTaskFee ?? productivityRows.reduce((sum, row) => sum + ((row.taskFeeCollected ?? row.taskFee) || 0), 0))],
       ['Total Fee Earned', fmtMoney(productivitySummary?.totalFeeEarned ?? productivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0))],
       ['Pending Quality Scores', String(productivitySummary?.pendingQualityScores ?? productivityRows.filter((row) => row.qualityScore == null).length)],
       ['Average Quality Score', productivitySummary?.averageQualityScore == null ? '—' : `${productivitySummary.averageQualityScore}%`],
@@ -575,8 +575,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                 rows: productivitySummaryRows,
               },
               {
-                title: 'Task Productivity Metrics',
-                headers: ['#', 'Date & Time', 'Staff', 'Matter', 'Task', 'Task Fee Collected', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned'],
+                title: 'Key Action Productivity Metrics',
+                headers: ['#', 'Date & Time', 'Staff', 'Matter', 'Key Action', 'Collected Key Action Base', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned'],
                 rows: numberedProductivityRows,
                 currencyColumns: [6, 11],
                 percentColumns: [7, 8, 9],
@@ -1111,13 +1111,13 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mt-4">
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Completed Tasks</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Completed Key Action Assignments</div>
                   <div className="mt-2 text-2xl font-semibold text-gray-900">
                     {data.productivitySummary?.completedTasks ?? data.productivityRows?.length ?? 0}
                   </div>
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Task Fee Collected</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Collected Key Action Base</div>
                   <div className="mt-2 text-2xl font-semibold text-gray-900">
                     {fmtMoney(data.productivitySummary?.totalTaskFeeCollected ?? data.productivitySummary?.totalTaskFee ?? (data.productivityRows || []).reduce((s, r) => s + ((r.taskFeeCollected ?? r.taskFee) || 0), 0))}
                   </div>
@@ -1151,12 +1151,12 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
           </div>
 
           <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Task Productivity Metrics</h2>
+            <h2 className="font-semibold text-gray-900 mb-4">Key Action Productivity Metrics</h2>
 
             {!data ? (
               <div className="text-gray-500">No data.</div>
             ) : (data.productivityRows || []).length === 0 ? (
-              <div className="text-gray-500">No completed tasks for this period.</div>
+              <div className="text-gray-500">No completed Key Actions with collected fees for this period.</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-[1400px] w-full">
@@ -1166,8 +1166,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                       <SortableHeader label="Date / Time" column="datetime" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
                       <SortableHeader label="Staff" column="staff" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
                       <SortableHeader label="Matter" column="matter" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="Task" column="task" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="Task Fee Collected" column="taskFeeCollected" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="right" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Key Action" column="task" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Collected Key Action Base" column="taskFeeCollected" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="right" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
                       <SortableHeader label="TPA" column="tpa" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
                       <SortableHeader label="Timeliness Score" column="timeliness" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
                       <SortableHeader label="Quality Score" column="quality" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />

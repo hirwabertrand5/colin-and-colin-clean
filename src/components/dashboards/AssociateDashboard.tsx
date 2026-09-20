@@ -906,10 +906,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         )}
 
         <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
-          <SectionHeader title={profile.labels.earnings} description={`Fees earned for ${earningsPeriod}, using the same task productivity formula as People & Capacity (Staff Contribution).`} />
+          <SectionHeader title={profile.labels.earnings} description={`Fees earned for ${earningsPeriod}, using completed Key Actions, collected fees, and the role-based productivity formula.`} />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
-              ['Task Fee Collected', formatRwf(reportTaskFeeCollected), 'Paid invoice value allocated to completed tasks'],
+              ['Collected Key Action Base', formatRwf(reportTaskFeeCollected), 'Completed Key Action value, capped by Paid invoices'],
               ['TPA', `${reportTpaPercent}%`, 'Configured from role/remuneration setup'],
               ['Timeliness Score', reportTimelinessScore == null ? 'Pending' : `${reportTimelinessScore}%`, 'Firm report completed-task timeliness score'],
               ['Quality Score', reportQualityScore == null ? 'Pending' : `${reportQualityScore}%`, 'Firm report completed-task quality score'],
@@ -926,14 +926,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           </div>
 
           <div className="mt-5 border-t border-gray-200 pt-3">
-            <div className="mb-2 text-sm font-medium text-gray-900">Fee breakdown by completed task</div>
+            <div className="mb-2 text-sm font-medium text-gray-900">Fee breakdown by completed Key Action</div>
             <div className="overflow-x-auto">
               <table className="min-w-[1024px] w-full text-left text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                   <tr>
                     <SortableHeader label="Matter" column="matter" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3" />
-                    <SortableHeader label="Task" column="task" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3" />
-                    <SortableHeader label="Task Fee" column="taskFee" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
+                    <SortableHeader label="Key Action" column="task" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3" />
+                    <SortableHeader label="Collected Base" column="taskFee" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
                     <SortableHeader label="TPA" column="tpa" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
                     <SortableHeader label="Timeliness" column="timeliness" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
                     <SortableHeader label="Quality" column="quality" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
@@ -944,7 +944,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                   {earningsRows.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                        No completed tasks with fee financials in this period.
+                        No completed Key Actions with collected fees in this period.
                       </td>
                     </tr>
                   ) : (

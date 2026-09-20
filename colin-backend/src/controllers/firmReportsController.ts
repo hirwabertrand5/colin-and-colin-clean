@@ -10,7 +10,12 @@ import PettyCashExpense from '../models/pettyCashExpenseModel';
 import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
+import WorkflowInstance from '../models/workflowInstanceModel';
 import { resolveTaskStageAllocation } from '../utils/workflowPercentages';
+import {
+  allocateCollectedValueAcrossKeyActions,
+  calculateCollectedKeyActionEarnings,
+} from '../utils/keyActionEarnings';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
@@ -250,6 +255,144 @@ const getTimelinessScore = (task: any) => {
   };
 };
 
+const normalizedTaskLabel = (value: unknown) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+
+const taskBelongsToMember = (task: any, memberName: string) => {
+  const member = baseNameFromLabel(memberName);
+  const names = [task?.assignee, task?.supervisor]
+    .map(baseNameFromLabel)
+    .filter(Boolean);
+  const stageNames = Array.isArray(task?.taskStages)
+    ? task.taskStages.map((stage: any) => baseNameFromLabel(stage?.staffMember)).filter(Boolean)
+    : [];
+  return [...names, ...stageNames].includes(member);
+};
+
+const taskMatchesKeyAction = (task: any, action: any) => {
+  const explicitKey = String(task?.workflowStepKey || '').trim();
+  if (explicitKey) return explicitKey === String(action?.key || '');
+  const actionTitle = normalizedTaskLabel(action?.title);
+  return Boolean(actionTitle) && [task?.title, task?.description].some(
+    (value) => normalizedTaskLabel(value) === actionTitle
+  );
+};
+
+/**
+ * Build report rows from completed template Key Actions rather than from an
+ * arbitrary task stage. Every matter role (initiator, reviewer, approver)
+ * receives its own TPA calculation.  The Key Action base is always capped by
+ * invoices that are actually Paid, so a billed/outstanding matter earns zero.
+ */
+const buildCollectedKeyActionRows = ({
+  matters,
+  templatesById,
+  instancesByCaseId,
+  tasksByCaseId,
+  paidInvoicesByCaseId,
+  roleByName,
+  fromDate,
+  toDate,
+  selectedMemberName,
+}: any) => {
+  const rows: any[] = [];
+  const selectedMember = selectedMemberName ? baseNameFromLabel(selectedMemberName) : '';
+
+  for (const matter of matters || []) {
+    const caseId = String(matter?._id || '');
+    const template = templatesById.get(String(matter?.workflowTemplateId || ''));
+    const caseTasks = tasksByCaseId.get(caseId) || [];
+    const earnings = calculateCollectedKeyActionEarnings({
+      matter,
+      template,
+      workflowInstance: instancesByCaseId.get(caseId),
+      tasks: caseTasks,
+      collectedAmount: paidInvoicesByCaseId.get(caseId) || 0,
+    });
+    const actionValueByKey = allocateCollectedValueAcrossKeyActions(earnings);
+    const assignments = matter?.caseAssignments || {};
+    const team = [
+      { assignmentRole: 'Initiator', name: String(assignments.initiator || matter?.assignedTo || '').trim() },
+      { assignmentRole: 'Reviewer', name: String(assignments.reviewer || '').trim() },
+      { assignmentRole: 'Approver', name: String(assignments.signerApprover || '').trim() },
+    ].filter((member) => member.name);
+
+    for (const action of earnings.completedActions) {
+      const actionTasks = caseTasks.filter((task: any) => taskMatchesKeyAction(task, action));
+      const completedAt =
+        parseTaskDate(action.completedAt) ||
+        actionTasks.map((task: any) => parseTaskDate(task?.completedAt || task?.updatedAt)).find(Boolean);
+      if (!completedAt || completedAt < fromDate || completedAt > toDate) continue;
+
+      const templateStep = Array.isArray(template?.steps)
+        ? template.steps.find((step: any) => String(step?.key || '') === action.key)
+        : null;
+      const workflowStage = Array.isArray(template?.stages)
+        ? template.stages.find((stage: any) => String(stage?.key || '') === String(templateStep?.stageKey || ''))
+        : null;
+      const taskFeeCollected = actionValueByKey.get(action.key) || 0;
+
+      for (const member of team) {
+        const memberKey = baseNameFromLabel(member.name);
+        if (selectedMember && memberKey !== selectedMember) continue;
+        const linkedTask = actionTasks
+          .filter((task: any) => taskBelongsToMember(task, member.name))
+          .sort((a: any, b: any) => Number(Boolean(b?.completedAt)) - Number(Boolean(a?.completedAt)))[0];
+        const linkedStage = Array.isArray(linkedTask?.taskStages)
+          ? linkedTask.taskStages.find((stage: any) => baseNameFromLabel(stage?.staffMember) === memberKey)
+          : null;
+        const timeliness = linkedTask ? getTimelinessScore(linkedTask) : null;
+        const timelinessScore = Number.isFinite(Number(linkedStage?.timelinessScore))
+          ? Math.max(0, Number(linkedStage.timelinessScore))
+          : timeliness?.score ?? 100;
+        const qualityScore = Number.isFinite(Number(linkedStage?.qualityScore))
+          ? Math.max(0, Number(linkedStage.qualityScore))
+          : Number.isFinite(Number(linkedTask?.qualityScore))
+            ? Math.max(0, Number(linkedTask.qualityScore))
+            : 100;
+        const role = String(roleByName.get(memberKey) || '').trim();
+        const tpaPercent = getTaskParticipationAllocation(role);
+        const feeEarned = roundMoney(
+          taskFeeCollected * (tpaPercent / 100) * (timelinessScore / 100) * (qualityScore / 100)
+        );
+
+        rows.push({
+          id: `${caseId}:${action.key}:${member.assignmentRole.toLowerCase()}`,
+          completedAt: completedAt.toISOString(),
+          staff: member.name,
+          assignmentRole: member.assignmentRole,
+          role,
+          matter: String(matter?.caseNo || matter?.parties || matter?.matterType || matter?.workflow || 'N/A'),
+          task: action.title,
+          taskFeeCollected,
+          taskFee: taskFeeCollected,
+          tpaPercent,
+          timelinessScore,
+          timelinessConsumedPercent: timeliness ? Math.round(timeliness.consumedPercent * 10) / 10 : null,
+          qualityScore,
+          formula: `${roundMoney(taskFeeCollected)} x ${tpaPercent}% x ${timelinessScore}% x ${qualityScore}% = ${feeEarned}`,
+          feeEarned,
+          keyActionsCompleted: 1,
+          keyActionsTotal: 1,
+          taskProgressPercent: action.percentage,
+          keyActionPercent: action.percentage,
+          workflowStage: String(workflowStage?.title || templateStep?.stageKey || 'Workflow stage not linked'),
+          workflowStagePercent: Number(workflowStage?.percentage) || null,
+          timelinessStatus: timeliness ? timeliness.status : 'Not scored - treated as 100%',
+          collectedAmount: earnings.collectedAmount,
+          eligibleCollectedValue: earnings.eligibleCollectedValue,
+        });
+      }
+    }
+  }
+
+  return rows.sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
+};
+
 const getPerformanceZone = (task: any): { zone: PerformanceZone; usedPercent: number } | null => {
   const assignedAt = parseTaskDate(task?.startDate) || parseTaskDate(task?.createdAt);
   const completedAt = parseTaskDate(task?.completedAt);
@@ -314,7 +457,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Task.find(tasksByDateQuery).select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore').lean(),
-      Task.find().select('caseId assignee supervisor').lean(),
+      Task.find()
+        .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages')
+        .lean(),
       User.find({ isActive: { $ne: false } }).select('name role').lean(),
       Prospect.aggregate([
         { $match: { createdAt: { $gte: fromDate, $lte: toDate }, createdBy: { $exists: true } } },
@@ -330,7 +475,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .select('_id assignedTo workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
       .lean();
 
-    const allCases = await Case.find().select('_id assignedTo status workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel').lean();
+    const allCases = await Case.find()
+      .select('_id assignedTo caseAssignments status caseNo parties budget workflowProgress billingSettings workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
+      .lean();
     const caseById = new Map((allCases as any[]).map((c) => [String(c._id), c]));
     const workflowTemplateIds = Array.from(new Set((allCases as any[])
       .map((c) => String(c.workflowTemplateId || '').trim())
@@ -344,11 +491,15 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const linkedCaseIdsByName = new Map<string, Set<string>>();
     for (const c of allCases as any[]) {
-      const name = normalizeName(c.assignedTo);
-      if (!name) continue;
-      const current = linkedCaseIdsByName.get(name) || new Set<string>();
-      current.add(String(c._id));
-      linkedCaseIdsByName.set(name, current);
+      const assignments = c.caseAssignments || {};
+      const names = [c.assignedTo, assignments.initiator, assignments.reviewer, assignments.signerApprover]
+        .map(normalizeName)
+        .filter(Boolean);
+      for (const name of names) {
+        const current = linkedCaseIdsByName.get(name) || new Set<string>();
+        current.add(String(c._id));
+        linkedCaseIdsByName.set(name, current);
+      }
     }
     for (const task of allTaskLinks as any[]) {
       const caseId = String(task.caseId || '');
@@ -366,7 +517,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         ? { _id: { $in: Array.from(linkedCaseIdsByName.get(selectedMemberNameNormalized) || []) } }
         : {}
     )
-      .select('_id assignedTo status caseNo parties budget updatedAt workflowProgress billingSettings legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments status caseNo parties budget updatedAt workflowProgress billingSettings legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
       .lean();
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
@@ -439,11 +590,15 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     for (const c of allCases as any[]) {
       if (!isOpenCase(c)) continue;
       allOpenCaseIds.add(String(c._id));
-      const name = normalizeName(c.assignedTo);
-      if (!name) continue;
-      const current = activeCaseIdsByName.get(name) || new Set<string>();
-      current.add(String(c._id));
-      activeCaseIdsByName.set(name, current);
+      const assignments = c.caseAssignments || {};
+      const names = [c.assignedTo, assignments.initiator, assignments.reviewer, assignments.signerApprover]
+        .map(normalizeName)
+        .filter(Boolean);
+      for (const name of names) {
+        const current = activeCaseIdsByName.get(name) || new Set<string>();
+        current.add(String(c._id));
+        activeCaseIdsByName.set(name, current);
+      }
     }
     for (const task of allTaskLinks as any[]) {
       const caseId = String(task.caseId || '');
@@ -477,6 +632,32 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       if (!caseId) continue;
       paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
     }
+    const selectedMatterIdsForEarnings = selectedMatters.map((matter: any) => matter._id);
+    const workflowInstances = selectedMatterIdsForEarnings.length
+      ? await WorkflowInstance.find({ caseId: { $in: selectedMatterIdsForEarnings } })
+        .select('caseId templateId steps')
+        .lean()
+      : [];
+    const instancesByCaseId = new Map(
+      (workflowInstances as any[]).map((instance) => [String(instance.caseId || ''), instance])
+    );
+    const tasksByCaseId = new Map<string, any[]>();
+    for (const task of allTaskLinks as any[]) {
+      const caseId = String(task?.caseId || '');
+      if (!caseId) continue;
+      tasksByCaseId.set(caseId, [...(tasksByCaseId.get(caseId) || []), task]);
+    }
+    const productivityRows = buildCollectedKeyActionRows({
+      matters: selectedMatters,
+      templatesById: workflowTemplateById,
+      instancesByCaseId,
+      tasksByCaseId,
+      paidInvoicesByCaseId,
+      roleByName,
+      fromDate,
+      toDate,
+      selectedMemberName,
+    });
     const earnedByName = new Map<string, number>();
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
@@ -530,12 +711,15 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         if (perf.zone === 'risk') riskByName.set(name, (riskByName.get(name) || 0) + 1);
         usedPercentByName.set(name, [...(usedPercentByName.get(name) || []), perf.usedPercent]);
       }
-      const financials = getTaskProductivityFinancials(t);
-      grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + financials.taskFeeCollected);
-      earnedByName.set(name, (earnedByName.get(name) || 0) + (financials.feeEarned || 0));
+    }
+
+    for (const row of productivityRows) {
+      const name = baseNameFromLabel(row.staff);
+      grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + (row.taskFeeCollected || 0));
+      earnedByName.set(name, (earnedByName.get(name) || 0) + (row.feeEarned || 0));
       firmRetainedByName.set(
         name,
-        (firmRetainedByName.get(name) || 0) + Math.max(0, financials.taskFeeCollected - (financials.feeEarned || 0))
+        (firmRetainedByName.get(name) || 0) + Math.max(0, (row.taskFeeCollected || 0) - (row.feeEarned || 0))
       );
     }
 
@@ -644,7 +828,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       revenueBilled: Math.round((revenueByType.get(row.type) || 0) * 100) / 100,
     })).sort((a, b) => a.type.localeCompare(b.type));
 
-    const productivityRows = (tasksCompleted as any[])
+    const legacyTaskProductivityRows = (tasksCompleted as any[])
       .filter((task) => !selectedMemberNameNormalized || baseNameFromLabel(task.assignee) === selectedMemberNameNormalized)
       .map((task) => {
         const staffName = String(task.assignee || '—').trim();
@@ -1104,6 +1288,59 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
     const displayName = String(user?.name || staffName).trim();
     const tpaPercent = getTaskParticipationAllocation(role);
 
+    // Personal productivity uses the same Case Workspace/Firm Reports engine:
+    // all three case assignments are eligible, but only this logged-in member's
+    // role row is returned.
+    const memberMatters = await Case.find({
+      $or: [
+        { assignedTo: displayName },
+        { 'caseAssignments.initiator': displayName },
+        { 'caseAssignments.reviewer': displayName },
+        { 'caseAssignments.signerApprover': displayName },
+      ],
+    })
+      .select('_id assignedTo caseAssignments caseNo parties budget workflowProgress billingSettings matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
+      .lean();
+    const memberMatterIds = (memberMatters as any[]).map((matter) => matter._id);
+    const [memberWorkflowInstances, memberTasks, paidMemberInvoices] = await Promise.all([
+      memberMatterIds.length
+        ? WorkflowInstance.find({ caseId: { $in: memberMatterIds } }).select('caseId templateId steps').lean()
+        : [],
+      memberMatterIds.length
+        ? Task.find({ caseId: { $in: memberMatterIds } })
+          .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages')
+          .lean()
+        : [],
+      dateBasis === 'invoiceDate'
+        ? Invoice.find({ status: 'Paid', date: { $gte: fromISO, $lte: toISO } }).select('caseId amount').lean()
+        : Invoice.find({ status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } }).select('caseId amount').lean(),
+    ]);
+    const memberTemplates = memberMatterIds.length
+      ? await WorkflowTemplate.find({ _id: { $in: Array.from(new Set((memberMatters as any[])
+        .map((matter) => String(matter.workflowTemplateId || '')).filter(Boolean))) } }).select('_id stages steps').lean()
+      : [];
+    const memberTasksByCaseId = new Map<string, any[]>();
+    for (const task of memberTasks as any[]) {
+      const caseId = String(task?.caseId || '');
+      if (caseId) memberTasksByCaseId.set(caseId, [...(memberTasksByCaseId.get(caseId) || []), task]);
+    }
+    const memberPaidInvoicesByCaseId = new Map<string, number>();
+    for (const invoice of paidMemberInvoices as any[]) {
+      const caseId = String(invoice?.caseId || '');
+      if (caseId) memberPaidInvoicesByCaseId.set(caseId, (memberPaidInvoicesByCaseId.get(caseId) || 0) + (Number(invoice.amount) || 0));
+    }
+    const rows = buildCollectedKeyActionRows({
+      matters: memberMatters,
+      templatesById: new Map((memberTemplates as any[]).map((template) => [String(template._id), template])),
+      instancesByCaseId: new Map((memberWorkflowInstances as any[]).map((instance) => [String(instance.caseId), instance])),
+      tasksByCaseId: memberTasksByCaseId,
+      paidInvoicesByCaseId: memberPaidInvoicesByCaseId,
+      roleByName: new Map([[baseNameFromLabel(displayName), role]]),
+      fromDate,
+      toDate,
+      selectedMemberName: displayName,
+    });
+
     const tasksCompleted = await Task.find({
       status: 'Completed',
       completedAt: { $gte: fromDate, $lte: toDate },
@@ -1128,7 +1365,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         .filter(Boolean))) } }).select('_id stages steps').lean() as any[])
         .map((template) => [String(template._id), template])
     );
-    const rows = memberTasksCompleted
+    const legacyTaskRows = memberTasksCompleted
       .map((task) => {
         const matter = taskCaseMap.get(String(task.caseId || ''));
         const matterLabel = matter
@@ -1198,7 +1435,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         paymentsReceived: totalTaskFeeCollected,
         outstandingBalance: 0,
         feesEarned: totalFeeEarned,
-        qualityReviewStatus: 'Uses completed task quality scores from the productivity report formula.',
+        qualityReviewStatus: 'Uses completed Key Action task scores when available; otherwise the productivity multiplier defaults to 100%.',
       },
       productivitySummary: {
         completedTasks: rows.length,
@@ -1221,7 +1458,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
           role,
           earningRoleLabel: roleShare.label,
           earningSharePercent: roleShare.percent,
-          activeCases: taskCaseIds.length,
+          activeCases: memberMatters.length,
           tasksCompleted: rows.length,
           invoicePaymentsReceived: totalTaskFeeCollected,
           earnedFees: totalFeeEarned,

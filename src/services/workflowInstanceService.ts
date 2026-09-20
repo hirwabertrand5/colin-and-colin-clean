@@ -91,6 +91,10 @@ export type CaseEarnedFees = {
   contractValue: number;
   currency: string;
   completedPercent: number;
+  completedValue?: number;
+  collectedAmount?: number;
+  eligibleCollectedValue?: number;
+  completedKeyActions?: number;
   earnedValue: number;
   stages: CaseStagePercent[];
   team: CaseTeamEarnedFee[];
