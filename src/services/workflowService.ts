@@ -27,7 +27,6 @@ export type WorkflowTemplate = {
       required: boolean;
       category?: string;
     }>;
-    fee?: WorkflowFeeSpec;
     sla?: WorkflowSlaSpec;
     steps?: string[];
   }>;
@@ -41,7 +40,6 @@ export type WorkflowTemplate = {
     responsibleRole?: string;
     actions?: string[];
     percentage?: number;
-    fee?: WorkflowFeeSpec;
     sla?: WorkflowSlaSpec;
     outputs?: Array<{
       key: string;
@@ -53,16 +51,6 @@ export type WorkflowTemplate = {
       text: string;
     }>;
   }>;
-};
-
-export type WorkflowFeeSpec = {
-  type?: 'fixed' | 'range' | 'percentage' | 'text' | 'included';
-  amount?: number;
-  currency?: string;
-  min?: number;
-  max?: number;
-  percentage?: number;
-  text?: string;
 };
 
 export type WorkflowSlaSpec = {

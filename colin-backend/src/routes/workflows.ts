@@ -23,7 +23,6 @@ import {
   updateStepAction,
   deleteStepAction,
   toggleStepAction,
-  setStepFeeAmount,
 } from '../controllers/workflowController';
 
 const router = express.Router();
@@ -108,14 +107,6 @@ router.patch(
   '/cases/:caseId/steps/:stepKey/actions/:index/toggle',
   authenticate,
   toggleStepAction
-);
-
-// Fee overrides (admin only)
-router.put(
-  '/cases/:caseId/steps/:stepKey/fee',
-  authenticate,
-  authorize(ADMIN_ROLES),
-  setStepFeeAmount
 );
 
 export default router;

@@ -24,7 +24,6 @@ type WorkflowRow = {
   keyActions: string;
   output: string;
   legalBasis: string;
-  legalFees: string;
   timeline: string;
   percentage?: number;
 };
@@ -35,7 +34,6 @@ type WorkflowSection = {
   percentage?: number;
   output: string;
   legalBasis: string;
-  legalFees: string;
   timeline: string;
   rows: WorkflowRow[];
 };
@@ -53,14 +51,12 @@ type TemplateStage = {
   percentage?: number;
   outputs?: TemplateOutput[];
   legalBasis?: TemplateLegalBasis[];
-  fee?: TemplateFee;
   sla?: TemplateSla;
 };
 type TemplateOutput =
   | string
   | { key?: string; name?: string; required?: boolean; category?: string; text?: string; title?: string };
 type TemplateLegalBasis = string | { text?: string; title?: string };
-type TemplateFee = string | { text?: string; currency?: string; min?: number; max?: number; percentage?: number; type?: string };
 type TemplateSla = string | { text?: string; min?: number; max?: number; unit?: string };
 type TemplateStep = {
   key?: string;
@@ -70,7 +66,6 @@ type TemplateStep = {
   actions?: string[];
   outputs?: TemplateOutput[];
   legalBasis?: TemplateLegalBasis[];
-  fee?: TemplateFee;
   sla?: TemplateSla;
   percentage?: number;
 };
@@ -109,13 +104,12 @@ function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
     setSortDir((current) => sortKey === column && current === 'asc' ? 'desc' : 'asc');
   };
   const exportRows = sections.flatMap((section) => {
-    const rows = section.rows.length ? section.rows : [{ stage: '', keyActions: '', output: '', legalBasis: '', legalFees: '', timeline: '', percentage: undefined }];
+    const rows = section.rows.length ? section.rows : [{ stage: '', keyActions: '', output: '', legalBasis: '', timeline: '', percentage: undefined }];
     return rows.map((row, index) => ({
       stage: index === 0 ? section.title : '',
       keyActions: row.keyActions,
       output: index === 0 ? section.output : '',
       legalBasis: index === 0 ? section.legalBasis : '',
-      legalFees: index === 0 ? section.legalFees : '',
       percentage: row.percentage,
       timeline: index === 0 ? section.timeline : '',
     }));
@@ -132,7 +126,6 @@ function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
             { label: 'Key Actions', value: (r: WorkflowRow) => r.keyActions },
             { label: 'Output', value: (r: WorkflowRow) => r.output },
             { label: 'Legal Basis', value: (r: WorkflowRow) => r.legalBasis },
-            { label: 'Legal Fees', value: (r: WorkflowRow) => r.legalFees },
             { label: 'Percentage', value: (r: WorkflowRow) => (r.percentage != null ? `${r.percentage}%` : '—') },
             { label: 'Timeline', value: (r: WorkflowRow) => r.timeline },
           ]}
@@ -147,7 +140,6 @@ function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
             <th className="p-3 text-left">OUTPUT</th>
             <th className="p-3 text-left">KEY ACTIONS</th>
             <th className="p-3 text-left">PERCENTAGE</th>
-            <th className="p-3 text-left">FEES</th>
             <th className="p-3 text-left">TIMELINES</th>
           </tr>
         </thead>
@@ -155,11 +147,11 @@ function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
           {sections.map((section) => {
             const rows = section.rows.length
               ? section.rows
-              : [{ stage: '', keyActions: '', output: '', legalBasis: '', legalFees: '', timeline: '', percentage: undefined }];
+              : [{ stage: '', keyActions: '', output: '', legalBasis: '', timeline: '', percentage: undefined }];
             return (
               <Fragment key={section.id}>
                 <tr className="bg-gray-100">
-                  <td colSpan={7} className="px-4 py-2 text-center font-semibold text-gray-900">
+                  <td colSpan={6} className="px-4 py-2 text-center font-semibold text-gray-900">
                     {section.title}{section.percentage != null ? ` ${section.percentage}%` : ''}
                   </td>
                 </tr>
@@ -172,10 +164,7 @@ function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
                     </>}
                     <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{row.keyActions || '—'}</td>
                     <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{row.percentage != null ? `${row.percentage}%` : '—'}</td>
-                    {index === 0 && <>
-                      <td rowSpan={rows.length} className="p-3 border-b text-gray-700"><CellList text={section.legalFees} /></td>
-                      <td rowSpan={rows.length} className="p-3 border-b text-gray-700"><CellList text={section.timeline} /></td>
-                    </>}
+                    {index === 0 && <td rowSpan={rows.length} className="p-3 border-b text-gray-700"><CellList text={section.timeline} /></td>}
                   </tr>
                 ))}
               </Fragment>
@@ -191,7 +180,6 @@ function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
             <th className="p-3 text-left">OUTPUT</th>
             <th className="p-3 text-left">KEY ACTIONS</th>
             <th className="p-3 text-left">PERCENTAGE</th>
-            <th className="p-3 text-left">FEES</th>
             <th className="p-3 text-left">TIMELINES</th>
           </tr>
         </thead>
@@ -204,7 +192,6 @@ function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
               </td>
               <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{r.output}</td>
               <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{r.legalBasis}</td>
-              <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">{r.legalFees}</td>
               <td className="p-3 border-b text-gray-700 whitespace-pre-wrap">
                 {r.percentage != null ? `${r.percentage}%` : '—'}
               </td>
@@ -300,18 +287,6 @@ export default function Settings() {
         .join('\n');
     };
 
-    const normalizeFee = (fee: TemplateFee | undefined) => {
-      if (!fee) return '';
-      if (typeof fee === 'string') return fee;
-      if (fee.text) return fee.text;
-      if (fee.type === 'range' && typeof fee.min === 'number' && typeof fee.max === 'number') {
-        return `${fee.currency || 'RWF'} ${fee.min.toLocaleString()} - ${fee.max.toLocaleString()}`;
-      }
-      if (fee.type === 'fixed' && typeof fee.min === 'number') return `${fee.currency || 'RWF'} ${fee.min.toLocaleString()}`;
-      if (fee.type === 'percentage' && typeof fee.percentage === 'number') return `${fee.percentage}%`;
-      return '';
-    };
-
     const normalizeSla = (sla: TemplateSla | undefined) => {
       if (!sla) return '';
       if (typeof sla === 'string') return sla;
@@ -347,7 +322,6 @@ export default function Settings() {
               keyActions: `${actionIndex + 1}. ${action}`.trim(),
               output: '',
               legalBasis: '',
-              legalFees: '',
               timeline: '',
               percentage: typeof step.percentage === 'number' ? step.percentage : undefined,
             }));
@@ -358,7 +332,6 @@ export default function Settings() {
             percentage: typeof stage.percentage === 'number' ? stage.percentage : undefined,
             output: normalizeOutputs(stage.outputs) || normalizeOutputs(firstStep?.outputs),
             legalBasis: normalizeLegalBasis(stage.legalBasis) || normalizeLegalBasis(firstStep?.legalBasis),
-            legalFees: normalizeFee(stage.fee) || normalizeFee(firstStep?.fee),
             timeline: normalizeSla(stage.sla) || normalizeSla(firstStep?.sla),
             rows,
           };

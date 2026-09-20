@@ -35,7 +35,9 @@ import { getDocumentsForCase, CaseDocument } from '../../services/documentServic
 import { getAuditForCase, AuditLogItem } from '../../services/auditService';
 import {
   getWorkflowForCase,
+  getCaseEarnedFees,
   toggleWorkflowStepAction,
+  CaseEarnedFees,
   WorkflowInstance,
 } from '../../services/workflowInstanceService';
 
@@ -129,6 +131,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const [task, setTask] = useState<TaskData | null>(null);
   const [caseData, setCaseData] = useState<CaseData | null>(null);
   const [workflowInstance, setWorkflowInstance] = useState<WorkflowInstance | null>(null);
+  const [keyActionEarnings, setKeyActionEarnings] = useState<CaseEarnedFees | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [documents, setDocuments] = useState<CaseDocument[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
@@ -215,11 +218,8 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const canToggleChecklist = useMemo(() => {
     if (!task) return false;
     if (isApprovedLocked) return false;
-    const meName = normalizeIdentity(currentUser?.name);
-    const meEmail = normalizeIdentity(currentUser?.email);
-    // Every signed-in user may tick key actions / checklist items so work is never blocked.
-    return Boolean(meName || meEmail);
-  }, [task, isApprovedLocked, currentUser?.email, currentUser?.name]);
+    return canWorkOnTask;
+  }, [task, isApprovedLocked, canWorkOnTask]);
 
   const canSetQualityScore = useMemo(() => {
     if (!task) return false;
@@ -261,7 +261,10 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const workflowChecklistItems = useMemo<DerivedChecklistItem[]>(() => {
     if (!workflowInstance?.steps?.length) return [];
 
-    return workflowInstance.steps.flatMap((step) =>
+    const linkedSteps = task?.workflowStepKey
+      ? workflowInstance.steps.filter((step) => step.stepKey === task.workflowStepKey)
+      : workflowInstance.steps;
+    return linkedSteps.flatMap((step) =>
       (step.actions || []).map((action, actionIndex) => ({
         id: `${step.stepKey}-${actionIndex}`,
         item: action.text,
@@ -271,7 +274,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
         actionIndex,
       }))
     );
-  }, [workflowInstance]);
+  }, [workflowInstance, task?.workflowStepKey]);
 
   const manualChecklistItems = task?.checklist || [];
 
@@ -301,22 +304,12 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     return paidInvoices.reduce((sum, invoice) => sum + (Number(invoice.amount) || 0), 0);
   }, [invoices]);
 
-  const taskIsLetter = useMemo(
-    () => /letter/i.test(`${task?.title || ''} ${task?.description || ''}`),
-    [task?.title, task?.description]
+  const linkedKeyAction = useMemo(
+    () => keyActionEarnings?.keyActions?.find((action) => action.key === task?.workflowStepKey),
+    [keyActionEarnings?.keyActions, task?.workflowStepKey]
   );
-
-  const matterContractValue = useMemo(() => {
-    const planned = Number(caseData?.workflowProgress?.plannedValue?.amount || 0);
-    const budget = Number(caseData?.budget || 0);
-    return planned > 0 ? planned : budget;
-  }, [caseData?.budget, caseData?.workflowProgress?.plannedValue?.amount]);
-
-  const taskFeeCollected = useMemo(() => {
-    // A letter task is worth 10% of the matter contract value; other tasks keep the progress-based formula.
-    if (taskIsLetter) return Math.round(matterContractValue * 0.1);
-    return Math.round((matterCollectedFee * workflowProgressPercentage) / 100);
-  }, [matterCollectedFee, workflowProgressPercentage, matterContractValue, taskIsLetter]);
+  const taskProgressValue = linkedKeyAction?.progressValue || 0;
+  const taskCoveredValue = linkedKeyAction?.coveredValue || 0;
 
   const formatMoney = (amount: number) =>
     `${billingCurrency} ${Math.round((Number(amount) || 0) * 100) / 100}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -391,13 +384,15 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
       // ✅ Only show latest 6 activity logs
       setAuditLogs(auditResult.status === 'fulfilled' ? (auditResult.value || []).slice(0, 6) : []);
 
-      const [workflowResult, invoicesResult] = await Promise.allSettled([
+      const [workflowResult, invoicesResult, earningsResult] = await Promise.allSettled([
         getWorkflowForCase(t.caseId),
         getInvoicesForCase(t.caseId),
+        getCaseEarnedFees(t.caseId),
       ]);
 
       setWorkflowInstance(workflowResult.status === 'fulfilled' ? workflowResult.value : null);
       setInvoices(invoicesResult.status === 'fulfilled' ? invoicesResult.value : []);
+      setKeyActionEarnings(earningsResult.status === 'fulfilled' ? earningsResult.value : null);
 
       await loadAttachments(id);
     } catch (err: any) {
@@ -497,10 +492,11 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
   const refreshWorkflowContext = async (caseId: string) => {
     // Also refresh the case: the toggle/complete endpoints persist workflowProgress and
     // billingSettings server-side, so pulling the case keeps the progress bar / fees in sync.
-    const [caseResult, workflowResult, invoicesResult] = await Promise.allSettled([
+    const [caseResult, workflowResult, invoicesResult, earningsResult] = await Promise.allSettled([
       getCaseById(caseId),
       getWorkflowForCase(caseId),
       getInvoicesForCase(caseId),
+      getCaseEarnedFees(caseId),
     ]);
 
     if (caseResult.status === 'fulfilled') {
@@ -513,6 +509,10 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
     if (invoicesResult.status === 'fulfilled') {
       setInvoices(invoicesResult.value);
+    }
+
+    if (earningsResult.status === 'fulfilled') {
+      setKeyActionEarnings(earningsResult.value);
     }
   };
 
@@ -1082,7 +1082,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
               <span className="text-sm text-gray-600">{workflowProgressPercentage}% Complete</span>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 mb-4">
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                 <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Workflow Progress</div>
                 <div className="mt-2 text-lg font-semibold text-gray-900">{workflowProgressPercentage}%</div>
@@ -1094,11 +1094,24 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                 <div className="text-xs text-gray-500">Total paid on this matter</div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Task Fee Collected</div>
-                <div className="mt-2 text-lg font-semibold text-green-700">{formatMoney(taskFeeCollected)}</div>
-                <div className="text-xs text-gray-500">{taskIsLetter ? 'Letter task · 10% of contract value' : 'Collected x workflow progress'}</div>
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Key Action Percentage</div>
+                <div className={`mt-2 text-lg font-semibold ${linkedKeyAction?.percentage == null && task?.workflowStepKey ? 'text-amber-700' : 'text-gray-900'}`}>
+                  {linkedKeyAction ? linkedKeyAction.percentage == null ? 'Missing' : `${linkedKeyAction.percentage}%` : '—'}
+                </div>
+                <div className="text-xs text-gray-500">{task?.workflowStepKey ? 'Set in the workflow template' : 'Not linked to one Key Action'}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">Progress Value Covered</div>
+                <div className="mt-2 text-lg font-semibold text-green-700">{formatMoney(taskCoveredValue)}</div>
+                <div className="text-xs text-gray-500">Key Action value: {formatMoney(taskProgressValue)}</div>
               </div>
             </div>
+
+            {task?.workflowStepKey && linkedKeyAction?.percentage == null && (
+              <div className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                This Key Action has no percentage. Its progress value and staff-earned-fee allocation remain 0 until the workflow is updated.
+              </div>
+            )}
 
             <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-4">
               <div className="h-full bg-gray-800 transition-all" style={{ width: `${workflowProgressPercentage}%` }} />

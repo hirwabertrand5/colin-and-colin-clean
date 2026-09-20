@@ -3,6 +3,7 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import Task from '../models/taskModel';
 import Case from '../models/caseModel';
+import WorkflowInstance from '../models/workflowInstanceModel';
 import User from '../models/userModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { writeAudit } from '../services/auditService';
@@ -31,7 +32,10 @@ const withActor = (req: AuthRequest) => {
 };
 
 const isAdminCaseRole = (role?: string) =>
-  role === 'managing_director' || role === 'executive_assistant';
+  role === 'managing_director' ||
+  role === 'managing_partner' ||
+  role === 'executive_managing_partner' ||
+  role === 'executive_assistant';
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
 const formatDeadline = (value?: string | Date) => resolveDeadlineDateTime(value)?.toLocaleString() || String(value || '-');
@@ -102,7 +106,7 @@ const normalizeTaskStagesPayload = (value: unknown, fallback: any[] = []) => {
     .filter(Boolean);
 };
 
-const buildDefaultTaskStagesFromCase = (caseRecord: any, dueDate: string, assignedAt = new Date()) => {
+const buildDefaultTaskStagesFromCase = (caseRecord: any, dueDate: string, assignedAt = new Date()): any[] => {
   const caseAssignments = caseRecord?.caseAssignments || {};
   const initiator = String(caseAssignments?.initiator || caseRecord?.assignedTo || '').trim();
   const reviewer = String(caseAssignments?.reviewer || '').trim();
@@ -176,6 +180,48 @@ const ensureMatterAssignmentTask = async (caseId: string) => {
   const caseAssignments = caseRecord.caseAssignments || {};
   const hasMatterAssignments = Boolean(caseAssignments?.initiator && caseAssignments?.reviewer && caseAssignments?.signerApprover);
   if (!hasMatterAssignments) return;
+
+  // Bring older matters forward to the same workflow-linked task model used
+  // for newly created matters. This runs idempotently when their task list is opened.
+  const workflow: any = await WorkflowInstance.findOne({ caseId: new mongoose.Types.ObjectId(caseId) }).lean();
+  const workflowSteps = Array.isArray(workflow?.steps) ? workflow.steps : [];
+  if (workflowSteps.length) {
+    const linkedTasks = await Task.find({
+      caseId: new mongoose.Types.ObjectId(caseId),
+      workflowStepKey: { $exists: true, $ne: '' },
+    }).select('workflowStepKey').lean();
+    const existingStepKeys = new Set(linkedTasks.map((task: any) => String(task.workflowStepKey || '')));
+    for (const step of workflowSteps) {
+      const stepKey = String(step?.stepKey || '').trim();
+      if (!stepKey || existingStepKeys.has(stepKey)) continue;
+      const dueAt = resolveDeadlineDateTime(step?.dueAt) || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const startAt = resolveDeadlineDateTime(step?.startAt) || resolveDeadlineDateTime(caseRecord.workflowStartDate) || new Date();
+      const dueDate = dueAt.toISOString().slice(0, 10);
+      const taskNo = await buildYearlySequence('task', 'TASK');
+      await Task.create({
+        caseId: new mongoose.Types.ObjectId(caseId),
+        taskNo,
+        title: String(step?.title || 'Workflow Key Action'),
+        workflowMode: 'STAGED',
+        workflowStage: 'Assigned',
+        workflowStageKey: String(step?.stageKey || ''),
+        workflowStepKey: stepKey,
+        priority: 'Medium',
+        status: 'Not Started',
+        assignee: String(caseAssignments.initiator || caseRecord.assignedTo || '').trim(),
+        supervisor: String(caseAssignments.reviewer || caseAssignments.signerApprover || '').trim(),
+        relatedClient: String(caseRecord.parties || '').trim(),
+        startDate: startAt.toISOString().slice(0, 10),
+        dueDate,
+        description: 'Auto-created from this workflow Key Action. Complete the staged activity, attach supporting documents, then submit the task.',
+        taskStages: buildDefaultTaskStagesFromCase(caseRecord, dueDate),
+        requiresApproval: false,
+        approvalStatus: 'Not Required',
+        assignedBy: 'System',
+      });
+    }
+    return;
+  }
 
   const existingTask = await Task.findOne({
     caseId: new mongoose.Types.ObjectId(caseId),

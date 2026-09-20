@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarPlus, Plus, Pencil, Trash2, X } from 'lucide-react';
-import { TaskData } from '../../services/taskService';
+import { TaskData, getTasksForCase } from '../../services/taskService';
 import {
   getWorkflowForCase,
   completeWorkflowStep,
@@ -128,35 +128,55 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     if (step.stageTitle) return step.stageTitle;
     return stageMetaByKey.get(String(step.stageKey || ''))?.title || step.stageKey || 'Stage';
   };
+  const keyActionValueOf = (stepKey: string) =>
+    earned?.keyActions?.find((action) => String(action.key) === String(stepKey));
 
   useEffect(() => {
     load();
     // eslint-disable-next-line
   }, [caseId]);
 
-  const goToTaskDetail = (actionText: string) => {
+  const goToTaskDetail = async (stepKey: string, actionText: string) => {
     try {
       const meName = String(currentUserName || '').trim().toLowerCase();
       const meEmail = String(currentUserEmail || '').trim().toLowerCase();
       if (!meName && !meEmail) return;
-      const mine = (tasks || []).filter((t) => {
-        if (String(t.caseId || '') !== String(caseId)) return false;
+      let candidates: TaskData[] = Array.isArray(tasks) ? tasks : [];
+      try {
+        candidates = await getTasksForCase(caseId);
+      } catch {
+        // Keep the workspace snapshot if the refresh fails.
+      }
+      const onThisCase = candidates.filter((t) => String(t.caseId || '') === String(caseId));
+      const mine = onThisCase.filter((t) => {
         const assignee = String(t.assignee || '').trim().toLowerCase();
         const supervisor = String(t.supervisor || '').trim().toLowerCase();
         const identityMatch =
           (meName && (assignee === meName || supervisor === meName)) ||
           (meEmail && (assignee === meEmail || supervisor === meEmail));
-        return identityMatch && String(t.status || '').toLowerCase() !== 'completed';
+        const stagedMatch = (t.taskStages || []).some((stage) => {
+          const staff = String(stage.staffMember || '').trim().toLowerCase();
+          return (meName && staff === meName) || (meEmail && staff === meEmail);
+        });
+        return (identityMatch || stagedMatch) && String(t.status || '').toLowerCase() !== 'completed';
       });
-      if (!mine.length) return;
+      const mineLinked = mine.find((task) => String(task.workflowStepKey || '') === String(stepKey || ''));
       const wanted = String(actionText || '').trim().toLowerCase();
+      // Prefer the exact workflow-linked task for this Key Action. When the current user
+      // is not assigned to it (e.g. an administrator toggles an action), still open that
+      // task so they can submit or review — access is enforced on the task detail page.
+      const linkedTask = onThisCase.find(
+        (t) =>
+          String(t.workflowStepKey || '') === String(stepKey || '') &&
+          String(t.status || '').toLowerCase() !== 'completed'
+      );
       const byTitle = wanted
         ? mine.find((t) => {
             const title = String(t.title || '').trim().toLowerCase();
             return title && (title.includes(wanted) || wanted.includes(title));
           })
         : undefined;
-      const target = byTitle || mine[0];
+      const target = mineLinked || linkedTask || byTitle || mine[0];
       if (target?._id) navigate(`/tasks/${target._id}`);
     } catch {
       // Navigation is a best-effort convenience; never break the toggle flow.
@@ -190,7 +210,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       notifyWorkflowChanged();
       // When the user ticks a key action on the case workspace, take them to the related task
       // detail (their own assigned task on this matter) so they can complete and submit it.
-      if (nextDone) goToTaskDetail(snapshotAction?.text || '');
+      if (nextDone) void goToTaskDetail(stepKey, snapshotAction?.text || snapshotStep?.title || '');
     } catch (e: any) {
       setWf(snapshot); // revert the optimistic flip
       setErr(e.message || 'Failed to update key action');
@@ -372,6 +392,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           </div>
         </div>
 
+        {(earned?.missingKeyActionPercentages?.length || 0) > 0 && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            {earned?.missingKeyActionPercentages?.length} Key Action percentage{earned?.missingKeyActionPercentages?.length === 1 ? '' : 's'} missing. Those actions remain worth 0 until a percentage is set in the workflow.
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
             <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Contract Value</div>
@@ -394,7 +420,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               {formatMoney(earned?.completedValue, earned?.currency)}
             </div>
             <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              Before collection cap
+              Progress value covered so far
             </div>
           </div>
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
@@ -403,7 +429,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               {formatMoney(earned?.earnedValue, earned?.currency)}
             </div>
             <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              Paid: {formatMoney(earned?.collectedAmount, earned?.currency)}
+              Paid: {formatMoney(earned?.collectedAmount, earned?.currency)}{Number(earned?.collectedAmount || 0) <= 0 ? ' — staff earnings remain 0' : ''}
             </div>
           </div>
         </div>
@@ -510,6 +536,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         }
 
         const keyActions = derivedActions || [];
+        const keyActionValue = keyActionValueOf(s.stepKey);
         const canManageActions = canCompleteSteps && s.status !== 'Completed';
         const canToggleStepActions = canToggleActions || canCompleteSteps;
 
@@ -574,7 +601,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               {/* Grey vertical line separator */}
               <div className="h-16 w-px bg-gray-300 dark:bg-gray-600" />
 
-              {/* Fee section on the right side */}
+              {/* Deadline and Key Action progress value */}
               <div className="flex flex-col items-end gap-1 pl-4">
                 {s.dueAt ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Due {formatDeadlineDateTime(s.dueAt)}</span>
@@ -584,14 +611,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 ) : s.slaText ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Duration: {s.slaText}</span>
                 ) : null}
-                {(() => {
-                  const pct = stagePercentOf(s);
-                  return pct != null ? (
+                {keyActionValue ? (
+                  keyActionValue.percentage != null ? (
                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                      Percentage: {pct}%
+                      Key Action: {keyActionValue.percentage}% · {formatMoney(keyActionValue.progressValue, earned?.currency)}
                     </span>
-                  ) : null;
-                })()}
+                  ) : (
+                    <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Key Action percentage missing</span>
+                  )
+                ) : null}
               </div>
 
               {canAmendDeadlines && s.status !== 'Completed' && (

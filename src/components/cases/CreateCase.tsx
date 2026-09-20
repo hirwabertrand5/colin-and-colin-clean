@@ -24,12 +24,8 @@ type PreviewWorkflowStep = {
   title: string;
   stageLabel: string;
   responsibleRole?: string;
-  feeAmount?: number;
-  feeCurrency: string;
-  feeText?: string;
-  feeRangeMin?: number;
-  feeRangeMax?: number;
-  feeLabel: string;
+  percentage?: number;
+  progressValue: number;
   slaLabel: string;
   dueAt: Date;
   stepIndex: number;
@@ -509,19 +505,6 @@ export default function CreateCase({
     return `${currency || 'RWF'} ${amount.toLocaleString()}`;
   };
 
-  const formatFeeSpec = (fee: any) => {
-    const currency = String(fee?.currency || 'RWF').toUpperCase();
-    const min = typeof fee?.min === 'number' ? fee.min : typeof fee?.amount === 'number' ? fee.amount : undefined;
-    const max = typeof fee?.max === 'number' ? fee.max : undefined;
-    if (fee?.type === 'range' && typeof min === 'number' && typeof max === 'number') {
-      return `${currency} ${min.toLocaleString()} - ${max.toLocaleString()}`;
-    }
-    if (typeof min === 'number') return formatCurrency(min, currency);
-    if (fee?.type === 'percentage' && typeof fee?.percentage === 'number') return `${fee.percentage}%`;
-    if (fee?.type === 'included') return fee?.text || 'Included';
-    return fee?.text || 'No fee set';
-  };
-
   const formatRelativeDue = (date?: Date) => {
     if (!date) return 'TBD';
     const now = new Date();
@@ -564,13 +547,7 @@ export default function CreateCase({
       const dueAt = new Date(stepStart.getTime() + minutes * 60_000);
       cursor = new Date(dueAt);
 
-      const feeAmount =
-        typeof s?.fee?.amount === 'number'
-          ? s.fee.amount
-          : typeof s?.fee?.min === 'number'
-            ? s.fee.min
-            : undefined;
-      const feeCurrency = s?.fee?.currency || 'RWF';
+      const percentage = typeof s?.percentage === 'number' && s.percentage >= 0 ? s.percentage : undefined;
       const slaLabel = typeof s?.sla?.max === 'number' && s?.sla?.unit ? `${s.sla.max} ${s.sla.unit}` : s?.sla?.text || '—';
       const actions = Array.isArray(s?.actions) ? s.actions.map((a: any) => String(a || '').trim()).filter(Boolean) : [];
 
@@ -579,12 +556,8 @@ export default function CreateCase({
         title: s.title,
         stageLabel: stageTitleByKey.get(s.stageKey) || s.stageKey || 'Stage',
         responsibleRole: s.responsibleRole,
-        feeAmount,
-        feeCurrency,
-        feeText: typeof s?.fee?.text === 'string' ? s.fee.text : undefined,
-        feeRangeMin: typeof s?.fee?.min === 'number' ? s.fee.min : undefined,
-        feeRangeMax: typeof s?.fee?.max === 'number' ? s.fee.max : undefined,
-        feeLabel: formatFeeSpec(s?.fee),
+        percentage,
+        progressValue: Math.round(plannedValueAmount * ((percentage || 0) / 100)),
         slaLabel,
         dueAt,
         stepIndex: index + 1,
@@ -592,19 +565,15 @@ export default function CreateCase({
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedWorkflowTemplate, formData.workflowStartDate]);
+  }, [selectedWorkflowTemplate, formData.workflowStartDate, plannedValueAmount]);
 
   const workflowSummary = useMemo(() => {
     if (selectedWorkflowSteps.length === 0) return null;
 
-    const totalFee = selectedWorkflowSteps.reduce((sum, step) => sum + (step.feeAmount || 0), 0);
-    const currency = selectedWorkflowSteps.find((step) => step.feeCurrency)?.feeCurrency || 'RWF';
     const nextStep = selectedWorkflowSteps.find((step) => step.dueAt >= new Date());
     const finalStep = selectedWorkflowSteps[selectedWorkflowSteps.length - 1];
 
     return {
-      totalFee,
-      currency,
       nextDueAt: nextStep?.dueAt,
       completionDate: finalStep?.dueAt,
       stepCount: selectedWorkflowSteps.length,
@@ -1220,7 +1189,7 @@ export default function CreateCase({
                                 </div>
 
                                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Fees & deadlines</div>
+                                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Progress value & deadlines</div>
                                   <div className="mt-3 space-y-3">
                                     <div>
                                       <div className="text-xs text-gray-500">Deadline</div>
@@ -1230,11 +1199,10 @@ export default function CreateCase({
                                       <div className="mt-1 text-xs text-gray-500">Due {formatDeadlineDateTime(step.dueAt)}</div>
                                     </div>
                                     <div>
-                                      <div className="text-xs text-gray-500">Fee</div>
-                                      <div className="mt-1 text-sm font-semibold text-gray-900">{step.feeLabel}</div>
-                                      {typeof step.feeRangeMin === 'number' && typeof step.feeRangeMax === 'number' ? (
-                                        <div className="mt-1 text-xs text-gray-500">Template range</div>
-                                      ) : null}
+                                      <div className="text-xs text-gray-500">Key Action percentage</div>
+                                      {step.percentage != null ? (
+                                        <><div className="mt-1 text-sm font-semibold text-gray-900">{step.percentage}%</div><div className="mt-1 text-xs text-gray-500">Progress value: {formatCurrency(step.progressValue, plannedValueCurrency)}</div></>
+                                      ) : <div className="mt-1 text-sm font-semibold text-amber-700">Percentage missing</div>}
                                     </div>
                                   </div>
                                 </div>
@@ -1252,7 +1220,7 @@ export default function CreateCase({
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="text-sm font-semibold text-gray-900 mb-3">Workflow settings</div>
               <div className="text-sm text-gray-600">
-                A workflow template automatically generates deadlines, step fees or ranges, and key actions. Billing uses only the contract value and the percentage of checked key actions.
+                A workflow template automatically generates deadlines and Key Actions. Progress value is calculated from the contract value and the percentage of checked Key Actions; no manual workflow fees are used.
               </div>
             </div>
           </div>

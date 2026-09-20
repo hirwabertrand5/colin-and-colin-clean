@@ -1,57 +1,10 @@
-import { IFeeSpec, ISlaSpec, IWorkflowTemplate } from '../models/workflowTemplateModel';
-import { resolveStagePercentages, resolveStepPercentages } from './workflowPercentages';
-
-export type WorkflowMoney = {
-  amount?: number;
-  currency?: string;
-  text?: string;
-};
+import { ISlaSpec, IWorkflowTemplate } from '../models/workflowTemplateModel';
+import { parsePercentage, resolveStagePercentages } from './workflowPercentages';
 
 export const normalizeCurrency = (raw: string | undefined) => {
-  const v = (raw || '').trim().toUpperCase();
-  if (!v) return undefined;
-  if (v === 'FRW') return 'RWF';
-  return v;
-};
-
-export const parseFirstNumber = (text: string): number | undefined => {
-  const cleaned = String(text || '')
-    .replace(/\u00A0/g, ' ')
-    .replace(/[, ]+/g, '')
-    .trim();
-  const m = cleaned.match(/(\d+(\.\d+)?)/);
-  if (!m) return undefined;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : undefined;
-};
-
-export const feeToMoney = (fee: IFeeSpec | undefined): WorkflowMoney => {
-  if (!fee) return {};
-
-  if (fee.type === 'fixed' && typeof fee.min === 'number') {
-    const currency = normalizeCurrency(fee.currency);
-    return { amount: fee.min, ...(currency ? { currency } : {}), ...(fee.text ? { text: fee.text } : {}) };
-  }
-  if (fee.type === 'range' && typeof fee.min === 'number') {
-    const currency = normalizeCurrency(fee.currency);
-    return { amount: fee.min, ...(currency ? { currency } : {}), ...(fee.text ? { text: fee.text } : {}) };
-  }
-  if (fee.type === 'percentage') return { text: fee.text || `${fee.percentage ?? ''}%` };
-  if (fee.type === 'included') return { text: fee.text || 'Included' };
-
-  if (fee.text) {
-    const amount = parseFirstNumber(fee.text);
-    const currency =
-      normalizeCurrency(fee.currency) ||
-      (fee.text.toLowerCase().includes('rwf') || fee.text.toLowerCase().includes('frw') ? 'RWF' : undefined);
-    return {
-      ...(typeof amount === 'number' ? { amount } : {}),
-      ...(currency ? { currency } : {}),
-      text: fee.text,
-    };
-  }
-
-  return {};
+  const value = (raw || '').trim().toUpperCase();
+  if (!value) return undefined;
+  return value === 'FRW' ? 'RWF' : value;
 };
 
 const UNIT_TO_MINUTES: Record<string, number> = {
@@ -70,56 +23,30 @@ const UNIT_TO_MINUTES: Record<string, number> = {
 
 export const slaToMinutes = (sla: ISlaSpec | undefined): { minutes?: number; text?: string } => {
   if (!sla) return {};
-
-  // Prefer numeric config
-  if (typeof sla.max === 'number' && sla.unit) {
-    const unit = String(sla.unit);
-    const mult = UNIT_TO_MINUTES[unit] || (unit === 'hours' ? 60 : unit === 'days' ? 60 * 24 : unit === 'weeks' ? 60 * 24 * 7 : undefined);
-    if (mult) {
-      const minutes = Math.max(0, Math.round(sla.max * mult));
-      return { minutes, ...(sla.text ? { text: sla.text } : {}) };
-    }
-  }
-  if (typeof sla.min === 'number' && sla.unit) {
-    const unit = String(sla.unit);
-    const mult = UNIT_TO_MINUTES[unit] || (unit === 'hours' ? 60 : unit === 'days' ? 60 * 24 : unit === 'weeks' ? 60 * 24 * 7 : undefined);
-    if (mult) {
-      const minutes = Math.max(0, Math.round(sla.min * mult));
-      return { minutes, ...(sla.text ? { text: sla.text } : {}) };
-    }
+  const numericValue = typeof sla.max === 'number' ? sla.max : typeof sla.min === 'number' ? sla.min : undefined;
+  if (typeof numericValue === 'number' && sla.unit) {
+    const multiplier = UNIT_TO_MINUTES[String(sla.unit)];
+    if (multiplier) return { minutes: Math.max(0, Math.round(numericValue * multiplier)), ...(sla.text ? { text: sla.text } : {}) };
   }
 
   const text = (sla.text || '').trim();
   if (!text) return {};
+  if (/^\d+(\.\d+)?$/.test(text)) return { minutes: Math.round(Number(text) * 60), text };
 
-  // Minimal parser for: "48", "48 hours", "1 day 12 hours", "1d 12h"
-  const tokens = text
-    .toLowerCase()
-    .replace(/,/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // if only a number, assume hours
-  if (/^\d+(\.\d+)?$/.test(tokens)) {
-    const n = Number(tokens);
-    return Number.isFinite(n) ? { minutes: Math.round(n * 60), text } : {};
-  }
-
-  let total = 0;
+  let minutes = 0;
   let matched = false;
-  const re = /(\d+(\.\d+)?)\s*(weeks?|w|days?|d|hours?|hrs?|hr|h)\b/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(tokens))) {
-    const n = Number(m[1]);
-    const unit = String(m[3] || '');
-    const mult = UNIT_TO_MINUTES[unit];
-    if (Number.isFinite(n) && mult) {
-      total += n * mult;
+  const matcher = /(\d+(\.\d+)?)\s*(weeks?|w|days?|d|hours?|hrs?|hr|h)\b/g;
+  let item: RegExpExecArray | null;
+  while ((item = matcher.exec(text.toLowerCase()))) {
+    const amount = Number(item[1]);
+    const unit = item[3];
+    const multiplier = unit ? UNIT_TO_MINUTES[unit] : undefined;
+    if (Number.isFinite(amount) && multiplier) {
+      minutes += amount * multiplier;
       matched = true;
     }
   }
-
-  return matched ? { minutes: Math.max(0, Math.round(total)), text } : { text };
+  return matched ? { minutes: Math.max(0, Math.round(minutes)), text } : { text };
 };
 
 export const addMinutes = (start: Date, minutes: number | undefined) => {
@@ -127,99 +54,47 @@ export const addMinutes = (start: Date, minutes: number | undefined) => {
   return new Date(start.getTime() + minutes * 60_000);
 };
 
+/**
+ * Workflow templates no longer create fee amounts. A step's value is always
+ * derived later from its Key Action percentage and the matter contract value.
+ */
 export const buildInstanceSteps = (template: IWorkflowTemplate | any, startDate: Date) => {
-  const sorted = (template?.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+  const steps = (template?.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   const stagePercentages = resolveStagePercentages(template);
-  const stepPercentages = resolveStepPercentages(template);
-  const stagesByKey: Map<string, any> = new Map(
-    ((Array.isArray(template?.stages) ? template.stages : []) as any[]).map(
-      (stage: any) => [String(stage?.key || ''), stage] as [string, any]
-    )
+  const stagesByKey = new Map<string, any>(
+    (Array.isArray(template?.stages) ? template.stages : []).map((stage: any) => [String(stage?.key || ''), stage])
   );
-
   let cursor = new Date(startDate);
 
-  const built = sorted.map((s: any, idx: number) => {
-    const slaInfo = slaToMinutes(s.sla);
-    const feeInfo = feeToMoney(s.fee);
-
-    const stepStartAt = new Date(cursor);
-    const dueAt = addMinutes(stepStartAt, slaInfo.minutes);
+  return steps.map((step: any, index: number) => {
+    const sla = slaToMinutes(step.sla);
+    const startAt = new Date(cursor);
+    const dueAt = addMinutes(startAt, sla.minutes);
     cursor = new Date(dueAt);
-
-    const feeType = String(s?.fee?.type || '');
-    const feeCurrency = feeInfo.currency;
-    const feeRangeMin = feeType === 'range' && typeof s?.fee?.min === 'number' ? s.fee.min : undefined;
-    const feeRangeMax = feeType === 'range' && typeof s?.fee?.max === 'number' ? s.fee.max : undefined;
-    const feeInputRequired = false;
-
-    const stageKey = String(s?.stageKey || '');
-    const stageTitle = String(stagesByKey.get(stageKey)?.title || stageKey);
-    const stagePercentage = stagePercentages.get(stageKey) ?? 0;
-    const stepPercentage = stepPercentages.get(String(s?.key || '')) ?? 0;
-
+    const stageKey = String(step?.stageKey || '');
     return {
-      stepKey: s.key,
-      title: s.title,
+      stepKey: step.key,
+      title: step.title,
       stageKey,
-      stageTitle,
-      stagePercentage,
-      percentage: stepPercentage,
-      order: s.order,
-      status: idx === 0 ? 'In Progress' : 'Not Started',
-
-      startAt: stepStartAt,
+      stageTitle: String(stagesByKey.get(stageKey)?.title || stageKey),
+      stagePercentage: stagePercentages.get(stageKey) ?? 0,
+      // Do not silently split a stage percentage across actions. A missing
+      // Key Action percentage must remain visible and worth 0.
+      percentage: parsePercentage(step?.percentage) ?? 0,
+      order: step.order,
+      status: index === 0 ? 'In Progress' : 'Not Started',
+      startAt,
       dueAt,
-
-      feeAmount: typeof feeInfo.amount === 'number' ? feeInfo.amount : undefined,
-      feeCurrency,
-      feeText: feeInputRequired
-        ? feeInfo.text || (typeof feeRangeMin === 'number' && typeof feeRangeMax === 'number'
-          ? `Range: ${feeCurrency || ''} ${feeRangeMin} - ${feeRangeMax}`.trim()
-          : 'Range')
-        : feeInfo.text,
-      feeRangeMin,
-      feeRangeMax,
-      feeInputRequired,
-      feeSetByUser: false,
-
-      slaMinutes: typeof slaInfo.minutes === 'number' ? slaInfo.minutes : undefined,
-      slaText: slaInfo.text,
-
-      responsibleRole: typeof s.responsibleRole === 'string' ? s.responsibleRole : undefined,
-
-      actions: (s.actions || []).map((text: any) => ({ text: String(text || '').trim(), done: false })),
-
-      outputs: (s.outputs || []).map((o: any) => ({
-        key: o.key,
-        name: o.name,
-        required: Boolean(o.required),
-        category: o.category,
+      slaMinutes: typeof sla.minutes === 'number' ? sla.minutes : undefined,
+      slaText: sla.text,
+      responsibleRole: typeof step.responsibleRole === 'string' ? step.responsibleRole : undefined,
+      actions: (step.actions || []).map((text: any) => ({ text: String(text || '').trim(), done: false })),
+      outputs: (step.outputs || []).map((output: any) => ({
+        key: output.key,
+        name: output.name,
+        required: Boolean(output.required),
+        category: output.category,
       })),
     };
   });
-
-  // Fee smoothing:
-  // If a step has no fee defined, split the previous numeric fee in half and assign to both steps.
-  for (let i = 1; i < built.length; i += 1) {
-    const prev = built[i - 1];
-    const cur = built[i];
-
-    const curHasNoFee =
-      typeof cur.feeAmount !== 'number' &&
-      !cur.feeInputRequired &&
-      !cur.feeText;
-    const prevHasFee = typeof prev.feeAmount === 'number';
-
-    if (curHasNoFee && prevHasFee) {
-      const original = prev.feeAmount as number;
-      const prevHalf = Math.floor(original / 2);
-      const curHalf = original - prevHalf;
-      prev.feeAmount = prevHalf;
-      cur.feeAmount = curHalf;
-      cur.feeCurrency = cur.feeCurrency || prev.feeCurrency;
-    }
-  }
-
-  return built;
 };

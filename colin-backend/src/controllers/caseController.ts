@@ -136,7 +136,9 @@ const calculateActionProgress = (steps: any[], plannedAmount: number) => {
   const actions = (steps || []).flatMap((step: any) => (Array.isArray(step.actions) ? step.actions : []));
   const checked = actions.filter((action: any) => Boolean(action?.done)).length;
   const total = actions.length;
-  const percent = total > 0 ? Math.round((checked / total) * 100) : 0;
+  const checklistPercent = total > 0 ? Math.round((checked / total) * 100) : 0;
+  const weightedPercent = computeCompletedPercentFromInstance(steps || []);
+  const percent = weightedPercent > 0 ? weightedPercent : checklistPercent;
   return { percent, completedAmount: Math.round((plannedAmount * percent) / 100) };
 };
 
@@ -225,7 +227,7 @@ const gatherTakeRequestRecipients = async (opts: {
   };
 };
 
-const buildMatterTaskStages = (caseRecord: any, dueDate: string, assignedAt = new Date()) => {
+const buildMatterTaskStages = (caseRecord: any, dueDate: string, assignedAt = new Date()): any[] => {
   const caseAssignments = caseRecord?.caseAssignments || {};
   const initiator = String(caseAssignments?.initiator || caseRecord?.assignedTo || '').trim();
   const reviewer = String(caseAssignments?.reviewer || '').trim();
@@ -404,11 +406,14 @@ export const createCase = async (req: AuthRequest, res: Response) => {
 
     // ✅ Initialize workflow instance if workflowTemplateId provided
     const workflowTemplateId = (req.body as any)?.workflowTemplateId;
+    // Retained so each workflow Key Action can receive its own staged task.
+    let createdWorkflowSteps: any[] = [];
     if (workflowAutomation && workflowTemplateId) {
       const template: any = await WorkflowTemplate.findById(workflowTemplateId).lean();
       if (template) {
         const steps = buildInstanceSteps(template, normalizedWorkflowStartDate);
         applySequentialInitialActions(steps as any[], (req.body as any)?.initialWorkflowActions);
+        createdWorkflowSteps = steps as any[];
 
         const inst = await WorkflowInstance.create({
           caseId: newCase._id,
@@ -422,15 +427,10 @@ export const createCase = async (req: AuthRequest, res: Response) => {
         newCase.workflowInstanceId = inst._id as any;
         newCase.matterType = template.matterType;
 
-        const templatePlannedAmount = steps.reduce(
-          (sum: number, s: any) => sum + (typeof s.feeAmount === 'number' ? s.feeAmount : 0),
-          0
-        );
         const requestedPlannedAmount = parseMoney((req.body as any)?.workflowProgress?.plannedValue?.amount) || parseMoney((req.body as any)?.budget);
-        const plannedAmount = requestedPlannedAmount || templatePlannedAmount;
+        const plannedAmount = requestedPlannedAmount;
         const plannedCurrency =
           (req.body as any)?.workflowProgress?.plannedValue?.currency ||
-          steps.map((s: any) => s.feeCurrency).find(Boolean) ||
           (newCase as any).billingSettings?.currency ||
           'RWF';
         const actionProgress = calculateActionProgress(steps as any[], plannedAmount);
@@ -442,7 +442,7 @@ export const createCase = async (req: AuthRequest, res: Response) => {
           ...(steps[0]?.startAt ? { currentStepStartAt: steps[0].startAt } : {}),
           ...(steps[0]?.dueAt ? { currentStepDueAt: steps[0].dueAt } : {}),
           nextDueAt: steps[0]?.dueAt,
-          plannedValue: { amount: plannedAmount || undefined, currency: plannedCurrency },
+          plannedValue: { ...(typeof plannedAmount === 'number' ? { amount: plannedAmount } : {}), currency: plannedCurrency },
           completedValue: { amount: actionProgress.completedAmount, currency: plannedCurrency },
         };
         (newCase as any).billingSettings = {
@@ -472,6 +472,38 @@ export const createCase = async (req: AuthRequest, res: Response) => {
       assignedCaseAssignments?.initiator && assignedCaseAssignments?.reviewer && assignedCaseAssignments?.signerApprover
     );
     if (hasMatterAssignments) {
+      // A linked task makes each workflow Key Action actionable in Task Details
+      // for the initiator, reviewer and signer/approver. The generic task is
+      // kept only for matters without a workflow template.
+      if (createdWorkflowSteps.length) {
+        for (const step of createdWorkflowSteps) {
+          const stepDueAt = resolveDeadlineDateTime(step?.dueAt) || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+          const stepStartAt = resolveDeadlineDateTime(step?.startAt) || normalizedWorkflowStartDate;
+          const dueDate = stepDueAt.toISOString().slice(0, 10);
+          const taskNo = await buildYearlySequence('task', 'TASK');
+          await Task.create({
+            caseId: newCase._id,
+            taskNo,
+            title: String(step?.title || 'Workflow Key Action'),
+            workflowMode: 'STAGED',
+            workflowStage: 'Assigned',
+            workflowStageKey: String(step?.stageKey || ''),
+            workflowStepKey: String(step?.stepKey || ''),
+            priority: 'Medium',
+            status: 'Not Started',
+            assignee: String(assignedCaseAssignments.initiator || newCase.assignedTo || req.user?.name || '').trim(),
+            supervisor: String(assignedCaseAssignments.reviewer || assignedCaseAssignments.signerApprover || req.user?.name || '').trim(),
+            relatedClient: String(newCase.parties || '').trim(),
+            startDate: stepStartAt.toISOString().slice(0, 10),
+            dueDate,
+            description: 'Auto-created from this workflow Key Action. Complete the staged activity, attach supporting documents, then submit the task.',
+            taskStages: buildMatterTaskStages(newCase, dueDate),
+            requiresApproval: false,
+            approvalStatus: 'Not Required',
+            assignedBy: req.user?.name || 'System',
+          });
+        }
+      } else {
       const autoTaskNo = await buildYearlySequence('task', 'TASK');
       const autoDueDate = new Date();
       autoDueDate.setDate(autoDueDate.getDate() + 7);
@@ -497,6 +529,7 @@ export const createCase = async (req: AuthRequest, res: Response) => {
       });
 
       await stagedTask.save();
+      }
     }
 
     const actor = actorFromReq(req);
@@ -991,18 +1024,13 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
           updated.matterType = template.matterType;
           updated.workflowStartDate = wfStart;
 
-          const templatePlannedAmount = steps.reduce(
-            (sum: number, s: any) => sum + (typeof s.feeAmount === 'number' ? s.feeAmount : 0),
-            0
-          );
           const requestedPlannedAmount =
             parseMoney((req.body as any)?.workflowProgress?.plannedValue?.amount) ||
             parseMoney((req.body as any)?.budget) ||
             parseMoney(updated.workflowProgress?.plannedValue?.amount);
-          const plannedAmount = requestedPlannedAmount || templatePlannedAmount;
+          const plannedAmount = requestedPlannedAmount;
           const plannedCurrency =
             (req.body as any)?.workflowProgress?.plannedValue?.currency ||
-            steps.map((s: any) => s.feeCurrency).find(Boolean) ||
             updated.billingSettings?.currency ||
             'RWF';
           const actionProgress = calculateActionProgress(steps as any[], plannedAmount);
@@ -1015,7 +1043,7 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
             ...(steps[0]?.startAt ? { currentStepStartAt: steps[0].startAt } : {}),
             ...(steps[0]?.dueAt ? { currentStepDueAt: steps[0].dueAt } : {}),
             nextDueAt: steps[0]?.dueAt,
-            plannedValue: { amount: plannedAmount || undefined, currency: plannedCurrency },
+            plannedValue: { ...(typeof plannedAmount === 'number' ? { amount: plannedAmount } : {}), currency: plannedCurrency },
             completedValue: { amount: actionProgress.completedAmount, currency: plannedCurrency },
           };
           updated.billingSettings = {
@@ -1054,7 +1082,7 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
           currency: plannedCurrency,
           prepaidTotal: 0,
           prepaidRemaining: 0,
-          accruedUnbilled: actionProgress.completedAmount,
+          accruedUnbilled: completedAmount,
         };
         await updated.save();
       }

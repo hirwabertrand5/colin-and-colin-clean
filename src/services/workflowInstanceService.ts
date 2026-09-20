@@ -31,14 +31,6 @@ export type WorkflowInstance = {
       doneAt?: string;
     }>;
 
-    feeAmount?: number;
-    feeCurrency?: string;
-    feeText?: string;
-    feeRangeMin?: number;
-    feeRangeMax?: number;
-    feeInputRequired?: boolean;
-    feeSetByUser?: boolean;
-
     slaMinutes?: number;
     slaText?: string;
 
@@ -95,6 +87,16 @@ export type CaseEarnedFees = {
   collectedAmount?: number;
   eligibleCollectedValue?: number;
   completedKeyActions?: number;
+  keyActions?: Array<{
+    key: string;
+    title: string;
+    percentage: number | null;
+    resolvedPercentage: number;
+    progressValue: number;
+    coveredValue: number;
+    completed: boolean;
+  }>;
+  missingKeyActionPercentages?: Array<{ key: string; title: string }>;
   earnedValue: number;
   stages: CaseStagePercent[];
   team: CaseTeamEarnedFee[];
@@ -263,21 +265,3 @@ export const deleteWorkflowStepAction = async (caseId: string, stepKey: string, 
   return data;
 };
 
-export const setWorkflowStepFeeAmount = async (
-  caseId: string,
-  stepKey: string,
-  amount: number,
-  currency?: string
-): Promise<WorkflowInstance> => {
-  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/fee`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${getToken()}`,
-    },
-    body: JSON.stringify({ amount, ...(currency ? { currency } : {}) }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || 'Failed to set step fee');
-  return data;
-};

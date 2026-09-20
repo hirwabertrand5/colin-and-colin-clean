@@ -19,7 +19,7 @@ import {
   computeStageBreakdownFromInstance,
   getTpaPercent,
   normalizeTemplatePercentages,
-  resolveStepPercentages,
+  parsePercentage,
 } from '../utils/workflowPercentages';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
@@ -110,7 +110,6 @@ const publicationValidationError = (payload: any) => {
     stageKeys.add(key);
   }
 
-  const explicitActionPercentages = steps.some((step: any) => literalPercentage(step?.percentage) !== undefined);
   const stepKeys = new Set<string>();
   for (const [index, step] of steps.entries()) {
     const key = String(step?.key || '').trim();
@@ -119,8 +118,6 @@ const publicationValidationError = (payload: any) => {
     stepKeys.add(key);
     if (!String(step?.title || '').trim()) return `Key action ${index + 1} needs a description.`;
     if (!stageKeys.has(String(step?.stageKey || '').trim())) return `Key action ${index + 1} must belong to a stage.`;
-    if (explicitActionPercentages && literalPercentage(step?.percentage) === undefined)
-      return `Key action ${index + 1} needs a valid percentage.`;
   }
 
   return allocationValidationError(payload);
@@ -148,16 +145,6 @@ const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: a
       dueAt: previous?.dueAt || nextStep.dueAt,
       completedAt: previous?.completedAt,
       extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
-      feeAmount:
-        typeof previous?.feeSetByUser === 'boolean' && previous.feeSetByUser
-          ? previous.feeAmount
-          : nextStep.feeAmount,
-      feeCurrency: previous?.feeCurrency || nextStep.feeCurrency,
-      feeText: previous?.feeText || nextStep.feeText,
-      feeRangeMin: previous?.feeRangeMin ?? nextStep.feeRangeMin,
-      feeRangeMax: previous?.feeRangeMax ?? nextStep.feeRangeMax,
-      feeInputRequired: previous?.feeInputRequired ?? nextStep.feeInputRequired,
-      feeSetByUser: previous?.feeSetByUser ?? nextStep.feeSetByUser,
       actions: mergedActions,
       outputs: nextStep.outputs,
     };
@@ -187,19 +174,6 @@ const syncCaseWorkflowInstanceFromTemplate = async (caseId: string, template: an
   return inst;
 };
 
-const computeWorkflowMoney = (inst: any) => {
-  const plannedAmount = (inst.steps || []).reduce(
-    (sum: number, s: any) => sum + (typeof s.feeAmount === 'number' ? s.feeAmount : 0),
-    0
-  );
-  const completedAmount = (inst.steps || []).reduce(
-    (sum: number, s: any) => sum + (s.status === 'Completed' && typeof s.feeAmount === 'number' ? s.feeAmount : 0),
-    0
-  );
-  const currency = (inst.steps || []).map((s: any) => s.feeCurrency).find(Boolean);
-  return { plannedAmount, completedAmount, currency };
-};
-
 const computeNextDueAt = (inst: any) => {
   const pending = (inst.steps || [])
     .filter((s: any) => s.status !== 'Completed')
@@ -214,7 +188,6 @@ const previousActiveStatus = (status?: string) => {
 };
 
 export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mongoose.ClientSession) => {
-  const { plannedAmount, completedAmount, currency } = computeWorkflowMoney(inst);
   const nextDueAt = computeNextDueAt(inst);
   const currentStep = inst.currentStepKey
     ? (inst.steps || []).find((s: any) => s.stepKey === inst.currentStepKey)
@@ -225,8 +198,8 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   const existingPlannedAmount =
     typeof c.workflowProgress?.plannedValue?.amount === 'number'
       ? c.workflowProgress.plannedValue.amount
-      : Number(String(c.budget || '').replace(/[^\d.]/g, '')) || plannedAmount;
-  const existingCurrency = c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || currency || 'RWF';
+      : Number(String(c.budget || '').replace(/[^\d.]/g, '')) || 0;
+  const existingCurrency = c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF';
   const actions = (inst.steps || []).flatMap((step: any) => (Array.isArray(step.actions) ? step.actions : []));
   const checkedActions = actions.filter((action: any) => Boolean(action?.done)).length;
   const actionTotal = actions.length;
@@ -238,11 +211,7 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   const stageWeightedPercent = computeCompletedPercentFromInstance(inst?.steps || []);
   // Fall back to the action-based percent for legacy instances without percentages.
   const percent = stageWeightedPercent > 0 ? stageWeightedPercent : actionPercent;
-  const actionCompletedAmount =
-    actionTotal > 0 ? Math.round((existingPlannedAmount * actionPercent) / 100) : completedAmount;
-  const stageCompletedAmount =
-    existingPlannedAmount > 0 ? Math.round((existingPlannedAmount * stageWeightedPercent) / 100) : completedAmount;
-  const completedValueAmount = stageWeightedPercent > 0 ? stageCompletedAmount : actionCompletedAmount;
+  const completedValueAmount = Math.round((existingPlannedAmount * percent) / 100);
 
   c.workflowProgress = {
     status: inst.status === 'Completed' ? 'Completed' : 'In Progress',
@@ -287,7 +256,7 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
     currency: existingCurrency,
     prepaidTotal: 0,
     prepaidRemaining: 0,
-    accruedUnbilled: actionCompletedAmount || 0,
+    accruedUnbilled: completedValueAmount || 0,
   };
 
   const urgencyColor = getCaseUrgencyColor(c);
@@ -522,6 +491,14 @@ export const createTemplate = async (req: AuthRequest, res: Response) => {
     if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
 
     const payload: any = { ...req.body };
+    // Manual workflow fees are retired. Existing templates are safely migrated
+    // when saved by removing legacy fee specifications from every section/action.
+    payload.stages = Array.isArray(payload.stages)
+      ? payload.stages.map(({ fee: _fee, ...stage }: any) => stage)
+      : payload.stages;
+    payload.steps = Array.isArray(payload.steps)
+      ? payload.steps.map(({ fee: _fee, ...step }: any) => step)
+      : payload.steps;
     if (payload.draft) payload.active = false;
     const validationError = payload.draft ? allocationValidationError(payload) : publicationValidationError(payload);
     if (validationError) return res.status(400).json({ message: validationError });
@@ -544,7 +521,13 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     const { templateId } = req.params as any;
     const before = await WorkflowTemplate.findById(templateId).lean();
 
-    const payload = { ...req.body };
+    const payload: any = { ...req.body };
+    payload.stages = Array.isArray(payload.stages)
+      ? payload.stages.map(({ fee: _fee, ...stage }: any) => stage)
+      : payload.stages;
+    payload.steps = Array.isArray(payload.steps)
+      ? payload.steps.map(({ fee: _fee, ...step }: any) => step)
+      : payload.steps;
     if (payload.draft) payload.active = false;
     const validationError = payload.draft ? allocationValidationError(payload) : publicationValidationError(payload);
     if (validationError) return res.status(400).json({ message: validationError });
@@ -669,7 +652,9 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
     // and earned values are still correct everywhere.
     let effectiveSteps: any[] = Array.isArray(inst?.steps) ? inst.steps : [];
     if (template && !effectiveSteps.some((step: any) => Number(step?.percentage) > 0)) {
-      const stepPercentages = resolveStepPercentages(template);
+      const templateStepsByKey = new Map<string, any>(
+        (template.steps || []).map((templateStep: any) => [String(templateStep?.key || ''), templateStep])
+      );
       const stagePercentages: any = (template.stages || []).reduce(
         (map: any, stage: any) => map.set(String(stage?.key || ''), stage),
         new Map<string, any>()
@@ -679,7 +664,7 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
         const stage = stagePercentages.get(stageKey);
         return {
           ...step,
-          percentage: stepPercentages.get(String(step?.stepKey || '')) ?? 0,
+          percentage: parsePercentage(templateStepsByKey.get(String(step?.stepKey || ''))?.percentage) ?? 0,
           stagePercentage: typeof stage?.percentage === 'number' ? stage.percentage : 0,
           stageTitle: String(stage?.title || step?.stageTitle || stageKey || 'Stage'),
         };
@@ -822,6 +807,8 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
       collectedAmount: keyActionEarnings.collectedAmount,
       eligibleCollectedValue: keyActionEarnings.eligibleCollectedValue,
       completedKeyActions: keyActionEarnings.completedActions.length,
+      keyActions: keyActionEarnings.keyActions,
+      missingKeyActionPercentages: keyActionEarnings.missingKeyActionPercentages,
       stages: stages.map((stage) => ({
         ...stage,
         title: stage.title || stage.stageKey || 'Stage',
@@ -1399,51 +1386,5 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
       message: e?.message || 'Failed to update key action.',
       ...(Array.isArray(e?.remainingActions) ? { remainingActions: e.remainingActions } : {}),
     });
-  }
-};
-
-// Set a specific fee for a step (admin only; used for fee ranges)
-export const setStepFeeAmount = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
-    const { caseId, stepKey } = req.params as any;
-    const { amount, currency } = req.body || {};
-
-    const feeAmount = Number(amount);
-    if (!Number.isFinite(feeAmount) || feeAmount < 0) {
-      return res.status(400).json({ message: 'amount must be a non-negative number.' });
-    }
-
-    const c: any = await Case.findById(caseId);
-    if (!c) return res.status(404).json({ message: 'Case not found.' });
-
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
-    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
-
-    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
-    if (!step) return res.status(404).json({ message: 'Step not found.' });
-    if (step.status === 'Completed') return res.status(400).json({ message: 'Cannot change fee for a completed step.' });
-
-    step.feeAmount = feeAmount;
-    step.feeSetByUser = true;
-    if (typeof currency === 'string' && currency.trim()) step.feeCurrency = currency.trim().toUpperCase();
-
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
-
-    const actor = actorFromReq(req);
-    await writeAudit({
-      caseId: String(c._id),
-      actorName: actor.actorName,
-      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
-      action: 'WORKFLOW_STEP_FEE_SET',
-      message: 'Set workflow step fee',
-      detail: `${stepKey} • ${step.feeCurrency || ''} ${feeAmount}`,
-    });
-
-    res.json(inst);
-  } catch (e: any) {
-    res.status(500).json({ message: e?.message || 'Failed to set step fee.' });
   }
 };
