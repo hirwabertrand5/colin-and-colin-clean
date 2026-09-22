@@ -469,7 +469,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     );
     const productivitySummary = data.productivitySummary;
     const productivitySummaryRows = withRowNumbers([
-      ['Completed Key Action Assignments', String(productivitySummary?.completedTasks ?? productivityRows.length)],
+      ['Tasks Completed (Whole Cases)', String(productivitySummary?.completedTasks ?? 0)],
       ['Collected Key Action Base', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? productivitySummary?.totalTaskFee ?? productivityRows.reduce((sum, row) => sum + ((row.taskFeeCollected ?? row.taskFee) || 0), 0))],
       ['Total Fee Earned', fmtMoney(productivitySummary?.totalFeeEarned ?? productivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0))],
       ['Pending Quality Scores', String(productivitySummary?.pendingQualityScores ?? productivityRows.filter((row) => row.qualityScore == null).length)],
@@ -1111,9 +1111,9 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mt-4">
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Completed Key Action Assignments</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Tasks Completed (Whole Cases)</div>
                   <div className="mt-2 text-2xl font-semibold text-gray-900">
-                    {data.productivitySummary?.completedTasks ?? data.productivityRows?.length ?? 0}
+                    {data.productivitySummary?.completedTasks ?? data.productivityRows?.filter((row: any) => row.caseCompleted).length ?? 0}
                   </div>
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">

@@ -49,7 +49,12 @@ export type AuditAction =
   | 'INDEPENDENT_TASK_ASSIGNED'
   | 'INDEPENDENT_TASK_COMMENTED'
   | 'INDEPENDENT_TASK_ATTACHMENT_UPLOADED'
-  | 'INDEPENDENT_TASK_ATTACHMENT_DELETED';
+  | 'INDEPENDENT_TASK_ATTACHMENT_DELETED'
+  // ✅ Case Management (three assigned members + workflow Key Actions)
+  | 'CASE_MANAGEMENT_REQUESTED_REVIEW'
+  | 'CASE_MANAGEMENT_REQUESTED_APPROVAL'
+  | 'CASE_MANAGEMENT_APPROVED'
+  | 'CASE_MANAGEMENT_QUALITY_SCORED';
 
 export interface IAuditLog extends Document {
   caseId: mongoose.Types.ObjectId;

@@ -50,14 +50,17 @@ const getTimelinessScore = (task: any) => {
   if (totalMs <= 0 || !Number.isFinite(totalMs) || !Number.isFinite(usedMs)) return null;
 
   const consumedPercent = Math.max(0, Math.round((usedMs / totalMs) * 1000) / 10);
-  return Math.max(0, Math.round(100 - consumedPercent));
+  return Math.min(100, Math.max(0, Math.round(100 - consumedPercent)));
 };
 
 const computeRating1to5 = (inputs: {
-  productivityScore: number; // 0..100
-  qualityScore: number;      // 0..100
-  reliabilityScore: number;  // 0..100
-}) => {
+  productivityScore: number | null; // 0..100
+  qualityScore: number | null;      // 0..100
+  reliabilityScore: number | null;  // 0..100
+}): number | null => {
+  // A rating requires all three inputs to be real data — never invent values.
+  if (inputs.productivityScore == null || inputs.qualityScore == null || inputs.reliabilityScore == null) return null;
+
   // Weighted score
   const total =
     0.45 * inputs.productivityScore +
@@ -175,11 +178,20 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
 
   // Quality score based on review scores when available, then approval success as fallback
   const decided = approved.length + rejected.length;
-  const approvalRate = decided ? Math.round((approved.length / decided) * 100) : 100; // if none, treat as perfect
-  const qualityScore = clamp(averageQualityScore ?? approvalRate, 0, 100);
+  const approvalRate = decided ? Math.round((approved.length / decided) * 100) : null; // null until a decision exists — never assume 100%
+  const qualityScore = averageQualityScore != null
+    ? clamp(averageQualityScore, 0, 100)
+    : approvalRate != null
+      ? clamp(approvalRate, 0, 100)
+      : null;
 
   // Reliability score based on task timeliness, then on-time completion as fallback
-  const reliabilityScore = clamp(averageTimelinessScore ?? onTimePct, 0, 100);
+  const onTimeReliability = completed.length ? onTimePct : null;
+  const reliabilityScore = averageTimelinessScore != null
+    ? clamp(averageTimelinessScore, 0, 100)
+    : onTimeReliability != null
+      ? clamp(onTimeReliability, 0, 100)
+      : null;
 
   const rating = computeRating1to5({ productivityScore, qualityScore, reliabilityScore });
 
@@ -201,7 +213,7 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
       pending: pending.length,
       approved: approved.length,
       rejected: rejected.length,
-      approvalRatePct: clamp(approvalRate, 0, 100),
+      approvalRatePct: approvalRate == null ? null : clamp(approvalRate, 0, 100),
     },
 
     rating: {
@@ -269,7 +281,9 @@ export const getTeamPerformance = async (req: AuthRequest, res: Response) => {
 
     // Rank: rating desc, then productivity desc, then on-time completion desc
     rows.sort((a, b) => {
-      if (b.rating !== a.rating) return b.rating - a.rating;
+      const ar = a.rating == null ? -1 : a.rating;
+      const br = b.rating == null ? -1 : b.rating;
+      if (br !== ar) return br - ar;
       if (b.scores.productivity !== a.scores.productivity) return b.scores.productivity - a.scores.productivity;
       return (b.onTimeCompletionPct || 0) - (a.onTimeCompletionPct || 0);
     });

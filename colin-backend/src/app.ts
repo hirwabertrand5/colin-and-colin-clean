@@ -23,6 +23,7 @@ import dashboardRoutes from './routes/dashboard';
 import adminEmailRoutes from './routes/adminEmail';
 import helpRoutes from './routes/help';
 import workflowRoutes from './routes/workflows';
+import caseManagementRoutes from './routes/caseManagement';
 import prospectRoutes from './routes/prospect';
 import clientExperienceRoutes from './routes/clientExperience';
 import independentTaskRoutes from './routes/independentTasks';
@@ -87,6 +88,7 @@ app.use('/api', dashboardRoutes);
 app.use('/api', adminEmailRoutes);
 app.use('/api', helpRoutes);
 app.use('/api/workflows', workflowRoutes);
+app.use('/api/case-management', caseManagementRoutes);
 app.use('/api/client-experience', clientExperienceRoutes);
 app.use('/api', independentTaskRoutes);
 // uploads

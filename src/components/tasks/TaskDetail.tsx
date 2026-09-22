@@ -223,9 +223,19 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
   const canSetQualityScore = useMemo(() => {
     if (!task) return false;
-    if (isApprovedLocked && task.qualityScore == null) return true;
-    return Boolean(isManagingDirector || currentUser?.role === 'executive_assistant' || isTaskSupervisor);
-  }, [task, isManagingDirector, currentUser?.role, isTaskSupervisor, isApprovedLocked]);
+    const role = currentUser?.role;
+    const allowedRole =
+      role === 'managing_partner' ||
+      role === 'executive_managing_partner' ||
+      role === 'partner' ||
+      role === 'executive_partner' ||
+      role === 'executive_assistant';
+    const meName = normalizeIdentity(currentUser?.name);
+    const meEmail = normalizeIdentity(currentUser?.email);
+    const reviewer = normalizeIdentity(caseData?.caseAssignments?.reviewer);
+    const isCaseReviewer = Boolean(reviewer && (reviewer === meName || reviewer === meEmail));
+    return Boolean(allowedRole || isCaseReviewer || isTaskSupervisor);
+  }, [task, currentUser?.role, currentUser?.name, currentUser?.email, caseData?.caseAssignments?.reviewer, isTaskSupervisor]);
 
   const relatedCaseLabel = useMemo(() => {
     if (caseData) return caseData.parties || caseData.caseNo || '—';

@@ -24,6 +24,7 @@ import {
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
 import { calculateCollectedKeyActionEarnings } from '../utils/keyActionEarnings';
+import { computeCaseEarnedFees } from '../utils/caseEarnedFees';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -281,7 +282,7 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   await c.save(session ? { session } : undefined);
 };
 
-const completeStepInternal = async (req: AuthRequest, c: any, inst: any, stepKey: string) => {
+const completeStepInternal = async (actor: { actorName: string; actorUserId?: string | undefined }, c: any, inst: any, stepKey: string) => {
   const step = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
   if (!step) throw new Error('Step not found.');
 
@@ -319,8 +320,6 @@ const completeStepInternal = async (req: AuthRequest, c: any, inst: any, stepKey
   const previousCaseWorkflowStatus = c.workflowProgress?.status;
 
   await updateCaseWorkflowProgress(c, inst);
-
-  const actor = actorFromReq(req);
 
   // Include stage transition info when available
   const prevStage = (inst.steps || []).find((s: any) => s.stepKey === stepKey)?.stageKey || 'unknown';
@@ -695,125 +694,41 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
     const earnedValue = keyActionEarnings.eligibleCollectedValue;
     const stages = computeStageBreakdownFromInstance(effectiveSteps);
 
-    const assignments: any = c.caseAssignments || {};
-    const teamSpecs = [
-      {
-        key: 'initiator',
-        label: 'Initiator',
-        name: String(assignments.initiator || c.assignedTo || '').trim(),
-      },
-      {
-        key: 'reviewer',
-        label: 'Reviewer',
-        name: String(assignments.reviewer || '').trim(),
-      },
-      {
-        key: 'approver',
-        label: 'Approver',
-        name: String(assignments.signerApprover || '').trim(),
-      },
-    ].filter((spec) => spec.name);
-
     // Resolve each member's system role so TPA follows the role-based table.
-    const names = teamSpecs.map((spec) => spec.name);
-    const users: any[] = await User.find({ name: { $in: names } })
-      .select('name email role')
-      .lean();
+    const assignments: any = c.caseAssignments || {};
+    const memberNames = [
+      assignments.initiator || c.assignedTo,
+      assignments.reviewer,
+      assignments.signerApprover,
+    ]
+      .map((value: any) => String(value || '').trim())
+      .filter(Boolean);
+    const users: any[] = memberNames.length
+      ? await User.find({ name: { $in: memberNames } })
+          .select('name email role')
+          .lean()
+      : [];
     const roleByName = new Map<string, string>();
     for (const user of users || []) {
       const key = String(user?.name || '').trim().toLowerCase();
       if (key && !roleByName.has(key)) roleByName.set(key, String(user?.role || ''));
     }
 
-    const team = teamSpecs.map((spec) => {
-      const role = roleByName.get(spec.name.toLowerCase()) || '';
-      const me = spec.name.toLowerCase();
-      const mine = (tasks || []).filter((task: any) => {
-        const assignee = String(task?.assignee || '').trim().toLowerCase();
-        const supervisor = String(task?.supervisor || task?.supervisorReviewer || '').trim().toLowerCase();
-        const stageMembers = Array.isArray(task?.taskStages)
-          ? task.taskStages.map((st: any) => String(st?.staffMember || '').trim().toLowerCase())
-          : [];
-        return assignee === me || supervisor === me || stageMembers.includes(me);
-      });
-      const completedMine = mine.filter(
-        (task: any) => String(task?.status || '').toLowerCase() === 'completed'
-      );
-
-      // Timeliness: average computed timeliness of completed tasks (0–100), mirroring
-      // the productivity report (score = 100 − % of SLA consumed).
-      const timelinessScores: number[] = [];
-      for (const task of completedMine) {
-        const stageScores = Array.isArray(task?.taskStages)
-          ? task.taskStages
-              .map((st: any) => Number(st?.timelinessScore))
-              .filter((n: number) => Number.isFinite(n) && n >= 0 && n <= 100)
-          : [];
-        if (stageScores.length) {
-          timelinessScores.push(
-            Math.round(stageScores.reduce((a: number, b: number) => a + b, 0) / stageScores.length)
-          );
-          continue;
-        }
-        const assignedAt = resolveDeadlineDateTime(task?.startDate || task?.createdAt || task?.updatedAt);
-        const completedAt = resolveDeadlineDateTime(task?.completedAt || task?.updatedAt);
-        const dueAt = resolveDeadlineDateTime(task?.dueDate);
-        if (assignedAt && completedAt && dueAt && dueAt.getTime() > assignedAt.getTime()) {
-          const totalMs = dueAt.getTime() - assignedAt.getTime();
-          const usedMs = completedAt.getTime() - assignedAt.getTime();
-          if (totalMs > 0) {
-            const consumed = Math.round((usedMs / totalMs) * 1000) / 10;
-            timelinessScores.push(Math.max(0, Math.round(100 - consumed)));
-          }
-        }
-      }
-
-      const qualityScores = completedMine
-        .map((task: any) => Number(task?.qualityScore))
-        .filter((n: number) => Number.isFinite(n) && n >= 0 && n <= 100);
-
-      const timelinessScore = timelinessScores.length
-        ? Math.round((timelinessScores.reduce((a: number, b: number) => a + b, 0) / timelinessScores.length) * 10) / 10
-        : null;
-      const qualityScore = qualityScores.length
-        ? Math.round((qualityScores.reduce((a: number, b: number) => a + b, 0) / qualityScores.length) * 10) / 10
-        : null;
-
-      const tpaPercent = getTpaPercent(role);
-      // Missing scores never punish the team member — productivity formula default.
-      const effectiveTimeliness = timelinessScore ?? 100;
-      const effectiveQuality = qualityScore ?? 100;
-      const earnedFee = computeEarnedFee(earnedValue, tpaPercent, effectiveTimeliness, effectiveQuality);
-
-      return {
-        key: spec.key,
-        role: spec.label,
-        name: spec.name,
-        userRole: role || null,
-        tpaPercent,
-        timelinessScore,
-        qualityScore,
-        taskFeeCollected: earnedValue,
-        earnedFee,
-      };
+    const result = computeCaseEarnedFees({
+      caseDoc: c,
+      template,
+      workflowInstance: { ...(inst || {}), steps: effectiveSteps },
+      tasks,
+      collectedAmount,
+      roleByName,
     });
 
     return res.json({
-      contractValue,
-      currency,
-      completedPercent,
-      earnedValue,
-      completedValue,
-      collectedAmount: keyActionEarnings.collectedAmount,
-      eligibleCollectedValue: keyActionEarnings.eligibleCollectedValue,
-      completedKeyActions: keyActionEarnings.completedActions.length,
-      keyActions: keyActionEarnings.keyActions,
-      missingKeyActionPercentages: keyActionEarnings.missingKeyActionPercentages,
-      stages: stages.map((stage) => ({
+      ...result,
+      stages: result.stages.map((stage) => ({
         ...stage,
-        title: stage.title || stage.stageKey || 'Stage',
+        title: String(stage.title || stage.stageKey || 'Stage'),
       })),
-      team,
     });
   } catch (e: any) {
     return res.status(500).json({ message: e?.message || 'Failed to compute earned fees.' });
@@ -926,6 +841,10 @@ export const attachOutputDocument = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Key-action completion is also used by Case Management (Signer/Approver
+// approval) so the same timeline, progress and audit path is kept.
+export { completeStepInternal as completeStepForCase };
+
 // Complete a step (admin only)
 export const completeStep = async (req: AuthRequest, res: Response) => {
   try {
@@ -943,7 +862,7 @@ export const completeStep = async (req: AuthRequest, res: Response) => {
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
-    const updated = await completeStepInternal(req, c, inst, stepKey);
+    const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
     res.json(updated);
   } catch (e: any) {
     const status = typeof e?.statusCode === 'number' ? e.statusCode : 500;
@@ -1229,7 +1148,7 @@ export const deleteStepAction = async (req: AuthRequest, res: Response) => {
     // If the step is now fully satisfied, keep workflow progress consistent.
     const allDone = actions.length === 0 || actions.every((a: any) => a?.done === true);
     if (allDone && step.status !== 'Completed') {
-      const updated = await completeStepInternal(req, c, inst, stepKey);
+      const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
       const actor = actorFromReq(req);
       await writeAudit({
         caseId: String(c._id),
@@ -1351,9 +1270,15 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
         if (orderedStep.stepKey === stepKey) {
           orderedStep.status = 'In Progress';
           orderedStep.completedAt = undefined;
+          // Unchecking an action means the work is no longer fully submitted —
+          // bring the case-management lifecycle back to In Progress.
+          orderedStep.submittedAt = undefined;
+          orderedStep.reviewedAt = undefined;
         } else {
           orderedStep.status = 'Not Started';
           orderedStep.completedAt = undefined;
+          orderedStep.submittedAt = undefined;
+          orderedStep.reviewedAt = undefined;
         }
       }
       inst.status = 'Active';
@@ -1370,10 +1295,13 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
       detail: `${stepKey} • ${target.text} • ${nextDone ? 'done' : 'not done'}`,
     });
 
-    // If all key actions are done, auto-complete the step (and update case progress/billing)
+    // If all key actions are done, auto-complete the step (and update case
+    // progress/billing). Case Management toggles with autoComplete:false so the
+    // step stays "In Progress" until the Case Initiator requests a review.
     const allDone = actions.length === 0 || actions.every((a: any) => a?.done === true);
-    if (allDone && step.status !== 'Completed') {
-      const updated = await completeStepInternal(req, c, inst, stepKey);
+    const allowAutoComplete = (req.body as any)?.autoComplete !== false;
+    if (allDone && step.status !== 'Completed' && allowAutoComplete) {
+      const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
       return res.json(updated);
     }
 

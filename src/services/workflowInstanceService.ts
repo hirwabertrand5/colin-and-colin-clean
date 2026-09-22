@@ -100,6 +100,14 @@ export type CaseEarnedFees = {
   earnedValue: number;
   stages: CaseStagePercent[];
   team: CaseTeamEarnedFee[];
+  /** Matter-level Quality Score entered through Case Management. */
+  qualityScore?: number | null;
+  qualityScoredBy?: string | null;
+  qualityScoredAt?: string | null;
+  /** Sum of the staff earned fees that could actually be computed (null until available). */
+  staffEarnedTotal?: number | null;
+  /** Eligible collected value remaining after staff earned fees. */
+  firmFee?: number;
 };
 
 export const getCaseEarnedFees = async (caseId: string): Promise<CaseEarnedFees> => {
@@ -168,11 +176,16 @@ export const amendWorkflowStepDeadline = async (
 export const toggleWorkflowStepAction = async (
   caseId: string,
   stepKey: string,
-  index: number
+  index: number,
+  autoComplete?: boolean
 ): Promise<WorkflowInstance> => {
   const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/actions/${index}/toggle`, {
     method: 'PATCH',
-    headers: { Authorization: `Bearer ${getToken()}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ autoComplete: autoComplete !== false }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || 'Failed to update key action');

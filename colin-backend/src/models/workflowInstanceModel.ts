@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type StepStatus = 'Not Started' | 'In Progress' | 'Completed';
+export type StepStatus = 'Not Started' | 'In Progress' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';
 
 export interface IInstanceOutput {
   key: string;
@@ -22,6 +22,10 @@ export interface IInstanceStep {
   startAt?: Date;
   dueAt?: Date;
   completedAt?: Date;
+  /** Case Management: when the Case Initiator submitted the completed work for review. */
+  submittedAt?: Date;
+  /** Case Management: when the Reviewer reviewed the work and requested approval. */
+  reviewedAt?: Date;
   extensionHistory?: Array<{
     previousDueAt?: Date;
     newDueAt?: Date;
@@ -93,10 +97,12 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     stageKey: { type: String, required: true },
     order: { type: Number, required: true },
 
-    status: { type: String, enum: ['Not Started', 'In Progress', 'Completed'], default: 'Not Started' },
+    status: { type: String, enum: ['Not Started', 'In Progress', 'Awaiting Review', 'Awaiting Approval', 'Completed'], default: 'Not Started' },
     startAt: { type: Date },
     dueAt: { type: Date },
     completedAt: { type: Date },
+    submittedAt: { type: Date },
+    reviewedAt: { type: Date },
     extensionHistory: {
       type: [
         new Schema(

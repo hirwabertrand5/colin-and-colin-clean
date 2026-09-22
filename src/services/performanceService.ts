@@ -22,14 +22,14 @@ export type PerformanceSummary = {
     pending: number;
     approved: number;
     rejected: number;
-    approvalRatePct: number;
+    approvalRatePct: number | null;
   };
 
   rating: {
-    value: 1 | 2 | 3 | 4 | 5;
+    value: 1 | 2 | 3 | 4 | 5 | null;
     productivityScore: number;
-    qualityScore: number;
-    reliabilityScore: number;
+    qualityScore: number | null;
+    reliabilityScore: number | null;
   };
 
   monthly: { month: string; tasksCompleted: number; tasksTotal: number; onTime: number; late: number }[];
@@ -59,12 +59,12 @@ export const getMyPerformance = async (params?: { from?: string; to?: string }):
 export type TeamPerformanceRow = {
   name: string;
   role: string;
-  rating: number;
+  rating: number | null;
   tasksCompleted: number;
   tasksTotal: number;
   onTimeCompletionPct: number;
-  approvals: { pending: number; approved: number; rejected: number; approvalRatePct: number };
-  scores: { productivity: number; quality: number; reliability: number };
+  approvals: { pending: number; approved: number; rejected: number; approvalRatePct: number | null };
+  scores: { productivity: number; quality: number | null; reliability: number | null };
 };
 
 export const getTeamPerformance = async (params?: { from?: string; to?: string; role?: string }) => {

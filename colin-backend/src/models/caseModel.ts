@@ -142,6 +142,12 @@ export interface ICase extends Document {
     accruedUnbilled?: number;
   };
 
+  caseManagement?: {
+    qualityScore?: number;
+    qualityScoredBy?: string;
+    qualityScoredAt?: Date;
+  };
+
   clientContacts: IClientContact[];
   reporting?: ICaseReportingSettings;
 
@@ -343,6 +349,21 @@ const CaseSchema = new Schema<ICase>(
         prepaidTotal: { type: Number, min: 0, default: 0 },
         prepaidRemaining: { type: Number, min: 0, default: 0 },
         accruedUnbilled: { type: Number, min: 0, default: 0 },
+      },
+      default: {},
+    },
+
+    /********************************
+     * Case Management
+     * Quality Score is entered through the Case Management tab by the Reviewer
+     * or Signer/Approver. It is matter-level (whole-matter performance), stored
+     * as actual case data and never hard-coded.
+     ********************************/
+    caseManagement: {
+      type: {
+        qualityScore: { type: Number, min: 0, max: 100 },
+        qualityScoredBy: { type: String, trim: true },
+        qualityScoredAt: { type: Date },
       },
       default: {},
     },

@@ -41,6 +41,7 @@ type WorkflowSection = {
 type WorkflowDoc = {
   id: string;
   title: string;
+  active: boolean;
   sections: WorkflowSection[];
 };
 
@@ -309,9 +310,8 @@ export default function Settings() {
 
       return {
         id: t._id,
-        title: `${t.matterType || t.name}${t.name && t.matterType !== t.name ? ` — ${t.name}` : ''} • ${
-          t.active ? 'Active' : 'Inactive'
-        }`,
+        title: `${t.matterType || t.name}${t.name && t.matterType !== t.name ? ` — ${t.name}` : ''}`,
+        active: Boolean(t.active),
         sections: stages.map((stage, sectionIndex) => {
           const sectionSteps = stepsSorted.filter((step) => String(step.stageKey || '') === stage.key);
           const firstStep = sectionSteps[0];
@@ -511,7 +511,25 @@ export default function Settings() {
                       onClick={() => setOpenWorkflowId((cur) => (cur === wf.id ? '' : wf.id))}
                       className="w-full flex items-center justify-between px-4 py-3 text-left"
                     >
-                      <span className="text-sm font-medium text-gray-900">{wf.title}</span>
+                      <span className="text-sm font-medium text-gray-900">
+                          <span className="inline-flex items-center gap-2">
+                            <span>{wf.title}</span>
+                            <span
+                              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
+                                wf.active
+                                  ? 'border-green-200 bg-green-100 text-green-800 shadow-sm dark:border-green-700 dark:bg-green-900/40 dark:text-green-300'
+                                  : 'border-gray-200 bg-gray-100 text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                              }`}
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${
+                                  wf.active ? 'bg-green-600 dark:bg-green-400' : 'bg-gray-400 dark:bg-gray-500'
+                                }`}
+                              />
+                              {wf.active ? 'Active' : 'Inactive'}
+                            </span>
+                          </span>
+                        </span>
                       <ChevronDown
                         className={`w-4 h-4 text-gray-500 transition-transform ${
                           open ? 'rotate-180' : ''

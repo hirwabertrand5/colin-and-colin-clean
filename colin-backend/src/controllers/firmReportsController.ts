@@ -11,7 +11,6 @@ import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
-import { resolveTaskStageAllocation } from '../utils/workflowPercentages';
 import {
   allocateCollectedValueAcrossKeyActions,
   calculateCollectedKeyActionEarnings,
@@ -193,21 +192,6 @@ const getTaskParticipationAllocation = (role?: string) => {
   return TASK_TPA_SHARES[normalized] ?? 0;
 };
 
-const getTaskStageAllocation = (matter: any, task: any, template: any) => {
-  if (!matter || !template) return null;
-  return resolveTaskStageAllocation(template, task);
-};
-
-/**
- * The productivity base is the configured workflow-stage share of the matter
- * contract value. It deliberately does not depend on an invoice being paid.
- */
-const getTaskFeeCollectedValue = (matter: any, task: any, template: any): number => {
-  const allocation = getTaskStageAllocation(matter, task, template);
-  if (!allocation) return 0;
-  return roundMoney(getContractValue(matter) * (allocation.percentage / 100));
-};
-
 const getTimelinessScore = (task: any) => {
   const taskStatus = String(task?.status || '').toLowerCase();
   const assignedAt = parseTaskDate(task?.startDate) || parseTaskDate(task?.createdAt) || parseTaskDate(task?.updatedAt) || parseTaskDate(task?.completedAt);
@@ -250,7 +234,7 @@ const getTimelinessScore = (task: any) => {
 
   return {
     consumedPercent: Math.max(0, consumedPercent),
-    score: consumedPercent > 100 ? 0 : Math.max(0, Math.round(100 - consumedPercent)),
+    score: consumedPercent > 100 ? 0 : Math.min(100, Math.max(0, Math.round(100 - consumedPercent))),
     status: timelinessStatus,
   };
 };
@@ -280,6 +264,23 @@ const taskMatchesKeyAction = (task: any, action: any) => {
   return Boolean(actionTitle) && [task?.title, task?.description].some(
     (value) => normalizedTaskLabel(value) === actionTitle
   );
+};
+
+/** A Task is the whole case: it is completed only when every Key Action in the workflow is completed. */
+const isWholeCaseCompleted = (inst: any) => {
+  const steps = Array.isArray(inst?.steps) ? inst.steps : [];
+  if (!steps.length) return false;
+  if (String(inst?.status || '').toLowerCase() === 'completed') return true;
+  return steps.every((step: any) => String(step?.status || '').toLowerCase() === 'completed');
+};
+
+/** Number of distinct whole cases/tasks (not Key Actions) completed from productivity rows. */
+const countCompletedWholeCases = (rows: any[]) => {
+  const caseIds = new Set<string>();
+  for (const row of rows || []) {
+    if (row?.caseCompleted && String(row?.caseId || '').trim()) caseIds.add(String(row.caseId));
+  }
+  return caseIds.size;
 };
 
 /**
@@ -346,22 +347,36 @@ const buildCollectedKeyActionRows = ({
           ? linkedTask.taskStages.find((stage: any) => baseNameFromLabel(stage?.staffMember) === memberKey)
           : null;
         const timeliness = linkedTask ? getTimelinessScore(linkedTask) : null;
+        // Matter-level Quality Score entered through Case Management
+        // (Reviewer / Signer-Approver). Missing multipliers stay null so the
+        // earned fee renders "_" instead of assuming 100% or 0%.
+        const matterQuality = Number.isFinite(Number(matter?.caseManagement?.qualityScore))
+          ? Math.max(0, Number(matter.caseManagement.qualityScore))
+          : null;
         const timelinessScore = Number.isFinite(Number(linkedStage?.timelinessScore))
           ? Math.max(0, Number(linkedStage.timelinessScore))
-          : timeliness?.score ?? 100;
-        const qualityScore = Number.isFinite(Number(linkedStage?.qualityScore))
-          ? Math.max(0, Number(linkedStage.qualityScore))
-          : Number.isFinite(Number(linkedTask?.qualityScore))
-            ? Math.max(0, Number(linkedTask.qualityScore))
-            : 100;
+          : timeliness?.score ?? null;
+        const qualityScore = matterQuality !== null
+          ? matterQuality
+          : Number.isFinite(Number(linkedStage?.qualityScore))
+            ? Math.max(0, Number(linkedStage.qualityScore))
+            : Number.isFinite(Number(linkedTask?.qualityScore))
+              ? Math.max(0, Number(linkedTask.qualityScore))
+              : null;
         const role = String(roleByName.get(memberKey) || '').trim();
         const tpaPercent = getTaskParticipationAllocation(role);
-        const feeEarned = roundMoney(
-          taskFeeCollected * (tpaPercent / 100) * (timelinessScore / 100) * (qualityScore / 100)
-        );
+        const feeEarned =
+          timelinessScore != null && qualityScore != null && tpaPercent > 0
+            ? roundMoney(taskFeeCollected * (tpaPercent / 100) * (timelinessScore / 100) * (qualityScore / 100))
+            : null;
+        const fmtPct = (num: number | null) => (num == null ? '_' : `${num}%`);
+        const formula = `${roundMoney(taskFeeCollected)} x ${tpaPercent}% x ${fmtPct(timelinessScore)} x ${fmtPct(qualityScore)} = ${feeEarned == null ? '_' : roundMoney(feeEarned)}`;
+        const timelinessStatus = timeliness ? timeliness.status : 'Not scored';
 
         rows.push({
           id: `${caseId}:${action.key}:${member.assignmentRole.toLowerCase()}`,
+          caseId,
+          caseCompleted: isWholeCaseCompleted(instancesByCaseId.get(caseId)),
           completedAt: completedAt.toISOString(),
           staff: member.name,
           assignmentRole: member.assignmentRole,
@@ -374,7 +389,7 @@ const buildCollectedKeyActionRows = ({
           timelinessScore,
           timelinessConsumedPercent: timeliness ? Math.round(timeliness.consumedPercent * 10) / 10 : null,
           qualityScore,
-          formula: `${roundMoney(taskFeeCollected)} x ${tpaPercent}% x ${timelinessScore}% x ${qualityScore}% = ${feeEarned}`,
+          formula,
           feeEarned,
           keyActionsCompleted: 1,
           keyActionsTotal: 1,
@@ -382,7 +397,7 @@ const buildCollectedKeyActionRows = ({
           keyActionPercent: action.percentage,
           workflowStage: String(workflowStage?.title || templateStep?.stageKey || 'Workflow stage not linked'),
           workflowStagePercent: Number(workflowStage?.percentage) || null,
-          timelinessStatus: timeliness ? timeliness.status : 'Not scored - treated as 100%',
+          timelinessStatus,
           collectedAmount: earnings.collectedAmount,
           eligibleCollectedValue: earnings.eligibleCollectedValue,
         });
@@ -476,7 +491,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .lean();
 
     const allCases = await Case.find()
-      .select('_id assignedTo caseAssignments status caseNo parties budget workflowProgress billingSettings workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments status caseNo parties budget workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
       .lean();
     const caseById = new Map((allCases as any[]).map((c) => [String(c._id), c]));
     const workflowTemplateIds = Array.from(new Set((allCases as any[])
@@ -517,17 +532,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         ? { _id: { $in: Array.from(linkedCaseIdsByName.get(selectedMemberNameNormalized) || []) } }
         : {}
     )
-      .select('_id assignedTo caseAssignments status caseNo parties budget updatedAt workflowProgress billingSettings legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments status caseNo parties budget updatedAt workflowProgress billingSettings caseManagement legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
       .lean();
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
-    const taskCaseIds = Array.from(new Set((tasksCompleted as any[]).map((task) => String(task.caseId || '')).filter(Boolean)));
-    const taskCases = taskCaseIds.length
-      ? await Case.find({ _id: { $in: taskCaseIds } })
-        .select('_id caseNo parties budget workflowProgress billingSettings matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
-        .lean()
-      : [];
-    const taskCaseMap = new Map((taskCases as any[]).map((matter) => [String(matter._id), matter]));
     const workflowTemplateById = new Map(
       workflowTemplates.map((template) => [String(template._id), template])
     );
@@ -625,7 +633,6 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const delayedByName = new Map<string, number>();
     const riskByName = new Map<string, number>();
     const usedPercentByName = new Map<string, number[]>();
-    const caseIds = Array.from(new Set((tasksCompleted as any[]).map((t) => String(t.caseId)).filter(Boolean)));
     const paidInvoicesByCaseId = new Map<string, number>();
     for (const inv of productivityInvoices as any[]) {
       const caseId = String(inv.caseId || '');
@@ -662,35 +669,6 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
 
-    const getTaskProductivityFinancials = (task: any) => {
-      const staffName = String(task.assignee || '—').trim();
-      const role = String(roleByName.get(baseNameFromLabel(staffName)) || '').trim();
-      const tpaPercent = getTaskParticipationAllocation(role);
-      const matter = taskCaseMap.get(String(task.caseId || ''));
-      const template = workflowTemplateById.get(String(matter?.workflowTemplateId || ''));
-      const stageAllocation = getTaskStageAllocation(matter, task, template);
-      const taskProgressPercent = stageAllocation?.percentage ?? 0;
-      const taskFeeCollected = getTaskFeeCollectedValue(matter, task, template);
-      const timeliness = getTimelinessScore(task);
-      const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Math.max(0, Math.round(Number(task.qualityScore))) : null;
-      const feeEarned =
-        qualityScore == null || !timeliness
-          ? null
-          : Math.round((taskFeeCollected * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100)) * 100) / 100;
-
-      return {
-        role,
-        tpaPercent,
-        matter,
-        stageAllocation,
-        taskFeeCollected,
-        taskProgressPercent,
-        timeliness,
-        qualityScore,
-        feeEarned,
-      };
-    };
-
     for (const t of tasksCompleted as any[]) {
       const name = baseNameFromLabel(t.assignee);
       if (selectedMemberNameNormalized && baseNameFromLabel(name) !== selectedMemberNameNormalized) continue;
@@ -716,11 +694,16 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     for (const row of productivityRows) {
       const name = baseNameFromLabel(row.staff);
       grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + (row.taskFeeCollected || 0));
-      earnedByName.set(name, (earnedByName.get(name) || 0) + (row.feeEarned || 0));
-      firmRetainedByName.set(
-        name,
-        (firmRetainedByName.get(name) || 0) + Math.max(0, (row.taskFeeCollected || 0) - (row.feeEarned || 0))
-      );
+      // Missing TPA/timeliness/quality renders the earned fee as null ('_') —
+      // those rows contribute nothing to staff earnings or to the firm's
+      // retained share until the actual score exists.
+      if (row.feeEarned != null) {
+        earnedByName.set(name, (earnedByName.get(name) || 0) + (row.feeEarned || 0));
+        firmRetainedByName.set(
+          name,
+          (firmRetainedByName.get(name) || 0) + Math.max(0, (row.taskFeeCollected || 0) - (row.feeEarned || 0))
+        );
+      }
     }
 
     const overdueFilter: any = { status: { $ne: 'Completed' } };
@@ -828,52 +811,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       revenueBilled: Math.round((revenueByType.get(row.type) || 0) * 100) / 100,
     })).sort((a, b) => a.type.localeCompare(b.type));
 
-    const legacyTaskProductivityRows = (tasksCompleted as any[])
-      .filter((task) => !selectedMemberNameNormalized || baseNameFromLabel(task.assignee) === selectedMemberNameNormalized)
-      .map((task) => {
-        const staffName = String(task.assignee || '—').trim();
-        const financials = getTaskProductivityFinancials(task);
-        const matterLabel = financials.matter
-          ? String(financials.matter.caseNo || financials.matter.parties || financials.matter.matterType || financials.matter.workflow || '—')
-          : '—';
-        const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
-        const progressCompleted = checklist.filter((item: any) => Boolean(item?.completed)).length;
-        const progressTotal = checklist.length;
-        const roundedTaskFeeCollected = Math.round(financials.taskFeeCollected * 100) / 100;
-        const roundedFeeEarned = financials.feeEarned == null ? null : Math.round(financials.feeEarned * 100) / 100;
-
-        return {
-          id: String(task._id),
-          completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
-          staff: staffName,
-          role: financials.role,
-          matter: matterLabel,
-          task: String(task.title || 'Task'),
-          taskFeeCollected: financials.taskFeeCollected,
-          taskFee: financials.taskFeeCollected,
-          tpaPercent: financials.tpaPercent,
-          timelinessScore: financials.timeliness ? financials.timeliness.score : null,
-          timelinessConsumedPercent: financials.timeliness ? Math.round(financials.timeliness.consumedPercent * 10) / 10 : null,
-          qualityScore: financials.qualityScore,
-          formula:
-            financials.qualityScore == null
-              ? 'Pending quality score'
-              : !financials.timeliness
-                ? 'Pending timeliness score'
-                : `${roundedTaskFeeCollected} x ${financials.tpaPercent}% x ${financials.timeliness.score}% x ${financials.qualityScore}% = ${roundedFeeEarned}`,
-          feeEarned: financials.feeEarned,
-          keyActionsCompleted: progressCompleted,
-          keyActionsTotal: progressTotal,
-          taskProgressPercent: financials.taskProgressPercent,
-          workflowStage: financials.stageAllocation?.stageTitle || 'Workflow stage not linked',
-          workflowStagePercent: financials.stageAllocation?.percentage ?? null,
-          timelinessStatus: financials.timeliness ? financials.timeliness.status : 'Late',
-        };
-      })
-      .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
-
     const productivitySummary = {
-      completedTasks: productivityRows.length,
+      completedTasks: countCompletedWholeCases(productivityRows),
       totalTaskFeeCollected: Math.round(productivityRows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0) * 100) / 100,
       totalTaskFee: Math.round(productivityRows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0) * 100) / 100,
       totalFeeEarned: Math.round(
@@ -1299,7 +1238,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         { 'caseAssignments.signerApprover': displayName },
       ],
     })
-      .select('_id assignedTo caseAssignments caseNo parties budget workflowProgress billingSettings matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments caseNo parties budget workflowProgress billingSettings caseManagement matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
       .lean();
     const memberMatterIds = (memberMatters as any[]).map((matter) => matter._id);
     const [memberWorkflowInstances, memberTasks, paidMemberInvoices] = await Promise.all([
@@ -1341,81 +1280,6 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       selectedMemberName: displayName,
     });
 
-    const tasksCompleted = await Task.find({
-      status: 'Completed',
-      completedAt: { $gte: fromDate, $lte: toDate },
-    })
-      .select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore status')
-      .lean();
-    const memberTasksCompleted = (tasksCompleted as any[]).filter(
-      (task) => baseNameFromLabel(task.assignee) === baseNameFromLabel(displayName)
-    );
-
-    const taskCaseIds = Array.from(new Set(memberTasksCompleted.map((task) => String(task.caseId || '')).filter(Boolean)));
-    const taskCases = taskCaseIds.length
-      ? await Case.find({ _id: { $in: taskCaseIds } })
-        .select('_id caseNo parties budget workflowProgress billingSettings matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
-        .lean()
-      : [];
-
-    const taskCaseMap = new Map((taskCases as any[]).map((matter) => [String(matter._id), matter]));
-    const workflowTemplateById = new Map(
-      (await WorkflowTemplate.find({ _id: { $in: Array.from(new Set((taskCases as any[])
-        .map((matter) => String(matter.workflowTemplateId || ''))
-        .filter(Boolean))) } }).select('_id stages steps').lean() as any[])
-        .map((template) => [String(template._id), template])
-    );
-    const legacyTaskRows = memberTasksCompleted
-      .map((task) => {
-        const matter = taskCaseMap.get(String(task.caseId || ''));
-        const matterLabel = matter
-          ? String(matter.caseNo || matter.parties || matter.matterType || matter.workflow || 'N/A')
-          : 'N/A';
-        const checklist = Array.isArray(task?.checklist) ? task.checklist : [];
-        const keyActionsCompleted = checklist.filter((item: any) => Boolean(item?.completed)).length;
-        const keyActionsTotal = checklist.length;
-        const template = workflowTemplateById.get(String(matter?.workflowTemplateId || ''));
-        const stageAllocation = getTaskStageAllocation(matter, task, template);
-        const taskProgressPercent = stageAllocation?.percentage ?? 0;
-        const taskFeeCollected = getTaskFeeCollectedValue(matter, task, template);
-        const timeliness = getTimelinessScore(task);
-        const qualityScore = Number.isFinite(Number(task.qualityScore)) ? Math.max(0, Math.round(Number(task.qualityScore))) : null;
-        const feeEarned =
-          qualityScore == null || !timeliness
-            ? null
-            : roundMoney(taskFeeCollected * (tpaPercent / 100) * (timeliness.score / 100) * (qualityScore / 100));
-
-        return {
-          id: String(task._id),
-          staffId: String(user?._id || req.user?.id || ''),
-          completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
-          staff: displayName,
-          role,
-          matter: matterLabel,
-          task: String(task.title || 'Task'),
-          taskFeeCollected,
-          taskFee: taskFeeCollected,
-          tpaPercent,
-          timelinessScore: timeliness ? timeliness.score : null,
-          timelinessConsumedPercent: timeliness ? Math.round(timeliness.consumedPercent * 10) / 10 : null,
-          qualityScore,
-          formula:
-            qualityScore == null
-              ? 'Pending quality score'
-              : !timeliness
-                ? 'Pending timeliness score'
-                : `${taskFeeCollected} x ${tpaPercent}% x ${timeliness.score}% x ${qualityScore}% = ${feeEarned}`,
-          feeEarned,
-          keyActionsCompleted,
-          keyActionsTotal,
-          taskProgressPercent,
-          workflowStage: stageAllocation?.stageTitle || 'Workflow stage not linked',
-          workflowStagePercent: stageAllocation?.percentage ?? null,
-          timelinessStatus: timeliness ? timeliness.status : 'Late',
-        };
-      })
-      .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
-
     const totalTaskFeeCollected = roundMoney(rows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0));
     const totalFeeEarned = roundMoney(rows.reduce((sum, row) => sum + (row.feeEarned || 0), 0));
     const qualityRows = rows.filter((row) => row.qualityScore != null);
@@ -1429,16 +1293,16 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       selectedMember: {
         name: displayName,
         role,
-        tasksCompleted: rows.length,
+        tasksCompleted: countCompletedWholeCases(rows),
         outstandingTasks: overdueTasks,
         revenueGenerated: totalTaskFeeCollected,
         paymentsReceived: totalTaskFeeCollected,
         outstandingBalance: 0,
         feesEarned: totalFeeEarned,
-        qualityReviewStatus: 'Uses completed Key Action task scores when available; otherwise the productivity multiplier defaults to 100%.',
+        qualityReviewStatus: 'Uses the case Quality Score entered through Case Management (Reviewer / Signer-Approver); missing scores render "_" until entered.',
       },
       productivitySummary: {
-        completedTasks: rows.length,
+        completedTasks: countCompletedWholeCases(rows),
         totalTaskFeeCollected,
         totalTaskFee: totalTaskFeeCollected,
         totalFeeEarned,
@@ -1459,12 +1323,16 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
           earningRoleLabel: roleShare.label,
           earningSharePercent: roleShare.percent,
           activeCases: memberMatters.length,
-          tasksCompleted: rows.length,
+          tasksCompleted: countCompletedWholeCases(rows),
           invoicePaymentsReceived: totalTaskFeeCollected,
           earnedFees: totalFeeEarned,
           revenueAttributed: totalFeeEarned,
           grossFeesHandled: totalTaskFeeCollected,
-          firmRetainedEarnings: roundMoney(Math.max(0, totalTaskFeeCollected - totalFeeEarned)),
+          firmRetainedEarnings: roundMoney(
+        rows
+          .filter((row) => row.feeEarned != null)
+          .reduce((sum, row) => sum + Math.max(0, (row.taskFeeCollected || row.taskFee || 0) - (row.feeEarned || 0)), 0)
+      ),
         },
       ],
     });

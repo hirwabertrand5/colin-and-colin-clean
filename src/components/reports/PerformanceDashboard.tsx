@@ -255,10 +255,10 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
       },
       {
         label: 'Approval Rate',
-        value: `${approvals?.approvalRatePct ?? 0}%`,
+        value: approvals?.approvalRatePct == null ? '_' : `${approvals.approvalRatePct}%`,
         helper: `Approved: ${approvals?.approved ?? 0} • Rejected: ${approvals?.rejected ?? 0}`,
         icon: TrendingUp,
-        tone: approvals && approvals.approvalRatePct >= 80 ? 'green' : 'amber',
+        tone: approvals != null && approvals.approvalRatePct != null && approvals.approvalRatePct >= 80 ? 'green' : 'amber',
         pill: `${approvals?.pending ?? 0} pending`,
       },
       {
@@ -328,7 +328,9 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
     if (data.rating?.value) {
       list.push({
         title: `Rating ${data.rating.value}/5`,
-        description: `${ratingLabel(data.rating.value)} • Productivity ${data.rating.productivityScore}% • Quality ${data.averageQualityScore ?? data.rating.qualityScore}%`,
+        description: `${ratingLabel(data.rating.value)} • Productivity ${data.rating.productivityScore}% • Quality ${
+            data.rating.qualityScore == null ? '_' : `${data.rating.qualityScore}%`
+          }`,
         icon: Award,
         tone: data.rating.value >= 4 ? 'green' : data.rating.value >= 3 ? 'amber' : 'red',
       });
@@ -343,12 +345,12 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
       });
     }
 
-    if ((data.approvals?.approvalRatePct ?? 0) > 0) {
+    if (data.approvals?.approvalRatePct != null && data.approvals.approvalRatePct > 0) {
       list.push({
-        title: `Approval rate ${data.approvals?.approvalRatePct ?? 0}%`,
+        title: `Approval rate ${data.approvals.approvalRatePct}%`,
         description: `${data.approvals?.approved ?? 0} approved • ${data.approvals?.pending ?? 0} pending`,
         icon: TrendingUp,
-        tone: data.approvals!.approvalRatePct >= 80 ? 'green' : 'amber',
+        tone: data.approvals.approvalRatePct >= 80 ? 'green' : 'amber',
       });
     }
 

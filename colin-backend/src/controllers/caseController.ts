@@ -326,8 +326,12 @@ export const getAllCases = async (req: AuthRequest, res: Response) => {
     }).sort({ updatedAt: -1 });
     const yellowCases = yellowCandidates.filter((c: any) => isPublicYellowCase(c));
 
+    // Interns only see cases actually assigned to them plus approaching-deadline
+    // (yellow) cases they may request — never all cases or task-only links.
+    const isIntern = role === 'intern';
+
     const map = new Map<string, any>();
-    [...assignedCases, ...taskCases, ...yellowCases].forEach((c: any) => map.set(String(c._id), c));
+    [...assignedCases, ...(isIntern ? [] : taskCases), ...yellowCases].forEach((c: any) => map.set(String(c._id), c));
     return res.json(Array.from(map.values()));
   } catch {
     return res.status(500).json({ message: 'Failed to fetch cases.' });
@@ -472,63 +476,37 @@ export const createCase = async (req: AuthRequest, res: Response) => {
       assignedCaseAssignments?.initiator && assignedCaseAssignments?.reviewer && assignedCaseAssignments?.signerApprover
     );
     if (hasMatterAssignments) {
-      // A linked task makes each workflow Key Action actionable in Task Details
-      // for the initiator, reviewer and signer/approver. The generic task is
-      // kept only for matters without a workflow template.
-      if (createdWorkflowSteps.length) {
-        for (const step of createdWorkflowSteps) {
-          const stepDueAt = resolveDeadlineDateTime(step?.dueAt) || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-          const stepStartAt = resolveDeadlineDateTime(step?.startAt) || normalizedWorkflowStartDate;
-          const dueDate = stepDueAt.toISOString().slice(0, 10);
-          const taskNo = await buildYearlySequence('task', 'TASK');
-          await Task.create({
-            caseId: newCase._id,
-            taskNo,
-            title: String(step?.title || 'Workflow Key Action'),
-            workflowMode: 'STAGED',
-            workflowStage: 'Assigned',
-            workflowStageKey: String(step?.stageKey || ''),
-            workflowStepKey: String(step?.stepKey || ''),
-            priority: 'Medium',
-            status: 'Not Started',
-            assignee: String(assignedCaseAssignments.initiator || newCase.assignedTo || req.user?.name || '').trim(),
-            supervisor: String(assignedCaseAssignments.reviewer || assignedCaseAssignments.signerApprover || req.user?.name || '').trim(),
-            relatedClient: String(newCase.parties || '').trim(),
-            startDate: stepStartAt.toISOString().slice(0, 10),
-            dueDate,
-            description: 'Auto-created from this workflow Key Action. Complete the staged activity, attach supporting documents, then submit the task.',
-            taskStages: buildMatterTaskStages(newCase, dueDate),
-            requiresApproval: false,
-            approvalStatus: 'Not Required',
-            assignedBy: req.user?.name || 'System',
-          });
-        }
-      } else {
-      const autoTaskNo = await buildYearlySequence('task', 'TASK');
-      const autoDueDate = new Date();
-      autoDueDate.setDate(autoDueDate.getDate() + 7);
-      const autoDueDateString = autoDueDate.toISOString().slice(0, 10);
-      const stagedTask = new Task({
-        caseId: newCase._id,
-        taskNo: autoTaskNo,
-        title: `Matter Assignment - ${newCase.caseNo || 'Case'}`,
-        workflowMode: 'STAGED',
-        workflowStage: 'Assigned',
-        priority: 'Medium',
-        status: 'Not Started',
-        assignee: String(assignedCaseAssignments.initiator || newCase.assignedTo || req.user?.name || '').trim(),
-        supervisor: String(assignedCaseAssignments.reviewer || assignedCaseAssignments.signerApprover || req.user?.name || '').trim(),
-        relatedClient: String(newCase.parties || '').trim(),
-        startDate: newCase.workflowStartDate || newCase.createdAt?.toISOString().slice(0, 10) || new Date().toISOString().slice(0, 10),
-        dueDate: autoDueDateString,
-        description: 'Auto-created from matter assignment.',
-        taskStages: buildMatterTaskStages(newCase, autoDueDateString),
-        requiresApproval: false,
-        approvalStatus: 'Not Required',
-        assignedBy: req.user?.name || 'System',
-      });
+      // The case lifecycle is driven by the three assigned members and the
+      // workflow template's Key Actions through the Case Management tab. No
+      // separate per-Key-Action tasks are auto-created. A single
+      // matter-assignment task is kept only for matters without a workflow
+      // template.
+      if (!createdWorkflowSteps.length) {
+        const autoTaskNo = await buildYearlySequence('task', 'TASK');
+        const autoDueDate = new Date();
+        autoDueDate.setDate(autoDueDate.getDate() + 7);
+        const autoDueDateString = autoDueDate.toISOString().slice(0, 10);
+        const stagedTask = new Task({
+          caseId: newCase._id,
+          taskNo: autoTaskNo,
+          title: `Matter Assignment - ${newCase.caseNo || 'Case'}`,
+          workflowMode: 'STAGED',
+          workflowStage: 'Assigned',
+          priority: 'Medium',
+          status: 'Not Started',
+          assignee: String(assignedCaseAssignments.initiator || newCase.assignedTo || req.user?.name || '').trim(),
+          supervisor: String(assignedCaseAssignments.reviewer || assignedCaseAssignments.signerApprover || req.user?.name || '').trim(),
+          relatedClient: String(newCase.parties || '').trim(),
+          startDate: newCase.workflowStartDate || newCase.createdAt?.toISOString().slice(0, 10) || new Date().toISOString().slice(0, 10),
+          dueDate: autoDueDateString,
+          description: 'Auto-created from matter assignment.',
+          taskStages: buildMatterTaskStages(newCase, autoDueDateString),
+          requiresApproval: false,
+          approvalStatus: 'Not Required',
+          assignedBy: req.user?.name || 'System',
+        });
 
-      await stagedTask.save();
+        await stagedTask.save();
       }
     }
 

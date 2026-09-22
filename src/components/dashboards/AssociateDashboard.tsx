@@ -260,7 +260,7 @@ const getTimelinessBand = (task: TaskData, todayISO: string) => {
   return 'late';
 };
 
-const getTimelinessScore = (task: TaskData, todayISO: string) => Math.max(0, Math.round(100 - getConsumedPercent(task, todayISO)));
+const getTimelinessScore = (task: TaskData, todayISO: string) => Math.min(100, Math.max(0, Math.round(100 - getConsumedPercent(task, todayISO))));
 
 const toneClasses: Record<Tone, { icon: string; text: string; chip: string; bar: string }> = {
   slate: { icon: 'bg-gray-100 text-gray-700', text: 'text-gray-900', chip: 'bg-gray-100 text-gray-700', bar: 'bg-gray-700' },

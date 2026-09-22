@@ -33,10 +33,12 @@ type Props = {
   tasks?: TaskData[];
   currentUserName?: string;
   currentUserEmail?: string;
+  /** When provided, Key Actions opened by the three assigned members redirect to the Case Management tab. */
+  onOpenCaseManagement?: (stepKey?: string) => void;
 };
 
 const formatMoney = (amount: number | null | undefined, currency?: string) => {
-  if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) return '—';
+  if (amount === null || amount === undefined || !Number.isFinite(Number(amount))) return '_';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: String(currency || 'RWF'),
@@ -44,7 +46,7 @@ const formatMoney = (amount: number | null | undefined, currency?: string) => {
   }).format(Number(amount));
 };
 
-export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged, tasks, currentUserName, currentUserEmail }: Props) {
+export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged, tasks, currentUserName, currentUserEmail, onOpenCaseManagement }: Props) {
   void canUpload;
   const navigate = useNavigate();
   const [wf, setWf] = useState<WorkflowInstance | null>(null);
@@ -208,9 +210,16 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setWf(updated);
       // Reconcile case progress in the background — never block the checkbox on extra round-trips.
       notifyWorkflowChanged();
-      // When the user ticks a key action on the case workspace, take them to the related task
-      // detail (their own assigned task on this matter) so they can complete and submit it.
-      if (nextDone) void goToTaskDetail(stepKey, snapshotAction?.text || snapshotStep?.title || '');
+      // When the user ticks a key action on the case workspace, the three
+      // assigned members work through the Case Management tab (workflow →
+      // review → approval). Redirect them there with the Key Action in context.
+      if (nextDone) {
+        if (onOpenCaseManagement) {
+          onOpenCaseManagement(stepKey);
+        } else {
+          void goToTaskDetail(stepKey, snapshotAction?.text || snapshotStep?.title || '');
+        }
+      }
     } catch (e: any) {
       setWf(snapshot); // revert the optimistic flip
       setErr(e.message || 'Failed to update key action');
@@ -397,6 +406,22 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             {earned?.missingKeyActionPercentages?.length} Key Action percentage{earned?.missingKeyActionPercentages?.length === 1 ? '' : 's'} missing. Those actions remain worth 0 until a percentage is set in the workflow.
           </div>
         )}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300">
+            Matter Quality Score:{' '}
+            {earned?.qualityScore == null ? '_' : `${earned.qualityScore}%`}
+          </span>
+          {earned?.qualityScoredBy ? (
+            <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300">
+              Recorded by {earned.qualityScoredBy}
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-400">
+              Not yet scored - earned fees render '_' until the Quality Score is entered.
+            </span>
+          )}
+        </div>
+
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
@@ -432,6 +457,20 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               Paid: {formatMoney(earned?.collectedAmount, earned?.currency)}{Number(earned?.collectedAmount || 0) <= 0 ? ' — staff earnings remain 0' : ''}
             </div>
           </div>
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Staff Earned Fees</div>
+            <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
+              {earned?.staffEarnedTotal == null ? '_' : formatMoney(earned.staffEarnedTotal, earned.currency)}
+            </div>
+            <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Earned by the assigned members</div>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Remaining Firm Fee</div>
+            <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
+              {earned?.firmFee == null ? '_' : formatMoney(earned.firmFee, earned.currency)}
+            </div>
+            <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Eligible collected value after staff earned fees</div>
+          </div>
         </div>
 
         {earned && earned.team.length > 0 ? (
@@ -457,22 +496,22 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{member.role}</td>
                       <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{member.name}</td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
-                        {member.tpaPercent > 0 ? `${member.tpaPercent}%` : '—'}
+                        {member.tpaPercent > 0 ? `${member.tpaPercent}%` : '_'}
                       </td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
-                        {member.timelinessScore != null ? `${member.timelinessScore}%` : '—'}
+                        {member.timelinessScore != null ? `${member.timelinessScore}%` : '_'}
                       </td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
-                        {member.qualityScore != null ? `${member.qualityScore}%` : '—'}
+                        {member.qualityScore != null ? `${member.qualityScore}%` : '_'}
                       </td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
                         {formatMoney(member.taskFeeCollected, earned.currency)}
                       </td>
                       <td
                         className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100"
-                        title={noScores ? 'Timeliness/quality not scored yet — treated as 100%' : ''}
+                        title={noScores ? 'Timeliness/quality not scored yet — earned fee renders _ until the scores are entered.' : ''}
                       >
-                        {fee != null ? formatMoney(fee, earned.currency) : '—'}
+                        {fee != null ? formatMoney(fee, earned.currency) : '_'}
                       </td>
                     </tr>
                   );
@@ -580,6 +619,18 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     ⏳ Key actions pending
                   </span>
                 )}
+                {hasActions ? (
+                  <span
+                    className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+                      allActionsDone
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                        : 'border-gray-300 bg-gray-50 text-gray-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
+                    }`}
+                    title={allActionsDone ? 'All Key Actions under this Step are completed' : 'Some Key Actions under this Step are still incomplete'}
+                  >
+                    {allActionsDone ? 'Step: Done' : 'Step: In Progress'}
+                  </span>
+                ) : null}
                 {latestExtension ? (
                   <span
                     className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"

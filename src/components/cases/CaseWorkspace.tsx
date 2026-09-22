@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import CaseClientReportsTab from '../reports/CaseClientReportsTab';
 import CaseWorkflowTab from './CaseWorkflowTab';
+import CaseManagementTab from './CaseManagementTab';
 import {
   FileText,
   Upload,
@@ -10,6 +11,7 @@ import {
   Calendar as CalendarIcon,
   DollarSign,
   Clock,
+  ListChecks,
   Edit,
   Check,
   Eye,
@@ -248,8 +250,15 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   // Tabs
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'teamStages' | 'tasks' | 'calendar' | 'documents' | 'billing' | 'audit' | 'reports'
+    'overview' | 'caseManagement' | 'teamStages' | 'tasks' | 'calendar' | 'documents' | 'billing' | 'audit' | 'reports'
   >('overview');
+  // Optional Key Action context when arriving from the Case Workspace Key Actions.
+  const [cmFocusStep, setCmFocusStep] = useState('');
+
+  const openCaseManagementFromKeyAction = (stepKey?: string) => {
+    setCmFocusStep(String(stepKey || ''));
+    setActiveTab('caseManagement');
+  };
 
   // Workflow instance (for overview checklist)
   const [workflowInstance, setWorkflowInstance] = useState<WorkflowInstance | null>(null);
@@ -1406,6 +1415,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         <nav className="flex space-x-6 overflow-x-auto">
           {[
             { id: 'overview', label: 'Overview', icon: FileText },
+            { id: 'caseManagement', label: 'Case Management', icon: ListChecks },
             { id: 'teamStages', label: 'Team & Stages', icon: FolderTree },
             { id: 'tasks', label: 'Tasks', icon: CheckSquare },
             { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
@@ -1562,6 +1572,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 tasks={tasks}
                 currentUserName={currentUser?.name}
                 currentUserEmail={currentUser?.email}
+                onOpenCaseManagement={openCaseManagementFromKeyAction}
                 onWorkflowChanged={async () => {
                   if (!caseData?._id) return;
                   // The workflow endpoints (toggle/complete/reopen/amend) already persist the case's
@@ -1932,6 +1943,23 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
             </div>
           )}
         </div>
+      )}
+
+      {/* ✅ Case Management — the three assigned members + workflow Key Actions */}
+      {activeTab === 'caseManagement' && caseData?._id && (
+        <CaseManagementTab
+          caseId={caseData._id}
+          currentUserName={currentUser?.name}
+          currentUserEmail={currentUser?.email}
+          focusStepKey={cmFocusStep}
+          onWorkflowChanged={() => {
+            if (!caseData?._id) return;
+            void getCaseById(caseData._id).then((nextCase: any) => {
+              if (nextCase) setCaseData(nextCase);
+            });
+            void getWorkflowForCase(caseData._id).then((nextWorkflow) => setWorkflowInstance(nextWorkflow));
+          }}
+        />
       )}
 
       {/* ✅ Client Reports (MD/Exec only) */}
