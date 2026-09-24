@@ -125,6 +125,12 @@ export interface CaseData {
     accruedUnbilled?: number;
   };
 
+  caseManagement?: {
+    qualityScore?: number;
+    qualityScoredBy?: string;
+    qualityScoredAt?: string;
+  };
+
   initialWorkflowActions?: Record<string, number[]>;
 
   createdAt?: string;

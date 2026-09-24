@@ -6,7 +6,7 @@ export const baseNameFromLabel = (label: unknown): string => {
   return cutComma.trim().replace(/\s+/g, ' ');
 };
 
-export const pctRatio = (n?: number | null): number => Math.max(0, Math.round(Number(n || 0))) / 100;
+export const pctRatio = (n?: number | null): number => Math.max(0, Math.min(100, Math.round(Number(n || 0)))) / 100;
 
 export const round2 = (n: number): number => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 

@@ -668,6 +668,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const earnedByName = new Map<string, number>();
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
+    // A Task is the whole case: count distinct completed cases per member, never
+    // the staged per-Key-Action task records as individual tasks.
+    const wholeCaseTasksByName = new Map<string, Set<string>>();
 
     for (const t of tasksCompleted as any[]) {
       const name = baseNameFromLabel(t.assignee);
@@ -693,6 +696,11 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     for (const row of productivityRows) {
       const name = baseNameFromLabel(row.staff);
+      if (row?.caseCompleted && row?.caseId) {
+        const set = wholeCaseTasksByName.get(name) || new Set<string>();
+        set.add(String(row.caseId));
+        wholeCaseTasksByName.set(name, set);
+      }
       grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + (row.taskFeeCollected || 0));
       // Missing TPA/timeliness/quality renders the earned fee as null ('_') —
       // those rows contribute nothing to staff earnings or to the firm's
@@ -706,13 +714,20 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const overdueFilter: any = { status: { $ne: 'Completed' } };
-    if (selectedMemberName) overdueFilter.assignee = selectedMemberName;
-    const overdueTasks = await Task.find(overdueFilter).select('assignee').lean();
-    const overdueByName = new Map<string, number>();
-    for (const t of overdueTasks as any[]) {
-      const name = baseNameFromLabel(t.assignee);
-      overdueByName.set(name, (overdueByName.get(name) || 0) + 1);
+    // Whole-case overdue: an open matter whose next/current deadline has passed,
+    // attributed to its primary assignee (Task = whole case).
+    const overdueMattersByName = new Map<string, number>();
+    for (const c of allCases as any[]) {
+      if (!isOpenCase(c)) continue;
+      const wp = c.workflowProgress || {};
+      const due = resolveDeadlineDateTime(wp.currentStepDueAt || wp.nextDueAt);
+      if (!due || due.getTime() > Date.now()) continue;
+      const assignments = c.caseAssignments || {};
+      const primary = String(c.assignedTo || assignments.initiator || '').trim();
+      const name = baseNameFromLabel(primary);
+      if (!name) continue;
+      if (selectedMemberNameNormalized && baseNameFromLabel(name) !== selectedMemberNameNormalized) continue;
+      overdueMattersByName.set(name, (overdueMattersByName.get(name) || 0) + 1);
     }
 
     const prospectCountsByUser = new Map<string, number>(
@@ -731,9 +746,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         const taskCount = completedTasksByName.get(memberKey) || 0;
         const prospectCount = prospectCountsByUser.get(String(u._id)) || 0;
         const reportCount = reportCountsByUser.get(String(u._id)) || 0;
-        const assistantProductivity = roleShare.label.includes('Executive Assistant')
-          ? taskCount + prospectCount + reportCount
-          : taskCount;
+        // Tasks Completed = whole cases completed (each Task is a whole case);
+        // never the staged per-Key-Action task records.
+        const wholeCasesCompleted = wholeCaseTasksByName.get(memberKey)?.size || 0;
 
         return {
           id: String(u._id),
@@ -742,7 +757,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           earningRoleLabel: roleShare.label,
           earningSharePercent: roleShare.percent,
           activeCases: activeCaseIdsByName.get(normalizedName)?.size || 0,
-          tasksCompleted: assistantProductivity,
+          tasksCompleted: wholeCasesCompleted,
           assistantTasksCompleted: taskCount,
           prospectsCreated: prospectCount,
           reportsGenerated: reportCount,
@@ -754,7 +769,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           earlyTasks: earlyByName.get(memberKey) || 0,
           onTimeTasks: onTimeByName.get(memberKey) || 0,
           lateTasks: lateByName.get(memberKey) || 0,
-          overdueTasks: overdueByName.get(memberKey) || 0,
+          overdueTasks: overdueMattersByName.get(memberKey) || 0,
           excellentTasks: excellentByName.get(memberKey) || 0,
           goodTasks: goodByName.get(memberKey) || 0,
           delayedTasks: delayedByName.get(memberKey) || 0,
@@ -1144,8 +1159,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       ? {
         name: selectedMemberName,
         role: selectedMember?.role || 'Unknown',
-        tasksCompleted: completedTasksByName.get(selectedMemberNameNormalized || '') || 0,
-        outstandingTasks: overdueByName.get(selectedMemberNameNormalized || '') || 0,
+        // Task = whole case: completed matters, then overdue matters.
+        tasksCompleted: wholeCaseTasksByName.get(selectedMemberNameNormalized || '')?.size || 0,
+        outstandingTasks: overdueMattersByName.get(selectedMemberNameNormalized || '') || 0,
         revenueGenerated: Math.round((grossHandledByName.get(selectedMemberNameNormalized || '') || 0) * 100) / 100,
         paymentsReceived: Math.round(
           selectedMatters.reduce((sum, matter: any) => sum + (paidInvoicesByCaseId.get(String(matter._id)) || 0), 0) * 100

@@ -593,7 +593,9 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       ? computeMemberFeeEarnedFromRows(earningsRows, { meId, meName: me?.name })
       : earningsSummary?.totalFeeEarned ?? 0)
     ?? 0;
-  const reportTasksCompleted = earningsSummary?.completedTasks ?? performance?.tasksCompleted ?? taskSignals.completed.length;
+  const reportTasksCompleted = earningsSummary?.completedTasks
+    ?? performance?.tasksCompleted
+    ?? authorisedCases.filter((matter) => String(matter.workflowProgress?.status || '').toLowerCase() === 'completed' || String(matter.status || '').toLowerCase() === 'closed').length;
   const reportTpaPercent =
     earningsReport?.productivityRows?.find((row) => row.tpaPercent != null)?.tpaPercent ??
     earningsTeamRow?.earningSharePercent ??

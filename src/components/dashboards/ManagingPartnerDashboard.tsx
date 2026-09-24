@@ -144,6 +144,13 @@ const timeAgo = (iso?: string) => {
 const normalize = (value?: string) => String(value || '').trim().toLowerCase().replace(/[-_]/g, ' ');
 const isClosedMatter = (matter: CaseData) => normalize(matter.status) === 'closed';
 const isActiveMatter = (matter: CaseData) => !isClosedMatter(matter) && normalize(matter.status) !== 'temporarily closed';
+/** Task = whole case: a matter is complete only when the whole workflow is complete. */
+const isMatterCompleted = (matter: CaseData) =>
+  normalize(matter.workflowProgress?.status || '') === 'completed' || isClosedMatter(matter);
+const matterNextDueAt = (matter: CaseData) =>
+  resolveDeadlineDateTime(matter.workflowProgress?.currentStepDueAt || matter.workflowProgress?.nextDueAt);
+const matterAssigneeOf = (matter: CaseData) =>
+  String(matter.assignedTo || matter.caseAssignments?.initiator || 'Unassigned').trim();
 const getTaskDueAt = (task: TaskData) => resolveDeadlineDateTime(task.dueDate);
 const getProspectValue = (prospect: Prospect) => toNumber(prospect.estimatedFeeValue) || toNumber(prospect.estimatedMatterValue);
 const isConvertedProspect = (prospect: Prospect) => normalize(prospect.stage) === 'converted';
@@ -473,28 +480,31 @@ export default function ManagingPartnerDashboard() {
     });
   }, [billingMonths]);
 
-  const openTasks = useMemo(() => tasks.filter((task) => task.status !== 'Completed'), [tasks]);
-  const completedTasks = useMemo(() => tasks.filter((task) => task.status === 'Completed'), [tasks]);
+  // Task = whole case: these aggregates count whole matters, never the staged
+  // per-Key-Action task records as individual tasks.
+  const openMatters = useMemo(() => cases.filter((matter) => isActiveMatter(matter) && !isMatterCompleted(matter)), [cases]);
+  const completedMatters = useMemo(() => cases.filter((matter) => isMatterCompleted(matter)), [cases]);
+  const openTasks = openMatters;
+  const completedTasks = completedMatters;
   const openTaskSeries = useMemo(() => {
     const map = new Map<string, number>();
-    tasks.forEach((task) => {
-      const key = monthKey(task.createdAt || task.dueDate);
-      if (key && task.status !== 'Completed') map.set(key, (map.get(key) || 0) + 1);
+    openMatters.forEach((matter) => {
+      const key = monthKey(matter.createdAt || matter.workflowStartDate);
+      if (key) map.set(key, (map.get(key) || 0) + 1);
     });
     return Array.from(map.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-8)
       .map(([key, value]) => ({ label: monthLabel(key), value }));
-  }, [tasks]);
+  }, [openMatters]);
 
   const overdueTasks = useMemo(
     () =>
-      tasks.filter((task) => {
-        if (task.status === 'Completed') return false;
-        const due = getTaskDueAt(task);
+      openMatters.filter((matter) => {
+        const due = matterNextDueAt(matter);
         return Boolean(due && Number.isFinite(due.getTime()) && due.getTime() < Date.now());
       }),
-    [tasks]
+    [openMatters]
   );
 
   const upcomingDeadlines = useMemo(
@@ -547,7 +557,7 @@ export default function ManagingPartnerDashboard() {
     const engagement = activeMatters.filter((matter) => (matter.workflowProgress?.percent || 0) > 25 && (matter.workflowProgress?.percent || 0) <= 70).length;
     const active = activeMatters.filter((matter) => (matter.workflowProgress?.percent || 0) > 70).length;
     const review = tasks.filter((task) => task.workflowStage === 'Awaiting Review' || task.approvalStatus === 'Pending').length;
-    const completion = tasks.filter((task) => task.status === 'Completed').length;
+    const completion = cases.filter((matter) => isMatterCompleted(matter)).length;
     const closed = cases.filter(isClosedMatter).length;
     return [
       { label: 'Inquiry / Intake', value: inquiry, color: '#1d4ed8' },
@@ -583,8 +593,8 @@ export default function ManagingPartnerDashboard() {
 
   const capacityRows = useMemo(() => {
     const openByAssignee = new Map<string, number>();
-    openTasks.forEach((task) => {
-      const assignee = task.assignee || 'Unassigned';
+    openTasks.forEach((matter) => {
+      const assignee = matterAssigneeOf(matter as CaseData);
       openByAssignee.set(assignee, (openByAssignee.get(assignee) || 0) + 1);
     });
     const available = staff.filter((person) => (openByAssignee.get(person.name) || 0) <= 3).length;
@@ -628,7 +638,7 @@ export default function ManagingPartnerDashboard() {
     ? activeMatters.filter((matter) => normalize(matter.priority) === 'high' || toNumber(matter.workflowProgress?.percent) <= 25).length
     : null;
   const conflictReviews = sources.prospects ? prospects.filter((prospect) => prospect.conflictCheckStatus === 'Flagged').length : null;
-  const complianceExceptions = sources.tasks ? overdueTasks.length : null;
+  const complianceExceptions = sources.cases ? overdueTasks.length : null;
   const regulatoryDeadlines = sources.events
     ? events.filter((event) => normalize(event.type).includes('regulatory') || normalize(event.title).includes('regulatory')).length
     : null;
@@ -637,7 +647,7 @@ export default function ManagingPartnerDashboard() {
     const alerts: Array<{ tone: AlertTone; text: string; time: string }> = [];
     if (highRiskMatters && highRiskMatters > 0) alerts.push({ tone: 'critical', text: `${highRiskMatters} matters require your immediate attention`, time: 'Live' });
     if (pendingInvoiceTotal > 0) alerts.push({ tone: 'high', text: `${pendingInvoices.length} invoices are pending (${formatMoney(pendingInvoiceTotal)})`, time: 'Live' });
-    if (overdueTasks.length > 0) alerts.push({ tone: 'high', text: `${overdueTasks.length} tasks are overdue`, time: 'Live' });
+    if (overdueTasks.length > 0) alerts.push({ tone: 'high', text: `${overdueTasks.length} matters are overdue`, time: 'Live' });
     if (nearDeadlines.length > 0) alerts.push({ tone: 'medium', text: `${nearDeadlines.length} deadlines due in the next 7 days`, time: 'Live' });
     if (conflictReviews && conflictReviews > 0) alerts.push({ tone: 'medium', text: `${conflictReviews} conflict checks require review`, time: 'Live' });
     return alerts.slice(0, 5);
@@ -717,12 +727,12 @@ export default function ManagingPartnerDashboard() {
         />
         <MetricCard
           title="Open Tasks"
-          value={sources.tasks ? formatCount(openTasks.length) : NA}
+          value={sources.cases ? formatCount(openTasks.length) : NA}
           note="vs last month"
           icon={CheckSquare}
           tone="purple"
-          trend={sources.tasks ? newestMonthPair(openTaskSeries.length ? openTaskSeries : [{ label: 'Now', value: currentOpenTasks }]) : null}
-          data={sources.tasks ? openTaskSeries : []}
+          trend={sources.cases ? newestMonthPair(openTaskSeries.length ? openTaskSeries : [{ label: 'Now', value: currentOpenTasks }]) : null}
+          data={sources.cases ? openTaskSeries : []}
           to="/tasks"
         />
         <MetricCard

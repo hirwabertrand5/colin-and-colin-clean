@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Task from '../models/taskModel';
 import User from '../models/userModel';
+import Case from '../models/caseModel';
+import WorkflowInstance from '../models/workflowInstanceModel';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
@@ -58,7 +60,7 @@ const computeRating1to5 = (inputs: {
   qualityScore: number | null;      // 0..100
   reliabilityScore: number | null;  // 0..100
 }): number | null => {
-  // A rating requires all three inputs to be real data — never invent values.
+  // A rating requires all three inputs to be real data - never invent values.
   if (inputs.productivityScore == null || inputs.qualityScore == null || inputs.reliabilityScore == null) return null;
 
   // Weighted score
@@ -75,26 +77,185 @@ const computeRating1to5 = (inputs: {
   return 1;
 };
 
-const getUserScopeFilter = (req: AuthRequest, userName: string) => {
-  // In your system tasks are scoped by assignee name (MVP).
-  // MD can query anyone; others can query only self.
-  if (req.user?.role === 'managing_director') return { assignee: userName };
-  return { assignee: req.user?.name || '' };
+const normalizePerformanceName = (value: unknown) => String(value || '').trim().toLowerCase();
+
+/** Whether the user is part of the assigned team of a case. */
+const caseTeamIncludes = (c: any, name: string) => {
+  const me = normalizePerformanceName(name);
+  if (!me) return false;
+  const candidates = [
+    c?.assignedTo,
+    c?.caseAssignments?.initiator,
+    c?.caseAssignments?.reviewer,
+    c?.caseAssignments?.signerApprover,
+  ].map(normalizePerformanceName).filter(Boolean);
+  return candidates.includes(me);
+};
+
+const isClosedCase = (c: any) => String(c?.status || '').trim().toLowerCase() === 'closed';
+
+/** A Task is the whole case: it is completed only when every Key Action is completed. */
+const wholeCaseCompleted = (inst: any) => {
+  if (!inst) return false;
+  if (String(inst?.status || '').trim().toLowerCase() === 'completed') return true;
+  const steps = Array.isArray(inst?.steps) ? inst.steps : [];
+  if (!steps.length) return false;
+  return steps.every((s: any) => String(s?.status || '').trim().toLowerCase() === 'completed');
+};
+
+const stepDate = (value: unknown): Date | null => {
+  const resolved = resolveDeadlineDateTime(value as never);
+  return resolved && Number.isFinite(resolved.getTime()) ? resolved : null;
+};
+
+/** Whole-case completion moment = the latest completed Key Action's completedAt. */
+const caseCompletionDate = (c: any, inst: any): Date | null => {
+  if (inst) {
+    const completedSteps = (Array.isArray(inst.steps) ? inst.steps : []) as any[];
+  const dateValues: Array<Date | null> = completedSteps
+    .filter((s: any) => String(s?.status || '').trim().toLowerCase() === 'completed' && s?.completedAt)
+    .map((s: any): Date | null => stepDate(s.completedAt));
+  const dates = dateValues.filter((d): d is Date => d !== null && Number.isFinite(d.getTime()));
+    if (dates.length) return new Date(Math.max(...dates.map((d) => d.getTime())));
+  }
+  if (isClosedCase(c)) {
+    const updated = c?.updatedAt ? new Date(c.updatedAt) : null;
+    if (updated && Number.isFinite(updated.getTime())) return updated;
+  }
+  return null;
+};
+
+/** Next/current due date of the open portion of the case workflow. */
+const caseNextDueAt = (c: any, inst: any): Date | null => {
+  if (inst && !wholeCaseCompleted(inst)) {
+    const steps = (Array.isArray(inst.steps) ? inst.steps : []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+    const open = steps.find((s: any) => String(s?.status || '').trim().toLowerCase() !== 'completed');
+    if (open?.dueAt) return stepDate(open.dueAt);
+    for (const s of steps) if (s?.dueAt) return stepDate(s.dueAt);
+  }
+  return stepDate(c?.workflowProgress?.currentStepDueAt) || stepDate(c?.workflowProgress?.nextDueAt);
+};
+
+/**
+ * Whole-case timeliness from the last completed Key Action using the existing
+ * 100 âˆ’ consumed% formula. Always capped at 100 â€” never above.
+ */
+const caseTimelinessScore = (c: any, inst: any): number | null => {
+  if (!inst) return null;
+  const steps = (Array.isArray(inst.steps) ? inst.steps : [])
+    .filter((s: any) => String(s?.status || '').trim().toLowerCase() === 'completed' && s?.startAt && s?.completedAt && s?.dueAt)
+    .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+  if (!steps.length) return null;
+  const last = steps[steps.length - 1];
+  const startAt = stepDate(last.startAt);
+  const completedAt = stepDate(last.completedAt);
+  const dueAt = stepDate(last.dueAt);
+  if (!startAt || !completedAt || !dueAt) return null;
+  const totalMs = dueAt.getTime() - startAt.getTime();
+  if (!Number.isFinite(totalMs) || totalMs <= 0) return null;
+  const usedMs = completedAt.getTime() - startAt.getTime();
+  const consumed = Math.round((usedMs / totalMs) * 1000) / 10;
+  return Math.min(100, Math.max(0, Math.round(100 - consumed)));
 };
 
 async function computeUserPerformance(req: AuthRequest, userName: string, from: string, to: string) {
-  const scope = getUserScopeFilter(req, userName);
+  const scopeName = String(userName || req.user?.name || '').trim();
 
-  // Use completedAt for completion KPIs; use dueDate range for planning KPIs
-  const tasks = await Task.find(scope).lean();
+  // A Task is the whole case: the universe below is the user's matters (cases),
+  // never the staged per-Key-Action task records.
+  const [cases, contributorTasks] = await Promise.all([
+    Case.find()
+      .select('_id caseNo assignedTo caseAssignments status priority workflowProgress caseManagement createdAt updatedAt workflowStartDate')
+      .lean(),
+    scopeName
+      ? Task.find({ $or: [{ assignee: scopeName }, { supervisor: scopeName }] }).select('caseId taskStages').lean()
+      : [],
+  ]);
 
-  // limit to range using dueDate for "workload in period"
-  const inRangeTasks = tasks.filter((t: any) => String(t.dueDate) >= from && String(t.dueDate) <= to);
+  const me = normalizePerformanceName(scopeName);
+  const contribCaseIds = new Set<string>();
+  for (const task of contributorTasks as any[]) {
+    if (task?.caseId) contribCaseIds.add(String(task.caseId));
+    for (const stage of task?.taskStages || []) {
+      if (stage?.staffMember && normalizePerformanceName(stage.staffMember) === me && task.caseId) {
+        contribCaseIds.add(String(task.caseId));
+      }
+    }
+  }
 
-  const completed = inRangeTasks.filter((t: any) => t.status === 'Completed');
-  const approved = inRangeTasks.filter((t: any) => t.requiresApproval && t.approvalStatus === 'Approved');
-  const rejected = inRangeTasks.filter((t: any) => t.requiresApproval && t.approvalStatus === 'Rejected');
-  const pending = inRangeTasks.filter((t: any) => t.requiresApproval && t.approvalStatus === 'Pending');
+  const myCases = (cases as any[]).filter(
+    (c) => caseTeamIncludes(c, scopeName) || contribCaseIds.has(String(c._id))
+  );
+  const myCaseIds = (myCases as any[]).map((c) => c._id);
+  const instances = myCaseIds.length
+    ? await WorkflowInstance.find({ caseId: { $in: myCaseIds } }).select('caseId status steps').lean()
+    : [];
+  const instByCase = new Map<string, any>((instances as any[]).map((i) => [String(i.caseId), i]));
+
+  // Project each matter into the shape the rest of this function consumes, with
+  // task state now meaning whole-case state.
+  const tasks = (myCases as any[]).map((c) => {
+    const inst: any = instByCase.get(String(c._id)) || null;
+    const completed = wholeCaseCompleted(inst) || isClosedCase(c);
+    const completedAt = completed ? caseCompletionDate(c, inst) : null;
+    const dueAt = caseNextDueAt(c, inst);
+    const completedAtISO = completedAt && Number.isFinite(completedAt.getTime()) ? completedAt.toISOString() : '';
+    const dueISO = dueAt && Number.isFinite(dueAt.getTime()) ? dueAt.toISOString().slice(0, 10) : '';
+    const start = stepDate(c?.workflowStartDate) || (c?.createdAt ? new Date(c.createdAt) : null);
+    const startISO = start && Number.isFinite(start.getTime()) ? start.toISOString().slice(0, 10) : '';
+    const quality = Number.isFinite(Number(c?.caseManagement?.qualityScore))
+      ? Math.min(100, Math.max(0, Number(c.caseManagement.qualityScore)))
+      : null;
+    const pendingDecision = Boolean(
+      !completed &&
+      !isClosedCase(c) &&
+      inst &&
+      (Array.isArray(inst.steps) ? inst.steps : []).some((s: any) => {
+        const status = String(s?.status || '').toLowerCase();
+        return status === 'awaiting review' || status === 'awaiting approval';
+      })
+    );
+    return {
+      _id: c._id,
+      caseId: String(c._id),
+      title: String(c.caseNo || ''),
+      dueDate: dueISO,
+      startDate: startISO,
+      completedAt: completedAtISO || undefined,
+      status: completed ? 'Completed' : String(c?.workflowProgress?.status || c?.status || 'In Progress'),
+      priority: String(c?.priority || 'Medium'),
+      qualityScore: quality,
+      timelinessScore: completed && !isClosedCase(c) ? caseTimelinessScore(c, inst) : null,
+      requiresApproval: pendingDecision,
+      approvalStatus: pendingDecision ? 'Pending' : 'Not Required',
+      isWholeCase: true,
+    };
+  });
+
+  const fromD = new Date(`${from}T00:00:00.000Z`);
+  const toD = new Date(`${to}T23:59:59.999Z`);
+
+  // A matter belongs to the period when it was completed in it, or when an open
+  // matter's next due date falls inside it.
+  const inRangeTasks = tasks.filter((t: any) => {
+    if (t.completedAt) {
+      const comp = new Date(t.completedAt);
+      if (Number.isFinite(comp.getTime()) && comp.getTime() >= fromD.getTime() && comp.getTime() <= toD.getTime()) {
+        return true;
+      }
+    }
+    if (String(t.status || '').toLowerCase() !== 'completed' && t.dueDate) {
+      const due = resolveDeadlineDateTime(t.dueDate);
+      if (due && due.getTime() >= fromD.getTime() && due.getTime() <= toD.getTime()) return true;
+    }
+    return false;
+  });
+
+  const completed = inRangeTasks.filter((t: any) => String(t.status || '').toLowerCase() === 'completed');
+  // Whole cases completed are the approved work; there is no rejection signal in the data model.
+  const approved = completed;
+  const rejected: any[] = [];
+  const pending = inRangeTasks.filter((t: any) => t.requiresApproval === true && t.approvalStatus === 'Pending');
 
   // On-time: completedAt <= dueDate
   const onTimeCount = completed.filter((t: any) => {
@@ -137,7 +298,7 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
       const comp = t.completedAt ? new Date(t.completedAt) : null;
       const due = resolveDeadlineDateTime(t.dueDate);
       if (comp && due && comp.getTime() <= due.getTime()) row.onTime += 1;
-      else row.late += 1;
+      else if (due) row.late += 1;
     }
     monthlyMap.set(key, row);
   }
@@ -151,13 +312,16 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
     return { label, completed: completedItems, total: items.length };
   });
 
-  // Breakdown by status
-  const statusLabels = ['Not Started', 'In Progress', 'Completed'];
-  const byStatus = statusLabels.map((label) => {
-    const items = inRangeTasks.filter((t: any) => t.status === label);
-    const completedItems = items.filter((t: any) => t.status === 'Completed').length;
-    return { label, completed: completedItems, total: items.length };
-  });
+  // Breakdown by whole-case status (dynamic so every matter status is reported)
+  const statusGroupMap = new Map<string, { label: string; completed: number; total: number }>();
+  for (const t of inRangeTasks as any[]) {
+    const label = String(t.status || 'In Progress');
+    const row = statusGroupMap.get(label) || { label, completed: 0, total: 0 };
+    row.total += 1;
+    if (String(t.status || '').toLowerCase() === 'completed') row.completed += 1;
+    statusGroupMap.set(label, row);
+  }
+  const byStatus = Array.from(statusGroupMap.values());
 
   // Weighted productivity: completed tasks weighted by priority, normalized
   const weightedCompleted = completed.reduce((s: number, t: any) => s + priorityWeight(t.priority), 0);
@@ -169,21 +333,20 @@ async function computeUserPerformance(req: AuthRequest, userName: string, from: 
     ? Math.round((scoredQuality.reduce((sum: number, t: any) => sum + (Number(t.qualityScore) || 0), 0) / scoredQuality.length) * 10) / 10
     : null;
 
+  // Whole-case timeliness uses the score already computed from the completed
+  // workflow (100 âˆ’ consumed%, always capped at 100).
   const scoredTimeliness = completed
-    .map((task: any) => getTimelinessScore(task))
-    .filter((score): score is number => score !== null);
+    .map((t: any) => t.timelinessScore as number | undefined | null)
+    .filter((score): score is number => typeof score === 'number' && Number.isFinite(score) && score >= 0);
   const averageTimelinessScore = scoredTimeliness.length
     ? Math.round((scoredTimeliness.reduce((sum: number, score: number) => sum + score, 0) / scoredTimeliness.length) * 10) / 10
     : null;
 
-  // Quality score based on review scores when available, then approval success as fallback
-  const decided = approved.length + rejected.length;
-  const approvalRate = decided ? Math.round((approved.length / decided) * 100) : null; // null until a decision exists — never assume 100%
+  // Quality & reliability only from real data â€” never inferred from other metrics.
+  const approvalRate: number | null = null; // no rejection signal exists in the data model
   const qualityScore = averageQualityScore != null
     ? clamp(averageQualityScore, 0, 100)
-    : approvalRate != null
-      ? clamp(approvalRate, 0, 100)
-      : null;
+    : null;
 
   // Reliability score based on task timeliness, then on-time completion as fallback
   const onTimeReliability = completed.length ? onTimePct : null;

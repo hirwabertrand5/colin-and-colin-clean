@@ -240,7 +240,7 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
       {
         label: 'Tasks Completed',
         value: String(tasksCompleted),
-        helper: tasksTotal ? `Out of ${tasksTotal} tasks in period` : 'No tasks in this period',
+        helper: tasksTotal ? `Out of ${tasksTotal} matters in period (Task = whole case)` : 'No matters in this period',
         icon: CheckSquare,
         tone: 'blue',
         pill: tasksTotal ? `${Math.round((tasksCompleted / Math.max(1, tasksTotal)) * 100)}%` : '—',
@@ -474,7 +474,7 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Current completion</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Completed tasks divided by total tasks</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Completed matters divided by total matters (each Task is a whole case)</div>
                 </div>
                 <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{workflowSignals.completionRate}%</div>
               </div>

@@ -76,6 +76,25 @@ const resolveMyCaseRole = (caseDoc: any, req: AuthRequest) => {
   return 'none';
 };
 
+/**
+ * Whether the signed-in user is the Case Initiator of this matter. This is
+ * computed independently from `resolveMyCaseRole` because administrators that
+ * are labelled as the initiator (e.g. a Managing Partner or Executive Assistant
+ * who created the case) resolve to `admin` there, yet they must still be denied
+ * Quality Score editing.
+ */
+const isCaseInitiator = (caseDoc: any, req: AuthRequest) => {
+  const meName = normalizeIdentity(req.user?.name);
+  const meEmail = normalizeIdentity(req.user?.email);
+  if (!meName && !meEmail) return false;
+  const match = (value: string) => {
+    const normalized = normalizeIdentity(value);
+    return Boolean(normalized) && (normalized === meName || normalized === meEmail);
+  };
+  const assignments = getCaseAssignments(caseDoc);
+  return Boolean(assignments.initiator && match(assignments.initiator));
+};
+
 const allKeyActionsDone = (step: any) => {
   const actions = Array.isArray(step?.actions) ? step.actions : [];
   return actions.length === 0 || actions.every((action: any) => Boolean(action?.done));
@@ -144,6 +163,13 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
   const myRole = resolveMyCaseRole(caseDoc, req);
   const { qualityScore, qualityScoredBy, qualityScoredAt } = getMatterQualityScore(caseDoc);
 
+  // Quality Score editing is available to the Reviewer of this case and to the
+  // Managing Partner / Partner / Executive Assistant roles — never to the Case
+  // Initiator (who may also hold one of those roles).
+  const canEnterQualityScore =
+    !isCaseInitiator(caseDoc, req) &&
+    (myRole === 'reviewer' || isAllowedQualityScoreRole(req.user?.role));
+
   return {
     caseId: String(caseDoc?._id || ''),
     caseNo: String(caseDoc?.caseNo || ''),
@@ -152,7 +178,7 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
     currentStepKey: inst?.currentStepKey,
     members,
     myRole,
-    canEnterQualityScore: myRole === 'reviewer' || isAllowedQualityScoreRole(req.user?.role),
+    canEnterQualityScore,
     qualityScore,
     qualityScoredBy,
     qualityScoredAt,
@@ -395,8 +421,8 @@ export const setQualityScore = async (req: AuthRequest, res: Response) => {
     if (!ctx.caseDoc) return res.status(404).json({ message: 'Case not found.' });
 
     const myRole = resolveMyCaseRole(ctx.caseDoc, req);
-    if (myRole !== 'reviewer' && !isAllowedQualityScoreRole(req.user?.role)) {
-      return res.status(403).json({ message: 'Only the Reviewer, Managing Partner, Partner or Executive Assistant can enter the Quality Score.' });
+    if (myRole === 'initiator' || isCaseInitiator(ctx.caseDoc, req) || (myRole !== 'reviewer' && !isAllowedQualityScoreRole(req.user?.role))) {
+      return res.status(403).json({ message: 'Only the Reviewer, Managing Partner, Partner or Executive Assistant can enter the Quality Score. The Case Initiator cannot.' });
     }
 
     const score = Number(qualityScore);

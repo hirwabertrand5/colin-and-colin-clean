@@ -1178,7 +1178,7 @@ export default function CreateCase({
                                             >
                                               {checked ? <Check className="h-3.5 w-3.5 text-white" /> : null}
                                             </button>
-                                            <span className={checked ? 'text-gray-500 line-through' : 'text-gray-700'}>{action}</span>
+                                            <span className={checked ? 'text-gray-700' : 'text-gray-700'}>{action}</span>
                                           </label>
                                         );
                                       })}
