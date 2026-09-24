@@ -13,6 +13,7 @@ import { listAllWorkflowTemplates, WorkflowTemplate } from '../../services/workf
 import SortableHeader from '../ui/SortableHeader';
 import TableExport from '../ui/TableExport';
 import { sortRows, SortDir } from '../../utils/tableSort';
+import { bulletLines, numberedKeyAction } from '../../utils/workflowFormat';
 import {
   getIntakeAutomationConfig,
   updateIntakeAutomationConfig,
@@ -109,8 +110,8 @@ function WorkflowTable({ sections }: { sections: WorkflowSection[] }) {
     return rows.map((row, index) => ({
       stage: index === 0 ? section.title : '',
       keyActions: row.keyActions,
-      output: index === 0 ? section.output : '',
-      legalBasis: index === 0 ? section.legalBasis : '',
+      output: index === 0 ? bulletLines(section.output) : '',
+      legalBasis: index === 0 ? bulletLines(section.legalBasis) : '',
       percentage: row.percentage,
       timeline: index === 0 ? section.timeline : '',
     }));
@@ -296,17 +297,44 @@ export default function Settings() {
       return range ? `${range} ${sla.unit || 'days'}` : '';
     };
 
-    const templatesSorted = [...workflowTemplates].sort((a, b) => {
-      const aMatter = (a.matterType || '').toLowerCase();
-      const bMatter = (b.matterType || '').toLowerCase();
-      if (aMatter !== bMatter) return aMatter.localeCompare(bMatter);
-      return (a.name || '').localeCompare(b.name || '');
-    });
+    // Settings-page display rule: show only the original active workflows. When
+    // the same workflow exists as several copies/versions, keep the most recently
+    // updated copy. This is a display change only — nothing is deleted from the DB.
+    const templateUpdatedAt = (t: WorkflowTemplate) => {
+      const record = t as WorkflowTemplate & { updatedAt?: unknown; createdAt?: unknown };
+      const source = record.updatedAt || record.createdAt;
+      const parsed = source ? new Date(String(source)).getTime() : Number.NaN;
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const dedupeKey = (t: WorkflowTemplate) =>
+      `${(t.matterType || '').trim().toLowerCase()}::${(t.name || '').trim().toLowerCase()}`;
+    const templatesSorted = workflowTemplates
+      .filter((t) => Boolean(t.active) && !t.draft)
+      .reduce<WorkflowTemplate[]>((unique, t) => {
+        const key = dedupeKey(t);
+        const index = unique.findIndex((u) => dedupeKey(u) === key);
+        if (index === -1) {
+          unique.push(t);
+        } else if (templateUpdatedAt(t) > templateUpdatedAt(unique[index])) {
+          unique[index] = t;
+        }
+        return unique;
+      }, [])
+      .sort((a, b) => {
+        const aMatter = (a.matterType || '').toLowerCase();
+        const bMatter = (b.matterType || '').toLowerCase();
+        if (aMatter !== bMatter) return aMatter.localeCompare(bMatter);
+        return (a.name || '').localeCompare(b.name || '');
+      });
 
     return templatesSorted.map((t) => {
       const steps = (t.steps || []) as TemplateStep[];
       const stepsSorted = [...steps].sort((a, b) => (a.order || 0) - (b.order || 0));
       const stages = [...((t.stages || []) as TemplateStage[])].sort((a, b) => (a.order || 0) - (b.order || 0));
+
+      // Automatic Key Action number — derived from the Key Action's position in
+      // the workflow, spanning every stage/step so it never restarts (1…N).
+      let globalActionNumber = 0;
 
       return {
         id: t._id,
@@ -317,14 +345,17 @@ export default function Settings() {
           const firstStep = sectionSteps[0];
           const rows = sectionSteps.flatMap((step) => {
             const actionItems = step.actions?.length ? step.actions : [step.title || ''];
-            return actionItems.map((action, actionIndex) => ({
-              stage: '',
-              keyActions: `${actionIndex + 1}. ${action}`.trim(),
-              output: '',
-              legalBasis: '',
-              timeline: '',
-              percentage: typeof step.percentage === 'number' ? step.percentage : undefined,
-            }));
+            return actionItems.map((action) => {
+              globalActionNumber += 1;
+              return {
+                stage: '',
+                keyActions: numberedKeyAction(action, globalActionNumber),
+                output: '',
+                legalBasis: '',
+                timeline: '',
+                percentage: typeof step.percentage === 'number' ? step.percentage : undefined,
+              };
+            });
           });
           return {
             id: `${t._id}_${stage.key}`,
@@ -339,6 +370,11 @@ export default function Settings() {
       };
     });
   }, [workflowTemplates]);
+
+  // Auto-open the first visible workflow when none is selected yet.
+  useEffect(() => {
+    if (!openWorkflowId && workflows.length) setOpenWorkflowId(workflows[0].id);
+  }, [openWorkflowId, workflows]);
 
   useEffect(() => {
     let mounted = true;
@@ -517,13 +553,13 @@ export default function Settings() {
                             <span
                               className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
                                 wf.active
-                                  ? 'border-green-200 bg-green-100 text-green-800 shadow-sm dark:border-green-700 dark:bg-green-900/40 dark:text-green-300'
-                                  : 'border-gray-200 bg-gray-100 text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                                  ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm dark:border-emerald-300 dark:bg-emerald-400 dark:text-emerald-950'
+                                  : 'border-gray-300 bg-gray-200 text-gray-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300'
                               }`}
                             >
                               <span
                                 className={`h-1.5 w-1.5 rounded-full ${
-                                  wf.active ? 'bg-green-600 dark:bg-green-400' : 'bg-gray-400 dark:bg-gray-500'
+                                  wf.active ? 'bg-white dark:bg-emerald-950' : 'bg-gray-500 dark:bg-gray-400'
                                 }`}
                               />
                               {wf.active ? 'Active' : 'Inactive'}

@@ -68,14 +68,23 @@ const styleTitleRow = (row: Worksheet['row']) => {
 };
 
 const styleDataRow = (row: Worksheet['row'], rowIndex: number, section: ExcelSectionDefinition) => {
-  row.height = 20;
   const isEven = rowIndex % 2 === 0;
+  // Autosize rows for multi-line (bullet-list) cells so wrapped text stays visible.
+  let rowLineCount = 1;
+  row.eachCell({ includeEmpty: true }, (cell) => {
+    const lineCount = String(cell.value ?? '').split('\n').length;
+    if (lineCount > rowLineCount) rowLineCount = lineCount;
+  });
+  row.height = Math.max(20, rowLineCount * 14 + 6);
   row.eachCell({ includeEmpty: true }, (cell, colIndex) => {
     const rawValue = row.getCell(colIndex).value;
     const value = rawValue;
     const text = value == null ? '' : String(value);
     cell.font = { name: 'Segoe UI', size: 10, color: { argb: 'FF0F172A' } };
     cell.alignment = { vertical: 'middle' };
+    if (text.includes('\n')) {
+      cell.alignment = { ...cell.alignment, vertical: 'top', wrapText: true };
+    }
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',

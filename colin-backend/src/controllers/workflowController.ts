@@ -25,6 +25,7 @@ import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility
 import { caseMatchesAssignee } from '../utils/caseAssignments';
 import { calculateCollectedKeyActionEarnings } from '../utils/keyActionEarnings';
 import { computeCaseEarnedFees } from '../utils/caseEarnedFees';
+import { normalizeTemplateActionText } from '../utils/workflowText';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -502,6 +503,10 @@ export const createTemplate = async (req: AuthRequest, res: Response) => {
     const validationError = payload.draft ? allocationValidationError(payload) : publicationValidationError(payload);
     if (validationError) return res.status(400).json({ message: validationError });
 
+    // Keep the stored Key Action text clean: remove any manually entered
+    // numbering from the actions/titles before persisting.
+    normalizeTemplateActionText(payload);
+
     // Preserve literal stage and key-action percentages exactly as supplied.
     normalizeTemplatePercentages(payload);
 
@@ -530,6 +535,10 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     if (payload.draft) payload.active = false;
     const validationError = payload.draft ? allocationValidationError(payload) : publicationValidationError(payload);
     if (validationError) return res.status(400).json({ message: validationError });
+
+    // Keep the stored Key Action text clean: remove any manually entered
+    // numbering from the actions/titles before persisting.
+    normalizeTemplateActionText(payload);
 
     // Normalize literal percentages without redistributing them.
     normalizeTemplatePercentages(payload);
