@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { createCase, CaseData, CaseType } from '../../services/caseService';
-import { listActiveWorkflowTemplates, WorkflowTemplate } from '../../services/workflowService';
+import { findMatchingWorkflowTemplate, listActiveWorkflowTemplates, WorkflowTemplate } from '../../services/workflowService';
 import { getAssignmentUsers } from '../../services/userService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { getRoleSuggestions } from '../../constants/partyRoles';
@@ -461,7 +461,7 @@ export default function CreateCase({
     const ct = resolveCaseTypeFromSelection(selectedServiceNodes);
 
     if (!suggested || !ct) return;
-    const match = templates.find((t) => t.matterType === suggested && t.caseType === ct);
+    const match = findMatchingWorkflowTemplate(templates, suggested, ct);
     if (!match) return;
 
     setFormData((prev) => ({

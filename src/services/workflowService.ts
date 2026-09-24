@@ -62,6 +62,16 @@ export type WorkflowSlaSpec = {
   text?: string;
 };
 
+const normalizeTemplateMatchValue = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+export const findMatchingWorkflowTemplate = (
+  templates: WorkflowTemplate[],
+  matterType: string,
+  caseType: WorkflowTemplate['caseType']
+) => templates.find(
+  (template) => normalizeTemplateMatchValue(template.matterType) === normalizeTemplateMatchValue(matterType) && template.caseType === caseType
+);
+
 export const listActiveWorkflowTemplates = async (): Promise<WorkflowTemplate[]> => {
   const res = await fetch(`${API_URL}/workflows/templates/active`, {
     headers: { Authorization: `Bearer ${getToken()}` },

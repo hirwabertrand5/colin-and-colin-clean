@@ -75,6 +75,7 @@ import { getAssignmentUsers } from '../../services/userService';
 import { listExpensesForCase, PettyCashExpense } from '../../services/pettyCashService';
 import { getWorkflowForCase, WorkflowInstance, completeWorkflowStep } from '../../services/workflowInstanceService';
 import {
+  findMatchingWorkflowTemplate,
   getWorkflowTemplateById,
   listActiveWorkflowTemplates,
   WorkflowTemplate,
@@ -659,10 +660,10 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
     // If current template doesn't match suggested, auto-pick best match
     const currentTemplate = workflowTemplates.find((t) => t._id === editCaseData.workflowTemplateId);
-    const currentOk = currentTemplate && currentTemplate.matterType === suggested && currentTemplate.caseType === ct;
+    const currentOk = currentTemplate && findMatchingWorkflowTemplate([currentTemplate], suggested, ct);
     if (currentOk) return;
 
-    const match = workflowTemplates.find((t) => t.matterType === suggested && t.caseType === ct);
+    const match = findMatchingWorkflowTemplate(workflowTemplates, suggested, ct);
     if (!match) return;
 
     setEditCaseData((prev) => {

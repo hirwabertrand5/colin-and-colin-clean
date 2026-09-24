@@ -143,8 +143,6 @@ const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: a
     return {
       ...nextStep,
       status: previous?.status || nextStep.status,
-      startAt: previous?.startAt || nextStep.startAt,
-      dueAt: previous?.dueAt || nextStep.dueAt,
       completedAt: previous?.completedAt,
       extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
       actions: mergedActions,
