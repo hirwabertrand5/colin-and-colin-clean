@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   Award,
   BarChart3,
-  BookOpen,
   Briefcase,
   Calendar as CalendarIcon,
   CheckCircle2,
@@ -14,21 +13,18 @@ import {
   Handshake,
   ShieldAlert,
   TrendingUp,
-  Users,
 } from 'lucide-react';
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
 import { caseMatchesAssignee } from '../../utils/caseAssignments';
 import { getAllCases, CaseData } from '../../services/caseService';
+import { getStaffDashboardSummary, StaffDashboardSummaryResponse } from '../../services/dashboardService';
 import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
 import { getAllTasks, TaskData } from '../../services/taskService';
-import { FirmReportDateBasis, FirmReportRange, getFirmReports, getMyProductivityEarningsReport, MyProductivityEarningsResponse } from '../../services/firmReportsService';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
-import { baseNameFromLabel, computeMemberFeeEarnedFromRows, computeTaskFeeCollectedFromRows } from '../../utils/productivity';
-import SortableHeader from '../ui/SortableHeader';
-import { SortDir, sortRows } from '../../utils/tableSort';
+import { baseNameFromLabel } from '../../utils/productivity';
 import './AssociateDashboard.css';
 
 type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
@@ -42,7 +38,6 @@ type RoleProfile = {
   visible: {
     team: boolean;
     business: boolean;
-    development: boolean;
     matterFinancials: boolean;
   };
   labels: {
@@ -50,7 +45,6 @@ type RoleProfile = {
     matters: string;
     team: string;
     performance: string;
-    development: string;
     earnings: string;
     risk: string;
   };
@@ -80,7 +74,6 @@ type TeamRow = {
   assigned: number;
   completed: number;
   overdue: number;
-  capacity: number;
   quality: number | null;
 };
 
@@ -99,13 +92,12 @@ const roleProfiles: Record<string, RoleProfile> = {
     purpose: 'Read-and-act dashboard for assigned work, matter support, learning, reviews, and own earnings.',
     tpa: 1,
     financialScope: 'own',
-    visible: { team: false, business: false, development: true, matterFinancials: false },
+    visible: { team: false, business: false, matterFinancials: false },
     labels: {
       overview: 'My Work',
       matters: 'My Matters',
       team: 'Team Workload',
       performance: 'My Performance',
-      development: 'Learning & Development',
       earnings: 'My Earnings',
       risk: 'Notifications & Deadline Alerts',
     },
@@ -115,13 +107,12 @@ const roleProfiles: Record<string, RoleProfile> = {
     purpose: 'Execute work, develop professional competence, and take growing matter responsibility.',
     tpa: 3,
     financialScope: 'own',
-    visible: { team: false, business: false, development: true, matterFinancials: false },
+    visible: { team: false, business: false, matterFinancials: false },
     labels: {
       overview: 'My Work',
       matters: 'My Matters',
       team: 'Team Workload',
       performance: 'Performance',
-      development: 'Professional Development',
       earnings: 'My Financial Contribution',
       risk: 'Risk & Notifications',
     },
@@ -131,13 +122,12 @@ const roleProfiles: Record<string, RoleProfile> = {
     purpose: 'Manage work, matters, quality, productivity, capacity, and authorised financial contribution.',
     tpa: 5,
     financialScope: 'matter',
-    visible: { team: true, business: true, development: true, matterFinancials: true },
+    visible: { team: true, business: true, matterFinancials: true },
     labels: {
       overview: 'My Overview',
       matters: 'Matter Portfolio',
       team: 'Team Workload',
       performance: 'Performance',
-      development: 'Professional Development',
       earnings: 'My Remuneration',
       risk: 'Risk & Compliance',
     },
@@ -147,13 +137,12 @@ const roleProfiles: Record<string, RoleProfile> = {
     purpose: 'Manage matters, supervise people, control quality, control delivery, and protect profitability.',
     tpa: 6,
     financialScope: 'portfolio',
-    visible: { team: true, business: true, development: true, matterFinancials: true },
+    visible: { team: true, business: true, matterFinancials: true },
     labels: {
       overview: 'Senior Associate Overview',
       matters: 'Matter Portfolio',
       team: 'Team Workload',
       performance: 'Team Performance',
-      development: 'Quality Control',
       earnings: 'Remuneration',
       risk: 'Senior Associate Alerts',
     },
@@ -163,13 +152,12 @@ const roleProfiles: Record<string, RoleProfile> = {
     purpose: 'Manage clients, matters, revenue, profitability, team delivery, and business development.',
     tpa: 8,
     financialScope: 'client',
-    visible: { team: true, business: true, development: true, matterFinancials: true },
+    visible: { team: true, business: true, matterFinancials: true },
     labels: {
       overview: 'Partner Overview',
       matters: 'Client & Matter Portfolio',
       team: 'Team Management',
       performance: 'Team Management',
-      development: 'Client Relationship Control',
       earnings: 'Partner Remuneration',
       risk: 'Partner Alerts',
     },
@@ -206,13 +194,6 @@ const safeNum = (value: unknown) => {
 
 const formatRwf = (value: number) => `RWF ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const formatFees = (value: number) => `RWF ${Math.round(Number.isFinite(value) ? value : 0).toLocaleString('en-US')}`;
-
-const formatPeriodDate = (value?: string) => {
-  if (!value) return 'N/A';
-  const d = new Date(`${value}T00:00:00`);
-  if (!Number.isFinite(d.getTime())) return value;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-};
 
 const getMatterContractValue = (matter: CaseData) => {
   const planned = safeNum(matter.workflowProgress?.plannedValue?.amount);
@@ -328,7 +309,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const [cases, setCases] = useState<CaseData[]>([]);
   const [events, setEvents] = useState<FirmCalendarEvent[]>([]);
   const [performance, setPerformance] = useState<PerformanceSummary | null>(null);
-  const [earningsReport, setEarningsReport] = useState<MyProductivityEarningsResponse | null>(null);
+  const [staffSummary, setStaffSummary] = useState<StaffDashboardSummaryResponse | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
 
   usePageTitle(profile.title);
@@ -336,9 +317,6 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const today = useMemo(() => isoToday(), []);
   const next30Days = useMemo(() => addDaysISO(today, 30), [today]);
   const meName = useMemo(() => baseNameFromLabel(me?.name), [me?.name]);
-  const meId = me?._id || me?.id;
-  const [earningsRange, setEarningsRange] = useState<FirmReportRange>('monthly');
-  const earningsBasis: FirmReportDateBasis = 'invoiceDate';
 
   useEffect(() => {
     let mounted = true;
@@ -348,19 +326,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         setLoading(true);
         setError('');
 
-        const [taskResult, caseResult, eventResult, performanceResult, earningsResult, prospectResult] = await Promise.allSettled([
+        const [taskResult, caseResult, eventResult, performanceResult, summaryResult, prospectResult] = await Promise.allSettled([
           getAllTasks(),
           getAllCases(),
           getFirmEvents({ from: today, to: next30Days, type: 'all' }),
           getMyPerformance(),
-          (async () => {
-            const params = { range: earningsRange, basis: earningsBasis, teamMemberId: meId };
-            try {
-              return await getFirmReports(params);
-            } catch {
-              return await getMyProductivityEarningsReport({ range: earningsRange, basis: earningsBasis });
-            }
-          })(),
+          getStaffDashboardSummary(),
           getAllProspects({ includeTerminal: true }),
         ]);
 
@@ -369,7 +340,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         if (caseResult.status === 'fulfilled') setCases(caseResult.value);
         if (eventResult.status === 'fulfilled') setEvents(eventResult.value);
         if (performanceResult.status === 'fulfilled') setPerformance(performanceResult.value);
-        if (earningsResult.status === 'fulfilled') setEarningsReport(earningsResult.value);
+        if (summaryResult.status === 'fulfilled') setStaffSummary(summaryResult.value);
         if (prospectResult.status === 'fulfilled') setProspects(prospectResult.value);
       } catch (e: any) {
         if (!mounted) return;
@@ -383,7 +354,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     return () => {
       mounted = false;
     };
-  }, [earningsRange, next30Days, today]);
+  }, [next30Days, today]);
 
   const ownTasks = useMemo(
     () =>
@@ -393,18 +364,16 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     [meName, tasks],
   );
 
-  const visibleCaseIds = useMemo(
+  // Only matters where the signed-in user is an assignee (Initiator, Reviewer,
+  // Signer/Approver or assignedTo) — this keeps the dashboard cards and the
+  // matter list in line with the staff summary endpoint.
+  const authorisedCases = useMemo(
     () =>
-      new Set(ownTasks.map((task) => String(task.caseId || '')).filter(Boolean)),
-    [ownTasks],
+      cases.filter(
+        (matter) => caseMatchesAssignee(matter, meName) || caseMatchesAssignee(matter, me?.email),
+      ),
+    [cases, me?.email, meName],
   );
-
-  const authorisedCases = useMemo(() => {
-    const scoped = cases.filter((matter) => {
-      return visibleCaseIds.has(String(matter._id || '')) || caseMatchesAssignee(matter, meName);
-    });
-    return scoped.length > 0 ? scoped : cases;
-  }, [cases, meName, visibleCaseIds]);
 
   const tasksByCase = useMemo(() => {
     const map = new Map<string, TaskData[]>();
@@ -418,7 +387,6 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
   const taskSignals = useMemo(() => {
     const open = ownTasks.filter((task) => task.status !== 'Completed');
-    const completed = ownTasks.filter((task) => task.status === 'Completed');
     const dueSoon = open.filter((task) => task.dueDate >= today && task.dueDate <= addDaysISO(today, 7));
     const overdue = open.filter((task) => {
       const dueAt = getTaskDate(task.dueDate);
@@ -435,28 +403,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       },
       { excellent: 0, good: 0, warning: 0, poor: 0, late: 0 } as Record<string, number>
     );
-    const scoredQuality = ownTasks.filter((task) => Number.isFinite(Number(task.qualityScore)));
-    const qualityAverage =
-      performance?.averageQualityScore != null
-        ? Math.round(performance.averageQualityScore)
-        : scoredQuality.length
-          ? Math.round(scoredQuality.reduce((sum, task) => sum + safeNum(task.qualityScore), 0) / scoredQuality.length)
-          : null;
-    const timelinessAverage =
-      performance?.averageTimelinessScore != null
-        ? Math.round(performance.averageTimelinessScore)
-        : ownTasks.length
-          ? Math.round(ownTasks.reduce((sum, task) => sum + getTimelinessScore(task, today), 0) / ownTasks.length)
-          : 0;
-    const onTimeRate = performance?.onTimeCompletionPct ?? 0;
-    const completionRate = performance?.tasksTotal
-      ? Math.round((performance.tasksCompleted / performance.tasksTotal) * 100)
-      : ownTasks.length
-        ? Math.round((completed.length / ownTasks.length) * 100)
-        : 0;
-
-    return { open, completed, dueSoon, overdue, awaitingReview, awaitingExternal, bandCounts, qualityAverage, timelinessAverage, onTimeRate, completionRate };
-  }, [ownTasks, performance?.averageQualityScore, performance?.averageTimelinessScore, performance?.onTimeCompletionPct, performance?.tasksCompleted, performance?.tasksTotal, today]);
+    return { open, dueSoon, overdue, awaitingReview, awaitingExternal, bandCounts };
+  }, [ownTasks, today]);
 
   const matterRows = useMemo<MatterRow[]>(() => {
     return authorisedCases
@@ -488,8 +436,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     const contractValue = matterRows.reduce((sum, matter) => sum + matter.contractValue, 0);
     const earnedValue = matterRows.reduce((sum, matter) => sum + matter.earnedValue, 0);
     const outstanding = Math.max(0, contractValue - earnedValue);
-    const grossProfitMargin = earnedValue > 0 ? 100 : 0;
-    return { contractValue, earnedValue, outstanding, grossProfitMargin };
+    return { contractValue, earnedValue, outstanding };
   }, [matterRows]);
 
   const teamRows = useMemo<TeamRow[]>(() => {
@@ -510,10 +457,9 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         assigned: row.assigned,
         completed: row.completed,
         overdue: row.overdue,
-        capacity: Math.min(150, Math.round((row.assigned / 20) * 100)),
         quality: row.quality.length ? Math.round(row.quality.reduce((sum, value) => sum + value, 0) / row.quality.length) : null,
       }))
-      .sort((a, b) => b.capacity - a.capacity || b.overdue - a.overdue)
+      .sort((a, b) => b.assigned - a.assigned || b.overdue - a.overdue)
       .slice(0, 8);
   }, [tasks, today]);
 
@@ -544,81 +490,37 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     [events, today]
   );
 
-  const earningsPeriod = useMemo(() => {
-    const range = earningsReport?.range;
-    return range ? `${formatPeriodDate(range.from)} to ${formatPeriodDate(range.to)}` : 'N/A';
-  }, [earningsReport?.range]);
-  const earningsSummary = earningsReport?.productivitySummary;
-  const earningsMember = earningsReport?.selectedMember;
-  const earningsTeamRow = earningsReport?.team?.[0];
-  const earningsRows = earningsReport?.productivityRows || [];
-  const [feeSortKey, setFeeSortKey] = useState('');
-  const [feeSortDir, setFeeSortDir] = useState<SortDir>('asc');
-  const handleFeeSort = (column: string) => {
-    if (feeSortKey === column) {
-      setFeeSortDir(feeSortDir === 'asc' ? 'desc' : 'asc');
-    } else {
-      setFeeSortKey(column);
-      setFeeSortDir('asc');
-    }
-  };
-  const sortedEarningsRows = useMemo(
-    () =>
-      sortRows(earningsRows, feeSortKey, feeSortDir, (row: any) => {
-        switch (feeSortKey) {
-          case 'matter':
-            return row.matter || '';
-          case 'task':
-            return row.task || '';
-          case 'taskFee':
-            return row.taskFeeCollected || row.taskFee || 0;
-          case 'tpa':
-            return row.tpaPercent ?? 0;
-          case 'timeliness':
-            return row.timelinessScore ?? -1;
-          case 'quality':
-            return row.qualityScore ?? -1;
-          default:
-            return row.feeEarned ?? -1;
-        }
-      }),
-    [earningsRows, feeSortKey, feeSortDir],
-  );
-  const reportTaskFeeCollected = earningsRows.length
-    ? computeTaskFeeCollectedFromRows(earningsRows, { meId, meName: me?.name })
-    : earningsSummary?.totalTaskFeeCollected ?? earningsSummary?.totalTaskFee ?? 0;
-  const reportFeeEarned = earningsMember?.feesEarned
-    ?? earningsTeamRow?.earnedFees
-    ?? (earningsRows.length
-      ? computeMemberFeeEarnedFromRows(earningsRows, { meId, meName: me?.name })
-      : earningsSummary?.totalFeeEarned ?? 0)
-    ?? 0;
-  const reportTasksCompleted = earningsSummary?.completedTasks
-    ?? performance?.tasksCompleted
-    ?? authorisedCases.filter((matter) => String(matter.workflowProgress?.status || '').toLowerCase() === 'completed' || String(matter.status || '').toLowerCase() === 'closed').length;
-  const reportTpaPercent =
-    earningsReport?.productivityRows?.find((row) => row.tpaPercent != null)?.tpaPercent ??
-    earningsTeamRow?.earningSharePercent ??
-    profile.tpa;
-  const reportQualityScore = earningsSummary?.averageQualityScore ?? taskSignals.qualityAverage;
-  const reportTimelinessScore = earningsSummary?.averageTimelinessScore ?? taskSignals.timelinessAverage;
+  const summary = staffSummary;
+  // Per-matter rows straight from the Case Workspace → Earned Fees tables.
+  const matterFeeRows = summary?.rows || [];
+  const feeScoredMatters = matterFeeRows.filter((row) => row.earnedFee != null);
+  const summaryCompletionRate =
+    summary && summary.mattersAssigned > 0
+      ? Math.round((summary.mattersCompleted / summary.mattersAssigned) * 100)
+      : null;
 
   const headlineStats = useMemo<StatCard[]>(() => {
-    const activeMatters = authorisedCases.filter((matter) => String(matter.status || '').toLowerCase() !== 'closed').length;
+    const assigned = summary?.mattersAssigned ?? 0;
+    const outstanding = summary?.mattersOutstanding ?? 0;
+    const overdue = summary?.overdueSections ?? 0;
+    const timeliness = summary?.averageTimelinessScore ?? null;
+    const quality = summary?.averageQualityScore ?? null;
+    const completedMatters = summary?.mattersCompleted ?? 0;
+    const fees = summary?.feesEarnedTotal ?? null;
     const stats: StatCard[] = [
-      { label: profile.financialScope === 'client' ? 'Active Clients / Matters' : 'Active Matters', value: String(activeMatters), helper: 'Uses linked matters from your task set', icon: Briefcase, tone: 'blue', href: '/matters' },
-      { label: 'Tasks Outstanding', value: String(taskSignals.open.length), helper: `${taskSignals.dueSoon.length} due in 7 days`, icon: CheckSquare, tone: taskSignals.open.length ? 'amber' : 'green', href: '/tasks' },
-      { label: 'Overdue Tasks', value: String(taskSignals.overdue.length), helper: taskSignals.overdue.length ? 'Action required' : 'No overdue work', icon: AlertTriangle, tone: taskSignals.overdue.length ? 'red' : 'green', href: '/tasks' },
-      { label: 'On-Time Completion', value: `${taskSignals.onTimeRate}%`, helper: 'Matches productivity report', icon: Clock, tone: taskSignals.onTimeRate >= 80 ? 'green' : 'amber', href: '/performance' },
-      { label: 'Quality Score', value: reportQualityScore == null ? 'Pending' : `${reportQualityScore}%`, helper: `Firm report period: ${earningsPeriod}`, icon: Award, tone: 'purple', href: '/performance' },
-      { label: 'Tasks Completed', value: String(reportTasksCompleted), helper: `Matches People & Capacity · ${earningsPeriod}`, icon: TrendingUp, tone: 'green', href: '/performance' },
+      { label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Active Matters', value: String(assigned), helper: 'Matters where you are the Initiator, Reviewer or Signer/Approver', icon: Briefcase, tone: 'blue', href: '/matters' },
+      { label: 'Tasks Outstanding', value: String(outstanding), helper: 'Matters where the Key Actions are not all checked yet', icon: CheckSquare, tone: outstanding ? 'amber' : 'green', href: '/tasks' },
+      { label: 'Overdue Tasks', value: String(overdue), helper: 'Workflow sections past their deadline in your matters', icon: AlertTriangle, tone: overdue ? 'red' : 'green', href: '/tasks' },
+      { label: 'On-Time Completion', value: timeliness == null ? 'Pending' : `${timeliness}%`, helper: 'Average Timeliness of your row in each Case Workspace', icon: Clock, tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber', href: '/performance' },
+      { label: 'Quality Score', value: quality == null ? 'Pending' : `${quality}%`, helper: 'Average Quality Score on the matters assigned to you', icon: Award, tone: 'purple', href: '/performance' },
+      { label: 'Tasks Completed', value: String(completedMatters), helper: 'Matters where the workflow is completed', icon: TrendingUp, tone: 'green', href: '/performance' },
       profile.financialScope === 'own'
-        ? { label: 'TPA', value: `${reportTpaPercent}%`, helper: 'Role remuneration configuration', icon: DollarSign, tone: 'green' }
-        : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Authorised matter values', icon: DollarSign, tone: 'green' },
-      { label: 'Fees Earned', value: earningsReport ? formatFees(reportFeeEarned) : 'Pending', helper: `Matches Staff Contribution in People & Capacity · ${earningsPeriod}`, icon: DollarSign, tone: reportFeeEarned > 0 ? 'green' : 'amber' },
+        ? { label: 'TPA', value: `${summary?.tpaPercent ?? profile.tpa}%`, helper: 'Your role participation share', icon: DollarSign, tone: 'green' }
+        : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Planned value of your assigned matters', icon: DollarSign, tone: 'green' },
+      { label: 'Fees Earned', value: fees == null ? 'Pending' : formatFees(fees), helper: 'Sum of your Earned fee rows in the Case Workspace tables', icon: DollarSign, tone: fees && fees > 0 ? 'green' : 'amber' },
     ];
     return stats;
-  }, [authorisedCases, earningsPeriod, financials.contractValue, profile, reportFeeEarned, reportQualityScore, reportTasksCompleted, reportTpaPercent, taskSignals]);
+  }, [financials.contractValue, profile, summary]);
 
   return (
     <div className="staff-dashboard">
@@ -630,21 +532,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             <p className="mt-1 text-gray-600">{me?.name ? `Welcome, ${me.name}. ` : ''}{profile.purpose}</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-2">
-              <label htmlFor="staff-earnings-range" className="text-xs text-gray-600">Period</label>
-              <select
-                id="staff-earnings-range"
-                value={earningsRange}
-                onChange={(event) => setEarningsRange(event.target.value as FirmReportRange)}
-                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700"
-              >
-                <option value="monthly">Monthly</option>
-                <option value="quarterly">Quarterly</option>
-                <option value="yearly">Yearly</option>
-              </select>
-            </div>
             <div className="rounded-full bg-gray-900 px-4 py-2 text-xs font-semibold text-white">
-              TPA {profile.tpa}% · {profile.financialScope} scope
+              TPA {summary?.tpaPercent ?? profile.tpa}% · {profile.financialScope} scope
             </div>
           </div>
         </div>
@@ -716,7 +605,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             {[
               { label: 'Awaiting review / approval', value: taskSignals.awaitingReview.length, icon: CheckCircle2, tone: 'amber' as Tone },
               { label: 'Awaiting client/external info', value: taskSignals.awaitingExternal.length, icon: Clock, tone: 'blue' as Tone },
-              { label: 'Overdue or late work', value: taskSignals.overdue.length, icon: ShieldAlert, tone: taskSignals.overdue.length ? 'red' as Tone : 'green' as Tone },
+              { label: 'Overdue or late tasks', value: taskSignals.overdue.length, icon: ShieldAlert, tone: taskSignals.overdue.length ? 'red' as Tone : 'green' as Tone },
               { label: 'Upcoming calendar items', value: upcomingEvents.length, icon: CalendarIcon, tone: 'slate' as Tone },
             ].map((item) => {
               const Icon = item.icon;
@@ -736,12 +625,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
         <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg">
           <div className="px-5 py-4 border-b border-gray-200">
-            <SectionHeader title={profile.labels.matters} description="Role-permitted matters with next actions, deadlines, workload pressure, and drill-down." />
+            <SectionHeader title={profile.labels.matters} description="Matters assigned to you with next actions, deadlines, workload pressure, and drill-down." />
           </div>
           {loading ? (
             <div className="px-5 py-10 text-gray-500">Loading matters…</div>
           ) : matterRows.length === 0 ? (
-            <div className="px-5 py-10 text-gray-500">No authorised matters found.</div>
+            <div className="px-5 py-10 text-gray-500">No matters are assigned to you yet.</div>
           ) : (
             <div className="divide-y divide-gray-200">
               {matterRows.slice(0, 8).map((matter) => (
@@ -787,13 +676,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
         {profile.visible.matterFinancials && (
           <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
-            <SectionHeader title="Matter Financial Status" description="Authorised matter values only; firm-wide revenue, firm cash, and firm profitability remain restricted." />
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <SectionHeader title="Matter Financial Status" description="Planned, completed, and outstanding value of the matters assigned to you." />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
                 ['Contract Value', formatRwf(financials.contractValue), 'slate' as Tone],
                 ['Work Value in Progress', formatRwf(financials.earnedValue), 'green' as Tone],
                 ['Outstanding Value', formatRwf(financials.outstanding), 'amber' as Tone],
-                ['Gross Margin Signal', `${financials.grossProfitMargin}%`, financials.grossProfitMargin > 0 ? 'green' as Tone : 'amber' as Tone],
               ].map(([label, value, tone]) => {
                 const toneData = toneClasses[tone as Tone];
                 return (
@@ -809,42 +697,36 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
         {profile.visible.team && (
           <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-5">
-            <SectionHeader title={profile.labels.team} description="Assigned, completed, overdue, capacity, and quality for authorised team workload." />
+            <SectionHeader title={profile.labels.team} description="Assigned, completed, overdue, and quality for authorised team workload from task records." />
             {loading ? (
               <div className="text-gray-500">Loading team workload…</div>
             ) : teamRows.length === 0 ? (
               <div className="text-gray-500">No team workload data available.</div>
             ) : (
               <div className="space-y-3">
-                {teamRows.map((member) => {
-                  const tone = member.capacity > 100 ? 'red' : member.capacity > 85 ? 'amber' : 'green';
-                  return (
-                    <div key={member.name} className="rounded-lg border border-gray-200 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="font-medium text-gray-900">{member.name}</div>
-                          <div className="text-xs text-gray-500">{member.completed}/{member.assigned} completed · {member.overdue} overdue · quality {member.quality == null ? '—' : `${member.quality}%`}</div>
-                        </div>
-                        <div className={`text-sm font-semibold ${toneClasses[tone].text}`}>{member.capacity}%</div>
+                {teamRows.map((member) => (
+                  <div key={member.name} className="rounded-lg border border-gray-200 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-medium text-gray-900">{member.name}</div>
+                        <div className="text-xs text-gray-500">{member.completed}/{member.assigned} tasks completed · {member.overdue} overdue · quality {member.quality == null ? '—' : `${member.quality}%`}</div>
                       </div>
-                      <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div className={`h-full ${toneClasses[tone].bar}`} style={{ width: `${Math.min(100, member.capacity)}%` }} />
-                      </div>
+                      <div className="text-sm font-semibold text-gray-700">{member.assigned} assigned</div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             )}
           </div>
         )}
 
         <div className="bg-white border border-gray-200 rounded-lg p-5">
-          <SectionHeader title={profile.labels.performance} description="Completion, timeliness, quality, and performance rating from existing task/performance data." />
+          <SectionHeader title={profile.labels.performance} description="Completion, timeliness, quality, and rating computed from your assigned matters and your performance record." />
           <div className="space-y-4">
             {[
-              ['Completion Rate', `${taskSignals.completionRate}%`, CheckSquare, taskSignals.completionRate >= 80 ? 'green' : 'amber'],
-              ['Average Timeliness', `${taskSignals.timelinessAverage}%`, Clock, taskSignals.timelinessAverage >= 70 ? 'green' : 'amber'],
-              ['Average Quality', taskSignals.qualityAverage == null ? 'Pending' : `${taskSignals.qualityAverage}%`, Award, 'purple'],
+              ['Matters Completion Rate', summaryCompletionRate == null ? 'Pending' : `${summaryCompletionRate}%`, CheckSquare, (summaryCompletionRate ?? 0) >= 80 ? 'green' : 'amber'],
+              ['Average Timeliness', summary?.averageTimelinessScore == null ? 'Pending' : `${summary.averageTimelinessScore}%`, Clock, (summary?.averageTimelinessScore ?? 0) >= 70 ? 'green' : 'amber'],
+              ['Average Quality', summary?.averageQualityScore == null ? 'Pending' : `${summary.averageQualityScore}%`, Award, 'purple'],
               ['Performance Rating', performance?.rating?.value ? `${performance.rating.value}/5` : 'Pending', BarChart3, 'blue'],
             ].map(([label, value, Icon, tone]) => {
               const toneData = toneClasses[tone as Tone];
@@ -864,23 +746,6 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             <Link to="/performance" className="text-sm text-gray-600 hover:text-gray-900">Open detailed performance →</Link>
           </div>
         </div>
-
-        {profile.visible.development && (
-          <div className="bg-white border border-gray-200 rounded-lg p-5">
-            <SectionHeader title={profile.labels.development} description="Development indicators reuse training, review, and performance sources when configured." />
-            <div className="grid grid-cols-1 gap-3">
-              {['Legal Skills', 'Drafting', 'Research', 'Client Communication', 'Training'].map((label) => (
-                <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="h-4 w-4 text-gray-600" />
-                    <div className="text-sm font-medium text-gray-900">{label}</div>
-                  </div>
-                  <div className="mt-1 text-xs text-gray-500">Uses authorised reviews/training data; no duplicate dashboard entry field.</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {profile.visible.business && (
           <div className="bg-white border border-gray-200 rounded-lg p-5">
@@ -908,13 +773,16 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         )}
 
         <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
-          <SectionHeader title={profile.labels.earnings} description={`Fees earned for ${earningsPeriod}, using completed Key Actions, collected fees, and the role-based productivity formula.`} />
+          <SectionHeader
+            title={profile.labels.earnings}
+            description="Your row from each assigned matter's Case Workspace Earned Fees table. Totals match the Earned fee column of those tables."
+          />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
-              ['Collected Key Action Base', formatRwf(reportTaskFeeCollected), 'Completed Key Action value, capped by Paid invoices'],
-              ['TPA', `${reportTpaPercent}%`, 'Configured from role/remuneration setup'],
-              ['Timeliness Score', reportTimelinessScore == null ? 'Pending' : `${reportTimelinessScore}%`, 'Firm report completed-task timeliness score'],
-              ['Quality Score', reportQualityScore == null ? 'Pending' : `${reportQualityScore}%`, 'Firm report completed-task quality score'],
+              ['Fees Earned', summary?.feesEarnedTotal == null ? 'Pending' : formatFees(summary.feesEarnedTotal), 'Sum of your Earned fee rows across your matters'],
+              ['Collected Base', formatFees(summary?.collectedBaseTotal ?? 0), 'Eligible collected value used for your earned fees'],
+              ['TPA', `${summary?.tpaPercent ?? profile.tpa}%`, 'Your role participation share from the remuneration table'],
+              ['Matters with Earned Fees', String(feeScoredMatters.length), `${matterFeeRows.length} matter(s) assigned to you`],
             ].map(([label, value, helper]) => (
               <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">{label}</div>
@@ -923,42 +791,44 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               </div>
             ))}
           </div>
-          <div className="mt-4 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white">
-            Fees Earned for {earningsPeriod}: {formatFees(reportFeeEarned)} = Task Fee Collected × {reportTpaPercent}% × Timeliness × Quality
+          <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+            Fees Earned = Collected Base × TPA% × Timeliness% × Quality% for each matter, exactly as shown in that matter's Case Workspace.
           </div>
 
           <div className="mt-5 border-t border-gray-200 pt-3">
-            <div className="mb-2 text-sm font-medium text-gray-900">Fee breakdown by completed Key Action</div>
+            <div className="mb-2 text-sm font-medium text-gray-900">Fee breakdown by matter (Case Workspace)</div>
             <div className="overflow-x-auto">
               <table className="min-w-[1024px] w-full text-left text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                   <tr>
-                    <SortableHeader label="Matter" column="matter" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3" />
-                    <SortableHeader label="Key Action" column="task" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3" />
-                    <SortableHeader label="Collected Base" column="taskFee" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
-                    <SortableHeader label="TPA" column="tpa" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
-                    <SortableHeader label="Timeliness" column="timeliness" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
-                    <SortableHeader label="Quality" column="quality" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
-                    <SortableHeader label="Fee Earned" column="feeEarned" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} className="px-4 py-3 text-right" />
+                    <th className="px-4 py-3">Matter</th>
+                    <th className="px-4 py-3">Role</th>
+                    <th className="px-4 py-3 text-right">TPA</th>
+                    <th className="px-4 py-3 text-right">Timeliness</th>
+                    <th className="px-4 py-3 text-right">Quality</th>
+                    <th className="px-4 py-3 text-right">Collected base</th>
+                    <th className="px-4 py-3 text-right">Earned fee</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {earningsRows.length === 0 ? (
+                  {matterFeeRows.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                        No completed Key Actions with collected fees in this period.
+                        No matters assigned yet. Earned fees appear here once a matter is assigned to you and scored in its Case Workspace.
                       </td>
                     </tr>
                   ) : (
-                    sortedEarningsRows.slice(0, 12).map((row) => (
-                      <tr key={row.id} className="align-top">
-                        <td className="px-4 py-3 text-gray-700">{row.matter}</td>
-                        <td className="px-4 py-3 text-gray-700">{row.task}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.taskFeeCollected || row.taskFee || 0)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.tpaPercent}%</td>
+                    matterFeeRows.map((row) => (
+                      <tr key={row.caseId} className="align-top">
+                        <td className="px-4 py-3 text-gray-700">
+                          <Link to={`/matters/${row.caseId}`} className="hover:text-gray-900">{row.caseNo || row.parties || '—'}</Link>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">{row.role || '—'}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.tpaPercent > 0 ? `${row.tpaPercent}%` : '—'}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.timelinessScore == null ? '—' : `${row.timelinessScore}%`}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.qualityScore == null ? '—' : `${row.qualityScore}%`}</td>
-                        <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.feeEarned == null ? 'Pending' : formatRwf(row.feeEarned)}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBase)}</td>
+                        <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.earnedFee == null ? 'Pending' : formatFees(row.earnedFee)}</td>
                       </tr>
                     ))
                   )}

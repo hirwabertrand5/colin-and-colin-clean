@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/authMiddleware';
-import { getExecutiveAssistantDashboard } from '../controllers/dashboardController';
+import { getExecutiveAssistantDashboard, getStaffDashboardSummary } from '../controllers/dashboardController';
 
 const router = express.Router();
 
@@ -17,5 +17,9 @@ router.get(
   ]),
   getExecutiveAssistantDashboard
 );
+
+// Staff member dashboard — every metric comes from the matters the signed-in
+// user is assigned to (Initiator / Reviewer / Signer-Approver).
+router.get('/dashboard/staff-summary', authenticate, getStaffDashboardSummary);
 
 export default router;
