@@ -343,19 +343,21 @@ export default function Settings() {
         sections: stages.map((stage, sectionIndex) => {
           const sectionSteps = stepsSorted.filter((step) => String(step.stageKey || '') === stage.key);
           const firstStep = sectionSteps[0];
-          const rows = sectionSteps.flatMap((step) => {
-            const actionItems = step.actions?.length ? step.actions : [step.title || ''];
-            return actionItems.map((action) => {
-              globalActionNumber += 1;
-              return {
-                stage: '',
-                keyActions: numberedKeyAction(action, globalActionNumber),
-                output: '',
-                legalBasis: '',
-                timeline: '',
-                percentage: typeof step.percentage === 'number' ? step.percentage : undefined,
-              };
-            });
+          // One row per Key Action (= one workflow step). The Key Actions column
+          // shows the text entered in the builder — never the step's internal
+          // checklist — so the review table, the exports and the editor always
+          // list the same Key Actions with the same numbers and percentages.
+          const rows = sectionSteps.map((step) => {
+            globalActionNumber += 1;
+            const keyActionText = String(step.title || step.actions?.[0] || '').trim();
+            return {
+              stage: '',
+              keyActions: keyActionText ? numberedKeyAction(keyActionText, globalActionNumber) : '',
+              output: '',
+              legalBasis: '',
+              timeline: '',
+              percentage: typeof step.percentage === 'number' ? step.percentage : undefined,
+            };
           });
           return {
             id: `${t._id}_${stage.key}`,
