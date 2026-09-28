@@ -8,6 +8,8 @@
     "seed:workflows": "ts-node src/seed/runSeeds.ts",
     "audit:workflows": "ts-node src/scripts/auditFixWorkflows.ts",
     "restore:workflows": "ts-node src/scripts/auditFixWorkflows.ts --restore",
+    "seed:business-registration": "ts-node src/seed/runBusinessRegistrationSeed.ts",
+    "restore:template": "ts-node src/scripts/restoreTemplateFromSnapshots.ts",
     "verify:workflows": "ts-node src/scripts/verifyWorkflowFixes.ts",
     "normalize:workflows": "ts-node src/scripts/normalizeWorkflowNumbering.ts",
     "reset:password": "tsx src/scripts/resetUserPassword.ts"

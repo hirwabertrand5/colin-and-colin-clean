@@ -48,7 +48,8 @@ const step = (
   outputs: ReturnType<typeof output>[],
   legalBasis: string[],
   feeSpec: IFeeSpec,
-  slaSpec: ISlaSpec
+  slaSpec: ISlaSpec,
+  percentage?: number
 ): IWorkflowStepTemplate => ({
   key,
   order,
@@ -59,7 +60,45 @@ const step = (
   legalBasis: legal(...legalBasis),
   fee: feeSpec,
   sla: slaSpec,
+  ...(percentage !== undefined ? { percentage } : {}),
 });
+
+// Auction & Mortgage Enforcement: every Key Action of a section shares that
+// section's reference data (the builder copies section reference data to each
+// Key Action). Percentages are the firm's manual allocation: 25 / 20 / 45 / 10.
+const ameIntakeRef = {
+  outputs: [output('engagement_letter', 'Engagement letter', 'Engagement'), output('title_search_report', 'Title search report / abstract', 'Due Diligence')],
+  legalBasis: ['Art. 25 Law No 10/2009 on Mortgages'],
+  fee: fee('RWF 100,000 - 300,000', 100000, 300000),
+  sla: sla('1-2 hrs intake; advice within 24-72 hrs', 'hours', 1, 72),
+};
+const ameRegistrationRef = {
+  outputs: [output('valuation_report', 'Certified evaluation report', 'Valuation'), output('mortgage_agreement', 'Mortgage agreement and abstract', 'Documents'), output('consents', 'Notarized resolutions/consents', 'Documents'), output('rdb_confirmation', 'RDB registration confirmation', 'Filing')],
+  legalBasis: ['Art. 4 Law No 10/2009 on Mortgages'],
+  fee: fee('RWF 100,000 - 600,000; 0.5%-3% of property value, minimum RWF 500,000', 100000, 600000),
+  sla: sla('Complete within 24-48 hrs', 'hours', 24, 48),
+};
+const ameAuctionRef = {
+  outputs: [output('demand_letter', 'Demand letter', 'Correspondence'), output('decision_to_sell', 'Decision to Sell', 'Approval'), output('receiver_appointment', 'Receiver appointment', 'Auction'), output('auction_notice', 'Auction notice', 'Auction'), output('bidding_report', 'Bidding Report (Inyandikomvaho)', 'Auction')],
+  legalBasis: ['Art. 14, 15 and 18 Law No 10/2009 on Mortgages'],
+  fee: fee('RWF 500,000 - 3,000,000', 500000, 3000000),
+  sla: sla('Progress update every 10-14 days', 'days', 10, 14),
+};
+const amePostAuctionRef = {
+  outputs: [output('ownership_transfer', 'Ownership transfer documents', 'Transfer'), output('fund_distribution', 'Proof of fund distribution', 'Accounting')],
+  legalBasis: ['Law No 10/2009 on Mortgages'],
+  fee: fee('RWF 500,000 - 3,500,000 or 1%-5% of recovered amount', 500000, 3500000),
+  sla: sla('30-45 days', 'days', 30, 45),
+};
+const ameStep = (
+  key: string,
+  order: number,
+  stageKey: string,
+  title: string,
+  actions: string[],
+  percentage: number,
+  ref: typeof ameIntakeRef
+): IWorkflowStepTemplate => step(key, order, stageKey, title, actions, ref.outputs, ref.legalBasis, ref.fee, ref.sla, percentage);
 
 const templates: WorkflowSeed[] = [
   {
@@ -362,16 +401,36 @@ const templates: WorkflowSeed[] = [
     version: latestVersion,
     active: true,
     stages: [
-      { key: 'intake', order: 1, title: 'Client Intake' },
-      { key: 'registration', order: 2, title: 'Mortgage Registration' },
-      { key: 'auction', order: 3, title: 'Auction Procedure' },
-      { key: 'post_auction', order: 4, title: 'Post-Auction Phase' },
+      { key: 'intake', order: 1, title: 'Client Intake', percentage: 25 },
+      { key: 'registration', order: 2, title: 'Mortgage Registration', percentage: 20 },
+      { key: 'auction', order: 3, title: 'Auction Procedure', percentage: 45 },
+      { key: 'post_auction', order: 4, title: 'Post-Auction Phase', percentage: 10 },
     ],
     steps: [
-      step('AME_1_INTAKE', 1, 'intake', 'Client onboarding and security due diligence', ['Conflict check, open file, sign retainer and collect documents', 'Search NLA/RDB for encumbrances', 'Review evidence legally'], [output('engagement_letter', 'Engagement letter', 'Engagement'), output('title_search_report', 'Title search report / abstract', 'Due Diligence')], ['Art. 25 Law No 10/2009 on Mortgages'], fee('RWF 100,000 - 300,000', 100000, 300000), sla('1-2 hrs intake; advice within 24-72 hrs', 'hours', 1, 72)),
-      step('AME_2_REGISTRATION', 2, 'registration', 'Mortgage assessment, agreement, consents and registration', ['Coordinate certified valuer and review report', 'Prepare mortgage contract and notarized abstract', 'Draft board resolutions or spousal consent', 'Upload documents to RDB Electronic Mortgage Registration System'], [output('valuation_report', 'Certified evaluation report', 'Valuation'), output('mortgage_agreement', 'Mortgage agreement and abstract', 'Documents'), output('consents', 'Notarized resolutions/consents', 'Documents'), output('rdb_confirmation', 'RDB registration confirmation', 'Filing')], ['Art. 4 Law No 10/2009 on Mortgages'], fee('RWF 100,000 - 600,000; 0.5%-3% of property value, minimum RWF 500,000', 100000, 600000), sla('Complete within 24-48 hrs', 'hours', 24, 48)),
-      step('AME_3_AUCTION', 3, 'auction', 'Security verification, default notice, permit to sell and auction monitoring', ['Confirm creditor priority status', 'Draft and serve default notice', 'File application with Registrar General for Decision to Sell', 'Assist receiver appointment', 'Ensure auction notices are published', 'Review bidding report and verify successful bidder payment'], [output('demand_letter', 'Demand letter', 'Correspondence'), output('decision_to_sell', 'Decision to Sell', 'Approval'), output('receiver_appointment', 'Receiver appointment', 'Auction'), output('auction_notice', 'Auction notice', 'Auction'), output('bidding_report', 'Bidding Report (Inyandikomvaho)', 'Auction')], ['Art. 14, 15 and 18 Law No 10/2009 on Mortgages'], fee('RWF 500,000 - 3,000,000', 500000, 3000000), sla('Progress update every 10-14 days', 'days', 10, 14)),
-      step('AME_4_POST_AUCTION', 4, 'post_auction', 'Transfer of ownership and distribution', ['Finalize transfer of ownership', 'Account for funds', 'Close creditor file'], [output('ownership_transfer', 'Ownership transfer documents', 'Transfer'), output('fund_distribution', 'Proof of fund distribution', 'Accounting')], ['Law No 10/2009 on Mortgages'], fee('RWF 500,000 - 3,500,000 or 1%-5% of recovered amount', 500000, 3500000), sla('30-45 days', 'days', 30, 45)),
+      ameStep('AME_1_INTAKE', 1, 'intake', 'Receive client and conduct initial interview', ['Conflict check, open file, sign retainer and collect documents', 'Search NLA/RDB for encumbrances', 'Review evidence legally'], 3, ameIntakeRef),
+      ameStep('AME_2_REGISTRATION', 2, 'registration', 'Coordinate with a certified valuer and review the report for legal compliance', ['Coordinate certified valuer and review report', 'Prepare mortgage contract and notarized abstract', 'Draft board resolutions or spousal consent', 'Upload documents to RDB Electronic Mortgage Registration System'], 3, ameRegistrationRef),
+      ameStep('AME_3_AUCTION', 3, 'auction', 'Legal due diligence to ensure the security is enforceable and the creditor has priority status', ['Confirm creditor priority status', 'Draft and serve default notice', 'File application with Registrar General for Decision to Sell', 'Assist receiver appointment', 'Ensure auction notices are published', 'Review bidding report and verify successful bidder payment'], 5, ameAuctionRef),
+      ameStep('AME_4_POST_AUCTION', 4, 'post_auction', "Facilitate in finalizing the transfer of ownership and the legal accounting of funds to close the creditor's file (where applicable)", ['Finalize transfer of ownership', 'Account for funds', 'Close creditor file'], 10, amePostAuctionRef),
+      ameStep('key_action_5', 5, 'intake', 'Assess facts and identify nature of case', ['Assess facts and identify nature of case'], 1.5, ameIntakeRef),
+      ameStep('key_action_6', 6, 'intake', 'Conduct conflict of interest check', ['Conduct conflict of interest check'], 1.5, ameIntakeRef),
+      ameStep('key_action_7', 7, 'intake', 'Sign engagement letter', ['Sign engagement letter'], 3, ameIntakeRef),
+      ameStep('key_action_8', 8, 'intake', 'Advise client on mortgage registration, rights & potential outcomes', ['Advise client on mortgage registration, rights & potential outcomes'], 3, ameIntakeRef),
+      ameStep('key_action_9', 9, 'intake', 'Conduct search with relevant institution e.g (NLA, RDB) to check for existing encumbrances.', ['Conduct search with relevant institution e.g (NLA, RDB) to check for existing encumbrances.'], 3, ameIntakeRef),
+      ameStep('key_action_10', 10, 'intake', 'Prepare and share legal opinion note', ['Prepare and share legal opinion note'], 10, ameIntakeRef),
+      ameStep('key_action_11', 11, 'registration', 'Compile supporting evidence', ['Compile supporting evidence'], 3, ameRegistrationRef),
+      ameStep('key_action_12', 12, 'registration', 'Prepare the formal mortgage contract and the mandatory Notarized Abstract', ['Prepare the formal mortgage contract and the mandatory Notarized Abstract'], 5, ameRegistrationRef),
+      ameStep('key_action_13', 13, 'registration', 'Upload all documents to the Electronic Mortgage Registration System (RDB)', ['Upload all documents to the Electronic Mortgage Registration System (RDB)'], 4, ameRegistrationRef),
+      ameStep('key_action_14', 14, 'registration', 'Monitor the application until the Registrar General grants approval.', ['Monitor the application until the Registrar General grants approval.'], 5, ameRegistrationRef),
+      ameStep('key_action_15', 15, 'auction', 'Draft and serve formal notice of default, and demand to trigger the "power of sale"', ['Draft and serve formal notice of default, and demand to trigger the "power of sale"'], 5, ameAuctionRef),
+      ameStep('key_action_16', 16, 'auction', 'File application with Registrar General at RDB and Secure "Decision to Sell."', ['File application with Registrar General at RDB and Secure "Decision to Sell."'], 5, ameAuctionRef),
+      ameStep('key_action_17', 17, 'auction', 'Assist in appointing a Receiver', ['Assist in appointing a Receiver'], 5, ameAuctionRef),
+      ameStep('key_action_18', 18, 'auction', 'Liaise with the appointed receiver in regard to ensure he/she Served Debtor/Lienholders with Receivership notice', ['Liaise with the appointed receiver in regard to ensure he/she Served Debtor/Lienholders with Receivership notice'], 5, ameAuctionRef),
+      ameStep('key_action_19', 19, 'auction', 'Follow up with appointed receiver to Ensure auction notice is published at Cell level and national media.\nMonitor the 10-day mandatory window.', ['Follow up with appointed receiver to Ensure auction notice is published at Cell level and national media.', 'Monitor the 10-day mandatory window.'], 5, ameAuctionRef),
+      ameStep('key_action_20', 20, 'auction', 'Upload the outcome in the RDB system', ['Upload the outcome in the RDB system'], 5, ameAuctionRef),
+      ameStep('key_action_21', 21, 'auction', "Review the Bailiff’s Bidding Report.", ["Review the Bailiff’s Bidding Report."], 5, ameAuctionRef),
+      // Placeholder restored exactly from the original workflow (title "5" / 0%) — rename or remove in the editor.
+      ameStep('key_action_22', 22, 'auction', '5', ['5'], 0, ameAuctionRef),
+      ameStep('key_action_23', 23, 'auction', 'Follow up with receiver in case of forfeiting deposit if payment fails', ['Follow up with receiver in case of forfeiting deposit if payment fails'], 5, ameAuctionRef),
     ],
   },
   {

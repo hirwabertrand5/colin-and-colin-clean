@@ -4,6 +4,7 @@ import { seedArbitrationTemplate } from './seedArbitration';
 import { seedCommercialWorkflowTemplate } from './seedCommercialWorkflow';
 import { seedLaborProcedureTemplate } from './seedLaborProcedure';
 import { seedBusinessRegistrationTemplate } from './seedBusinessRegistration';
+import { seedBusinessRegistrationTemplateV2 } from './seedBusinessRegistrationV2';
 import { seedCriminalProcedureTemplate } from './seedCriminalProcedure';
 import { seedTontineRegistrationTemplate } from './seedTontineRegistration';
 import { seedDataProtectionLicensesTemplate } from './seedDataProtectionLicenses';
@@ -21,6 +22,7 @@ export const seedAllWorkflowTemplates = async () => {
   await seedCommercialWorkflowTemplate();
   await seedLaborProcedureTemplate();
   await seedBusinessRegistrationTemplate();
+  await seedBusinessRegistrationTemplateV2();
   await seedCriminalProcedureTemplate();
   await seedTontineRegistrationTemplate();
   await seedDataProtectionLicensesTemplate();
