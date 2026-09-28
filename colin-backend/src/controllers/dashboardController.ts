@@ -14,6 +14,11 @@ import WorkflowTemplate from '../models/workflowTemplateModel';
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import { getTpaPercent } from '../utils/workflowPercentages';
+import {
+  isWithinReportRange,
+  resolveOptionalReportRange,
+  type ResolvedReportRange,
+} from '../utils/reportRange';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -191,9 +196,58 @@ type StaffDashboardMatterRow = {
   completed: boolean;
   outstanding: boolean;
   overdueSections: number;
+  /** Set only when a period was requested — eligible collected value received in the period. */
+  collectedBaseInPeriod?: number;
+  /** Set only when a period was requested — your earned fee from the period's payments. */
+  earnedFeeInPeriod?: number | null;
 };
 
-const emptyStaffSummary = (meName: string, tpaPercent: number) => ({
+/** Period-scoped figures. Present only when the caller sends range/from/to. */
+type StaffDashboardPeriod = {
+  key: string;
+  label: string;
+  from: string;
+  to: string;
+  /** Your earned fee from payments received inside the period. */
+  feesEarned: number | null;
+  /** Collected value received inside the period across your matters. */
+  collectedValue: number;
+  /** Key Actions you checked inside the period. */
+  keyActionsChecked: number;
+  /** Workflow sections completed inside the period. */
+  sectionsCompleted: number;
+  /** Tasks completed inside the period where you were the assignee or a stage member. */
+  tasksCompleted: number;
+  /** Your matters whose workflow completed inside the period. */
+  mattersCompleted: number;
+  /** Average Timeliness of your task stages completed inside the period. */
+  averageTimelinessScore: number | null;
+  /** Average Quality of your task stages completed inside the period. */
+  averageQualityScore: number | null;
+};
+
+const buildStaffPeriod = (
+  range: ResolvedReportRange | null,
+  values?: Partial<Omit<StaffDashboardPeriod, 'key' | 'label' | 'from' | 'to'>>
+): StaffDashboardPeriod | undefined => {
+  if (!range) return undefined;
+  return {
+    key: range.key,
+    label: range.label,
+    from: range.displayFrom,
+    to: range.displayTo,
+    feesEarned: values?.feesEarned ?? null,
+    collectedValue: values?.collectedValue ?? 0,
+    keyActionsChecked: values?.keyActionsChecked ?? 0,
+    sectionsCompleted: values?.sectionsCompleted ?? 0,
+    tasksCompleted: values?.tasksCompleted ?? 0,
+    mattersCompleted: values?.mattersCompleted ?? 0,
+    averageTimelinessScore: values?.averageTimelinessScore ?? null,
+    averageQualityScore: values?.averageQualityScore ?? null,
+  };
+};
+
+const emptyStaffSummary = (meName: string, tpaPercent: number, period?: StaffDashboardPeriod) => ({
   user: { name: meName },
   tpaPercent,
   currency: 'RWF',
@@ -206,6 +260,7 @@ const emptyStaffSummary = (meName: string, tpaPercent: number) => ({
   feesEarnedTotal: null as number | null,
   collectedBaseTotal: 0,
   rows: [] as StaffDashboardMatterRow[],
+  ...(period ? { period } : {}),
 });
 
 /**
@@ -225,12 +280,26 @@ const emptyStaffSummary = (meName: string, tpaPercent: number) => ({
  * - Tasks completed    = assigned matters whose workflow is completed.
  * - Fees earned        = sum of the user's "Earned fee" column across the matters
  *                        they are assigned to (Case Workspace -> Earned Fees).
+ *
+ * Optional period: when the caller sends `range` (daily | weekly | monthly |
+ * quarterly | yearly | ytd) or `from` + `to`, the response additionally carries
+ * a `period` block with the figures earned / completed inside that window and
+ * per-matter in-period columns. Without those parameters the response is
+ * byte-for-byte the all-time summary it has always been.
  */
 export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) => {
   try {
     const meName = String(req.user?.name || '').trim();
     const meEmail = String(req.user?.email || '').trim();
     if (!meName && !meEmail) return res.status(401).json({ message: 'Unauthorized.' });
+
+    // Optional reporting period — resolved with the same helper Firm Reports
+    // uses, so a period always means the exact same window in both places.
+    const periodResolution = resolveOptionalReportRange(req.query as any);
+    if (periodResolution && 'error' in periodResolution) {
+      return res.status(400).json({ message: periodResolution.error });
+    }
+    const period = periodResolution || null;
 
     const roleTpaPercent = getTpaPercent(String(req.user?.role || ''));
     const meKeys = [meName, meEmail].map(normalizeKey).filter(Boolean);
@@ -251,14 +320,14 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
           .lean()
       : [];
 
-    if (!matters.length) return res.json(emptyStaffSummary(meName, roleTpaPercent));
+    if (!matters.length) return res.json(emptyStaffSummary(meName, roleTpaPercent, buildStaffPeriod(period)));
 
     const caseIds = matters.map((matter) => matter._id);
     const [instances, tasks, paidInvoices] = await Promise.all([
       WorkflowInstance.find({ caseId: { $in: caseIds } }).lean(),
       Task.find({ caseId: { $in: caseIds } }).lean(),
       Invoice.find({ caseId: { $in: caseIds }, status: 'Paid' })
-        .select('caseId amount')
+        .select('caseId amount updatedAt')
         .lean(),
     ]);
 
@@ -290,6 +359,22 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       const key = String(invoice?.caseId || '');
       if (!key) continue;
       collectedByCase.set(key, (collectedByCase.get(key) || 0) + Math.max(0, Number(invoice?.amount) || 0));
+    }
+
+    // Payments received inside the requested period. The payment date is the
+    // moment the invoice was marked Paid (its updatedAt), exactly like the
+    // Firm Reports "Payment Date" basis.
+    const collectedInPeriodByCase = new Map<string, number>();
+    if (period) {
+      for (const invoice of invoiceList) {
+        if (!isWithinReportRange(invoice?.updatedAt, period)) continue;
+        const key = String(invoice?.caseId || '');
+        if (!key) continue;
+        collectedInPeriodByCase.set(
+          key,
+          (collectedInPeriodByCase.get(key) || 0) + Math.max(0, Number(invoice?.amount) || 0)
+        );
+      }
     }
 
     // Resolve each assigned member's system role so the TPA column follows the
@@ -324,6 +409,17 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     let feesEarnedTotal = 0;
     let hasScoredFee = false;
     let currency = 'RWF';
+
+    // Period-scoped accumulators (only filled when a period was requested).
+    let periodFeesEarned = 0;
+    let hasPeriodFee = false;
+    let periodCollectedValue = 0;
+    let periodKeyActionsChecked = 0;
+    let periodSectionsCompleted = 0;
+    let periodTasksCompleted = 0;
+    let periodMattersCompleted = 0;
+    const periodTimelinessScores: number[] = [];
+    const periodQualityScores: number[] = [];
 
     for (const matter of matters) {
       const caseId = String(matter?._id || '');
@@ -402,6 +498,61 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       }
       collectedBaseTotal += collectedBase;
 
+      // ---- Period-scoped figures for this matter (requested periods only) ----
+      let collectedBaseInPeriod: number | undefined;
+      let earnedFeeInPeriod: number | null | undefined;
+      if (period) {
+        const collectedInPeriod = collectedInPeriodByCase.get(caseId) || 0;
+        periodCollectedValue += collectedInPeriod;
+
+        // Same engine and role table as the all-time row — only the collected
+        // value is restricted to payments received inside the period.
+        const earnedInPeriod = computeCaseEarnedFees({
+          caseDoc: matter,
+          template,
+          workflowInstance: { ...(instance || {}), steps: effectiveSteps },
+          tasks: tasksByCase.get(caseId) || [],
+          collectedAmount: collectedInPeriod,
+          roleByName,
+        });
+        const myPeriodRows = earnedInPeriod.team.filter((member) => meKeys.includes(normalizeKey(member.name)));
+        const myPeriodFees = myPeriodRows
+          .map((member) => member.earnedFee)
+          .filter((value): value is number => value != null);
+        earnedFeeInPeriod = myPeriodFees.length ? round2(myPeriodFees.reduce((sum, value) => sum + value, 0)) : null;
+        collectedBaseInPeriod = myPeriodRows.reduce(
+          (max, member) => Math.max(max, Number(member.taskFeeCollected) || 0),
+          0
+        );
+        if (earnedFeeInPeriod != null) {
+          periodFeesEarned += earnedFeeInPeriod;
+          hasPeriodFee = true;
+        }
+
+        for (const step of steps) {
+          if (
+            String((step as any)?.status || '').toLowerCase() === 'completed' &&
+            isWithinReportRange((step as any)?.completedAt, period)
+          ) {
+            periodSectionsCompleted += 1;
+          }
+          const stepActions = Array.isArray((step as any)?.actions) ? (step as any).actions : [];
+          for (const action of stepActions) {
+            if (action?.done && isWithinReportRange(action?.doneAt, period)) periodKeyActionsChecked += 1;
+          }
+        }
+
+        if (completed) {
+          const completionAt =
+            steps.reduce<Date | null>((latest, step: any) => {
+              const at = step?.completedAt ? new Date(step.completedAt) : null;
+              if (!at || Number.isNaN(at.getTime())) return latest;
+              return !latest || at.getTime() > latest.getTime() ? at : latest;
+            }, null) || (instance?.updatedAt ? new Date(instance.updatedAt) : null);
+          if (isWithinReportRange(completionAt, period)) periodMattersCompleted += 1;
+        }
+      }
+
       rows.push({
         caseId,
         caseNo: String(matter?.caseNo || ''),
@@ -416,8 +567,47 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         completed,
         outstanding,
         overdueSections: matterOverdueSections,
+        ...(period
+          ? { collectedBaseInPeriod: round2(collectedBaseInPeriod || 0), earnedFeeInPeriod: earnedFeeInPeriod ?? null }
+          : {}),
       });
     }
+
+    // ---- Period-scoped task metrics (assignee or workflow-stage member = me) ----
+    if (period) {
+      for (const task of taskList) {
+        const involvesMe =
+          meKeys.includes(normalizeKey(task?.assignee)) ||
+          (Array.isArray(task?.taskStages) &&
+            task.taskStages.some((stage: any) => meKeys.includes(normalizeKey(stage?.staffMember))));
+        if (!involvesMe) continue;
+
+        if (
+          String(task?.status || '').toLowerCase() === 'completed' &&
+          isWithinReportRange(task?.completedAt, period)
+        ) {
+          periodTasksCompleted += 1;
+        }
+
+        for (const stage of Array.isArray(task?.taskStages) ? task.taskStages : []) {
+          if (!meKeys.includes(normalizeKey(stage?.staffMember))) continue;
+          if (!isWithinReportRange(stage?.completedAt, period)) continue;
+          if (stage?.timelinessScore != null) periodTimelinessScores.push(Number(stage.timelinessScore));
+          if (stage?.qualityScore != null) periodQualityScores.push(Number(stage.qualityScore));
+        }
+      }
+    }
+
+    const periodSummary = buildStaffPeriod(period, {
+      feesEarned: hasPeriodFee ? round2(periodFeesEarned) : null,
+      collectedValue: round2(periodCollectedValue),
+      keyActionsChecked: periodKeyActionsChecked,
+      sectionsCompleted: periodSectionsCompleted,
+      tasksCompleted: periodTasksCompleted,
+      mattersCompleted: periodMattersCompleted,
+      averageTimelinessScore: averageOf(periodTimelinessScores),
+      averageQualityScore: averageOf(periodQualityScores),
+    });
 
     return res.json({
       user: { name: meName },
@@ -432,6 +622,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       feesEarnedTotal: hasScoredFee ? round2(feesEarnedTotal) : null,
       collectedBaseTotal: round2(collectedBaseTotal),
       rows,
+      ...(periodSummary ? { period: periodSummary } : {}),
     });
   } catch (e: any) {
     return res.status(500).json({ message: e?.message || 'Failed to load staff dashboard summary.' });

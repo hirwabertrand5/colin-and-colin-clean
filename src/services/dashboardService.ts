@@ -61,6 +61,35 @@ export type StaffDashboardMatterRow = {
   completed: boolean;
   outstanding: boolean;
   overdueSections: number;
+  /** Present when a period was requested — collected value received in the period. */
+  collectedBaseInPeriod?: number;
+  /** Present when a period was requested — earned fee from the period's payments. */
+  earnedFeeInPeriod?: number | null;
+};
+
+/** Same window options as Firm Reports so both pages speak one language. */
+export type StaffDashboardPeriodRange =
+  | 'daily'
+  | 'weekly'
+  | 'monthly'
+  | 'quarterly'
+  | 'yearly'
+  | 'ytd'
+  | 'custom';
+
+export type StaffDashboardPeriod = {
+  key: string;
+  label: string;
+  from: string;
+  to: string;
+  feesEarned: number | null;
+  collectedValue: number;
+  keyActionsChecked: number;
+  sectionsCompleted: number;
+  tasksCompleted: number;
+  mattersCompleted: number;
+  averageTimelinessScore: number | null;
+  averageQualityScore: number | null;
 };
 
 export type StaffDashboardSummaryResponse = {
@@ -83,10 +112,21 @@ export type StaffDashboardSummaryResponse = {
   feesEarnedTotal: number | null;
   collectedBaseTotal: number;
   rows: StaffDashboardMatterRow[];
+  /** Period-scoped figures — returned only when range/from/to were requested. */
+  period?: StaffDashboardPeriod;
 };
 
-export const getStaffDashboardSummary = async (): Promise<StaffDashboardSummaryResponse> => {
-  const res = await fetch(`${API_URL}/dashboard/staff-summary`, { headers: authHeaders() });
+export const getStaffDashboardSummary = async (params?: {
+  range?: StaffDashboardPeriodRange;
+  from?: string;
+  to?: string;
+}): Promise<StaffDashboardSummaryResponse> => {
+  const qs = new URLSearchParams();
+  if (params?.range) qs.set('range', params.range);
+  if (params?.from) qs.set('from', params.from);
+  if (params?.to) qs.set('to', params.to);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  const res = await fetch(`${API_URL}/dashboard/staff-summary${suffix}`, { headers: authHeaders() });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to load staff dashboard');
   return res.json();
 };

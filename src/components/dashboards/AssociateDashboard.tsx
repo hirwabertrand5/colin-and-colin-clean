@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -11,6 +11,7 @@ import {
   Clock,
   DollarSign,
   Handshake,
+  RefreshCw,
   ShieldAlert,
   TrendingUp,
 } from 'lucide-react';
@@ -18,7 +19,11 @@ import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
 import { caseMatchesAssignee } from '../../utils/caseAssignments';
 import { getAllCases, CaseData } from '../../services/caseService';
-import { getStaffDashboardSummary, StaffDashboardSummaryResponse } from '../../services/dashboardService';
+import {
+  getStaffDashboardSummary,
+  StaffDashboardPeriodRange,
+  StaffDashboardSummaryResponse,
+} from '../../services/dashboardService';
 import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
@@ -213,7 +218,7 @@ const getMatterEarnedValue = (matter: CaseData) => {
 const getTaskDate = (raw?: string) => {
   if (!raw) return null;
   const parsed = resolveDeadlineDateTime(raw);
-  return Number.isFinite(parsed.getTime()) ? parsed : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
 };
 
 const getConsumedPercent = (task: TaskData, todayISO: string) => {
@@ -312,6 +317,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const [staffSummary, setStaffSummary] = useState<StaffDashboardSummaryResponse | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
 
+  // ---- Reporting period (same windows as Firm Reports) ----
+  const [periodRange, setPeriodRange] = useState<'all' | StaffDashboardPeriodRange>('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [periodHint, setPeriodHint] = useState('');
+
   usePageTitle(profile.title);
 
   const today = useMemo(() => isoToday(), []);
@@ -355,6 +367,59 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       mounted = false;
     };
   }, [next30Days, today]);
+
+  // Resolve the selected period into request parameters (or a friendly hint).
+  const periodRequest = useMemo<{
+    params: { range?: StaffDashboardPeriodRange; from?: string; to?: string } | undefined;
+    hint: string;
+  }>(() => {
+    if (periodRange === 'all') return { params: undefined, hint: '' };
+    if (periodRange === 'custom') {
+      if (!customFrom || !customTo) {
+        return { params: undefined, hint: 'Select both From and To dates to apply the custom range.' };
+      }
+      if (customFrom > customTo) {
+        return { params: undefined, hint: 'The From date must be before the To date.' };
+      }
+      return { params: { from: customFrom, to: customTo }, hint: '' };
+    }
+    return { params: { range: periodRange }, hint: '' };
+  }, [periodRange, customFrom, customTo]);
+
+  const fetchSummaryForPeriod = async (signal?: { cancelled: boolean }) => {
+    try {
+      setSummaryLoading(true);
+      setError('');
+      const summary = await getStaffDashboardSummary(periodRequest.params);
+      if (!signal?.cancelled) setStaffSummary(summary);
+    } catch (e: any) {
+      if (!signal?.cancelled) setError(e?.message || 'Failed to update the dashboard for the selected period.');
+    } finally {
+      if (!signal?.cancelled) setSummaryLoading(false);
+    }
+  };
+
+  const periodEffectMounted = useRef(false);
+  useEffect(() => {
+    // The initial dashboard load already fetched the all-time summary.
+    if (!periodEffectMounted.current) {
+      periodEffectMounted.current = true;
+      return;
+    }
+    setPeriodHint(periodRequest.hint);
+    if (periodRequest.hint) return;
+    const signal = { cancelled: false };
+    void fetchSummaryForPeriod(signal);
+    return () => {
+      signal.cancelled = true;
+    };
+  }, [periodRequest]);
+
+  const refreshSummary = async () => {
+    setPeriodHint(periodRequest.hint);
+    if (periodRequest.hint) return;
+    await fetchSummaryForPeriod();
+  };
 
   const ownTasks = useMemo(
     () =>
@@ -491,6 +556,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   );
 
   const summary = staffSummary;
+  /** Selected-period figures (undefined while showing all-time numbers). */
+  const period = summary?.period;
   // Per-matter rows straight from the Case Workspace → Earned Fees tables.
   const matterFeeRows = summary?.rows || [];
   const feeScoredMatters = matterFeeRows.filter((row) => row.earnedFee != null);
@@ -503,22 +570,33 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     const assigned = summary?.mattersAssigned ?? 0;
     const outstanding = summary?.mattersOutstanding ?? 0;
     const overdue = summary?.overdueSections ?? 0;
-    const timeliness = summary?.averageTimelinessScore ?? null;
-    const quality = summary?.averageQualityScore ?? null;
     const completedMatters = summary?.mattersCompleted ?? 0;
-    const fees = summary?.feesEarnedTotal ?? null;
+    // When a reporting period is selected these figures describe that window;
+    // otherwise they are the all-time values the dashboard always had.
+    const period = summary?.period;
+    const timeliness = period?.averageTimelinessScore ?? summary?.averageTimelinessScore ?? null;
+    const quality = period?.averageQualityScore ?? summary?.averageQualityScore ?? null;
+    const fees = period ? period.feesEarned : summary?.feesEarnedTotal ?? null;
     const stats: StatCard[] = [
       { label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Active Matters', value: String(assigned), helper: 'Matters where you are the Initiator, Reviewer or Signer/Approver', icon: Briefcase, tone: 'blue', href: '/matters' },
       { label: 'Tasks Outstanding', value: String(outstanding), helper: 'Matters where the Key Actions are not all checked yet', icon: CheckSquare, tone: outstanding ? 'amber' : 'green', href: '/tasks' },
       { label: 'Overdue Tasks', value: String(overdue), helper: 'Workflow sections past their deadline in your matters', icon: AlertTriangle, tone: overdue ? 'red' : 'green', href: '/tasks' },
-      { label: 'On-Time Completion', value: timeliness == null ? 'Pending' : `${timeliness}%`, helper: 'Average Timeliness of your row in each Case Workspace', icon: Clock, tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber', href: '/performance' },
-      { label: 'Quality Score', value: quality == null ? 'Pending' : `${quality}%`, helper: 'Average Quality Score on the matters assigned to you', icon: Award, tone: 'purple', href: '/performance' },
-      { label: 'Tasks Completed', value: String(completedMatters), helper: 'Matters where the workflow is completed', icon: TrendingUp, tone: 'green', href: '/performance' },
+      { label: 'On-Time Completion', value: timeliness == null ? 'Pending' : `${timeliness}%`, helper: period ? `Average Timeliness of your task stages completed in ${period.label}` : 'Average Timeliness of your row in each Case Workspace', icon: Clock, tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber', href: '/performance' },
+      { label: 'Quality Score', value: quality == null ? 'Pending' : `${quality}%`, helper: period ? `Average Quality of your task stages completed in ${period.label}` : 'Average Quality Score on the matters assigned to you', icon: Award, tone: 'purple', href: '/performance' },
+      { label: 'Tasks Completed', value: String(period ? period.tasksCompleted : completedMatters), helper: period ? `Tasks completed in ${period.label}` : 'Matters where the workflow is completed', icon: TrendingUp, tone: 'green', href: '/performance' },
       profile.financialScope === 'own'
         ? { label: 'TPA', value: `${summary?.tpaPercent ?? profile.tpa}%`, helper: 'Your role participation share', icon: DollarSign, tone: 'green' }
         : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Planned value of your assigned matters', icon: DollarSign, tone: 'green' },
-      { label: 'Fees Earned', value: fees == null ? 'Pending' : formatFees(fees), helper: 'Sum of your Earned fee rows in the Case Workspace tables', icon: DollarSign, tone: fees && fees > 0 ? 'green' : 'amber' },
+      { label: 'Fees Earned', value: fees == null ? 'Pending' : formatFees(fees), helper: period ? `Earned from payments received in ${period.label}` : 'Sum of your Earned fee rows in the Case Workspace tables', icon: DollarSign, tone: fees && fees > 0 ? 'green' : 'amber' },
     ];
+    if (period) {
+      stats.push(
+        { label: 'Key Actions Checked', value: String(period.keyActionsChecked), helper: `Key Actions you checked in ${period.label}`, icon: CheckCircle2, tone: 'blue' },
+        { label: 'Sections Completed', value: String(period.sectionsCompleted), helper: `Workflow sections completed in ${period.label}`, icon: CheckSquare, tone: 'green' },
+        { label: 'Collected in Period', value: formatFees(period.collectedValue), helper: `Payments received in ${period.label} across your matters`, icon: DollarSign, tone: 'green' },
+        { label: 'Matters Completed', value: String(period.mattersCompleted), helper: `Your matters whose workflow completed in ${period.label}`, icon: TrendingUp, tone: 'purple' },
+      );
+    }
     return stats;
   }, [financials.contractValue, profile, summary]);
 
@@ -536,6 +614,71 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               TPA {summary?.tpaPercent ?? profile.tpa}% · {profile.financialScope} scope
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Reporting period — same windows as Firm Reports */}
+      <div className="mb-6 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col text-sm text-gray-700">
+            Reporting period
+            <select
+              value={periodRange}
+              onChange={(event) => setPeriodRange(event.target.value as 'all' | StaffDashboardPeriodRange)}
+              className="mt-1 rounded border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            >
+              <option value="all">All time</option>
+              <option value="daily">Last Day</option>
+              <option value="weekly">Last Week</option>
+              <option value="monthly">Last Month</option>
+              <option value="quarterly">Last Quarter</option>
+              <option value="yearly">Last Year</option>
+              <option value="ytd">Year to Date</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </label>
+
+          {periodRange === 'custom' && (
+            <>
+              <label className="flex flex-col text-sm text-gray-700">
+                From
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                  className="mt-1 rounded border border-gray-300 bg-white px-3 py-2 text-gray-900"
+                />
+              </label>
+              <label className="flex flex-col text-sm text-gray-700">
+                To
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                  className="mt-1 rounded border border-gray-300 bg-white px-3 py-2 text-gray-900"
+                />
+              </label>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={() => void refreshSummary()}
+            disabled={summaryLoading}
+            className="inline-flex items-center rounded bg-gray-800 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-60"
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${summaryLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+
+        <div className="text-sm text-gray-600">
+          {summaryLoading
+            ? 'Updating figures…'
+            : summary?.period
+              ? `Period: ${summary.period.from} → ${summary.period.to}`
+              : 'Showing all-time figures. Pick a period to see what you earned and completed in that window.'}
+          {periodHint && <div className="mt-1 text-xs text-amber-700">{periodHint}</div>}
         </div>
       </div>
 
@@ -721,14 +864,33 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         )}
 
         <div className="bg-white border border-gray-200 rounded-lg p-5">
-          <SectionHeader title={profile.labels.performance} description="Completion, timeliness, quality, and rating computed from your assigned matters and your performance record." />
+          <SectionHeader
+            title={profile.labels.performance}
+            description={period
+              ? `Completion, timeliness and quality for ${period.label}; the performance rating is your overall record.`
+              : 'Completion, timeliness, quality, and rating computed from your assigned matters and your performance record.'}
+          />
           <div className="space-y-4">
-            {[
+            {([
               ['Matters Completion Rate', summaryCompletionRate == null ? 'Pending' : `${summaryCompletionRate}%`, CheckSquare, (summaryCompletionRate ?? 0) >= 80 ? 'green' : 'amber'],
-              ['Average Timeliness', summary?.averageTimelinessScore == null ? 'Pending' : `${summary.averageTimelinessScore}%`, Clock, (summary?.averageTimelinessScore ?? 0) >= 70 ? 'green' : 'amber'],
-              ['Average Quality', summary?.averageQualityScore == null ? 'Pending' : `${summary.averageQualityScore}%`, Award, 'purple'],
+              [
+                'Average Timeliness',
+                (period?.averageTimelinessScore ?? summary?.averageTimelinessScore) == null
+                  ? 'Pending'
+                  : `${period?.averageTimelinessScore ?? summary?.averageTimelinessScore}%`,
+                Clock,
+                ((period?.averageTimelinessScore ?? summary?.averageTimelinessScore) ?? 0) >= 70 ? 'green' : 'amber',
+              ],
+              [
+                'Average Quality',
+                (period?.averageQualityScore ?? summary?.averageQualityScore) == null
+                  ? 'Pending'
+                  : `${period?.averageQualityScore ?? summary?.averageQualityScore}%`,
+                Award,
+                'purple',
+              ],
               ['Performance Rating', performance?.rating?.value ? `${performance.rating.value}/5` : 'Pending', BarChart3, 'blue'],
-            ].map(([label, value, Icon, tone]) => {
+            ] as Array<[string, string, React.ComponentType<any>, Tone]>).map(([label, value, Icon, tone]) => {
               const toneData = toneClasses[tone as Tone];
               const IconComponent = Icon as React.ComponentType<any>;
               return (
@@ -779,8 +941,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
-              ['Fees Earned', summary?.feesEarnedTotal == null ? 'Pending' : formatFees(summary.feesEarnedTotal), 'Sum of your Earned fee rows across your matters'],
-              ['Collected Base', formatFees(summary?.collectedBaseTotal ?? 0), 'Eligible collected value used for your earned fees'],
+              period
+                ? ['Fees Earned in Period', period.feesEarned == null ? 'Pending' : formatFees(period.feesEarned), `Earned from payments received in ${period.label}`]
+                : ['Fees Earned', summary?.feesEarnedTotal == null ? 'Pending' : formatFees(summary.feesEarnedTotal), 'Sum of your Earned fee rows across your matters'],
+              period
+                ? ['Collected in Period', formatFees(period.collectedValue), `Payments received in ${period.label} across your matters`]
+                : ['Collected Base', formatFees(summary?.collectedBaseTotal ?? 0), 'Eligible collected value used for your earned fees'],
               ['TPA', `${summary?.tpaPercent ?? profile.tpa}%`, 'Your role participation share from the remuneration table'],
               ['Matters with Earned Fees', String(feeScoredMatters.length), `${matterFeeRows.length} matter(s) assigned to you`],
             ].map(([label, value, helper]) => (
@@ -792,11 +958,15 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             ))}
           </div>
           <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
-            Fees Earned = Collected Base × TPA% × Timeliness% × Quality% for each matter, exactly as shown in that matter's Case Workspace.
+            {period
+              ? `For the selected period only payments received inside it are used as the collected base, so the figures line up with Firm Reports (Payment Date). Fees Earned = Collected Base × TPA% × Timeliness% × Quality%.`
+              : `Fees Earned = Collected Base × TPA% × Timeliness% × Quality% for each matter, exactly as shown in that matter's Case Workspace.`}
           </div>
 
           <div className="mt-5 border-t border-gray-200 pt-3">
-            <div className="mb-2 text-sm font-medium text-gray-900">Fee breakdown by matter (Case Workspace)</div>
+            <div className="mb-2 text-sm font-medium text-gray-900">
+              Fee breakdown by matter {period ? `· ${period.label}` : '(Case Workspace)'}
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-[1024px] w-full text-left text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
@@ -808,12 +978,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                     <th className="px-4 py-3 text-right">Quality</th>
                     <th className="px-4 py-3 text-right">Collected base</th>
                     <th className="px-4 py-3 text-right">Earned fee</th>
+                    {period && <th className="px-4 py-3 text-right">Collected (period)</th>}
+                    {period && <th className="px-4 py-3 text-right">Earned fee (period)</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {matterFeeRows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={period ? 9 : 7} className="px-4 py-8 text-center text-gray-500">
                         No matters assigned yet. Earned fees appear here once a matter is assigned to you and scored in its Case Workspace.
                       </td>
                     </tr>
@@ -829,6 +1001,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.qualityScore == null ? '—' : `${row.qualityScore}%`}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBase)}</td>
                         <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.earnedFee == null ? 'Pending' : formatFees(row.earnedFee)}</td>
+                        {period && <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBaseInPeriod ?? 0)}</td>}
+                        {period && <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.earnedFeeInPeriod == null ? '—' : formatFees(row.earnedFeeInPeriod)}</td>}
                       </tr>
                     ))
                   )}

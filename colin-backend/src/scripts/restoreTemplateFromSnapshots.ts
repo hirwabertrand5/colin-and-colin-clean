@@ -17,6 +17,9 @@
  *   npm run restore:template                          (dry run, default template)
  *   npm run restore:template -- --apply
  *   npm run restore:template -- --name="Other Workflow" --apply
+ *   npm run restore:template -- --name="X" --version=1 --apply   (specific version)
+ *   npm run restore:template -- --name="X" --replace --apply     (replace instead of merge)
+ *   npm run restore:template -- --scan                           (scan every template)
  */
 import 'dotenv/config';
 import connectDB from '../config/db';
@@ -42,14 +45,138 @@ type SnapshotStep = {
   actions: string[];
 };
 
+/**
+ * Read-only scan across every workflow template: reports which ones still have
+ * Key Actions or percentages that only exist in their case snapshots (i.e.
+ * data the old seed-overwrite bug removed and we have not restored yet).
+ */
+const scanAllTemplates = async () => {
+  const templates: any[] = await WorkflowTemplate.find({}).lean();
+  const instances: any[] = await WorkflowInstance.find({}).lean();
+  const instancesByTemplate = new Map<string, any[]>();
+  for (const instance of instances) {
+    const key = String(instance.templateId);
+    if (!instancesByTemplate.has(key)) instancesByTemplate.set(key, []);
+    instancesByTemplate.get(key)!.push(instance);
+  }
+
+  const recoverable: any[] = [];
+  const emptyPercentages: any[] = [];
+  let compared = 0;
+
+  for (const template of templates) {
+    const snapshots = instancesByTemplate.get(String(template._id)) || [];
+    const templateSteps: any[] = Array.isArray(template.steps) ? template.steps : [];
+    if (!templateSteps.length) continue;
+    const templateStepByKey = new Map(templateSteps.map((step: any) => [String(step?.key || ''), step]));
+    const templateStages: any[] = Array.isArray(template.stages) ? template.stages : [];
+    const templateStageByKey = new Map(templateStages.map((stage: any) => [String(stage?.key || ''), stage]));
+    const templateHasAnyPercentage =
+      templateSteps.some((step: any) => Number(step?.percentage) > 0) ||
+      templateStages.some((stage: any) => Number(stage?.percentage) > 0);
+
+    if (!snapshots.length) {
+      if (!templateHasAnyPercentage) {
+        emptyPercentages.push({
+          name: template.name,
+          version: template.version,
+          active: template.active,
+          keyActions: templateSteps.length,
+          caseSnapshots: 0,
+        });
+      }
+      continue;
+    }
+    compared += 1;
+
+    const richest: any = snapshots
+      .slice()
+      .sort((a, b) => {
+        const aSteps = Array.isArray(a.steps) ? a.steps.length : 0;
+        const bSteps = Array.isArray(b.steps) ? b.steps.length : 0;
+        if (bSteps !== aSteps) return bSteps - aSteps;
+        const aPct = (Array.isArray(a.steps) ? a.steps : []).filter((step: any) => Number(step?.percentage) > 0).length;
+        const bPct = (Array.isArray(b.steps) ? b.steps : []).filter((step: any) => Number(step?.percentage) > 0).length;
+        return bPct - aPct;
+      })[0];
+
+    const snapshotSteps: any[] = Array.isArray(richest.steps) ? richest.steps : [];
+    const missingSteps = snapshotSteps.filter(
+      (step: any) => step?.stepKey && !templateStepByKey.has(String(step.stepKey))
+    );
+    const missingStepPercentages = snapshotSteps.filter((step: any) => {
+      if (!(Number(step?.percentage) > 0)) return false;
+      const templateStep: any = templateStepByKey.get(String(step?.stepKey));
+      return Boolean(templateStep) && !(Number(templateStep?.percentage) > 0);
+    });
+    const missingStageKeys = [
+      ...new Set(
+        snapshotSteps
+          .filter((step: any) => Number(step?.stagePercentage) > 0)
+          .filter((step: any) => {
+            const templateStage: any = templateStageByKey.get(String(step?.stageKey));
+            return Boolean(templateStage) && !(Number(templateStage?.percentage) > 0);
+          })
+          .map((step: any) => String(step?.stageKey))
+      ),
+    ];
+
+    if (missingSteps.length || missingStepPercentages.length || missingStageKeys.length) {
+      recoverable.push({
+        name: template.name,
+        version: template.version,
+        active: template.active,
+        keyActionsNow: templateSteps.length,
+        keyActionsInSnapshot: snapshotSteps.length,
+        caseSnapshots: snapshots.length,
+        missingKeyActions: missingSteps.length,
+        missingStepPercentages: missingStepPercentages.length,
+        missingStagePercentages: missingStageKeys.length,
+        sampleKeyActions: missingSteps.slice(0, 6).map((step: any) => step.stepKey),
+      });
+    } else if (!templateHasAnyPercentage && !snapshotSteps.some((step: any) => Number(step?.percentage) > 0)) {
+      emptyPercentages.push({
+        name: template.name,
+        version: template.version,
+        active: template.active,
+        keyActions: templateSteps.length,
+        caseSnapshots: snapshots.length,
+      });
+    }
+  }
+
+  console.log(`Scanned ${templates.length} template(s); ${compared} could be compared against case snapshots.`);
+  console.log('');
+  if (recoverable.length) {
+    console.log(`TEMPLATES WITH UNRESTORED DATA: ${recoverable.length}`);
+    for (const entry of recoverable) console.log(' -', JSON.stringify(entry));
+  } else {
+    console.log('No template has recoverable Key Actions / percentages from its case snapshots.');
+  }
+  if (emptyPercentages.length) {
+    console.log('');
+    console.log(`NO PERCENTAGES CONFIGURED (verify manually — no snapshot evidence of loss): ${emptyPercentages.length}`);
+    for (const entry of emptyPercentages) console.log(' -', JSON.stringify(entry));
+  }
+};
+
 const run = async () => {
   await connectDB();
 
   const apply = process.argv.includes('--apply');
+  if (process.argv.includes('--scan')) {
+    await scanAllTemplates();
+    process.exit(0);
+  }
   const nameArg = process.argv.find((arg) => arg.startsWith('--name='));
   const templateName = nameArg ? nameArg.slice('--name='.length).replace(/^"|"$/g, '') : DEFAULT_TEMPLATE_NAME;
+  const versionArg = process.argv.find((arg) => arg.startsWith('--version='));
+  const versionFilter = versionArg ? Number(versionArg.slice('--version='.length)) : undefined;
 
-  const template: any = await WorkflowTemplate.findOne({ name: templateName }).lean();
+  const templateFilter: any = { name: templateName };
+  if (Number.isFinite(versionFilter)) templateFilter.version = versionFilter;
+
+  const template: any = await WorkflowTemplate.findOne(templateFilter).lean();
   if (!template) {
     console.error(`Template not found: ${templateName}`);
     process.exit(1);
@@ -103,6 +230,82 @@ const run = async () => {
         order: Number(step?.order) || snapshotStages.size + 1,
       });
     }
+  }
+
+  const replace = process.argv.includes('--replace');
+  if (replace) {
+    const replacementStages = Array.from(snapshotStages.values())
+      .sort((a, b) => a.order - b.order)
+      .map((stage, index) => ({
+        key: stage.key,
+        order: index + 1,
+        title: stage.title,
+        ...(stage.percentage !== undefined ? { percentage: stage.percentage } : {}),
+      }));
+    const rawSteps: any[] = Array.isArray(richest.steps) ? richest.steps : [];
+    const replacementSteps = snapshotSteps.map((snapshot) => {
+      const source: any = rawSteps.find((step: any) => String(step?.stepKey) === snapshot.key) || {};
+      const slaText = String(source?.slaText || '').trim();
+      const outputs = Array.isArray(source?.outputs) ? source.outputs : [];
+      return {
+        key: snapshot.key,
+        order: snapshot.order,
+        stageKey: snapshot.stageKey,
+        title: snapshot.title || snapshot.key,
+        actions: snapshot.actions.length ? snapshot.actions : snapshot.title ? [snapshot.title] : [],
+        ...(snapshot.percentage !== undefined ? { percentage: snapshot.percentage } : {}),
+        ...(outputs.length
+          ? {
+              outputs: outputs.map((output: any) => ({
+                key: String(output?.key || ''),
+                name: String(output?.name || ''),
+                required: Boolean(output?.required),
+                ...(output?.category ? { category: String(output.category) } : {}),
+              })),
+            }
+          : {}),
+        ...(slaText ? { sla: { text: slaText } } : {}),
+      };
+    });
+    const replacementTotal = replacementSteps.reduce(
+      (sum: number, step: any) => sum + (parsePercentage(step?.percentage) ?? 0),
+      0
+    );
+
+    console.log('');
+    console.log('REPLACE MODE: the template sections and Key Actions are rebuilt from the case snapshot.');
+    console.log(
+      `Sections: ${Array.isArray(template.stages) ? template.stages.length : 0} -> ${replacementStages.length} | ` +
+        `Key Actions: ${Array.isArray(template.steps) ? template.steps.length : 0} -> ${replacementSteps.length} | ` +
+        `percentages total: ${Math.round(replacementTotal * 100) / 100}%`
+    );
+    for (const stage of replacementStages) console.log('STAGE  ', JSON.stringify(stage));
+    for (const step of replacementSteps) {
+      console.log(
+        'STEP   ',
+        JSON.stringify({
+          key: step.key,
+          order: step.order,
+          stageKey: step.stageKey,
+          percentage: step.percentage,
+          title: String(step.title).slice(0, 70),
+          checklist: step.actions.length,
+        })
+      );
+    }
+
+    if (!apply) {
+      console.log('');
+      console.log('Dry run only. Re-run with --apply to write these changes to the template.');
+      process.exit(0);
+    }
+
+    await WorkflowTemplate.updateOne({ _id: template._id }, { $set: { stages: replacementStages, steps: replacementSteps } });
+    console.log('');
+    console.log(
+      `Applied. "${templateName}" v${template.version} now has ${replacementStages.length} sections and ${replacementSteps.length} Key Actions.`
+    );
+    process.exit(0);
   }
 
   const templateStages: any[] = Array.isArray(template.stages) ? template.stages : [];

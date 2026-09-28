@@ -11,6 +11,7 @@ import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
+import { computeRange, normalizeReportBasis } from '../utils/reportRange';
 import {
   allocateCollectedValueAcrossKeyActions,
   calculateCollectedKeyActionEarnings,
@@ -28,30 +29,7 @@ type DateBasis = 'invoiceDate' | 'paymentDate' | 'taskDate';
 
 type AgeingBucket = '0-30' | '30-60' | '60-90' | '90+';
 
-function computeRange(range?: string) {
-  const to = new Date();
-  to.setHours(23, 59, 59, 999);
-
-  const from = new Date(to);
-  const r = String(range || 'monthly').toLowerCase();
-
-  if (r === 'daily') from.setDate(from.getDate());
-  else if (r === 'weekly') from.setDate(from.getDate() - 7);
-  else if (r === 'quarterly') from.setMonth(from.getMonth() - 3);
-  else if (r === 'yearly') from.setFullYear(from.getFullYear() - 1);
-  else if (r === 'ytd') from.setMonth(0, 1);
-  else from.setMonth(from.getMonth() - 1); // monthly default
-
-  from.setHours(0, 0, 0, 0);
-  return { from, to };
-}
-
-const normalizeBasis = (value?: string): DateBasis => {
-  const normalized = String(value || 'invoiceDate').trim().toLowerCase();
-  if (normalized === 'paymentdate' || normalized === 'payment_date') return 'paymentDate';
-  if (normalized === 'taskdate' || normalized === 'task_date') return 'taskDate';
-  return 'invoiceDate';
-};
+const normalizeBasis = (value?: string): DateBasis => normalizeReportBasis(value);
 
 const getAgeingBuckets = (invoices: any[], referenceDate: Date) => {
   const buckets: Record<AgeingBucket, number> = {
