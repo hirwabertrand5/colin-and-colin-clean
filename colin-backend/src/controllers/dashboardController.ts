@@ -92,15 +92,28 @@ export const getExecutiveAssistantDashboard = async (req: AuthRequest, res: Resp
     // Pending follow-up (tasks)
     // - show tasks not completed, soonest due first
     // ----------------------------
-    const pendingTasks = await Task.find({ status: { $ne: 'Completed' } })
+    // Fetch enough rows to retain ten after excluding tasks whose matter was
+    // closed. Closed-matter tasks must not reappear as pending/overdue work.
+    const pendingTaskCandidates = await Task.find({ status: { $ne: 'Completed' } })
       .sort({ dueDate: 1, priority: 1 })
-      .limit(10)
+      .limit(100)
       .lean();
 
     // attach case labels to tasks
-    const pendingCaseIds = Array.from(new Set(pendingTasks.map((t: any) => String(t.caseId)).filter(Boolean)));
-    const pendingCases = await Case.find({ _id: { $in: pendingCaseIds } }).select('_id caseNo parties').lean();
+    const pendingCaseIds = Array.from(new Set(pendingTaskCandidates.map((t: any) => String(t.caseId)).filter(Boolean)));
+    const pendingCases = await Case.find({ _id: { $in: pendingCaseIds } })
+      .select('_id caseNo parties status workflowProgress')
+      .lean();
     const pendingCaseMap = new Map(pendingCases.map((c: any) => [String(c._id), c]));
+    const pendingTasks = pendingTaskCandidates
+      .filter((task: any) => {
+        const caseDoc: any = pendingCaseMap.get(String(task.caseId));
+        return !caseDoc || (
+          String(caseDoc.status || '').trim().toLowerCase() !== 'closed' &&
+          String(caseDoc.workflowProgress?.status || '').trim() !== 'Completed'
+        );
+      })
+      .slice(0, 10);
 
     const pendingFollowUp = pendingTasks.map((t: any) => {
       const c = pendingCaseMap.get(String(t.caseId));

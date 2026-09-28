@@ -3,6 +3,8 @@ const getToken = () => localStorage.getItem('token');
 
 export type WorkflowTemplate = {
   _id: string;
+  createdAt?: string;
+  updatedAt?: string;
   name: string;
   matterType: string;
   caseType: 'Transactional Cases' | 'Litigation Cases' | 'Labor Cases';

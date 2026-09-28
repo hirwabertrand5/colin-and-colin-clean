@@ -125,35 +125,116 @@ const publicationValidationError = (payload: any) => {
   return allocationValidationError(payload);
 };
 
-const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: any, startDate: Date) => {
+/** A completed workflow is a terminal matter state, even if an older write left
+ * the instance status behind after every step had already been completed. */
+export const isWorkflowInstanceCompleted = (inst: any) => {
+  if (String(inst?.status || '').trim() === 'Completed') return true;
+  const steps = Array.isArray(inst?.steps) ? inst.steps : [];
+  return steps.length > 0 && steps.every((step: any) => String(step?.status || '') === 'Completed');
+};
+
+const isClosedCaseWorkflow = (caseDoc: any, inst?: any) =>
+  String(caseDoc?.status || '').trim().toLowerCase() === 'closed' ||
+  String(caseDoc?.workflowProgress?.status || '').trim() === 'Completed' ||
+  isWorkflowInstanceCompleted(inst);
+
+/**
+ * Rebuild an instance's steps from the template WITHOUT discarding case data.
+ *
+ * Template edits are merged in place:
+ * - key actions (checklists) are matched by TEXT, never by position, so a
+ *   reorder in the template can never move a case's ticks to another action;
+ * - key actions added on the case itself are kept;
+ * - case steps that the template no longer defines are kept instead of being
+ *   silently deleted;
+ * - a percentage that is genuinely absent from the template never zeroes the
+ *   value the case already stored (an intentional 0% is still honoured).
+ */
+export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: any, startDate: Date) => {
   const builtSteps = buildInstanceSteps(template, startDate);
   const existingByKey = new Map((existingSteps || []).map((step: any) => [String(step.stepKey), step]));
+  const templateStepByKey = new Map<string, any>(
+    (Array.isArray(template?.steps) ? template.steps : []).map((step: any) => [String(step?.key || ''), step] as [string, any])
+  );
+  const templateStageByKey = new Map<string, any>(
+    (Array.isArray(template?.stages) ? template.stages : []).map((stage: any) => [String(stage?.key || ''), stage] as [string, any])
+  );
 
-  return builtSteps.map((nextStep: any, index: number) => {
+  const mergedSteps = builtSteps.map((nextStep: any) => {
     const previous = existingByKey.get(String(nextStep.stepKey));
-    const mergedActions = (nextStep.actions || []).map((action: any, actionIndex: number) => {
-      const previousAction = Array.isArray(previous?.actions) ? previous.actions[actionIndex] : undefined;
+    const previousActions = Array.isArray(previous?.actions) ? previous.actions : [];
+    // A text can legitimately occur more than once. Keep a queue for each
+    // text instead of a single Map value, otherwise repeated checklist items
+    // are silently lost during a later template sync.
+    const remainingPreviousActions = new Map<string, any[]>();
+    for (const action of previousActions) {
+      const text = String(action?.text || '').trim();
+      if (!text) continue;
+      const matchingActions = remainingPreviousActions.get(text) || [];
+      matchingActions.push(action);
+      remainingPreviousActions.set(text, matchingActions);
+    }
+    const mergedActions = (nextStep.actions || []).map((action: any) => {
+      const text = String(action?.text || '').trim();
+      const matchingActions = remainingPreviousActions.get(text) || [];
+      const previousAction = matchingActions.shift();
+      if (matchingActions.length) remainingPreviousActions.set(text, matchingActions);
+      else remainingPreviousActions.delete(text);
       return {
-        text: String(action?.text || '').trim(),
+        text,
         done: Boolean(previousAction?.done),
         ...(previousAction?.doneAt ? { doneAt: previousAction.doneAt } : {}),
       };
     });
+    // Key actions that only exist on the case keep their tick state.
+    const caseOnlyActions = Array.from(remainingPreviousActions.values())
+      .flat()
+      .map((action: any) => ({
+        text: String(action?.text || '').trim(),
+        done: Boolean(action?.done),
+        ...(action?.doneAt ? { doneAt: action.doneAt } : {}),
+      }))
+      .filter((action: any) => action.text);
+
+    const templateStep = templateStepByKey.get(String(nextStep.stepKey));
+    const templateStage = templateStageByKey.get(String(nextStep.stageKey));
+    const templateStepPercentage = parsePercentage(templateStep?.percentage);
+    const templateStagePercentage = parsePercentage(templateStage?.percentage);
 
     return {
       ...nextStep,
+      percentage:
+        templateStepPercentage === undefined && Number(previous?.percentage) > 0
+          ? Number(previous.percentage)
+          : nextStep.percentage,
+      stagePercentage:
+        templateStagePercentage === undefined && Number(previous?.stagePercentage) > 0
+          ? Number(previous.stagePercentage)
+          : nextStep.stagePercentage,
       status: previous?.status || nextStep.status,
       completedAt: previous?.completedAt,
       extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
-      actions: mergedActions,
+      actions: [...mergedActions, ...caseOnlyActions],
       outputs: nextStep.outputs,
     };
   });
+
+  // Steps the template no longer defines stay on the case with their progress.
+  const builtKeys = new Set(builtSteps.map((step: any) => String(step?.stepKey)));
+  const removedFromTemplate = (existingSteps || [])
+    .filter((step: any) => !builtKeys.has(String(step?.stepKey)))
+    .map((step: any) => ({ ...step }));
+
+  return [...mergedSteps, ...removedFromTemplate].sort((a, b) => (a.order || 0) - (b.order || 0));
 };
 
 const syncCaseWorkflowInstanceFromTemplate = async (caseId: string, template: any, wfStart: Date) => {
   const inst: any = await WorkflowInstance.findOne({ caseId });
   if (!inst) return null;
+
+  // A completed matter is an immutable workflow snapshot. A later edit to the
+  // shared template must never append work to it or make it active again.
+  if (isWorkflowInstanceCompleted(inst)) return inst;
 
   const nextSteps = buildUpdatedInstanceSteps(inst.steps, template, wfStart);
   const currentStep = inst.currentStepKey ? nextSteps.find((step: any) => step.stepKey === inst.currentStepKey) : null;
@@ -182,11 +263,6 @@ const computeNextDueAt = (inst: any) => {
   return pending?.dueAt;
 };
 
-const previousActiveStatus = (status?: string) => {
-  const normalized = String(status || '').trim().toLowerCase();
-  return normalized && normalized !== 'closed' ? status : 'In Progress';
-};
-
 export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mongoose.ClientSession) => {
   const nextDueAt = computeNextDueAt(inst);
   const currentStep = inst.currentStepKey
@@ -213,8 +289,15 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   const percent = stageWeightedPercent > 0 ? stageWeightedPercent : actionPercent;
   const completedValueAmount = Math.round((existingPlannedAmount * percent) / 100);
 
+  // Once the case itself is closed, preserve that terminal state. The explicit
+  // reopen-step endpoint changes the case back to In Progress before calling
+  // this function, so normal synchronization can never reopen it by accident.
+  const workflowCompleted =
+    isWorkflowInstanceCompleted(inst) ||
+    String(c?.status || '').trim().toLowerCase() === 'closed' ||
+    String(c?.workflowProgress?.status || '').trim() === 'Completed';
   c.workflowProgress = {
-    status: inst.status === 'Completed' ? 'Completed' : 'In Progress',
+    status: workflowCompleted ? 'Completed' : 'In Progress',
     currentStepKey: inst.currentStepKey,
     currentStepTitle: (() => {
       if (!inst.currentStepKey) return undefined;
@@ -245,10 +328,8 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
     completedValue: { amount: completedValueAmount || 0, currency: existingCurrency },
   };
 
-  if (inst.status === 'Completed') {
+  if (workflowCompleted) {
     c.status = 'Closed';
-  } else if (String(c.status || '').toLowerCase() === 'closed') {
-    c.status = previousActiveStatus(c.workflowProgress?.status);
   }
 
   c.billingSettings = {
@@ -522,8 +603,22 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
 
     const { templateId } = req.params as any;
     const before = await WorkflowTemplate.findById(templateId).lean();
+    if (!before) return res.status(404).json({ message: 'Template not found.' });
 
-    const payload: any = { ...req.body };
+    // Templates are submitted as a complete document. Without a revision
+    // check, an older browser tab can overwrite key actions and percentages
+    // that somebody else saved in the meantime. The editor sends the value it
+    // originally loaded, so reject stale saves instead of silently losing data.
+    const { expectedUpdatedAt, ...submittedPayload } = req.body || {};
+    if (!expectedUpdatedAt) {
+      return res.status(409).json({ message: 'This workflow is out of date. Refresh it before saving.' });
+    }
+    const expectedUpdatedAtMs = new Date(String(expectedUpdatedAt)).getTime();
+    if (!Number.isFinite(expectedUpdatedAtMs) || expectedUpdatedAtMs !== new Date((before as any).updatedAt).getTime()) {
+      return res.status(409).json({ message: 'This workflow was changed by someone else. Refresh it before saving.' });
+    }
+
+    const payload: any = { ...submittedPayload };
     payload.stages = Array.isArray(payload.stages)
       ? payload.stages.map(({ fee: _fee, ...stage }: any) => stage)
       : payload.stages;
@@ -541,22 +636,41 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     // Normalize literal percentages without redistributing them.
     normalizeTemplatePercentages(payload);
 
-    const updated = await WorkflowTemplate.findByIdAndUpdate(templateId, payload, { new: true });
-    if (!updated) return res.status(404).json({ message: 'Template not found.' });
+    const updated = await WorkflowTemplate.findOneAndUpdate(
+      { _id: templateId, updatedAt: new Date(expectedUpdatedAtMs) },
+      payload,
+      { new: true, runValidators: true }
+    );
+    if (!updated) {
+      return res.status(409).json({ message: 'This workflow was changed by someone else. Refresh it before saving.' });
+    }
 
-    const affectedCases = await Case.find({ workflowTemplateId: templateId }).select('_id workflowStartDate createdAt').lean();
-    await Promise.all((affectedCases as any[]).map(async (matter) => {
-      const wfStart = resolveDeadlineDateTime(matter.workflowStartDate || matter.createdAt || new Date()) || new Date();
-      const inst = await syncCaseWorkflowInstanceFromTemplate(String(matter._id), updated, wfStart);
-      if (!inst) return;
+    // Drafts are allowed to be incomplete, so they must never rewrite the
+    // workflows of live cases. Cases are synced when the workflow is published.
+    if (!updated.draft) {
+      const affectedCases = await Case.find({ workflowTemplateId: templateId })
+        .select('_id workflowStartDate createdAt status workflowProgress')
+        .lean();
+      await Promise.all((affectedCases as any[]).map(async (matter) => {
+        // Do not synchronize a completed/closed case from a mutable shared
+        // template. This was the path that turned closed matters back into
+        // active matters and made their old due dates appear overdue.
+        if (isClosedCaseWorkflow(matter)) return;
+        const wfStart = resolveDeadlineDateTime(matter.workflowStartDate || matter.createdAt || new Date()) || new Date();
+        const inst = await syncCaseWorkflowInstanceFromTemplate(String(matter._id), updated, wfStart);
+        if (!inst) return;
 
-      const caseDoc: any = await Case.findById(matter._id);
-      if (!caseDoc) return;
-      caseDoc.workflowTemplateId = updated._id as any;
-      caseDoc.matterType = updated.matterType;
-      caseDoc.workflowStartDate = wfStart;
-      await updateCaseWorkflowProgress(caseDoc, inst);
-    }));
+        if (isWorkflowInstanceCompleted(inst)) return;
+
+        const caseDoc: any = await Case.findById(matter._id);
+        if (!caseDoc) return;
+        if (isClosedCaseWorkflow(caseDoc, inst)) return;
+        caseDoc.workflowTemplateId = updated._id as any;
+        caseDoc.matterType = updated.matterType;
+        caseDoc.workflowStartDate = wfStart;
+        await updateCaseWorkflowProgress(caseDoc, inst);
+      }));
+    }
 
     if (before && before.matterType !== updated.matterType) {
       // Keep the template metadata itself authoritative; the case sync above updates linked cases.
@@ -893,6 +1007,7 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
 
+    const wasCompletedMatter = isClosedCaseWorkflow(c, inst);
     const step = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
     if (!step) return res.status(404).json({ message: 'Step not found.' });
     if (step.status !== 'Completed') return res.status(400).json({ message: 'Step is not completed.' });
@@ -910,6 +1025,9 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
     }
 
     await inst.save();
+    // Reopening a step is the one explicit operation that may reopen a
+    // completed matter. All regular template/case saves preserve Closed.
+    if (wasCompletedMatter) c.status = 'In Progress';
     await updateCaseWorkflowProgress(c, inst);
 
     const actor = actorFromReq(req);
@@ -1029,6 +1147,9 @@ export const addStepAction = async (req: AuthRequest, res: Response) => {
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+    if (isClosedCaseWorkflow(c, inst)) {
+      return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
+    }
 
     const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
     if (!step) return res.status(404).json({ message: 'Step not found.' });
@@ -1095,6 +1216,9 @@ export const updateStepAction = async (req: AuthRequest, res: Response) => {
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+    if (isClosedCaseWorkflow(c, inst)) {
+      return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
+    }
 
     const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
     if (!step) return res.status(404).json({ message: 'Step not found.' });
@@ -1140,6 +1264,9 @@ export const deleteStepAction = async (req: AuthRequest, res: Response) => {
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+    if (isClosedCaseWorkflow(c, inst)) {
+      return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
+    }
 
     const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
     if (!step) return res.status(404).json({ message: 'Step not found.' });
@@ -1187,9 +1314,59 @@ export const deleteStepAction = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const scanWorkflowMismatches = async () => {
+  const cases: any[] = await Case.find({})
+    .select('_id caseNo parties status workflowProgress')
+    .lean();
+  const caseIds = cases.map((caseDoc: any) => caseDoc._id);
+  const instances: any[] = caseIds.length
+    ? await WorkflowInstance.find({ caseId: { $in: caseIds } }).lean()
+    : [];
+  const instanceByCaseId = new Map(instances.map((inst: any) => [String(inst.caseId), inst]));
+  const mismatches: any[] = [];
+
+  for (const caseDoc of cases) {
+    const inst = instanceByCaseId.get(String(caseDoc._id));
+    const caseMarkedComplete =
+      String(caseDoc.status || '').trim().toLowerCase() === 'closed' ||
+      String(caseDoc.workflowProgress?.status || '').trim() === 'Completed';
+    if (!inst) {
+      if (caseMarkedComplete) {
+        mismatches.push({
+          caseId: String(caseDoc._id), caseNo: caseDoc.caseNo, parties: caseDoc.parties,
+          issue: 'Case is closed/completed but has no workflow instance', canAutoFix: false,
+        });
+      }
+      continue;
+    }
+
+    const allStepsCompleted = Array.isArray(inst.steps) && inst.steps.length > 0 &&
+      inst.steps.every((step: any) => String(step?.status || '') === 'Completed');
+    if (String(inst.status || '') === 'Completed' && !caseMarkedComplete) {
+      mismatches.push({
+        caseId: String(caseDoc._id), caseNo: caseDoc.caseNo, parties: caseDoc.parties,
+        issue: 'Workflow instance is completed but the case is not closed', canAutoFix: true,
+      });
+    } else if (allStepsCompleted && String(inst.status || '') !== 'Completed') {
+      mismatches.push({
+        caseId: String(caseDoc._id), caseNo: caseDoc.caseNo, parties: caseDoc.parties,
+        issue: 'All workflow steps are completed but the instance is still active', canAutoFix: true,
+      });
+    } else if (caseMarkedComplete && String(inst.status || '') !== 'Completed') {
+      mismatches.push({
+        caseId: String(caseDoc._id), caseNo: caseDoc.caseNo, parties: caseDoc.parties,
+        issue: 'Case is closed/completed but its workflow instance is still active', canAutoFix: false,
+      });
+    }
+  }
+  return mismatches;
+};
+
 export const auditCaseWorkflowMismatches = async (req: AuthRequest, res: Response) => {
   try {
-    return res.status(501).json({ message: 'Not implemented: auditCaseWorkflowMismatches' });
+    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
+    const mismatches = await scanWorkflowMismatches();
+    return res.json({ count: mismatches.length, mismatches });
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to audit mismatches.' });
   }
@@ -1197,7 +1374,34 @@ export const auditCaseWorkflowMismatches = async (req: AuthRequest, res: Respons
 
 export const fixCaseWorkflowMismatches = async (req: AuthRequest, res: Response) => {
   try {
-    return res.status(501).json({ message: 'Not implemented: fixCaseWorkflowMismatches' });
+    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
+    const mismatches = await scanWorkflowMismatches();
+    const repaired: any[] = [];
+    const skipped: any[] = [];
+
+    for (const mismatch of mismatches) {
+      if (!mismatch.canAutoFix) {
+        skipped.push(mismatch);
+        continue;
+      }
+      const [caseDoc, inst] = await Promise.all([
+        Case.findById(mismatch.caseId),
+        WorkflowInstance.findOne({ caseId: mismatch.caseId }),
+      ]);
+      if (!caseDoc || !inst) {
+        skipped.push({ ...mismatch, issue: `${mismatch.issue} (record no longer exists)` });
+        continue;
+      }
+
+      if (String(inst.status || '') !== 'Completed') {
+        inst.status = 'Completed';
+        await inst.save();
+      }
+      await updateCaseWorkflowProgress(caseDoc, inst);
+      repaired.push({ caseId: mismatch.caseId, caseNo: caseDoc.caseNo, issue: mismatch.issue });
+    }
+
+    return res.json({ repairedCount: repaired.length, repaired, skippedCount: skipped.length, skipped });
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to fix mismatches.' });
   }
@@ -1226,6 +1430,9 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+    if (isClosedCaseWorkflow(c, inst)) {
+      return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
+    }
 
     const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
     if (!step) return res.status(404).json({ message: 'Step not found.' });

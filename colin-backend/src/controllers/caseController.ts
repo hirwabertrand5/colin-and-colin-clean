@@ -12,6 +12,7 @@ import { sendEmailResend } from '../services/emailResendService';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { buildInstanceSteps } from '../utils/workflowCompute';
+import { buildUpdatedInstanceSteps, updateCaseWorkflowProgress } from './workflowController';
 import { computeCompletedPercentFromInstance } from '../utils/workflowPercentages';
 import { buildYearlySequence } from '../utils/counter';
 import { isPublicYellowCase } from '../utils/caseVisibility';
@@ -947,8 +948,37 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     }
 
     const before: any = await Case.findById(req.params.id);
+    if (!before) return res.status(404).json({ message: 'Case not found.' });
+
+    const beforeTemplateId = before.workflowTemplateId ? String(before.workflowTemplateId) : '';
+    const nextTemplateId = (req.body as any)?.workflowTemplateId ? String((req.body as any).workflowTemplateId) : '';
+    const didChangeTemplate = Boolean(nextTemplateId && nextTemplateId !== beforeTemplateId);
+    const beforeStart = before.workflowStartDate ? new Date(before.workflowStartDate).toISOString().slice(0, 10) : '';
+    const nextStart = (req.body as any)?.workflowStartDate
+      ? new Date((req.body as any).workflowStartDate).toISOString().slice(0, 10)
+      : '';
+    const didChangeStartDate = Boolean(nextStart && nextStart !== beforeStart);
+    const isCompletedMatter =
+      String(before.status || '').trim().toLowerCase() === 'closed' ||
+      String(before.workflowProgress?.status || '').trim() === 'Completed';
+    const requestedStatus = String((req.body as any)?.status || '').trim();
+
+    // Generic case editing must not be able to reopen a completed matter. The
+    // workflow reopen endpoint is the deliberate, audited way to do that.
+    if (isCompletedMatter && requestedStatus && requestedStatus.toLowerCase() !== 'closed') {
+      return res.status(400).json({ message: 'Closed matters can only be reopened from the workflow step action.' });
+    }
+    if (isCompletedMatter && (didChangeTemplate || didChangeStartDate)) {
+      return res.status(400).json({ message: 'Closed matters cannot have their workflow template or workflow start date changed.' });
+    }
+
     const nextAssignments = normalizeCaseAssignmentsPayload(req.body);
     const updatePayload: any = { ...(req.body as any) };
+    // Workflow state belongs to the workflow controller. A stale edit form used
+    // to submit an old workflowProgress object and overwrite the live state.
+    delete updatePayload.workflowProgress;
+    delete updatePayload.workflowInstanceId;
+    if (isCompletedMatter) delete updatePayload.status;
     if (nextAssignments) {
       updatePayload.caseAssignments = nextAssignments;
       updatePayload.assignedTo = buildCaseAssignedToDisplay({
@@ -960,16 +990,8 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
 
     if (!updated) return res.status(404).json({ message: 'Case not found.' });
 
-    // If workflow template was changed, re-initialize the workflow instance and progress
-    const beforeTemplateId = before?.workflowTemplateId ? String(before.workflowTemplateId) : '';
-    const nextTemplateId = (req.body as any)?.workflowTemplateId ? String((req.body as any).workflowTemplateId) : '';
-    const didChangeTemplate = Boolean(nextTemplateId && nextTemplateId !== beforeTemplateId);
-    const beforeStart = before?.workflowStartDate ? new Date(before.workflowStartDate).toISOString().slice(0, 10) : '';
-    const nextStart = (req.body as any)?.workflowStartDate
-      ? new Date((req.body as any).workflowStartDate).toISOString().slice(0, 10)
-      : '';
-    const didChangeStartDate = Boolean(nextStart && nextStart !== beforeStart);
-
+    // If workflow template was changed, merge the workflow instance and keep
+    // its recorded progress instead of rebuilding it from scratch.
     if (didChangeTemplate || didChangeStartDate) {
       const templateIdToUse = nextTemplateId || beforeTemplateId;
       if (templateIdToUse) {
@@ -978,9 +1000,10 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
           const wfStart =
             resolveDeadlineDateTime((req.body as any)?.workflowStartDate || updated.workflowStartDate || updated.createdAt || new Date()) ||
             new Date();
-          const steps = buildInstanceSteps(template, wfStart);
+          const builtSteps = buildInstanceSteps(template, wfStart);
 
           let inst: any = await WorkflowInstance.findOne({ caseId: updated._id });
+          let steps = builtSteps;
           if (!inst) {
             inst = await WorkflowInstance.create({
               caseId: updated._id,
@@ -990,9 +1013,12 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
               steps,
             });
           } else {
+            // Merge instead of replacing: the case keeps its key actions, ticks
+            // and percentages even when the template (or start date) changed.
+            steps = buildUpdatedInstanceSteps(inst.steps, template, wfStart);
             inst.templateId = template._id;
-            inst.status = 'Active';
-            inst.currentStepKey = steps[0]?.stepKey;
+            inst.currentStepKey =
+              steps.find((step: any) => step.stepKey === inst.currentStepKey)?.stepKey || steps[0]?.stepKey;
             inst.steps = steps;
             await inst.save();
           }
@@ -1011,28 +1037,12 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
             (req.body as any)?.workflowProgress?.plannedValue?.currency ||
             updated.billingSettings?.currency ||
             'RWF';
-          const actionProgress = calculateActionProgress(steps as any[], plannedAmount);
-
           updated.workflowProgress = {
-            status: 'In Progress',
-            percent: actionProgress.percent,
-            ...(inst.currentStepKey ? { currentStepKey: inst.currentStepKey } : {}),
-            ...(steps[0]?.title ? { currentStepTitle: steps[0].title } : {}),
-            ...(steps[0]?.startAt ? { currentStepStartAt: steps[0].startAt } : {}),
-            ...(steps[0]?.dueAt ? { currentStepDueAt: steps[0].dueAt } : {}),
-            nextDueAt: steps[0]?.dueAt,
+            ...(updated.workflowProgress || {}),
             plannedValue: { ...(typeof plannedAmount === 'number' ? { amount: plannedAmount } : {}), currency: plannedCurrency },
-            completedValue: { amount: actionProgress.completedAmount, currency: plannedCurrency },
           };
-          updated.billingSettings = {
-            ...(updated.billingSettings || {}),
-            currency: plannedCurrency,
-            prepaidTotal: 0,
-            prepaidRemaining: 0,
-            accruedUnbilled: actionProgress.completedAmount,
-          };
-
-          await updated.save();
+          updated.billingSettings = { ...(updated.billingSettings || {}), currency: plannedCurrency };
+          await updateCaseWorkflowProgress(updated, inst);
         }
       }
     }
@@ -1043,26 +1053,18 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
         const plannedCurrency =
           (req.body as any).workflowProgress.plannedValue.currency || updated.billingSettings?.currency || 'RWF';
         const inst: any = await WorkflowInstance.findOne({ caseId: updated._id }).lean();
-        const actionProgress = calculateActionProgress(inst?.steps || [], plannedAmount);
-        // Prefer the stage-weighted completion % (updated when steps on the template
-        // were changed); fall back to the action-based progress for legacy instances.
-        const weightedPercent = computeCompletedPercentFromInstance(inst?.steps || []);
-        const percent = weightedPercent > 0 ? weightedPercent : actionProgress.percent;
-        const completedAmount = Math.round((plannedAmount * percent) / 100);
+        if (!inst) {
+          return res.status(400).json({ message: 'The matter has no workflow instance to update.' });
+        }
         updated.workflowProgress = {
           ...(updated.workflowProgress || {}),
           plannedValue: { amount: plannedAmount, currency: plannedCurrency },
-          percent,
-          completedValue: { amount: completedAmount, currency: plannedCurrency },
         };
         updated.billingSettings = {
           ...(updated.billingSettings || {}),
           currency: plannedCurrency,
-          prepaidTotal: 0,
-          prepaidRemaining: 0,
-          accruedUnbilled: completedAmount,
         };
-        await updated.save();
+        await updateCaseWorkflowProgress(updated, inst);
       }
     }
 

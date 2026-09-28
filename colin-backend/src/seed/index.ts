@@ -33,8 +33,13 @@ export const seedAllWorkflowTemplates = async () => {
   // calculations always read valid 0–100 values (manual values are preserved).
   const templates: any[] = await WorkflowTemplate.find({}).lean();
   for (const template of templates) {
+    const stored = JSON.stringify({ stages: template.stages, steps: template.steps });
     normalizeTemplatePercentages(template);
     const cast = template as any;
+    const normalized = JSON.stringify({ stages: cast.stages, steps: cast.steps });
+    // Only rewrite a record when normalization actually changed it — a boot
+    // must never race an admin editing a workflow.
+    if (stored === normalized) continue;
     await WorkflowTemplate.updateOne(
       { _id: template._id },
       {

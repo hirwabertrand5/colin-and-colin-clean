@@ -448,9 +448,12 @@ export const seedBusinessRegistrationTemplate = async () => {
     { $set: { active: false } }
   );
 
+  // Insert the template only when it does not exist yet. Existing records may
+  // contain admin edits (key actions, percentages) and must never be
+  // overwritten by a restart or deploy. Bump `version` to ship new seed content.
   return WorkflowTemplate.findOneAndUpdate(
     { name, version },
-    { $set: template },
+    { $setOnInsert: template },
     { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
 };

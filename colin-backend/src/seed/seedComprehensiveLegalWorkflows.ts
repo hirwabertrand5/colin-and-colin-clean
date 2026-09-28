@@ -429,9 +429,13 @@ export const seedComprehensiveLegalWorkflows = async () => {
       { $set: { active: false } }
     );
 
+    // Insert the template only when it does not exist yet. Existing records may
+    // contain admin edits (key actions, percentages) and must never be
+    // overwritten by a restart or deploy. Bump `latestVersion` to ship new
+    // seed content as a new version.
     const result = await WorkflowTemplate.findOneAndUpdate(
       { name: template.name, version: template.version },
-      { $set: template },
+      { $setOnInsert: template },
       { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
 
