@@ -12,6 +12,7 @@
     "restore:template": "ts-node src/scripts/restoreTemplateFromSnapshots.ts",
     "verify:workflows": "ts-node src/scripts/verifyWorkflowFixes.ts",
     "verify:alignment": "tsx src/scripts/verifyMatterTypeAlignment.ts",
+    "verify:case-management-checklist": "tsx src/scripts/verifyCaseManagementChecklist.ts",
     "align:workflows": "tsx src/scripts/alignCaseWorkflowsWithTemplates.ts",
     "align:workflows:apply": "tsx src/scripts/alignCaseWorkflowsWithTemplates.ts --apply",
     "normalize:workflows": "ts-node src/scripts/normalizeWorkflowNumbering.ts",

@@ -15,9 +15,10 @@ import {
   computeStepWorkTimelinessScore,
   getMatterQualityScore,
   normalizeEffectiveWorkflowSteps,
+  resolveEffectiveStepActions,
 } from '../utils/caseEarnedFees';
 import { buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages';
-import { completeStepForCase } from './workflowController';
+import { completeStepForCase, reconcileInstanceTemplateWithCanonical } from './workflowController';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -158,9 +159,9 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
     submittedAt: step?.submittedAt,
     reviewedAt: step?.reviewedAt,
     timelinessScore: computeStepWorkTimelinessScore(step),
-    actions: Array.isArray(step?.actions)
-      ? step.actions.map((action: any) => ({ text: action?.text, done: Boolean(action?.done) }))
-      : [],
+    // Same checklist the Case Workspace shows: the instance keeps the progress,
+    // the template provides the Key Action text for legacy steps that stored none.
+    actions: resolveEffectiveStepActions(step, template),
   }));
 
   const myRole = resolveMyCaseRole(caseDoc, req);
@@ -196,9 +197,46 @@ const loadCaseManagementContext = async (req: AuthRequest) => {
   const caseDoc: any = await Case.findById(caseId);
   if (!caseDoc) return { error: null as any, caseDoc: null as any };
   const inst: any = await WorkflowInstance.findOne({ caseId: new mongoose.Types.ObjectId(caseId) });
+
+  // Same self-heal as the Case Workspace workflow endpoint: keep the matter on
+  // its canonical template so Case Management shows the same checklist as the
+  // Overview tab (and Templates settings). Never blocks loading on failure.
+  if (inst) {
+    try {
+      await reconcileInstanceTemplateWithCanonical(caseDoc, inst);
+    } catch {
+      // A reconciliation failure must never block Case Management.
+    }
+  }
+
   const template: any = inst
     ? await WorkflowTemplate.findById(inst.templateId).lean()
     : null;
+
+  // Legacy instances store no actions on their steps, which left Case Management
+  // without a checklist even though the Overview tab derived it from the
+  // template. Backfill and persist the template's Key Actions here so the
+  // checklist, review/approval guards and action toggles all stay in sync.
+  if (inst && template) {
+    let actionsBackfilled = false;
+    for (const step of inst.steps || []) {
+      const hasActions = Array.isArray(step?.actions) && step.actions.length > 0;
+      if (hasActions) continue;
+      const actions = resolveEffectiveStepActions(step, template);
+      if (actions.length) {
+        step.actions = actions;
+        actionsBackfilled = true;
+      }
+    }
+    if (actionsBackfilled) {
+      try {
+        await inst.save();
+      } catch {
+        // buildCaseManagementState still derives the actions from the template.
+      }
+    }
+  }
+
   const [tasks, paidInvoices] = await Promise.all([
     Task.find({ caseId }).lean(),
     Invoice.find({ caseId, status: 'Paid' }).select('amount').lean(),

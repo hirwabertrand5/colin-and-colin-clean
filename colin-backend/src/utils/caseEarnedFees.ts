@@ -362,3 +362,34 @@ export const normalizeEffectiveWorkflowSteps = (inst: any, template: any): any[]
     };
   });
 };
+
+/**
+ * The checklist (Key Actions) shown for one case workflow step.
+ *
+ * The template is authoritative for the checklist text; the instance only
+ * stores each action's progress. Legacy instances (created before actions were
+ * stored per step, or re-pointed after a template re-import) carry no actions at
+ * all — those matters showed the checklist on the Case Workspace Overview (which
+ * derives it from the template) but an empty step in Case Management. Applying
+ * the same rule here keeps both tabs on one checklist.
+ */
+export const resolveEffectiveStepActions = (
+  step: any,
+  template: any
+): Array<{ text: string; done: boolean }> => {
+  const instanceActions = Array.isArray(step?.actions) ? step.actions : [];
+  if (instanceActions.length > 0) {
+    return instanceActions.map((action: any) => ({
+      text: String(action?.text ?? '').trim(),
+      done: Boolean(action?.done),
+    }));
+  }
+
+  const templateStep = (Array.isArray(template?.steps) ? template.steps : []).find(
+    (candidate: any) => String(candidate?.key || '') === String(step?.stepKey || '')
+  );
+  return (Array.isArray(templateStep?.actions) ? templateStep.actions : [])
+    .map((text: any) => String(text || '').trim())
+    .filter(Boolean)
+    .map((text: string) => ({ text, done: false }));
+};
