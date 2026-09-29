@@ -12,6 +12,7 @@ import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { computeRange, normalizeReportBasis } from '../utils/reportRange';
+import { buildRoleByName, resolveMemberTpa, TASK_TPA_SHARES } from '../utils/workflowPercentages';
 import {
   allocateCollectedValueAcrossKeyActions,
   calculateCollectedKeyActionEarnings,
@@ -110,7 +111,7 @@ const roleEarningShare = (role?: string) => {
     intern: { label: 'Intern', percent: 1 },
     trainee_associate: { label: 'Trainee Associate', percent: 3 },
     associate: { label: 'Associate', percent: 5 },
-    executive_assistant: { label: 'Executive Assistant', percent: 5 },
+    executive_assistant: { label: 'Executive Assistant', percent: 3 },
     senior_associate: { label: 'Senior Associate', percent: 6 },
     senior_executive_assistant: { label: 'Senior Executive Assistant', percent: 6 },
     associate_partner: { label: 'Associate Partner', percent: 8 },
@@ -145,24 +146,6 @@ const parseTaskDate = (value: any, endOfDay = false) => {
 
   const parsed = new Date(raw);
   return Number.isFinite(parsed.getTime()) ? parsed : null;
-};
-
-const TASK_TPA_SHARES: Record<string, number> = {
-  intern: 1,
-  trainee_associate: 3,
-  associate: 5,
-  executive_assistant: 5,
-  senior_associate: 6,
-  senior_executive_assistant: 6,
-  partner: 8,
-  executive_partner: 8,
-  associate_partner: 8,
-  executive_associate_partner: 8,
-  senior_partner: 8,
-  originating_attorney: 8,
-  managing_partner: 10,
-  executive_managing_partner: 10,
-  managing_director: 10,
 };
 
 const getTaskParticipationAllocation = (role?: string) => {
@@ -341,8 +324,10 @@ const buildCollectedKeyActionRows = ({
             : Number.isFinite(Number(linkedTask?.qualityScore))
               ? Math.max(0, Number(linkedTask.qualityScore))
               : null;
-        const role = String(roleByName.get(memberKey) || '').trim();
-        const tpaPercent = getTaskParticipationAllocation(role);
+        // Same TPA resolver as the Case Workspace and Case Management.
+        const tpa = resolveMemberTpa(member.name, roleByName);
+        const role = String(tpa.role || '').trim();
+        const tpaPercent = tpa.tpaPercent;
         const feeEarned =
           timelinessScore != null && qualityScore != null && tpaPercent > 0
             ? roundMoney(taskFeeCollected * (tpaPercent / 100) * (timelinessScore / 100) * (qualityScore / 100))
@@ -561,9 +546,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const taxDataAvailable = false;
     const taxMessage = 'Tax data unavailable - source not configured';
 
-    const roleByName = new Map(
-      (users as any[]).map((u) => [baseNameFromLabel(u.name), String(u.role || '')])
-    );
+    // Case/whitespace-insensitive keys, built by the shared helper so Firm
+    // Reports resolves the same roles (and TPAs) as the Case Workspace.
+    const roleByName = buildRoleByName(users as any[]);
     const userIdByName = new Map(
       (users as any[]).map((u) => [baseNameFromLabel(u.name), String(u._id || '')])
     );
@@ -1268,7 +1253,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       instancesByCaseId: new Map((memberWorkflowInstances as any[]).map((instance) => [String(instance.caseId), instance])),
       tasksByCaseId: memberTasksByCaseId,
       paidInvoicesByCaseId: memberPaidInvoicesByCaseId,
-      roleByName: new Map([[baseNameFromLabel(displayName), role]]),
+      roleByName: buildRoleByName([{ name: displayName, role }]),
       fromDate,
       toDate,
       selectedMemberName: displayName,

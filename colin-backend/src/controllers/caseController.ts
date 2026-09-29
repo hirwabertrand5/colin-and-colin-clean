@@ -431,6 +431,11 @@ export const createCase = async (req: AuthRequest, res: Response) => {
         newCase.workflowTemplateId = template._id as any;
         newCase.workflowInstanceId = inst._id as any;
         newCase.matterType = template.matterType;
+        // The case label always mirrors the template that actually drives the
+        // checklist, so "Suggested Matter Type" can never disagree with the
+        // Key Actions shown in the Case Workspace.
+        newCase.workflow = template.matterType;
+        newCase.caseType = template.caseType;
 
         const requestedPlannedAmount = parseMoney((req.body as any)?.workflowProgress?.plannedValue?.amount) || parseMoney((req.body as any)?.budget);
         const plannedAmount = requestedPlannedAmount;
@@ -1026,6 +1031,8 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
           updated.workflowTemplateId = template._id as any;
           updated.workflowInstanceId = inst._id as any;
           updated.matterType = template.matterType;
+          updated.workflow = template.matterType;
+          updated.caseType = template.caseType;
           updated.workflowStartDate = wfStart;
 
           const requestedPlannedAmount =

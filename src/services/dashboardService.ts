@@ -31,6 +31,10 @@ export type ExecutiveDashboardResponse = {
     status: string;
     dueDate: string;
     priority?: string;
+    /** Matter the follow-up belongs to — links open its Case Management tab. */
+    caseId?: string;
+    /** Workflow section the task belongs to, focused when the matter opens. */
+    workflowStepKey?: string;
   }[];
   recentCases: {
     id: string;

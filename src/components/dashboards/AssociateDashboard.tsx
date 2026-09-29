@@ -28,6 +28,7 @@ import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
 import { getAllTasks, TaskData } from '../../services/taskService';
+import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import { baseNameFromLabel } from '../../utils/productivity';
 import './AssociateDashboard.css';
@@ -173,6 +174,10 @@ const profileForRole = (role?: UserRole) => {
   if (role && roleProfiles[role]) return roleProfiles[role];
   if (role && partnerRoles.includes(role)) return roleProfiles.partner;
   if (role === 'senior_executive_assistant') return roleProfiles.senior_associate;
+  // Executive Assistant: associate-style dashboard with the firm's 3% TPA.
+  if (role === 'executive_assistant') {
+    return { ...roleProfiles.associate, title: 'Executive Assistant Dashboard', tpa: 3 };
+  }
   return roleProfiles.associate;
 };
 
@@ -731,14 +736,19 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                           Due {formatDeadlineDateTime(task.dueDate)} · Supervisor {task.supervisor || '—'} · Timeliness {getTimelinessScore(task, today)}%
                         </p>
                       </div>
-                      <Link to={`/tasks/${task._id}`} className="shrink-0 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">Open</Link>
+                      <Link
+                        to={buildCaseManagementLink(task.caseId, task.workflowStepKey)}
+                        className="shrink-0 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+                      >
+                        Open Case Management
+                      </Link>
                     </div>
                   </div>
                 ))}
             </div>
           )}
           <div className="px-5 py-3 border-t border-gray-200">
-            <Link to="/tasks" className="text-sm text-gray-600 hover:text-gray-900">View all tasks →</Link>
+            <Link to="/tasks" className="text-sm text-gray-600 hover:text-gray-900">Open the Matter Work Board →</Link>
           </div>
         </div>
 

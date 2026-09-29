@@ -11,6 +11,9 @@
     "seed:business-registration": "ts-node src/seed/runBusinessRegistrationSeed.ts",
     "restore:template": "ts-node src/scripts/restoreTemplateFromSnapshots.ts",
     "verify:workflows": "ts-node src/scripts/verifyWorkflowFixes.ts",
+    "verify:alignment": "tsx src/scripts/verifyMatterTypeAlignment.ts",
+    "align:workflows": "tsx src/scripts/alignCaseWorkflowsWithTemplates.ts",
+    "align:workflows:apply": "tsx src/scripts/alignCaseWorkflowsWithTemplates.ts --apply",
     "normalize:workflows": "ts-node src/scripts/normalizeWorkflowNumbering.ts",
     "reset:password": "tsx src/scripts/resetUserPassword.ts"
   },

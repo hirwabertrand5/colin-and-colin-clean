@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import CaseClientReportsTab from '../reports/CaseClientReportsTab';
 import CaseWorkflowTab from './CaseWorkflowTab';
 import CaseManagementTab from './CaseManagementTab';
@@ -83,6 +83,11 @@ import {
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { getRoleSuggestions } from '../../constants/partyRoles';
 import { getCasePracticePath } from '../../utils/caseLabels';
+import {
+  CASE_WORKSPACE_TAB_SLUG,
+  CaseWorkspaceTabName,
+  normalizeCaseWorkspaceTab,
+} from '../../utils/caseWorkspaceLinks';
 import { caseMatchesAssignee, formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
 import {
   formatDeadlineDateTime,
@@ -249,17 +254,46 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [error, setError] = useState('');
   const [deletingCase, setDeletingCase] = useState(false);
 
-  // Tabs
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'caseManagement' | 'teamStages' | 'tasks' | 'calendar' | 'documents' | 'billing' | 'audit' | 'reports'
-  >('overview');
+  // Tabs — the active tab lives in the URL (?tab=case-management) so the
+  // dashboards, the work board and notifications can deep-link straight into
+  // the Case Management tab of the matter.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<CaseWorkspaceTabName>(
+    () => normalizeCaseWorkspaceTab(searchParams.get('tab')) || 'overview'
+  );
   // Optional Key Action context when arriving from the Case Workspace Key Actions.
-  const [cmFocusStep, setCmFocusStep] = useState('');
+  const [cmFocusStep, setCmFocusStep] = useState(() => String(searchParams.get('step') || ''));
+
+  const writeTabToUrl = (tab: CaseWorkspaceTabName, stepKey?: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', CASE_WORKSPACE_TAB_SLUG[tab]);
+    const step = String(stepKey ?? '').trim();
+    if (tab === 'caseManagement' && step) next.set('step', step);
+    else next.delete('step');
+    setSearchParams(next, { replace: true });
+  };
+
+  const selectTab = (tab: CaseWorkspaceTabName) => {
+    setActiveTab(tab);
+    writeTabToUrl(tab);
+  };
 
   const openCaseManagementFromKeyAction = (stepKey?: string) => {
-    setCmFocusStep(String(stepKey || ''));
+    const step = String(stepKey || '');
+    setCmFocusStep(step);
     setActiveTab('caseManagement');
+    writeTabToUrl('caseManagement', step);
   };
+
+  // Keep the view in sync when a link (notification, work board, dashboard)
+  // arrives while the Case Workspace is already open on another tab.
+  useEffect(() => {
+    const requested = normalizeCaseWorkspaceTab(searchParams.get('tab'));
+    if (requested) setActiveTab((prev) => (prev === requested ? prev : requested));
+    const step = String(searchParams.get('step') || '').trim();
+    if (step) setCmFocusStep(step);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // Workflow instance (for overview checklist)
   const [workflowInstance, setWorkflowInstance] = useState<WorkflowInstance | null>(null);
@@ -434,6 +468,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowTemplatesLoading, setWorkflowTemplatesLoading] = useState(false);
   const [workflowTemplatesError, setWorkflowTemplatesError] = useState('');
+  /** Template the case workflow instance actually follows (drives the checklist). */
+  const [linkedWorkflowTemplate, setLinkedWorkflowTemplate] = useState<WorkflowTemplate | null>(null);
   const editModalInitializedRef = useRef(false);
 
   // Billing
@@ -491,6 +527,30 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       })
       .finally(() => setWorkflowLoading(false));
   }, [id]);
+
+  // The template that actually drives this case's checklist. The "Suggested
+  // Matter Type" tile reads it, so the label can never disagree with the Key
+  // Actions rendered by the workflow tab.
+  useEffect(() => {
+    const templateId = workflowInstance?.templateId ? String(workflowInstance.templateId) : '';
+    if (!templateId) {
+      setLinkedWorkflowTemplate(null);
+      return;
+    }
+
+    let cancelled = false;
+    getWorkflowTemplateById(templateId)
+      .then((template) => {
+        if (!cancelled) setLinkedWorkflowTemplate(template);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedWorkflowTemplate(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowInstance?.templateId]);
 
   // Load workflow template for stage-specific fees and SLA
   useEffect(() => {
@@ -658,13 +718,14 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     const ct = resolveCaseTypeFromSelection(selectedEditServiceNodes);
     if (!suggested || !ct) return;
 
-    // If current template doesn't match suggested, auto-pick best match
-    const currentTemplate = workflowTemplates.find((t) => t._id === editCaseData.workflowTemplateId);
-    const currentOk = currentTemplate && findMatchingWorkflowTemplate([currentTemplate], suggested, ct);
-    if (currentOk) return;
-
+    // Keep the case on the canonical template for the suggested matter type
+    // (published, newest version, most recently updated). This also replaces an
+    // older duplicate, so the checklist always matches Templates settings.
     const match = findMatchingWorkflowTemplate(workflowTemplates, suggested, ct);
     if (!match) return;
+
+    const currentTemplate = workflowTemplates.find((t) => t._id === editCaseData.workflowTemplateId);
+    if (currentTemplate && currentTemplate._id === match._id) return;
 
     setEditCaseData((prev) => {
       if (!prev) return prev;
@@ -1433,7 +1494,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => selectTab(tab.id as CaseWorkspaceTabName)}
                 className={`
                   flex items-center px-1 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition-colors
                   ${
@@ -1635,7 +1696,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                   </div>
                   <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Suggested Matter Type</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-900">{caseData.workflow || 'Not specified'}</p>
+                    <p className="mt-1 text-sm font-semibold text-gray-900">
+                      {linkedWorkflowTemplate?.matterType || workflowTemplate?.matterType || caseData.workflow || 'Not specified'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1890,9 +1953,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() => navigate(`/tasks/${task._id}`)}
+                            onClick={() => openCaseManagementFromKeyAction(task.workflowStepKey)}
                             className="text-gray-700 hover:text-gray-900"
-                            title="Open task"
+                            title="Open in Case Management"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -1938,7 +2001,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
               {isRestrictedAssigneeRole && (
                 <div className="px-5 py-4 text-xs text-gray-500 border-t">
-                  Note: Task progress updates should be done from the Task page.
+                  Note: Task progress updates are done from the Case Management tab.
                 </div>
               )}
             </div>

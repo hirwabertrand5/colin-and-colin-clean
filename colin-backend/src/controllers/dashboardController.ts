@@ -13,7 +13,7 @@ import WorkflowTemplate from '../models/workflowTemplateModel';
 
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
-import { getTpaPercent } from '../utils/workflowPercentages';
+import { buildRoleByName, getTpaPercent, normalizeMemberName } from '../utils/workflowPercentages';
 import {
   isWithinReportRange,
   resolveOptionalReportRange,
@@ -131,6 +131,10 @@ export const getExecutiveAssistantDashboard = async (req: AuthRequest, res: Resp
         status: t.status,
         dueDate: t.dueDate || '—',
         priority: t.priority || 'Medium',
+        // The follow-up opens the matter's Case Management tab, so the frontend
+        // needs the matter and the workflow section it belongs to.
+        caseId: t.caseId ? String(t.caseId) : '',
+        workflowStepKey: t.workflowStepKey || '',
       };
     });
 
@@ -378,26 +382,11 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     }
 
     // Resolve each assigned member's system role so the TPA column follows the
-    // same role-based table as the Case Workspace Earned Fees table.
-    const memberNames = new Set<string>();
-    for (const matter of matters) {
-      const assignments = matter?.caseAssignments || {};
-      [assignments.initiator || matter?.assignedTo, assignments.reviewer, assignments.signerApprover]
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-        .forEach((name) => memberNames.add(name));
-    }
-    const users: any[] = memberNames.size
-      ? await User.find({ name: { $in: Array.from(memberNames) } })
-          .select('name role')
-          .lean()
-      : [];
-    const roleByName = new Map<string, string>();
-    for (const user of users) {
-      const key = normalizeKey(user?.name);
-      if (key && !roleByName.has(key)) roleByName.set(key, String(user?.role || ''));
-    }
-    if (meName && req.user?.role) roleByName.set(normalizeKey(meName), String(req.user.role));
+    // same role-based table as the Case Workspace Earned Fees table. The users
+    // collection is loaded whole and keyed case/whitespace-insensitively.
+    const users: any[] = await User.find({}).select('name role').lean();
+    const roleByName = buildRoleByName(users);
+    if (meName && req.user?.role) roleByName.set(normalizeMemberName(meName), String(req.user.role));
 
     const rows: StaffDashboardMatterRow[] = [];
     const timelinessScores: number[] = [];

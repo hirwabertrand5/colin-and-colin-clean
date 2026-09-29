@@ -552,7 +552,8 @@ export const addTaskToCase = async (req: AuthRequest, res: Response) => {
               severity: 'info',
               caseId: String(caseId),
               taskId: String(newTask._id),
-              link: `/tasks/${newTask._id}`,
+              // Matter work happens in the Case Management tab of the Case Workspace.
+              link: `/cases/${String(caseId)}?tab=case-management`,
             },
             email: {
             subject: `Task assigned: ${newTask.taskNo || 'Task'}`,
@@ -983,7 +984,8 @@ export const submitTaskForApproval = async (req: AuthRequest, res: Response) => 
         severity: 'warning',
         caseId: String(task.caseId),
         taskId: String(task._id),
-        link: `/tasks/${task._id}`,
+        // Matter work happens in the Case Management tab of the Case Workspace.
+        link: `/cases/${String(task.caseId)}?tab=case-management`,
       },
       email: {
         subject: `Approval needed: ${task.title || 'Task'}`,
@@ -1005,7 +1007,8 @@ export const submitTaskForApproval = async (req: AuthRequest, res: Response) => 
           severity: 'warning',
           caseId: String(task.caseId),
           taskId: String(task._id),
-          link: `/tasks/${task._id}`,
+          // Matter work happens in the Case Management tab of the Case Workspace.
+          link: `/cases/${String(task.caseId)}?tab=case-management`,
         },
       });
     }

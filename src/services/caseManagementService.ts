@@ -9,6 +9,8 @@ export type CaseManagementMember = {
   name: string;
   userRole: string | null;
   tpaPercent: number;
+  /** Where the TPA came from: the user record, the label itself, or nowhere. */
+  tpaSource?: 'user-record' | 'role-label' | 'none';
 };
 
 export type CaseManagementStep = {

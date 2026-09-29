@@ -26,7 +26,7 @@ export const TASK_TPA_SHARES: Record<string, number> = {
   intern: 1,
   trainee_associate: 3,
   associate: 5,
-  executive_assistant: 5,
+  executive_assistant: 3,
   senior_associate: 6,
   senior_executive_assistant: 6,
   partner: 8,
@@ -42,6 +42,93 @@ export const TASK_TPA_SHARES: Record<string, number> = {
 
 export const getTpaPercent = (role?: string) =>
   TASK_TPA_SHARES[String(role || '').toLowerCase()] ?? 0;
+
+/** Case/space-insensitive member-name key used by every team resolver. */
+export const normalizeMemberName = (value: unknown) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+/** "Steven R." / "Steven - Associate" / "Steven (Associate)" → "steven". */
+export const baseMemberName = (value: unknown) => {
+  const normalized = normalizeMemberName(value);
+  if (!normalized) return '';
+  const withoutRole = normalized.split(' - ')[0] ?? '';
+  return (withoutRole.split('(')[0] ?? '').trim();
+};
+
+/**
+ * Role display titles that are sometimes stored as the team-member value
+ * (for example "Managing Partner" instead of the person's name).
+ */
+export const TPA_ROLE_LABELS: Record<string, string> = {
+  'managing director': 'managing_director',
+  'managing partner': 'managing_partner',
+  'executive managing partner': 'executive_managing_partner',
+  'senior partner': 'senior_partner',
+  partner: 'partner',
+  'executive partner': 'executive_partner',
+  'associate partner': 'associate_partner',
+  'executive associate partner': 'executive_associate_partner',
+  'senior executive assistant': 'senior_executive_assistant',
+  'executive assistant': 'executive_assistant',
+  'originating attorney': 'originating_attorney',
+  'senior associate': 'senior_associate',
+  associate: 'associate',
+  'trainee associate': 'trainee_associate',
+  intern: 'intern',
+};
+
+export type MemberTpaResolution = {
+  tpaPercent: number;
+  role: string | null;
+  source: 'user-record' | 'role-label' | 'none';
+};
+
+/**
+ * Name → role map shared by every team resolver. Keys are normalized
+ * case/whitespace-insensitively and include the base name, so an assignment
+ * like "Steven - Associate" still matches the "Steven" user record.
+ */
+export const buildRoleByName = (users: any[]): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const user of Array.isArray(users) ? users : []) {
+    const role = String(user?.role || '').trim();
+    if (!role) continue;
+    for (const key of [normalizeMemberName(user?.name), baseMemberName(user?.name)]) {
+      if (key && !map.has(key)) map.set(key, role);
+    }
+  }
+  return map;
+};
+
+/**
+ * Resolve a team member's TPA%. The user-role map is checked with a normalized
+ * key (case/whitespace tolerant) and with the base name, then the member label
+ * itself is treated as a role title ("Managing Partner" → 10%). This is the only
+ * place team TPA is resolved so every surface agrees.
+ */
+export const resolveMemberTpa = (memberName: unknown, roleByName: Map<string, string>): MemberTpaResolution => {
+  const candidates = [normalizeMemberName(memberName), baseMemberName(memberName)].filter(Boolean);
+  for (const candidate of candidates) {
+    const role = String(roleByName.get(candidate) || '').trim();
+    const tpa = getTpaPercent(role);
+    if (role && tpa > 0) return { tpaPercent: tpa, role, source: 'user-record' };
+  }
+
+  const labelKey = TPA_ROLE_LABELS[baseMemberName(memberName)];
+  if (labelKey) return { tpaPercent: getTpaPercent(labelKey), role: labelKey, source: 'role-label' };
+
+  const underscored = normalizeMemberName(memberName)
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (getTpaPercent(underscored) > 0) {
+    return { tpaPercent: getTpaPercent(underscored), role: underscored, source: 'role-label' };
+  }
+
+  return { tpaPercent: 0, role: null, source: 'none' };
+};
 
 const round2 = (n: number) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const clamp = (n: number) => Math.max(0, Math.min(100, n));

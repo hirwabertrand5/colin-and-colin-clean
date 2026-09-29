@@ -128,7 +128,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
         { name: 'Independent Tasks', href: '/matters/independent-tasks', icon: CheckSquare },
       ],
     },
-    { name: 'Tasks', href: '/tasks', icon: CheckSquare },
+    { name: 'Matter Work Board', href: '/tasks', icon: CheckSquare },
     { name: 'Calendar & Deadlines', href: '/calendar', icon: CalendarIcon },
     { name: 'Billing & Margins', href: '/billing', icon: DollarSign, roles: ['managing_director', 'managing_partner', 'executive_managing_partner', 'senior_partner', 'partner', 'executive_partner', 'associate_partner', 'executive_associate_partner', 'executive_assistant', 'originating_attorney'] },
     { name: 'Firm Reports', href: '/reports', icon: BarChart3, roles: ['managing_director', 'executive_assistant'] },

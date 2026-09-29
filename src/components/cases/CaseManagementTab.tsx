@@ -414,7 +414,16 @@ function AssignedMembersCard({ state, memberByKey }: { state: CaseManagementStat
                     {member.name || DASH}
                     {member.userRole ? <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">({member.userRole})</span> : null}
                   </td>
-                  <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{member.tpaPercent > 0 ? `${member.tpaPercent}%` : DASH}</td>
+                  <td
+                    className="px-3 py-2 text-right text-gray-600 dark:text-gray-300"
+                    title={
+                      member.tpaSource === 'none'
+                        ? 'No user record matches this team member. Set their role in Users & Access so their TPA applies.'
+                        : undefined
+                    }
+                  >
+                    {member.tpaPercent > 0 ? `${member.tpaPercent}%` : DASH}
+                  </td>
                   <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{row && row.timelinessScore != null ? `${row.timelinessScore}%` : DASH}</td>
                   <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{row && row.qualityScore != null ? `${row.qualityScore}%` : DASH}</td>
                   <td className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">
@@ -750,7 +759,16 @@ function EarnedFeesSection({ state }: { state: CaseManagementState }) {
                 <tr key={member.key} className="bg-white dark:bg-gray-800">
                   <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{member.role}</td>
                   <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{member.name}</td>
-                  <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{member.tpaPercent > 0 ? `${member.tpaPercent}%` : DASH}</td>
+                  <td
+                    className="px-3 py-2 text-right text-gray-600 dark:text-gray-300"
+                    title={
+                      member.tpaSource === 'none'
+                        ? 'No user record matches this team member. Set their role in Users & Access so their TPA applies.'
+                        : undefined
+                    }
+                  >
+                    {member.tpaPercent > 0 ? `${member.tpaPercent}%` : DASH}
+                  </td>
                   <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{member.timelinessScore != null ? `${member.timelinessScore}%` : DASH}</td>
                   <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{member.qualityScore != null ? `${member.qualityScore}%` : DASH}</td>
                   <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{formatMoney(member.taskFeeCollected, earned.currency)}</td>

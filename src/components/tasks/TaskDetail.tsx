@@ -48,6 +48,7 @@ import {
   TaskAttachment,
 } from '../../services/taskAttachmentService';
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
+import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 
 interface TaskDetailProps {
   userRole: UserRole;
@@ -739,13 +740,18 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     <div>
       {/* Header */}
       <div className="mb-6">
-        <button
-          onClick={() => navigate('/tasks')}
-          className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900 mb-4"
-        >
-          <ArrowLeft className="w-4 h-4 mr-1" />
-          Back to Tasks
-        </button>
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => navigate('/tasks')}
+            className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900"
+          >
+            <ArrowLeft className="w-4 h-4 mr-1" />
+            Back to Matter Work Board
+          </button>
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800">
+            Day-to-day updates now happen in the matter&apos;s Case Management tab.
+          </span>
+        </div>
 
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
@@ -1262,10 +1268,10 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
               <h2 className="font-semibold text-gray-900">Case Documents</h2>
               <button
                 className="text-sm text-gray-600 hover:text-gray-900"
-                onClick={() => navigate(`/cases/${task.caseId}`)}
+                onClick={() => navigate(buildCaseManagementLink(task.caseId))}
                 type="button"
               >
-                Open Case →
+                Open Case Management →
               </button>
             </div>
 
@@ -1380,10 +1386,10 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
             <div className="space-y-2">
               <button
                 className="w-full px-4 py-2 border border-gray-300 rounded text-sm text-gray-700 hover:bg-gray-50"
-                onClick={() => navigate(`/cases/${task.caseId}`)}
+                onClick={() => navigate(buildCaseManagementLink(task.caseId))}
                 type="button"
               >
-                View Case Details
+                Open Case Management
               </button>
 
               <button

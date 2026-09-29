@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
+
 import usePageTitle from '../../hooks/usePageTitle';
 import {
   Bell,
@@ -170,10 +172,10 @@ export default function NotificationCenter() {
         return;
       }
 
-      // fallback routing
-      if (n.taskId) navigate(`/tasks/${n.taskId}`);
-      else if (n.caseId) navigate(`/cases/${n.caseId}`);
-      else if (n.fundId) navigate(`/petty-cash`);
+      // fallback routing — all matter work happens in the Case Management tab
+      if (n.caseId) navigate(buildCaseManagementLink(n.caseId));
+      else if (n.taskId) navigate('/tasks');
+      else if (n.fundId) navigate('/petty-cash');
       else navigate('/'); // final fallback
     } catch (e: any) {
       setError(e?.message || 'Failed to open notification');

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarPlus, Plus, Pencil, Trash2, X } from 'lucide-react';
-import { TaskData, getTasksForCase } from '../../services/taskService';
+import { TaskData } from '../../services/taskService';
 import {
   getWorkflowForCase,
   completeWorkflowStep,
@@ -23,6 +23,7 @@ import {
   getUrgencyColorForDueDate,
   toDateTimeLocalValue,
 } from '../../utils/workflowDeadline';
+import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 
 type Props = {
   caseId: string;
@@ -138,51 +139,14 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     // eslint-disable-next-line
   }, [caseId]);
 
-  const goToTaskDetail = async (stepKey: string, actionText: string) => {
-    try {
-      const meName = String(currentUserName || '').trim().toLowerCase();
-      const meEmail = String(currentUserEmail || '').trim().toLowerCase();
-      if (!meName && !meEmail) return;
-      let candidates: TaskData[] = Array.isArray(tasks) ? tasks : [];
-      try {
-        candidates = await getTasksForCase(caseId);
-      } catch {
-        // Keep the workspace snapshot if the refresh fails.
-      }
-      const onThisCase = candidates.filter((t) => String(t.caseId || '') === String(caseId));
-      const mine = onThisCase.filter((t) => {
-        const assignee = String(t.assignee || '').trim().toLowerCase();
-        const supervisor = String(t.supervisor || '').trim().toLowerCase();
-        const identityMatch =
-          (meName && (assignee === meName || supervisor === meName)) ||
-          (meEmail && (assignee === meEmail || supervisor === meEmail));
-        const stagedMatch = (t.taskStages || []).some((stage) => {
-          const staff = String(stage.staffMember || '').trim().toLowerCase();
-          return (meName && staff === meName) || (meEmail && staff === meEmail);
-        });
-        return (identityMatch || stagedMatch) && String(t.status || '').toLowerCase() !== 'completed';
-      });
-      const mineLinked = mine.find((task) => String(task.workflowStepKey || '') === String(stepKey || ''));
-      const wanted = String(actionText || '').trim().toLowerCase();
-      // Prefer the exact workflow-linked task for this Key Action. When the current user
-      // is not assigned to it (e.g. an administrator toggles an action), still open that
-      // task so they can submit or review — access is enforced on the task detail page.
-      const linkedTask = onThisCase.find(
-        (t) =>
-          String(t.workflowStepKey || '') === String(stepKey || '') &&
-          String(t.status || '').toLowerCase() !== 'completed'
-      );
-      const byTitle = wanted
-        ? mine.find((t) => {
-            const title = String(t.title || '').trim().toLowerCase();
-            return title && (title.includes(wanted) || wanted.includes(title));
-          })
-        : undefined;
-      const target = mineLinked || linkedTask || byTitle || mine[0];
-      if (target?._id) navigate(`/tasks/${target._id}`);
-    } catch {
-      // Navigation is a best-effort convenience; never break the toggle flow.
+  // The whole matter is one task now: a Key Action hands the user to the Case
+  // Management tab of this matter instead of the legacy task detail page.
+  const openCaseManagement = (stepKey: string) => {
+    if (onOpenCaseManagement) {
+      onOpenCaseManagement(stepKey);
+      return;
     }
+    navigate(buildCaseManagementLink(caseId, stepKey));
   };
 
   const toggleAction = async (stepKey: string, index: number) => {
@@ -214,11 +178,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       // assigned members work through the Case Management tab (workflow →
       // review → approval). Redirect them there with the Key Action in context.
       if (nextDone) {
-        if (onOpenCaseManagement) {
-          onOpenCaseManagement(stepKey);
-        } else {
-          void goToTaskDetail(stepKey, snapshotAction?.text || snapshotStep?.title || '');
-        }
+        openCaseManagement(stepKey);
       }
     } catch (e: any) {
       setWf(snapshot); // revert the optimistic flip
@@ -495,7 +455,14 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     <tr key={member.key} className="bg-white dark:bg-gray-800">
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{member.role}</td>
                       <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{member.name}</td>
-                      <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">
+                      <td
+                        className="px-3 py-2 text-right text-gray-600 dark:text-gray-300"
+                        title={
+                          member.tpaSource === 'none'
+                            ? 'No user record matches this team member. Set their role in Users & Access so their TPA applies.'
+                            : undefined
+                        }
+                      >
                         {member.tpaPercent > 0 ? `${member.tpaPercent}%` : '_'}
                       </td>
                       <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">

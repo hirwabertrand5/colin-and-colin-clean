@@ -12,10 +12,11 @@ import { createNotification, findUserByAssigneeString, notifyUsersById } from '.
 import {
   computeCaseEarnedFees,
   computeStepTimelinessScore,
+  computeStepWorkTimelinessScore,
   getMatterQualityScore,
   normalizeEffectiveWorkflowSteps,
 } from '../utils/caseEarnedFees';
-import { getTpaPercent } from '../utils/workflowPercentages';
+import { buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages';
 import { completeStepForCase } from './workflowController';
 
 const isAdmin = (role?: string) =>
@@ -136,8 +137,10 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
   ]
     .filter((member) => member.name)
     .map((member) => {
-      const userRole = String(roleByName.get(normalizeIdentity(member.name)) || '').trim() || null;
-      return { ...member, userRole, tpaPercent: getTpaPercent(userRole || '') };
+      // Same resolver as the Case Workspace: user record first, then the label
+      // itself when it is a role title ("Managing Partner").
+      const tpa = resolveMemberTpa(member.name, roleByName);
+      return { ...member, userRole: tpa.role, tpaPercent: tpa.tpaPercent, tpaSource: tpa.source };
     });
 
   const steps = effectiveSteps.map((step: any) => ({
@@ -154,7 +157,7 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
     completedAt: step?.completedAt,
     submittedAt: step?.submittedAt,
     reviewedAt: step?.reviewedAt,
-    timelinessScore: computeStepTimelinessScore(step),
+    timelinessScore: computeStepWorkTimelinessScore(step),
     actions: Array.isArray(step?.actions)
       ? step.actions.map((action: any) => ({ text: action?.text, done: Boolean(action?.done) }))
       : [],
@@ -204,16 +207,10 @@ const loadCaseManagementContext = async (req: AuthRequest) => {
     (sum: number, invoice: any) => sum + Math.max(0, Number(invoice?.amount) || 0),
     0
   );
-  const assignments = getCaseAssignments(caseDoc);
-  const memberNames = [assignments.initiator, assignments.reviewer, assignments.approver].filter(Boolean);
-  const users: any[] = memberNames.length
-    ? await User.find({ name: { $in: memberNames } }).select('name email role').lean()
-    : [];
-  const roleByName = new Map<string, string>();
-  for (const user of users || []) {
-    const key = normalizeIdentity(user?.name);
-    if (key && !roleByName.has(key)) roleByName.set(key, String(user?.role || ''));
-  }
+  // Loaded whole and keyed case/whitespace-insensitively so every assigned
+  // member resolves to their system role (and therefore their TPA).
+  const users: any[] = await User.find({}).select('name role').lean();
+  const roleByName = buildRoleByName(users);
   return {
     error: null as any,
     caseDoc,

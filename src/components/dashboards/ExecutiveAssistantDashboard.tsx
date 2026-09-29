@@ -13,6 +13,8 @@ import {
 
 import { getExecutiveAssistantDashboard } from '../../services/dashboardService';
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
+import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
+
 
 export default function ExecutiveAssistantDashboard() {
   const [loading, setLoading] = useState(true);
@@ -31,7 +33,16 @@ export default function ExecutiveAssistantDashboard() {
     { id: string; time: string; title: string; type: string; description?: string }[]
   >([]);
   const [pendingCoordination, setPendingCoordination] = useState<
-    { id: string; type: string; title: string; assignedTo: string; status: string; dueDate: string }[]
+    {
+      id: string;
+      type: string;
+      title: string;
+      assignedTo: string;
+      status: string;
+      dueDate: string;
+      caseId?: string;
+      workflowStepKey?: string;
+    }[]
   >([]);
   const [recentCases, setRecentCases] = useState<
     { id: string; name: string; status: string; client: string; createdDate: string }[]
@@ -98,7 +109,7 @@ export default function ExecutiveAssistantDashboard() {
     },
     {
       icon: CheckSquare,
-      label: 'Create Task',
+      label: 'Matter Work Board',
       href: '/tasks',
       color: 'border border-gray-300 text-gray-700 hover:bg-gray-50',
     },
@@ -235,10 +246,10 @@ export default function ExecutiveAssistantDashboard() {
                       <p className={`text-xs font-medium ${getStatusColor(item.status)}`}>{item.status}</p>
                     </div>
                     <Link
-                      to={`/tasks/${item.id}`}
-                      className="ml-4 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+                      to={buildCaseManagementLink(item.caseId, item.workflowStepKey)}
+                      className="ml-4 shrink-0 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
                     >
-                      Open
+                      Open Case Management
                     </Link>
                   </div>
                   <div className="text-xs text-gray-500 flex items-center">
@@ -252,7 +263,7 @@ export default function ExecutiveAssistantDashboard() {
 
           <div className="px-5 py-3 border-t border-gray-200">
             <Link to="/tasks" className="text-sm text-gray-600 hover:text-gray-900">
-              See all coordination →
+              Open the Matter Work Board →
             </Link>
           </div>
         </div>

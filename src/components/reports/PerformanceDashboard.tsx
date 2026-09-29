@@ -15,6 +15,8 @@ import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getAllTasks, TaskData } from '../../services/taskService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
+import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
+
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 
 interface PerformanceDashboardProps {
@@ -502,8 +504,8 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
                         <div className={`rounded-full px-2.5 py-1 text-xs font-medium ${task.priority === 'High' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300' : task.priority === 'Medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
                           {task.priority}
                         </div>
-                        <Link to={`/tasks/${task._id}`} className="text-xs font-medium text-gray-700 underline hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100">
-                          Open
+                        <Link to={buildCaseManagementLink(task.caseId, task.workflowStepKey)} className="text-xs font-medium text-gray-700 underline hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100">
+                          Open Case Management
                         </Link>
                       </div>
                     </div>
@@ -578,8 +580,8 @@ export default function PerformanceDashboard({ userRole }: PerformanceDashboardP
                     Overdue since {formatDeadlineDateTime(task.dueDate)} • {task.priority}
                   </div>
                 </div>
-                <Link to={`/tasks/${task._id}`} className="text-xs font-medium text-gray-700 underline hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100">
-                  View
+                <Link to={buildCaseManagementLink(task.caseId, task.workflowStepKey)} className="text-xs font-medium text-gray-700 underline hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100">
+                  Open Case Management
                 </Link>
               </div>
             ))}

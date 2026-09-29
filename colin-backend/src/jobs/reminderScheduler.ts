@@ -72,7 +72,8 @@ export const runReminderScan = async () => {
         severity: 'warning',
         caseId: String(t.caseId),
         taskId: String(t._id),
-        link: `/tasks/${t._id}`,
+        // Matter work happens in the Case Management tab of the Case Workspace.
+        link: `/cases/${String(t.caseId)}?tab=case-management`,
         dedupeKey,
       },
       email: {

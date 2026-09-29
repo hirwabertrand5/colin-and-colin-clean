@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
+import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
+
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 import {
   addEventToCase,
@@ -571,20 +573,22 @@ export default function Calendar({ userRole }: CalendarProps) {
               <button
                 type="button"
                 onClick={() => {
-                  if (detailItem.data.caseId) window.location.href = `/cases/${detailItem.data.caseId}`;
+                  if (detailItem.data.caseId) window.location.href = buildCaseManagementLink(detailItem.data.caseId);
                 }}
                 className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
               >
-                Open Case
+                Open Case Management
               </button>
 
               {detailItem.kind === 'task' && (
                 <button
                   type="button"
-                  onClick={() => window.location.href = `/tasks/${detailItem.data._id}`}
+                  onClick={() => {
+                    if (detailItem.data.caseId) window.location.href = buildCaseManagementLink(detailItem.data.caseId);
+                  }}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
                 >
-                  Open Task
+                  Open Case Management
                 </button>
               )}
 

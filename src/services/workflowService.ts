@@ -66,13 +66,42 @@ export type WorkflowSlaSpec = {
 
 const normalizeTemplateMatchValue = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+/**
+ * A matter type + case type can exist more than once in the templates
+ * collection (older seeds, versioned re-imports). Picking the first document
+ * found made the Case Workspace show one template's Key Actions while Templates
+ * settings showed another. The canonical copy is always the published, newest,
+ * most recently updated document — the same rule the backend applies.
+ */
+const workflowTemplateRank = (template: WorkflowTemplate): [number, number, number] => [
+  template.active && !template.draft ? 1 : 0,
+  Number(template.version) || 0,
+  new Date(template.updatedAt || template.createdAt || 0).getTime() || 0,
+];
+
+const compareWorkflowTemplateRank = (a: WorkflowTemplate, b: WorkflowTemplate) => {
+  const rankA = workflowTemplateRank(a);
+  const rankB = workflowTemplateRank(b);
+  for (let index = 0; index < rankA.length; index += 1) {
+    const valueA = rankA[index] ?? 0;
+    const valueB = rankB[index] ?? 0;
+    if (valueA !== valueB) return valueA > valueB ? -1 : 1;
+  }
+  return 0;
+};
+
 export const findMatchingWorkflowTemplate = (
   templates: WorkflowTemplate[],
   matterType: string,
   caseType: WorkflowTemplate['caseType']
-) => templates.find(
-  (template) => normalizeTemplateMatchValue(template.matterType) === normalizeTemplateMatchValue(matterType) && template.caseType === caseType
-);
+) =>
+  (Array.isArray(templates) ? templates : [])
+    .filter(
+      (template) =>
+        normalizeTemplateMatchValue(template.matterType) === normalizeTemplateMatchValue(matterType) &&
+        template.caseType === caseType
+    )
+    .sort(compareWorkflowTemplateRank)[0];
 
 export const listActiveWorkflowTemplates = async (): Promise<WorkflowTemplate[]> => {
   const res = await fetch(`${API_URL}/workflows/templates/active`, {

@@ -14,6 +14,7 @@ import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps } from '../utils/workflowCompute';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import {
+  buildRoleByName,
   computeCompletedPercentFromInstance,
   computeEarnedFee,
   computeStageBreakdownFromInstance,
@@ -26,6 +27,12 @@ import { caseMatchesAssignee } from '../utils/caseAssignments';
 import { calculateCollectedKeyActionEarnings } from '../utils/keyActionEarnings';
 import { computeCaseEarnedFees } from '../utils/caseEarnedFees';
 import { normalizeTemplateActionText } from '../utils/workflowText';
+import { alignInstanceStepsToTemplate } from '../utils/workflowAlignment';
+import {
+  buildCanonicalTemplateIndex,
+  resolveCanonicalTemplateForCase,
+  templateCanonicalGroupKey,
+} from '../utils/workflowTemplateMatch';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -254,6 +261,125 @@ const syncCaseWorkflowInstanceFromTemplate = async (caseId: string, template: an
   await inst.save();
   return inst;
 };
+
+/**
+ * Re-link a case workflow to its canonical template and align the checklist.
+ *
+ * Cases keep whatever template they were created with. When that template is
+ * deleted, replaced by a re-import (new _id) or shadowed by a duplicate, the
+ * Case Workspace would keep showing the old Key Actions while Templates
+ * settings shows the maintained one — the exact mismatch reported for matters
+ * such as Civil Litigation. This resolver always points the case at the single
+ * canonical template for its matter type + case type (published, newest
+ * version, most recently updated) and rebuilds the checklist from it without
+ * losing ticks, deadlines or completed work.
+ *
+ * Returns null when nothing needed to change (or the matter is closed).
+ * `dryRun` reports the plan without writing; `force` also cleans drift on a
+ * case that already follows the canonical template; `pruneLegacy` additionally
+ * removes completed work that belonged to the old template (opt-in, audited).
+ */
+export const reconcileInstanceTemplateWithCanonical = async (
+  caseDoc: any,
+  inst: any,
+  options: { force?: boolean; dryRun?: boolean; pruneLegacy?: boolean } = {}
+) => {
+  if (!caseDoc || !inst) return null;
+  // A completed matter is an immutable workflow snapshot.
+  if (isClosedCaseWorkflow(caseDoc, inst)) return null;
+
+  const linkedId = inst.templateId ? String(inst.templateId) : '';
+  const linked: any = linkedId ? await WorkflowTemplate.findById(linkedId).lean() : null;
+
+  let targetId = '';
+  if (linked) {
+    const siblings: any[] = linked.caseType
+      ? await WorkflowTemplate.find({ caseType: linked.caseType })
+          .select('name matterType caseType version active draft updatedAt')
+          .lean()
+      : await WorkflowTemplate.find({}).select('name matterType caseType version active draft updatedAt').lean();
+    const canonical: any = buildCanonicalTemplateIndex(siblings).get(
+      templateCanonicalGroupKey(linked.matterType, linked.caseType)
+    );
+    targetId = canonical && String(canonical._id) !== linkedId ? String(canonical._id) : linkedId;
+    // Already canonical: only an explicit forced alignment still runs.
+    if (targetId === linkedId && !options.force) return null;
+  } else {
+    const templates: any[] = await WorkflowTemplate.find({})
+      .select('name matterType caseType version active draft updatedAt')
+      .lean();
+    const target: any =
+      resolveCanonicalTemplateForCase(templates, {
+        matterType: caseDoc.workflow,
+        caseType: caseDoc.caseType,
+      }) ||
+      resolveCanonicalTemplateForCase(templates, {
+        matterType: caseDoc.matterType,
+        caseType: caseDoc.caseType,
+      }) ||
+      resolveCanonicalTemplateForCase(templates, { name: caseDoc.workflow, caseType: caseDoc.caseType });
+    if (!target) return null;
+    targetId = String(target._id);
+  }
+
+  const template: any = await WorkflowTemplate.findById(targetId).lean();
+  if (!template) return null;
+
+  const wfStart =
+    resolveDeadlineDateTime(caseDoc.workflowStartDate || caseDoc.createdAt || new Date()) || new Date();
+  const { steps, summary } = alignInstanceStepsToTemplate(inst.steps, template, wfStart, {
+    keepLegacyProgress: !options.pruneLegacy,
+  });
+
+  const changed =
+    String(inst.templateId || '') !== String(targetId) ||
+    summary.addedTemplateSteps > 0 ||
+    summary.addedActions > 0 ||
+    summary.droppedSteps.length > 0 ||
+    summary.droppedActions.length > 0;
+  if (!changed) return null;
+  if (options.dryRun) return { template, summary, changed, steps };
+
+  const tracked = inst.currentStepKey
+    ? steps.find((step: any) => step.stepKey === inst.currentStepKey)
+    : null;
+  const nextCurrentStepKey =
+    tracked && tracked.status !== 'Completed'
+      ? tracked.stepKey
+      : steps.find((step: any) => step.status !== 'Completed')?.stepKey || steps[0]?.stepKey;
+
+  inst.templateId = template._id;
+  inst.steps = steps;
+  inst.currentStepKey = nextCurrentStepKey;
+  await inst.save();
+
+  caseDoc.workflowTemplateId = template._id;
+  caseDoc.matterType = template.matterType;
+  caseDoc.caseType = template.caseType;
+  caseDoc.workflow = template.matterType;
+  if (!caseDoc.workflowStartDate) caseDoc.workflowStartDate = wfStart;
+  await updateCaseWorkflowProgress(caseDoc, inst);
+
+  await writeAudit({
+    caseId: String(caseDoc._id),
+    actorName: 'System',
+    action: 'WORKFLOW_TEMPLATE_ALIGNED',
+    message: 'Workflow checklist aligned with the current template',
+    detail:
+      `${String(template.name || template.matterType)} • ` +
+      `${summary.addedTemplateSteps} new step(s), -${summary.droppedSteps.length} stale step(s), ` +
+      `-${summary.droppedActions.length} stale key action(s)` +
+      (summary.keptLegacySteps.length || summary.keptLegacyActions.length
+        ? `, kept ${summary.keptLegacySteps.length} completed legacy step(s) and ${summary.keptLegacyActions.length} completed legacy key action(s)`
+        : '') +
+      (options.pruneLegacy && (summary.droppedSteps.length || summary.droppedActions.length)
+        ? `, pruned legacy work: ${[...summary.droppedSteps, ...summary.droppedActions].slice(0, 12).join(' | ')}`
+        : ''),
+  });
+
+  return { template, summary };
+};
+
 
 const computeNextDueAt = (inst: any) => {
   const pending = (inst.steps || [])
@@ -667,6 +793,7 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
         if (isClosedCaseWorkflow(caseDoc, inst)) return;
         caseDoc.workflowTemplateId = updated._id as any;
         caseDoc.matterType = updated.matterType;
+        caseDoc.workflow = updated.matterType;
         caseDoc.workflowStartDate = wfStart;
         await updateCaseWorkflowProgress(caseDoc, inst);
       }));
@@ -714,6 +841,15 @@ export const getWorkflowForCase = async (req: AuthRequest, res: Response) => {
 
     const inst: any = await WorkflowInstance.findOne({ caseId: new mongoose.Types.ObjectId(caseId) });
     if (!inst) return res.status(404).json({ message: 'No workflow instance for this case.' });
+
+    // ✅ Self-heal: a case created against a template that was later deleted,
+    // re-imported or replaced by a duplicate is re-linked to the canonical
+    // template here, so the checklist always matches Templates settings.
+    try {
+      await reconcileInstanceTemplateWithCanonical(c, inst);
+    } catch {
+      // A reconciliation failure must never block reading the workflow.
+    }
 
     // Backfill step actions from template if missing (safe for older instances)
     try {
@@ -816,24 +952,11 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
     const stages = computeStageBreakdownFromInstance(effectiveSteps);
 
     // Resolve each member's system role so TPA follows the role-based table.
-    const assignments: any = c.caseAssignments || {};
-    const memberNames = [
-      assignments.initiator || c.assignedTo,
-      assignments.reviewer,
-      assignments.signerApprover,
-    ]
-      .map((value: any) => String(value || '').trim())
-      .filter(Boolean);
-    const users: any[] = memberNames.length
-      ? await User.find({ name: { $in: memberNames } })
-          .select('name email role')
-          .lean()
-      : [];
-    const roleByName = new Map<string, string>();
-    for (const user of users || []) {
-      const key = String(user?.name || '').trim().toLowerCase();
-      if (key && !roleByName.has(key)) roleByName.set(key, String(user?.role || ''));
-    }
+    // The users collection is small and is loaded whole: matching by name with
+    // a case-sensitive `$in` used to leave members without their TPA whenever
+    // their stored name differed in case, spacing or carried a role suffix.
+    const users: any[] = await User.find({}).select('name role').lean();
+    const roleByName = buildRoleByName(users);
 
     const result = computeCaseEarnedFees({
       caseDoc: c,

@@ -73,6 +73,8 @@ export type CaseTeamEarnedFee = {
   name: string;
   userRole: string | null;
   tpaPercent: number;
+  /** Where the TPA came from: the user record, the label itself, or nowhere. */
+  tpaSource?: 'user-record' | 'role-label' | 'none';
   timelinessScore: number | null;
   qualityScore: number | null;
   taskFeeCollected: number;
