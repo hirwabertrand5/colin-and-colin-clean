@@ -98,3 +98,31 @@ export const buildInstanceSteps = (template: IWorkflowTemplate | any, startDate:
     };
   });
 };
+
+/**
+ * Whether a section is ready to be completed automatically because its whole
+ * checklist is ticked.
+ *
+ * The Case Workspace Overview shows one big completion checkbox per section,
+ * but only members with matter-management permission may tick it — interns and
+ * associates can only tick Key Actions. Ticking the last Key Action therefore
+ * completes the section for them: `toggleStepAction` runs this rule on every
+ * tick and the repair script (`npm run autocomplete:steps`) applies it to the
+ * matters that were already fully checked before the rule existed.
+ *
+ * Rules:
+ * - the section must really have Key Actions (an empty checklist is never
+ *   auto-completed — nothing proves the work is done);
+ * - every Key Action must be ticked;
+ * - the section must still be in the working lifecycle: 'Not Started' or
+ *   'In Progress'. Sections awaiting review/approval stay with the Reviewer /
+ *   Signer, and Completed sections are never touched.
+ */
+export const isStepChecklistReadyToAutoComplete = (step: any): boolean => {
+  const actions = Array.isArray(step?.actions) ? step.actions : [];
+  if (actions.length === 0) return false;
+  if (!actions.every((action: any) => action?.done === true)) return false;
+  const status = String(step?.status || '').trim().toLowerCase();
+  return status === 'not started' || status === 'in progress';
+};
+

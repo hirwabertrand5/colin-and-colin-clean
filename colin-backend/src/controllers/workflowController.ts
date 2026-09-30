@@ -11,7 +11,7 @@ import User from '../models/userModel';
 import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
-import { buildInstanceSteps } from '../utils/workflowCompute';
+import { buildInstanceSteps, isStepChecklistReadyToAutoComplete } from '../utils/workflowCompute';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import {
   buildRoleByName,
@@ -604,6 +604,35 @@ const completeStepInternal = async (actor: { actorName: string; actorUserId?: st
   }
 
   return inst;
+};
+
+/**
+ * Completes, in workflow order, every section whose checklist is fully ticked.
+ *
+ * This is the automatic version of the big completion checkbox on the Case
+ * Workspace Overview: as soon as every Key Action of a section is ticked the
+ * section is marked complete, so members who may tick Key Actions but cannot
+ * tick the section checkbox (interns, trainees, associates) can still finish a
+ * section — and unlock the next one. The ordered walk also clears any earlier
+ * section left fully ticked but pending, and stops at the first section that
+ * still has pending Key Actions or is awaiting review/approval.
+ *
+ * Returns the stepKeys that were completed by this pass.
+ */
+export const autoCompleteFullyCheckedSteps = async (
+  actor: { actorName: string; actorUserId?: string | undefined },
+  c: any,
+  inst: any
+): Promise<string[]> => {
+  const ordered = (inst.steps || []).slice().sort((a: any, b: any) => (a?.order || 0) - (b?.order || 0));
+  const completedKeys: string[] = [];
+  for (const step of ordered) {
+    if (String(step?.status || '') === 'Completed') continue;
+    if (!isStepChecklistReadyToAutoComplete(step)) break;
+    await completeStepInternal(actor, c, inst, step.stepKey);
+    completedKeys.push(String(step?.stepKey || ''));
+  }
+  return completedKeys;
 };
 
 const ensureInstanceStepActions = async (inst: any, step: any) => {
@@ -1402,11 +1431,14 @@ export const deleteStepAction = async (req: AuthRequest, res: Response) => {
 
     const removed = actions.splice(actionIndex, 1)[0];
 
-    // If the step is now fully satisfied, keep workflow progress consistent.
-    const allDone = actions.length === 0 || actions.every((a: any) => a?.done === true);
-    if (allDone && step.status !== 'Completed') {
-      const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
-      const actor = actorFromReq(req);
+    // Deleting a pending Key Action can leave the section's checklist fully
+    // ticked: run the same ordered auto-complete pass as ticking the last Key
+    // Action, so the big completion checkbox on the Case Workspace Overview is
+    // checked automatically. A section left without any Key Action is never
+    // auto-completed — nothing proves the work is done.
+    const actor = actorFromReq(req);
+    const autoCompletedKeys = await autoCompleteFullyCheckedSteps(actor, c, inst);
+    if (autoCompletedKeys.length > 0) {
       await writeAudit({
         caseId: String(c._id),
         actorName: actor.actorName,
@@ -1415,13 +1447,12 @@ export const deleteStepAction = async (req: AuthRequest, res: Response) => {
         message: 'Deleted workflow key action',
         detail: `${stepKey} • ${removed?.text || 'Action removed'}`,
       });
-      return res.json(updated);
+      return res.json(inst);
     }
 
     await inst.save();
     await updateCaseWorkflowProgress(c, inst);
 
-    const actor = actorFromReq(req);
     await writeAudit({
       caseId: String(c._id),
       actorName: actor.actorName,
@@ -1632,14 +1663,20 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
       detail: `${stepKey} • ${target.text} • ${nextDone ? 'done' : 'not done'}`,
     });
 
-    // If all key actions are done, auto-complete the step (and update case
-    // progress/billing). Case Management toggles with autoComplete:false so the
-    // step stays "In Progress" until the Case Initiator requests a review.
-    const allDone = actions.length === 0 || actions.every((a: any) => a?.done === true);
+    // Ticking Key Actions can complete a section: when every Key Action of a
+    // section is ticked, the big completion checkbox on the Case Workspace
+    // Overview is checked automatically — this is what unlocks the next
+    // section. The ordered pass also clears any earlier section left fully
+    // ticked but pending, because members without matter-management permission
+    // (interns/associates) cannot tick that checkbox themselves.
+    // Case Management keeps autoComplete:false so its review → approval chain
+    // still runs before the section completes.
     const allowAutoComplete = (req.body as any)?.autoComplete !== false;
-    if (allDone && step.status !== 'Completed' && allowAutoComplete) {
-      const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
-      return res.json(updated);
+    if (nextDone && allowAutoComplete) {
+      const autoCompletedKeys = await autoCompleteFullyCheckedSteps(actor, c, inst);
+      if (autoCompletedKeys.length > 0) {
+        return res.json(inst);
+      }
     }
 
     await inst.save();

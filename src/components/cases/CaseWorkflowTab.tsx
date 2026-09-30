@@ -509,6 +509,28 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       {steps.map((s, index, arr) => {
         // Check if previous step is completed (or this is the first step)
         const previousStepCompleted = index === 0 || (arr[index - 1]?.status === 'Completed');
+        // A section whose Key Actions are all ticked counts as cleared even if
+        // its big completion checkbox is still pending: the server ticks it
+        // automatically as soon as the last Key Action is saved (and the repair
+        // pass clears older matters), so interns/associates — who cannot tick
+        // the big checkbox themselves — are never blocked on the previous
+        // section's pending checkbox.
+        const previousStep = index === 0 ? undefined : arr[index - 1];
+        const previousStepStoredActions =
+          previousStep && Array.isArray(previousStep.actions) && previousStep.actions.length
+            ? previousStep.actions
+            : undefined;
+        const previousStepActions =
+          previousStepStoredActions ||
+          (previousStep
+            ? (template?.steps?.find((ts) => ts.key === previousStep.stepKey)?.actions || []).map((text: string) => ({
+                text,
+                done: false,
+              }))
+            : []);
+        const previousStepChecklistDone =
+          previousStepActions.length > 0 && previousStepActions.every((action: any) => Boolean(action?.done));
+        const previousStepCleared = previousStepCompleted || previousStepChecklistDone;
 
         // Determine if checkbox should be disabled for completing
         const isCompleted = s.status === 'Completed';
@@ -576,7 +598,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     </span>
                   );
                 })()}
-                {!previousStepCompleted && !isCompleted && (
+                {!previousStepCleared && !isCompleted && (
                   <span className="text-xs text-gray-500 dark:text-gray-400" title="Previous steps must be completed first">
                     ← Complete previous steps first
                   </span>
@@ -714,14 +736,14 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                         <button
                           type="button"
                           onClick={() => toggleAction(s.stepKey, idx)}
-                          disabled={isBusy || (!isDone && (!previousStepCompleted || !canCheckAction(s.stepKey, idx)))}
+                          disabled={isBusy || (!isDone && (!previousStepCleared || !canCheckAction(s.stepKey, idx)))}
                           className={`mt-0.5 h-5 w-5 rounded border flex items-center justify-center ${
                             isDone ? 'bg-green-600 border-green-600' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
                           } disabled:opacity-60`}
                           title={
                             !isDone && !canCheckAction(s.stepKey, idx)
                               ? 'Complete the previous key action first'
-                              : !previousStepCompleted
+                              : !previousStepCleared
                                 ? 'Complete previous steps first'
                                 : 'Toggle key action'
                           }
