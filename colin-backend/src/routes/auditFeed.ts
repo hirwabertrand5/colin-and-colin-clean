@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/authMiddleware';
-import { getRecentAuditFeed } from '../controllers/auditFeedController';
+import { getMyAuditTrail, getRecentAuditFeed } from '../controllers/auditFeedController';
 
 const router = express.Router();
 
@@ -10,5 +10,8 @@ router.get(
   authorize(['managing_director']),
   getRecentAuditFeed
 );
+
+// Every authenticated member's own activity trail (staff dashboards).
+router.get('/audit/mine', authenticate, getMyAuditTrail);
 
 export default router;

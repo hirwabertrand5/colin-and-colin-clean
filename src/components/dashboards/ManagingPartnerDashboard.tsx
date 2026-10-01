@@ -43,6 +43,8 @@ import { getAllProspects, Prospect } from '../../services/prospectService';
 import { listInvoices, Invoice } from '../../services/invoiceService';
 import { getActivePettyCashFund, PettyCashFund } from '../../services/pettyCashService';
 import { getStaffUsers, User as StaffUser } from '../../services/userService';
+import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
+import { caseMatchesAssignee } from '../../utils/caseAssignments';
 import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import './ManagingPartnerDashboard.css';
 
@@ -149,8 +151,6 @@ const isMatterCompleted = (matter: CaseData) =>
   normalize(matter.workflowProgress?.status || '') === 'completed' || isClosedMatter(matter);
 const matterNextDueAt = (matter: CaseData) =>
   resolveDeadlineDateTime(matter.workflowProgress?.currentStepDueAt || matter.workflowProgress?.nextDueAt);
-const matterAssigneeOf = (matter: CaseData) =>
-  String(matter.assignedTo || matter.caseAssignments?.initiator || 'Unassigned').trim();
 const getTaskDueAt = (task: TaskData) => resolveDeadlineDateTime(task.dueDate);
 const getProspectValue = (prospect: Prospect) => toNumber(prospect.estimatedFeeValue) || toNumber(prospect.estimatedMatterValue);
 const isConvertedProspect = (prospect: Prospect) => normalize(prospect.stage) === 'converted';
@@ -169,6 +169,61 @@ const newestMonthPair = (series: Array<{ value: number }>) => {
 };
 
 const getEventMatter = (event: FirmCalendarEvent) => event.case?.caseNo || event.case?.parties || event.title || NA;
+
+/**
+ * The departments on the People & Capacity card are the top-level codes of the
+ * Legal Services classification used when a matter is created in the new case
+ * form — A. Dispute Resolution and B. Transactions & Advisory. Every matter
+ * resolves to one of them through its legalServicePath; legacy matters without
+ * a path fall back to the case type recorded in that same classification.
+ */
+const departmentRootByNodeId = (() => {
+  const map = new Map<string, ServiceNode>();
+  const walk = (node: ServiceNode, root: ServiceNode) => {
+    map.set(node.id.trim().toLowerCase(), root);
+    map.set(node.label.trim().toLowerCase(), root);
+    (node.children || []).forEach((child) => walk(child, root));
+  };
+  LEGAL_SERVICES_TREE.forEach((root) => walk(root, root));
+  return map;
+})();
+
+const departmentRootByCaseType = (() => {
+  const map = new Map<string, ServiceNode>();
+  const walk = (node: ServiceNode, root: ServiceNode) => {
+    const caseType = String(node.caseType || '').trim();
+    if (caseType && !map.has(caseType)) map.set(caseType, root);
+    (node.children || []).forEach((child) => walk(child, root));
+  };
+  LEGAL_SERVICES_TREE.forEach((root) => walk(root, root));
+  return map;
+})();
+
+const resolveMatterDepartment = (matter: CaseData): ServiceNode | null => {
+  const path = Array.isArray(matter.legalServicePath) ? matter.legalServicePath : [];
+  for (const item of path) {
+    const byId = departmentRootByNodeId.get(String(item?.id || '').trim().toLowerCase());
+    if (byId) return byId;
+    const byLabel = departmentRootByNodeId.get(String(item?.label || '').trim().toLowerCase());
+    if (byLabel) return byLabel;
+  }
+  const caseType = String(matter.caseType || '').trim();
+  return (caseType && departmentRootByCaseType.get(caseType)) || null;
+};
+
+/** Remaining billable value of an open matter: planned value (or budget) minus completed value. */
+const matterBillableRemaining = (matter: CaseData) => {
+  const planned = toNumber(matter.workflowProgress?.plannedValue?.amount) || toNumber(matter.budget);
+  const completed = toNumber(matter.workflowProgress?.completedValue?.amount);
+  return Math.max(0, planned - completed);
+};
+
+/** Unfilled matter-team roles (Initiator / Reviewer / Signer-Approver) across the given matters. */
+const countOpenPositions = (matters: CaseData[]) =>
+  matters.reduce((sum, matter) => {
+    const slots = [matter.caseAssignments?.initiator, matter.caseAssignments?.reviewer, matter.caseAssignments?.signerApprover];
+    return sum + slots.filter((slot) => !String(slot || '').trim()).length;
+  }, 0);
 
 function DashboardCard({
   title,
@@ -323,16 +378,28 @@ function Funnel({ rows }: { rows: Array<{ label: string; value: number; color: s
   );
 }
 
-function HorizontalBars({ rows }: { rows: Array<{ label: string; value: number; color?: string; meta?: string }> }) {
-  const max = Math.max(...rows.map((row) => row.value), 1);
+function HorizontalBars({
+  rows,
+  scaleMax,
+}: {
+  rows: Array<{ label: string; value: number; color?: string; meta?: string; title?: string }>;
+  /** Optional fixed scale (e.g. 100 when rows carry percentages) so the bar width matches the shown value. */
+  scaleMax?: number;
+}) {
   if (!rows.length) return <div className="mp-empty-block">{NA}</div>;
+  const max = Math.max(scaleMax && scaleMax > 0 ? scaleMax : Math.max(...rows.map((row) => row.value), 1), 1);
   return (
     <div className="mp-bars">
       {rows.map((row) => (
         <div className="mp-bar-row" key={row.label}>
-          <span title={row.label}>{row.label}</span>
+          <span title={row.title || row.label}>{row.label}</span>
           <div className="mp-bar-track">
-            <div style={{ width: `${Math.max(6, (row.value / max) * 100)}%`, backgroundColor: row.color || '#2563eb' }} />
+            <div
+              style={{
+                width: row.value > 0 ? `${Math.min(100, Math.max(6, (row.value / max) * 100))}%` : '0%',
+                backgroundColor: row.color || '#2563eb',
+              }}
+            />
           </div>
           <strong>{row.meta || formatCount(row.value)}</strong>
         </div>
@@ -570,45 +637,69 @@ export default function ManagingPartnerDashboard() {
     ];
   }, [activeMatters, cases, openProspects.length, tasks]);
 
+  // Workload by Department — measured on whole matters (never on the staged
+  // per-Key-Action task records) and grouped by the top-level Legal Services
+  // classifications used in the new case form. The percentage is the
+  // department's share of the firm's open workload, and the bar is drawn on the
+  // same 0–100 scale so the bar and the percentage can never disagree.
   const departmentRows = useMemo(() => {
-    const map = new Map<string, { total: number; open: number }>();
-    tasks.forEach((task) => {
-      const matter = cases.find((item) => item._id === task.caseId);
-      const label = matter?.legalServicePath?.[0]?.label || matter?.caseType || 'Unassigned';
-      const item = map.get(label) || { total: 0, open: 0 };
-      item.total += 1;
-      if (task.status !== 'Completed') item.open += 1;
-      map.set(label, item);
+    const openByDepartment = new Map<string, number>();
+    let mappedOpen = 0;
+    openMatters.forEach((matter) => {
+      const department = resolveMatterDepartment(matter);
+      if (!department) return;
+      mappedOpen += 1;
+      openByDepartment.set(department.id, (openByDepartment.get(department.id) || 0) + 1);
     });
-    return Array.from(map.entries())
-      .map(([label, item]) => ({
-        label,
-        value: item.open,
-        meta: item.total ? `${Math.round((item.open / item.total) * 100)}%` : '0%',
-        color: item.open / Math.max(item.total, 1) > 0.75 ? '#ef4444' : '#2563eb',
-      }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
-  }, [cases, tasks]);
+    const colors = ['#2563eb', '#06b6d4', '#22c55e', '#f59e0b', '#8b5cf6', '#64748b'];
+    return LEGAL_SERVICES_TREE.map((department, index) => {
+      const openCount = openByDepartment.get(department.id) || 0;
+      const percent = mappedOpen ? Math.round((openCount / mappedOpen) * 100) : 0;
+      return {
+        label: department.label,
+        value: percent,
+        color: colors[index % colors.length],
+        meta: `${percent}%`,
+        title: `${openCount} open matter${openCount === 1 ? '' : 's'} · ${percent}% of the open workload`,
+      };
+    });
+  }, [openMatters]);
 
-  const capacityRows = useMemo(() => {
-    const openByAssignee = new Map<string, number>();
-    openTasks.forEach((matter) => {
-      const assignee = matterAssigneeOf(matter as CaseData);
-      openByAssignee.set(assignee, (openByAssignee.get(assignee) || 0) + 1);
-    });
-    const available = staff.filter((person) => (openByAssignee.get(person.name) || 0) <= 3).length;
-    const committed = staff.filter((person) => {
-      const count = openByAssignee.get(person.name) || 0;
-      return count > 3 && count <= 8;
-    }).length;
-    const overloaded = staff.filter((person) => (openByAssignee.get(person.name) || 0) > 8).length;
-    return [
-      { name: 'Available', value: available, color: '#22c55e' },
-      { name: 'Committed', value: committed, color: '#2563eb' },
-      { name: 'Overloaded', value: overloaded, color: '#ef4444' },
-    ];
-  }, [openTasks, staff]);
+  // Capacity Distribution — each team member's open matters across every
+  // assignment slot (Initiator / Reviewer / Signer-Approver / assignedTo), the
+  // same team definition used by the People & Capacity report pages.
+  const staffWorkloads = useMemo(
+    () => staff.map((person) => openMatters.filter((matter) => caseMatchesAssignee(matter, person.name)).length),
+    [openMatters, staff]
+  );
+
+  const capacitySummary = useMemo(() => {
+    const available = staffWorkloads.filter((load) => load <= 3).length;
+    const committed = staffWorkloads.filter((load) => load > 3 && load <= 8).length;
+    const overloaded = staffWorkloads.filter((load) => load > 8).length;
+    return { available, committed, overloaded, total: staffWorkloads.length };
+  }, [staffWorkloads]);
+
+  const capacityRows = useMemo(
+    () => [
+      { name: 'Available', value: capacitySummary.available, color: '#22c55e' },
+      { name: 'Committed', value: capacitySummary.committed, color: '#2563eb' },
+      { name: 'Overloaded', value: capacitySummary.overloaded, color: '#ef4444' },
+    ],
+    [capacitySummary]
+  );
+
+  // KPI values for the People & Capacity card, all derived from real records:
+  // Utilization = share of the team carrying a committed or overloaded book.
+  const utilization = sources.staff && sources.cases && staffWorkloads.length
+    ? Math.round(((capacitySummary.committed + capacitySummary.overloaded) / staffWorkloads.length) * 100)
+    : null;
+  // Billable Capacity = remaining planned value of the open matters.
+  const billableCapacity = sources.cases
+    ? openMatters.reduce((sum, matter) => sum + matterBillableRemaining(matter), 0)
+    : null;
+  // Open Positions = unfilled matter-team roles on the open matters.
+  const openPositions = sources.cases ? countOpenPositions(openMatters) : null;
 
   const clientRevenueRows = useMemo(() => {
     const caseMap = new Map(cases.map((matter) => [String(matter._id), matter]));
@@ -838,15 +929,15 @@ export default function ManagingPartnerDashboard() {
 
         <DashboardCard title="People & Capacity Overview" action="View full capacity" to="/performance" className="mp-span-4">
           <div className="mp-mini-kpis">
-            <div><Users size={18} /><span>Total People</span><strong>{formatCount(totalPeople)}</strong></div>
-            <div><TrendingUp size={18} /><span>Utilization</span><strong>{NA}</strong></div>
-            <div><CircleDollarSign size={18} /><span>Billable Capacity</span><strong>{NA}</strong></div>
-            <div><Briefcase size={18} /><span>Open Positions</span><strong>{NA}</strong></div>
+            <div title="Active staff accounts in the user directory."><Users size={18} /><span>Total People</span><strong>{formatCount(totalPeople)}</strong></div>
+            <div title="Share of the team carrying more than 3 open matters (Committed or Overloaded)."><TrendingUp size={18} /><span>Utilization</span><strong>{formatPercent(utilization)}</strong></div>
+            <div title="Remaining planned value of open matters (planned value minus completed value)."><CircleDollarSign size={18} /><span>Billable Capacity</span><strong>{formatMoney(billableCapacity)}</strong></div>
+            <div title="Unfilled matter-team roles (Initiator, Reviewer, Signer/Approver) on open matters."><Briefcase size={18} /><span>Open Positions</span><strong>{formatCount(openPositions)}</strong></div>
           </div>
           <div className="mp-two-col">
             <div>
               <h3>Workload by Department</h3>
-              <HorizontalBars rows={departmentRows} />
+              <HorizontalBars rows={departmentRows} scaleMax={100} />
             </div>
             <div className="mp-capacity">
               <h3>Capacity Distribution</h3>

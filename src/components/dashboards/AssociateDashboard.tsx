@@ -28,10 +28,17 @@ import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
 import { getAllTasks, TaskData } from '../../services/taskService';
+import { getMyAuditTrail, AuditFeedItem } from '../../services/auditService';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import { baseNameFromLabel } from '../../utils/productivity';
+import { sortRows, toggleSortKey } from '../../utils/tableSort';
+import type { SortDir } from '../../utils/tableSort';
+import SortableHeader from '../ui/SortableHeader';
 import './AssociateDashboard.css';
+
+/** Every table on this dashboard lists 10 rows per page, like the report tables. */
+const PAGE_SIZE = 10;
 
 type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
 type FinancialScope = 'own' | 'matter' | 'portfolio' | 'client';
@@ -269,6 +276,101 @@ const priorityChip = (priority: string) => {
   return 'bg-gray-100 text-gray-700';
 };
 
+// ---- Activity trail (audit) helpers ---------------------------------------
+
+/** Plain-language labels for the audit actions recorded against a member's account. */
+const auditActionLabels: Record<string, string> = {
+  CASE_CREATED: 'Matter created',
+  CASE_UPDATED: 'Matter updated',
+  CASE_DELETED: 'Matter deleted',
+  CASE_TAKE_REQUESTED: 'Matter take-over requested',
+  CASE_TAKE_REQUEST_APPROVED: 'Take-over approved',
+  CASE_TAKE_REQUEST_DENIED: 'Take-over denied',
+  CASE_MANAGEMENT_REQUESTED_REVIEW: 'Review requested',
+  CASE_MANAGEMENT_REQUESTED_APPROVAL: 'Approval requested',
+  CASE_MANAGEMENT_APPROVED: 'Matter approved',
+  CASE_MANAGEMENT_QUALITY_SCORED: 'Quality scored',
+  TASK_CREATED: 'Task created',
+  TASK_UPDATED: 'Task updated',
+  TASK_DELETED: 'Task deleted',
+  EVENT_CREATED: 'Calendar event created',
+  EVENT_UPDATED: 'Calendar event updated',
+  EVENT_DELETED: 'Calendar event deleted',
+  DOCUMENT_UPLOADED: 'Document uploaded',
+  DOCUMENT_DELETED: 'Document deleted',
+  INVOICE_CREATED: 'Invoice created',
+  INVOICE_UPDATED: 'Invoice updated',
+  INVOICE_PAID: 'Invoice paid',
+  INVOICE_DELETED: 'Invoice deleted',
+  WORKFLOW_INSTANCE_CREATED: 'Workflow started',
+  WORKFLOW_OUTPUT_UPLOADED: 'Workflow output uploaded',
+  WORKFLOW_STEP_COMPLETED: 'Key Action completed',
+  WORKFLOW_STEP_REOPENED: 'Key Action reopened',
+  WORKFLOW_STEP_ACTION_TOGGLED: 'Key Action checked',
+  WORKFLOW_STEP_FEE_SET: 'Key Action fee set',
+  WORKFLOW_STEP_DEADLINE_EXTENDED: 'Deadline extended',
+  WORKFLOW_STEP_ADDED: 'Workflow step added',
+  WORKFLOW_STEP_UPDATED: 'Workflow step updated',
+  WORKFLOW_STEP_DELETED: 'Workflow step deleted',
+  WORKFLOW_STEP_ACTION_ADDED: 'Key Action added',
+  WORKFLOW_STEP_ACTION_UPDATED: 'Key Action updated',
+  WORKFLOW_STEP_ACTION_DELETED: 'Key Action deleted',
+  WORKFLOW_TEMPLATE_CREATED: 'Workflow template created',
+  WORKFLOW_TEMPLATE_UPDATED: 'Workflow template updated',
+  WORKFLOW_TEMPLATE_DELETED: 'Workflow template deleted',
+  WORKFLOW_TEMPLATE_ALIGNED: 'Workflow template aligned',
+  INDEPENDENT_TASK_CREATED: 'Standalone task created',
+  INDEPENDENT_TASK_UPDATED: 'Standalone task updated',
+  INDEPENDENT_TASK_DELETED: 'Standalone task deleted',
+  INDEPENDENT_TASK_STATUS_CHANGED: 'Standalone task status changed',
+  INDEPENDENT_TASK_ASSIGNED: 'Standalone task assigned',
+  INDEPENDENT_TASK_COMMENTED: 'Standalone task commented',
+  INDEPENDENT_TASK_ATTACHMENT_UPLOADED: 'Task attachment uploaded',
+  INDEPENDENT_TASK_ATTACHMENT_DELETED: 'Task attachment deleted',
+  CLIENT_EXPERIENCE_TEMPLATE_CREATED: 'Client experience template created',
+  CLIENT_EXPERIENCE_REQUEST_CREATED: 'Client experience request created',
+  CLIENT_EXPERIENCE_ASSESSMENT_SUBMITTED: 'Client experience assessment submitted',
+  CLIENT_EXPERIENCE_RED_FLAG_CREATED: 'Client experience red flag',
+  CLIENT_EXPERIENCE_COMPLAINT_LOGGED: 'Client complaint logged',
+};
+
+const auditActionLabel = (action?: string) => {
+  const key = String(action || '').trim();
+  if (!key) return 'Activity';
+  if (auditActionLabels[key]) return auditActionLabels[key];
+  return key
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+};
+
+const auditActionChip = (action?: string) => {
+  const key = String(action || '').toUpperCase();
+  if (key.includes('DELETED') || key.includes('DENIED') || key.includes('RED_FLAG') || key.includes('COMPLAINT')) {
+    return 'bg-red-100 text-red-700';
+  }
+  if (key.startsWith('INVOICE')) return 'bg-green-100 text-green-700';
+  if (key.includes('QUALITY') || key.includes('APPROVED')) return 'bg-purple-100 text-purple-700';
+  if (key.startsWith('WORKFLOW')) return 'bg-amber-100 text-amber-700';
+  if (key.includes('TASK') || key.startsWith('DOCUMENT')) return 'bg-blue-100 text-blue-700';
+  return 'bg-gray-100 text-gray-700';
+};
+
+/** Audit timestamp in the firm's display format: 01 Oct 2026, 09:32. */
+const formatAuditTimestamp = (iso?: string) => {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return '—';
+  return date.toLocaleString('en-US', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
 function StatCardView({ stat, loading }: { stat: StatCard; loading: boolean }) {
   const Icon = stat.icon;
   const tone = toneClasses[stat.tone || 'slate'];
@@ -301,6 +403,44 @@ function SectionHeader({ title, description }: { title: string; description: str
   );
 }
 
+function Pagination({ page, pages, total, onChange }: { page: number; pages: number; total: number; onChange: (page: number) => void }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-5 py-4 text-sm text-gray-600">
+      <span>
+        Showing {total ? (page - 1) * PAGE_SIZE + 1 : 0}–{Math.min(page * PAGE_SIZE, total)} of {total}
+      </span>
+      <div className="flex flex-wrap gap-1">
+        <button
+          type="button"
+          disabled={page <= 1}
+          onClick={() => onChange(Math.max(1, page - 1))}
+          className="rounded border border-gray-300 px-3 py-1.5 disabled:opacity-40"
+        >
+          Previous
+        </button>
+        {Array.from({ length: pages }, (_, index) => index + 1).map((number) => (
+          <button
+            type="button"
+            key={number}
+            onClick={() => onChange(number)}
+            className={`rounded border px-3 py-1.5 ${number === page ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-300 bg-white'}`}
+          >
+            {number}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={page >= pages}
+          onClick={() => onChange(Math.min(pages, page + 1))}
+          className="rounded border border-gray-300 px-3 py-1.5 disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AssociateDashboard({ userRole }: { userRole?: UserRole }) {
   const me = useMemo(() => {
     try {
@@ -321,6 +461,18 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const [performance, setPerformance] = useState<PerformanceSummary | null>(null);
   const [staffSummary, setStaffSummary] = useState<StaffDashboardSummaryResponse | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [auditTrail, setAuditTrail] = useState<AuditFeedItem[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  // Fee breakdown by matter — sorting + pagination.
+  const [feePage, setFeePage] = useState(1);
+  const [feeSortKey, setFeeSortKey] = useState('');
+  const [feeSortDir, setFeeSortDir] = useState<SortDir>('asc');
+
+  // My Activity Trail — sorting + pagination.
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditSortKey, setAuditSortKey] = useState('');
+  const [auditSortDir, setAuditSortDir] = useState<SortDir>('asc');
 
   // ---- Reporting period (same windows as Firm Reports) ----
   const [periodRange, setPeriodRange] = useState<'all' | StaffDashboardPeriodRange>('all');
@@ -343,13 +495,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         setLoading(true);
         setError('');
 
-        const [taskResult, caseResult, eventResult, performanceResult, summaryResult, prospectResult] = await Promise.allSettled([
+        const [taskResult, caseResult, eventResult, performanceResult, summaryResult, prospectResult, auditResult] = await Promise.allSettled([
           getAllTasks(),
           getAllCases(),
           getFirmEvents({ from: today, to: next30Days, type: 'all' }),
           getMyPerformance(),
           getStaffDashboardSummary(),
           getAllProspects({ includeTerminal: true }),
+          getMyAuditTrail({ limit: 100 }),
         ]);
 
         if (!mounted) return;
@@ -359,6 +512,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         if (performanceResult.status === 'fulfilled') setPerformance(performanceResult.value);
         if (summaryResult.status === 'fulfilled') setStaffSummary(summaryResult.value);
         if (prospectResult.status === 'fulfilled') setProspects(prospectResult.value);
+        if (auditResult.status === 'fulfilled') setAuditTrail(auditResult.value);
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message || 'Failed to load dashboard.');
@@ -404,9 +558,26 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     }
   };
 
+  // The activity trail follows the same period as the rest of the dashboard, so
+  // it always shows the actions performed inside the window being reviewed.
+  const fetchAuditForPeriod = async (signal?: { cancelled: boolean }) => {
+    try {
+      setAuditLoading(true);
+      const rows = await getMyAuditTrail({ limit: 100, ...(periodRequest.params || {}) });
+      if (!signal?.cancelled) {
+        setAuditTrail(rows);
+        setAuditPage(1);
+      }
+    } catch {
+      // Keep the rows already on screen when a refresh fails.
+    } finally {
+      if (!signal?.cancelled) setAuditLoading(false);
+    }
+  };
+
   const periodEffectMounted = useRef(false);
   useEffect(() => {
-    // The initial dashboard load already fetched the all-time summary.
+    // The initial dashboard load already fetched the all-time summary and trail.
     if (!periodEffectMounted.current) {
       periodEffectMounted.current = true;
       return;
@@ -415,6 +586,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     if (periodRequest.hint) return;
     const signal = { cancelled: false };
     void fetchSummaryForPeriod(signal);
+    void fetchAuditForPeriod(signal);
     return () => {
       signal.cancelled = true;
     };
@@ -423,7 +595,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const refreshSummary = async () => {
     setPeriodHint(periodRequest.hint);
     if (periodRequest.hint) return;
-    await fetchSummaryForPeriod();
+    await Promise.all([fetchSummaryForPeriod(), fetchAuditForPeriod()]);
   };
 
   const ownTasks = useMemo(
@@ -570,6 +742,81 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     summary && summary.mattersAssigned > 0
       ? Math.round((summary.mattersCompleted / summary.mattersAssigned) * 100)
       : null;
+
+  // ---- Fee breakdown by matter — sorting + pagination (10 rows per page) ----
+  const sortedMatterFeeRows = useMemo(
+    () =>
+      sortRows(matterFeeRows, feeSortKey, feeSortDir, (row) => {
+        switch (feeSortKey) {
+          case 'matter':
+            return `${row.caseNo || ''} ${row.parties || ''}`;
+          case 'role':
+            return row.role || '';
+          case 'tpa':
+            return row.tpaPercent ?? null;
+          case 'timeliness':
+            return row.timelinessScore ?? null;
+          case 'quality':
+            return row.qualityScore ?? null;
+          case 'collected':
+            return row.collectedBase ?? null;
+          case 'earned':
+            return row.earnedFee ?? null;
+          case 'collectedPeriod':
+            return row.collectedBaseInPeriod ?? null;
+          case 'earnedPeriod':
+            return row.earnedFeeInPeriod ?? null;
+          default:
+            return '';
+        }
+      }),
+    [feeSortDir, feeSortKey, matterFeeRows]
+  );
+  const feePages = Math.max(1, Math.ceil(sortedMatterFeeRows.length / PAGE_SIZE));
+  const feePageClamped = Math.min(feePage, feePages);
+  const feePageRows = sortedMatterFeeRows.slice((feePageClamped - 1) * PAGE_SIZE, feePageClamped * PAGE_SIZE);
+
+  const handleFeeSort = (column: string) => {
+    const next = toggleSortKey(feeSortKey, feeSortDir, column);
+    setFeeSortKey(next.key);
+    setFeeSortDir(next.dir);
+    setFeePage(1);
+  };
+
+  // A different reporting period reloads the rows, so start again on page 1.
+  useEffect(() => {
+    setFeePage(1);
+  }, [period?.label]);
+
+  // ---- My Activity Trail — sorting + pagination (10 rows per page) ----------
+  const sortedAuditTrail = useMemo(
+    () =>
+      sortRows(auditTrail, auditSortKey, auditSortDir, (entry) => {
+        switch (auditSortKey) {
+          case 'when':
+            return entry.createdAt || '';
+          case 'action':
+            return auditActionLabel(entry.action);
+          case 'activity':
+            return `${entry.message || ''} ${entry.detail || ''}`;
+          case 'record':
+            return entry.case?.caseNo || entry.case?.parties || '';
+          default:
+            return '';
+        }
+      }),
+    [auditSortDir, auditSortKey, auditTrail]
+  );
+  const auditPages = Math.max(1, Math.ceil(sortedAuditTrail.length / PAGE_SIZE));
+  const auditPageClamped = Math.min(auditPage, auditPages);
+  const auditPageRows = sortedAuditTrail.slice((auditPageClamped - 1) * PAGE_SIZE, auditPageClamped * PAGE_SIZE);
+
+  const handleAuditSort = (column: string) => {
+    const next = toggleSortKey(auditSortKey, auditSortDir, column);
+    setAuditSortKey(next.key);
+    setAuditSortDir(next.dir);
+    setAuditPage(1);
+  };
 
   const headlineStats = useMemo<StatCard[]>(() => {
     const assigned = summary?.mattersAssigned ?? 0;
@@ -981,15 +1228,15 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               <table className="min-w-[1024px] w-full text-left text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                   <tr>
-                    <th className="px-4 py-3">Matter</th>
-                    <th className="px-4 py-3">Role</th>
-                    <th className="px-4 py-3 text-right">TPA</th>
-                    <th className="px-4 py-3 text-right">Timeliness</th>
-                    <th className="px-4 py-3 text-right">Quality</th>
-                    <th className="px-4 py-3 text-right">Collected base</th>
-                    <th className="px-4 py-3 text-right">Earned fee</th>
-                    {period && <th className="px-4 py-3 text-right">Collected (period)</th>}
-                    {period && <th className="px-4 py-3 text-right">Earned fee (period)</th>}
+                    <SortableHeader label="Matter" column="matter" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} />
+                    <SortableHeader label="Role" column="role" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} />
+                    <SortableHeader label="TPA" column="tpa" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                    <SortableHeader label="Timeliness" column="timeliness" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                    <SortableHeader label="Quality" column="quality" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                    <SortableHeader label="Collected base" column="collected" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                    <SortableHeader label="Earned fee" column="earned" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                    {period && <SortableHeader label="Collected (period)" column="collectedPeriod" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />}
+                    {period && <SortableHeader label="Earned fee (period)" column="earnedPeriod" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1000,7 +1247,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                       </td>
                     </tr>
                   ) : (
-                    matterFeeRows.map((row) => (
+                    feePageRows.map((row) => (
                       <tr key={row.caseId} className="align-top">
                         <td className="px-4 py-3 text-gray-700">
                           <Link to={`/matters/${row.caseId}`} className="hover:text-gray-900">{row.caseNo || row.parties || '—'}</Link>
@@ -1019,7 +1266,87 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                 </tbody>
               </table>
             </div>
+            {matterFeeRows.length > 0 && (
+              <Pagination page={feePageClamped} pages={feePages} total={matterFeeRows.length} onChange={setFeePage} />
+            )}
+
           </div>
+        </div>
+
+        {/* Activity trail — every action recorded against the signed-in member's account. */}
+        <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
+          <SectionHeader
+            title="My Activity Trail"
+            description={`Every action recorded against your account${me?.name ? ` (${me.name.trim()})` : ''}, newest first, with the exact time it was performed.`}
+          />
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+            <span>
+              {auditLoading && auditTrail.length === 0
+                ? 'Loading your activity…'
+                : auditTrail.length
+                  ? `Showing ${auditTrail.length} recorded action${auditTrail.length === 1 ? '' : 's'}${period ? ` in ${period.label}` : ' on your account'}${auditLoading ? ' · refreshing…' : ''}.`
+                  : period
+                    ? `No activity was recorded on your account in ${period.label}.`
+                    : 'No activity has been recorded on your account yet. Actions you take on matters appear here with their exact timestamp.'}
+            </span>
+            <span className="rounded-full bg-gray-100 px-3 py-1 font-medium text-gray-600">{period ? `Filtered: ${period.label}` : 'All time'} · newest first</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[860px] w-full text-left text-sm">
+              <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                <tr>
+                  <SortableHeader label="Date & time" column="when" sortKey={auditSortKey} sortDir={auditSortDir} onSort={handleAuditSort} />
+                  <SortableHeader label="Action" column="action" sortKey={auditSortKey} sortDir={auditSortDir} onSort={handleAuditSort} />
+                  <SortableHeader label="Activity" column="activity" sortKey={auditSortKey} sortDir={auditSortDir} onSort={handleAuditSort} />
+                  <SortableHeader label="Related record" column="record" sortKey={auditSortKey} sortDir={auditSortDir} onSort={handleAuditSort} />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {loading || (auditLoading && auditTrail.length === 0) ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-gray-500">Loading your activity…</td>
+                  </tr>
+                ) : auditTrail.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
+                      {period ? `No activity was recorded on your account in ${period.label}.` : 'No activity has been recorded on your account yet. Actions you take on matters appear here with their exact timestamp.'}
+                    </td>
+                  </tr>
+                ) : (
+                  auditPageRows.map((entry) => (
+                    <tr key={entry._id} className="align-top hover:bg-gray-50">
+                      <td className="whitespace-nowrap px-4 py-3 tabular-nums text-gray-700">{formatAuditTimestamp(entry.createdAt)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex whitespace-nowrap rounded px-2 py-0.5 text-xs ${auditActionChip(entry.action)}`}>
+                          {auditActionLabel(entry.action)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{entry.message || auditActionLabel(entry.action)}</div>
+                        {entry.detail ? <div className="mt-0.5 text-xs text-gray-500">{entry.detail}</div> : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        {entry.case ? (
+                          <Link to={`/matters/${entry.case._id}`} className="text-blue-700 hover:text-blue-900">
+                            {entry.case.caseNo || 'Matter'}
+                            {entry.case.parties ? <span className="block text-xs text-gray-500">{entry.case.parties}</span> : null}
+                          </Link>
+                        ) : entry.caseId ? (
+                          <span className="text-gray-500">Matter no longer available</span>
+                        ) : (
+                          <span className="text-gray-500">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {!loading && sortedAuditTrail.length > 0 && (
+            <Pagination page={auditPageClamped} pages={auditPages} total={sortedAuditTrail.length} onChange={setAuditPage} />
+          )}
+
         </div>
       </div>
     </div>

@@ -512,7 +512,7 @@
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(90px, 1fr) 1.35fr 40px;
+  grid-template-columns: minmax(90px, 1fr) 1.35fr minmax(40px, auto);
 }
 
 .mp-bar-row > span {
@@ -529,6 +529,7 @@
   font-size: 10px;
   font-weight: 850;
   text-align: right;
+  white-space: nowrap;
 }
 
 .mp-bar-track {
