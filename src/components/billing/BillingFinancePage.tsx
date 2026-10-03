@@ -77,6 +77,7 @@ export type BillingFinanceView =
   | "expense-direct-costs"
   | "expense-operating"
   | "procurement"
+  | "collected-base"
   | "fee-earned"
   | "accrued"
   | "payable"
@@ -137,6 +138,7 @@ const titles: Record<BillingFinanceView, string> = {
   "expense-direct-costs": "Direct Matter Costs",
   "expense-operating": "Operating Expenses",
   procurement: "Procurement",
+  "collected-base": "Collected Base",
   "fee-earned": "Fee Earned",
   accrued: "Accrued",
   payable: "Payable",
@@ -1617,6 +1619,7 @@ const EXPENSE_TYPES: DetailType[] = [
 ];
 
 const REMUNERATION_TYPES: DetailType[] = [
+  { key: "collected-base", label: "Collected Base", chipClass: BLUE_CHIP },
   { key: "fee-earned", label: "Fee Earned", chipClass: GREEN_CHIP },
   { key: "revenue", label: "Revenue Attributed", chipClass: BLUE_CHIP },
   { key: "firm-retained", label: "Firm Retained", chipClass: INDIGO_CHIP },
@@ -1728,9 +1731,15 @@ const buildRemunerationRecords = (
     };
     rows.push({
       ...base,
+      typeKey: "collected-base",
+      typeLabel: "Collected Base",
+      value: member.grossFeesHandled || 0,
+    });
+    rows.push({
+      ...base,
       typeKey: "fee-earned",
       typeLabel: "Fee Earned",
-      value: member.earnedFees || member.revenueAttributed || 0,
+      value: member.earnedFees ?? member.revenueAttributed ?? 0,
     });
     rows.push({
       ...base,

@@ -168,7 +168,19 @@ check(
   civIntake?.dueAt instanceof Date && civIntake.dueAt.toISOString() === '2026-01-08T09:00:00.000Z'
 );
 check('the missing template actions are added (1 in an existing step + 1 new step)', aligned.summary.addedActions === 2);
-check('the completed legacy step is preserved by default', aligned.summary.keptLegacySteps.length === 1);
+check(
+  'a completed legacy step is ARCHIVED, not listed on the active checklist',
+  aligned.summary.keptLegacySteps.length === 1 && aligned.archivedSteps.length === 1
+);
+check(
+  'the active checklist only carries the template steps',
+  !aligned.steps.some((step: any) => String(step.stepKey) === 'key_action_1')
+);
+check(
+  'the archived legacy step keeps its completed status and ticks',
+  aligned.archivedSteps[0]?.status === 'Completed' &&
+    aligned.archivedSteps[0]?.actions?.some((action: any) => action?.done)
+);
 check(
   'completed legacy work is never reported as dropped',
   !aligned.summary.droppedActions.some((text: string) => text.includes('Receive client and conduct initial interview'))
@@ -219,8 +231,9 @@ check(
   !withLeftover.steps.some((step: any) => String(step.stepKey) === 'key_action_9')
 );
 check(
-  'completed legacy steps are still preserved in the same pass',
-  withLeftover.steps.some((step: any) => String(step.stepKey) === 'key_action_1')
+  'completed legacy steps are archived in the same pass, never re-listed',
+  withLeftover.archivedSteps.some((step: any) => String(step.stepKey) === 'key_action_1') &&
+    !withLeftover.steps.some((step: any) => String(step.stepKey) === 'key_action_1')
 );
 
 console.log('\nD. Opt-in pruning of completed legacy work');
@@ -229,6 +242,7 @@ check(
   'completed legacy step is pruned on request',
   pruned.summary.droppedSteps.length === 1 && pruned.summary.keptLegacySteps.length === 0
 );
+check('pruned legacy work is not archived either', pruned.archivedSteps.length === 0);
 check('the checklist then matches the template exactly', pruned.steps.length === civilTemplate.steps.length);
 
 console.log(`\n${passed} passed, ${failed} failed.`);

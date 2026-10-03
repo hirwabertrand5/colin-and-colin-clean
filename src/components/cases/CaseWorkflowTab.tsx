@@ -129,7 +129,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   };
   const stageTitleOf = (step: { stageKey?: string; stageTitle?: string }): string => {
     if (step.stageTitle) return step.stageTitle;
-    return stageMetaByKey.get(String(step.stageKey || ''))?.title || step.stageKey || 'Stage';
+    // Never fall back to the raw stage key (e.g. "BR2_INTAKE_KYC") in the UI.
+    return stageMetaByKey.get(String(step.stageKey || ''))?.title || 'Stage';
   };
   const keyActionValueOf = (stepKey: string) =>
     earned?.keyActions?.find((action) => String(action.key) === String(stepKey));
@@ -339,6 +340,56 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     return orderedActionRefs.slice(0, currentIndex).every((action) => action.done);
   };
 
+  /**
+   * The workflow template is authoritative for the shape of the checklist: its
+   * stages run in template order and each stage owns the Key Actions (steps)
+   * that belong to it, in template order. Grouping the instance steps this way
+   * keeps the Overview tab reading exactly like the workflow template — stage by
+   * stage, each stage followed by its own Key Actions — instead of one flat list.
+   *
+   * Nothing is dropped: any instance step whose stage is missing from the
+   * template (or has no stage at all) is kept in a trailing group so no work
+   * disappears from the checklist.
+   */
+  const stageGroups = (() => {
+    const templateStages = [...(template?.stages || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const grouped = new Map<string, { key: string; title: string; order: number; percentage: number | null; steps: typeof steps }>();
+
+    for (const stage of templateStages) {
+      const key = String(stage.key || '');
+      if (!key) continue;
+      grouped.set(key, {
+        key,
+        title: String(stage.title || stage.name || key),
+        order: Number(stage.order ?? 0),
+        percentage: typeof stage.percentage === 'number' ? stage.percentage : null,
+        steps: [],
+      });
+    }
+
+    const orphans: typeof steps = [];
+    for (const step of steps) {
+      const stageKey = String(step.stageKey || '');
+      const group = grouped.get(stageKey);
+      if (group) {
+        group.steps.push(step);
+      } else {
+        orphans.push(step);
+      }
+    }
+
+    const ordered = Array.from(grouped.values()).sort((a, b) => a.order - b.order);
+    // Only render a stage heading when the stage actually owns Key Actions, so
+    // an empty stage never appears as a blank section.
+    const populated = ordered.filter((stage) => stage.steps.length > 0);
+    const unassigned = orphans.length
+      ? [{ key: '__unassigned__', title: 'Additional Key Actions', order: Number.MAX_SAFE_INTEGER, percentage: null, steps: orphans }]
+      : [];
+    return [...populated, ...unassigned];
+  })();
+
+  const totalStages = stageGroups.length;
+
   return (
     <div className="space-y-4">
       {/* Earned fees — contract value × workflow completion, productivity formula (TPA × timeliness × quality) */}
@@ -506,9 +557,37 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         <div className="mt-3">{templatePill}</div>
       </div>
 
-      {steps.map((s, index, arr) => {
+      {stageGroups.map((stageGroup, stageIndex) => {
+        const stageDone = stageGroup.steps.filter((s) => s.status === 'Completed').length;
+        return (
+        <section key={stageGroup.key} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 overflow-hidden">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-5 py-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-900 text-[11px] font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
+                  {stageIndex + 1}
+                </span>
+                Stage {stageIndex + 1} of {totalStages}
+              </div>
+              <h4 className="mt-1 truncate text-base font-semibold text-gray-900 dark:text-gray-100" title={stageGroup.title}>
+                {stageGroup.title}
+              </h4>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {stageDone} of {stageGroup.steps.length} Key Actions completed
+              </p>
+            </div>
+            {stageGroup.percentage != null && (
+              <span className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1 text-xs font-semibold text-gray-700 dark:text-gray-300">
+                {stageGroup.percentage}% of matter fee
+              </span>
+            )}
+          </header>
+          <div className="space-y-4 p-4">
+          {stageGroup.steps.map((s, actionIndex) => {
+        const index = steps.findIndex((candidate) => candidate.stepKey === s.stepKey);
+        const arr = steps;
         // Check if previous step is completed (or this is the first step)
-        const previousStepCompleted = index === 0 || (arr[index - 1]?.status === 'Completed');
+        const previousStepCompleted = index <= 0 || (arr[index - 1]?.status === 'Completed');
         // A section whose Key Actions are all ticked counts as cleared even if
         // its big completion checkbox is still pending: the server ticks it
         // automatically as soon as the last Key Action is saved (and the repair
@@ -572,8 +651,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         <div key={s.stepKey} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <div className="flex-1">
-              <div className="text-xs text-gray-500 dark:text-gray-400">{s.stepKey}</div>
-              <div className="font-semibold text-gray-900 dark:text-gray-100">{s.title}</div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-900 text-[11px] font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
+                  {actionIndex + 1}
+                </span>
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                  Key Action {actionIndex + 1} of {stageGroup.steps.length}
+                </span>
+              </div>
+              <div className="mt-1 font-semibold text-gray-900 dark:text-gray-100">{s.title}</div>
               <div className="text-sm text-gray-600 dark:text-gray-400">Status: {s.status}</div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <span
@@ -760,6 +846,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                         </div>
                       )}
                       <div className={`min-w-0 flex-1 text-sm ${isDone ? 'text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>
+                        <span className="mr-2 font-semibold text-gray-400">{idx + 1}.</span>
                         {label}
                       </div>
                       {canManageActions ? (
@@ -885,6 +972,10 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             </div>
           </div>
         </div>
+          );
+          })}
+          </div>
+        </section>
         );
       })}
 

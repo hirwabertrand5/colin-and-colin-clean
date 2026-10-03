@@ -746,7 +746,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
             className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900"
           >
             <ArrowLeft className="w-4 h-4 mr-1" />
-            Back to Matter Work Board
+            Back to Task Management
           </button>
           <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs text-amber-800">
             Day-to-day updates now happen in the matter&apos;s Case Management tab.

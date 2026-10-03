@@ -995,7 +995,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             </div>
           )}
           <div className="px-5 py-3 border-t border-gray-200">
-            <Link to="/tasks" className="text-sm text-gray-600 hover:text-gray-900">Open the Matter Work Board →</Link>
+            <Link to="/tasks" className="text-sm text-gray-600 hover:text-gray-900">Open Task Management →</Link>
           </div>
         </div>
 

@@ -1613,7 +1613,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
             <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="font-semibold text-gray-900">Workflow Checklist</h2>
-                <p className="text-sm text-gray-500 mt-1">Progress is based on checked key actions.</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  Key Actions are listed stage by stage in workflow template order, with each stage followed by its own Key Actions. Progress is based on checked key actions.
+                </p>
               </div>
               <div className="min-w-52 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
                 <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">

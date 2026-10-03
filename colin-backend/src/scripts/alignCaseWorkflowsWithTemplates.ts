@@ -22,8 +22,11 @@
  * snapshot. The script is idempotent — a second run changes nothing.
  *
  * Completed work that belonged to the old template (for example a case that was
- * started on a flattened 60-step copy of a workflow) is preserved by default.
- * Pass --prune-legacy to remove it as well, so the checklist matches the
+ * started on a flattened 60-step copy of a workflow) is ARCHIVED by default: it
+ * leaves the active checklist — so the Case Workspace, Case Management and the
+ * earned fees only ever show the current template's stages and Key Actions —
+ * while the full record is preserved on the workflow instance.
+ * Pass --prune-legacy to delete it outright instead, so the checklist matches the
  * template 1:1; every pruned item is written to the case audit log.
  *
  * Usage:
@@ -49,6 +52,12 @@ type AlignmentLine = {
   droppedActions: string[];
   keptLegacySteps: string[];
   keptLegacyActions: string[];
+  /** Ticks moved onto the current template's Key Actions from older wording. */
+  carriedProgress: Array<{ templateStepKey: string; actionText: string; fromText: string; score: number }>;
+  /** Previously ticked wording that matched no current Key Action — review these. */
+  unmatchedProgress: string[];
+  /** Total superseded steps now stored on the instance's archive. */
+  archivedSteps: number;
 };
 
 const isTerminalMatter = (caseDoc: any, inst: any) =>
@@ -121,6 +130,9 @@ const isTerminalMatter = (caseDoc: any, inst: any) =>
       droppedActions: result.summary.droppedActions,
       keptLegacySteps: result.summary.keptLegacySteps,
       keptLegacyActions: result.summary.keptLegacyActions,
+      carriedProgress: result.summary.carriedProgress || [],
+      unmatchedProgress: result.summary.unmatchedProgress || [],
+      archivedSteps: result.archivedSteps?.length || 0,
     });
   }
 
@@ -129,17 +141,25 @@ const isTerminalMatter = (caseDoc: any, inst: any) =>
     `${terminalSkipped} closed/completed (left untouched), ${withoutInstance} without a workflow instance, ${failed} failed.`);
   console.log(apply ? 'Applied changes (report below):' : 'Planned changes (run with --apply to repair):');
   if (pruneLegacy) {
-    console.log('Mode: --prune-legacy — completed work from superseded templates is removed and recorded in the case audit log.');
+    console.log('Mode: --prune-legacy — completed work from superseded templates is deleted outright and recorded in the case audit log.');
+  } else {
+    console.log('Superseded steps are archived off the checklist by default: they disappear from the Case Workspace and Case Management, while their full record is preserved on the workflow instance.');
   }
 
   for (const line of changes) {
     console.log(
       `  ${line.caseNo} | ${line.parties} | -> ${line.template} | +${line.addedSteps} step(s) +${line.addedActions} key action(s) ` +
         `| -${line.droppedSteps.length} stale step(s) -${line.droppedActions.length} stale key action(s) ` +
-        `| kept legacy: ${line.keptLegacySteps.length} step(s), ${line.keptLegacyActions.length} key action(s)`
+        `| archived legacy: ${line.keptLegacySteps.length} step(s), ${line.keptLegacyActions.length} key action(s)`
     );
     for (const dropped of line.droppedActions.slice(0, 3)) console.log(`      dropped key action: ${dropped}`);
-    for (const kept of line.keptLegacySteps.slice(0, 3)) console.log(`      kept completed legacy step: ${kept}`);
+    for (const kept of line.keptLegacySteps.slice(0, 3)) console.log(`      archived superseded step (removed from the checklist, record kept): ${kept}`);
+    for (const p of line.carriedProgress.slice(0, 5)) {
+      console.log(`      RESTORED ${p.templateStepKey}: "${p.actionText}"  <-  "${p.fromText}"  (${p.score.toFixed(2)})`);
+    }
+    for (const u of line.unmatchedProgress.slice(0, 5)) {
+      console.log(`      REVIEW: previously ticked wording with no current Key Action match: "${u}"`);
+    }
   }
 
   await mongoose.disconnect();

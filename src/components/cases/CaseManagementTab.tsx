@@ -516,6 +516,57 @@ function KeyActionsList(props: {
   } = props;
   const missingPercentages = state.earnedFees.missingKeyActionPercentages || [];
 
+  /**
+   * The workflow template is authoritative for the shape of the checklist: its
+   * stages run in template order and each stage owns the Key Actions (steps)
+   * that belong to it. Grouping the steps this way makes Case Management read
+   * exactly like the Overview tab and the workflow template — stage by stage,
+   * each stage followed by its own Key Actions — instead of one flat list.
+   *
+   * Nothing is dropped: a step whose stage is missing (or blank) is kept in a
+   * trailing group so no Key Action disappears from the checklist. Steps are
+   * ordered by their template `order`, and each stage is placed by its earliest
+   * step, which is the template's own stage sequence.
+   */
+  const orderedSteps = useMemo(
+    () => [...state.steps].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [state.steps]
+  );
+  const stageGroups = useMemo(() => {
+    const grouped = new Map<string, { key: string; title: string; order: number; percentage: number; steps: CaseManagementStep[] }>();
+
+    for (const step of orderedSteps) {
+      const key = String(step.stageKey || '');
+      if (!key) continue;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.steps.push(step);
+        // The template stage percentage is carried on every step; keep the first
+        // real value so a 0 on one step never hides the stage's own percentage.
+        if (!existing.percentage && step.stagePercentage) existing.percentage = step.stagePercentage;
+      } else {
+        grouped.set(key, {
+          key,
+          title: step.stageTitle || key,
+          order: step.order ?? 0,
+          percentage: step.stagePercentage || 0,
+          steps: [step],
+        });
+      }
+    }
+
+    const ordered = Array.from(grouped.values()).sort((a, b) => a.order - b.order);
+    // Only show a stage heading when the stage actually owns Key Actions, so an
+    // empty stage never renders as a blank section.
+    const populated = ordered.filter((stage) => stage.steps.length > 0);
+    const unassigned = orderedSteps.filter((step) => !String(step.stageKey || ''));
+    const trailing = unassigned.length
+      ? [{ key: '__unassigned__', title: 'Additional Key Actions', order: Number.MAX_SAFE_INTEGER, percentage: 0, steps: unassigned }]
+      : [];
+    return [...populated, ...trailing];
+  }, [orderedSteps]);
+  const totalStages = stageGroups.length;
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800">
       <div className="mb-3 flex items-center gap-2">
@@ -523,7 +574,7 @@ function KeyActionsList(props: {
         <div>
           <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Key Actions</div>
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            The workflow template&apos;s Key Actions, completed by the three assigned members.
+            The workflow template&apos;s Key Actions, completed by the three assigned members. Key Actions are grouped stage by stage in workflow template order, each stage followed by its own Key Actions.
           </div>
         </div>
       </div>
@@ -540,7 +591,36 @@ function KeyActionsList(props: {
             No Key Actions configured for this matter.
           </div>
         ) : null}
-        {state.steps.map((step) => {
+        {stageGroups.map((stageGroup, stageIndex) => {
+          const stageCompleted = stageGroup.steps.filter((s) => s.status === 'Completed').length;
+          return (
+            <section
+              key={stageGroup.key}
+              className="rounded-xl border border-gray-200 bg-gray-50/60 overflow-hidden dark:border-gray-700 dark:bg-gray-900/40"
+            >
+              <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-800">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-900 text-[11px] font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
+                      {stageIndex + 1}
+                    </span>
+                    Stage {stageIndex + 1} of {totalStages}
+                  </div>
+                  <h4 className="mt-1 truncate text-base font-semibold text-gray-900 dark:text-gray-100" title={stageGroup.title}>
+                    {stageGroup.title}
+                  </h4>
+                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {stageCompleted} of {stageGroup.steps.length} Key Actions completed
+                  </p>
+                </div>
+                {stageGroup.percentage ? (
+                  <span className="inline-flex items-center rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300">
+                    {stageGroup.percentage}% of matter fee
+                  </span>
+                ) : null}
+              </header>
+              <div className="space-y-3 p-4">
+        {stageGroup.steps.map((step, actionIndex) => {
           const chipClass = STATUS_CHIP[step.status] || STATUS_CHIP['Not Started'];
           const isFocused = focusStepKey && step.stepKey === focusStepKey;
           const allDone = step.actions.every((a) => a.done);
@@ -554,8 +634,15 @@ function KeyActionsList(props: {
             >
               <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{step.stepKey}</div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-900 text-[11px] font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
+                      {actionIndex + 1}
+                    </span>
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500 dark:text-gray-400">
+                      Key Action {actionIndex + 1} of {stageGroup.steps.length}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-gray-900 dark:text-gray-100">{step.title}</span>
                     <span
                       className="inline-flex items-center rounded-full border border-gray-300 bg-gray-50 px-2.5 py-0.5 text-xs font-semibold text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300"
@@ -564,7 +651,6 @@ function KeyActionsList(props: {
                       {step.percentage}%
                     </span>
                   </div>
-                  <div className="mt-1 text-sm text-gray-600 dark:text-gray-400">{step.stageTitle}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${chipClass}`}>{LIFECYCLE_LABEL[step.status] || step.status}</span>
@@ -632,6 +718,7 @@ function KeyActionsList(props: {
                             className="mt-0.5 h-4 w-4 rounded border-gray-300"
                           />
                           <span className="text-sm text-gray-900 dark:text-gray-100">
+                            <span className="mr-2 font-semibold text-gray-400">{index + 1}.</span>
                             {action.text}
                           </span>
                         </label>
@@ -677,6 +764,10 @@ function KeyActionsList(props: {
                 </div>
               )}
             </div>
+          );
+        })}
+              </div>
+            </section>
           );
         })}
       </div>

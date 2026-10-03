@@ -109,7 +109,7 @@ export default function ExecutiveAssistantDashboard() {
     },
     {
       icon: CheckSquare,
-      label: 'Matter Work Board',
+      label: 'Task Management',
       href: '/tasks',
       color: 'border border-gray-300 text-gray-700 hover:bg-gray-50',
     },
@@ -263,7 +263,7 @@ export default function ExecutiveAssistantDashboard() {
 
           <div className="px-5 py-3 border-t border-gray-200">
             <Link to="/tasks" className="text-sm text-gray-600 hover:text-gray-900">
-              Open the Matter Work Board →
+              Open Task Management →
             </Link>
           </div>
         </div>

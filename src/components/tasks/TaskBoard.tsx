@@ -1,5 +1,5 @@
 /**
- * Matter Work Board.
+ * Task Management.
  *
  * The whole matter is one task now: all work happens in the Case Management tab
  * of the Case Workspace. This board therefore summarises the Case Management
@@ -69,7 +69,7 @@ const memberList = (caseData: CaseData) =>
     .filter(Boolean);
 
 export default function TaskBoard({ userRole }: TaskBoardProps) {
-  usePageTitle('Matter Work Board');
+  usePageTitle('Task Management');
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -90,7 +90,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
         setTasks(tasksData);
         setCases(casesData);
       } catch (err: any) {
-        setError(err.message || 'Failed to load the matter work board');
+        setError(err.message || 'Failed to load the task management list');
       } finally {
         setLoading(false);
       }
@@ -378,7 +378,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-1">Matter Work Board</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 mb-1">Task Management</h1>
         <p className="text-gray-600">{headerSubtitle}</p>
       </div>
 

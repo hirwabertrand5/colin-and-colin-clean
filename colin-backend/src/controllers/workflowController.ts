@@ -27,7 +27,7 @@ import { caseMatchesAssignee } from '../utils/caseAssignments';
 import { calculateCollectedKeyActionEarnings } from '../utils/keyActionEarnings';
 import { computeCaseEarnedFees } from '../utils/caseEarnedFees';
 import { normalizeTemplateActionText } from '../utils/workflowText';
-import { alignInstanceStepsToTemplate } from '../utils/workflowAlignment';
+import { alignInstanceStepsToTemplate, hasSupersededTemplateSteps } from '../utils/workflowAlignment';
 import {
   buildCanonicalTemplateIndex,
   resolveCanonicalTemplateForCase,
@@ -302,8 +302,11 @@ export const reconcileInstanceTemplateWithCanonical = async (
       templateCanonicalGroupKey(linked.matterType, linked.caseType)
     );
     targetId = canonical && String(canonical._id) !== linkedId ? String(canonical._id) : linkedId;
-    // Already canonical: only an explicit forced alignment still runs.
-    if (targetId === linkedId && !options.force) return null;
+    // Already canonical: still repair when the case carries steps the template no
+    // longer defines. A matter drifts exactly like this when an earlier alignment
+    // kept the old template's steps, and without this check the stale stages stay
+    // on the checklist forever.
+    if (targetId === linkedId && !options.force && !hasSupersededTemplateSteps(inst.steps, linked)) return null;
   } else {
     const templates: any[] = await WorkflowTemplate.find({})
       .select('name matterType caseType version active draft updatedAt')
@@ -327,22 +330,37 @@ export const reconcileInstanceTemplateWithCanonical = async (
 
   const wfStart =
     resolveDeadlineDateTime(caseDoc.workflowStartDate || caseDoc.createdAt || new Date()) || new Date();
-  const { steps, summary } = alignInstanceStepsToTemplate(inst.steps, template, wfStart, {
+  const { steps, archivedSteps, summary } = alignInstanceStepsToTemplate(inst.steps, template, wfStart, {
     keepLegacyProgress: !options.pruneLegacy,
   });
+
+  // Preserve any previously archived work and merge the newly superseded steps,
+  // keyed by stepKey, so repeated repairs can never lose a record.
+  const archivedByKey = new Map<string, any>();
+  for (const step of Array.isArray(inst.archivedSteps) ? inst.archivedSteps : []) {
+    const key = String(step?.stepKey || '');
+    if (key) archivedByKey.set(key, step);
+  }
+  for (const step of archivedSteps) {
+    const key = String(step?.stepKey || '');
+    if (key && !archivedByKey.has(key)) archivedByKey.set(key, step);
+  }
+  const mergedArchivedSteps = Array.from(archivedByKey.values());
 
   const changed =
     String(inst.templateId || '') !== String(targetId) ||
     summary.addedTemplateSteps > 0 ||
     summary.addedActions > 0 ||
     summary.droppedSteps.length > 0 ||
-    summary.droppedActions.length > 0;
+    summary.droppedActions.length > 0 ||
+    archivedSteps.length > 0;
   if (!changed) return null;
-  if (options.dryRun) return { template, summary, changed, steps };
+  if (options.dryRun) return { template, summary, changed, steps, archivedSteps: mergedArchivedSteps };
 
   const tracked = inst.currentStepKey
     ? steps.find((step: any) => step.stepKey === inst.currentStepKey)
     : null;
+  // A tracked step that has just been archived must not remain the current step.
   const nextCurrentStepKey =
     tracked && tracked.status !== 'Completed'
       ? tracked.stepKey
@@ -352,6 +370,10 @@ export const reconcileInstanceTemplateWithCanonical = async (
   inst.steps = steps;
   inst.currentStepKey = nextCurrentStepKey;
   await inst.save();
+  // Written explicitly as well: the archive is the safety net for work that is no
+  // longer on the checklist, so it must never depend on schema casting to land.
+  await inst.collection.updateOne({ _id: inst._id }, { $set: { archivedSteps: mergedArchivedSteps } });
+  inst.archivedSteps = mergedArchivedSteps;
 
   caseDoc.workflowTemplateId = template._id;
   caseDoc.matterType = template.matterType;
@@ -377,7 +399,7 @@ export const reconcileInstanceTemplateWithCanonical = async (
         : ''),
   });
 
-  return { template, summary };
+  return { template, summary, steps, archivedSteps: mergedArchivedSteps };
 };
 
 
@@ -402,17 +424,22 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
       ? c.workflowProgress.plannedValue.amount
       : Number(String(c.budget || '').replace(/[^\d.]/g, '')) || 0;
   const existingCurrency = c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF';
-  const actions = (inst.steps || []).flatMap((step: any) => (Array.isArray(step.actions) ? step.actions : []));
+  // Progress reflects the ACTIVE checklist only. Steps that belonged to a
+  // superseded template are no longer part of the workflow, so counting their
+  // ticks here is exactly what made the bar report progress while the visible
+  // checklist showed nothing ticked.
+  const activeSteps = (inst.steps || []).filter((step: any) => !step?.archivedFromTemplate);
+  const actions = activeSteps.flatMap((step: any) => (Array.isArray(step.actions) ? step.actions : []));
   const checkedActions = actions.filter((action: any) => Boolean(action?.done)).length;
   const actionTotal = actions.length;
   const actionPercent = actionTotal > 0 ? Math.round((checkedActions / actionTotal) * 100) : 0;
 
   // Stage-weighted completion percent — the source of truth for earned fees.
   // Completed steps are weighted by their stage's percentage of the workflow.
-  const stageBreakdown = computeStageBreakdownFromInstance(inst?.steps || []);
-  const stageWeightedPercent = computeCompletedPercentFromInstance(inst?.steps || []);
+  const stageBreakdown = computeStageBreakdownFromInstance(activeSteps);
+  const stageWeightedPercent = computeCompletedPercentFromInstance(activeSteps);
   // Fall back to the action-based percent for legacy instances without percentages.
-  const percent = stageWeightedPercent > 0 ? stageWeightedPercent : actionPercent;
+  const percent = checkedActions > 0 ? (stageWeightedPercent > 0 ? stageWeightedPercent : actionPercent) : 0;
   const completedValueAmount = Math.round((existingPlannedAmount * percent) / 100);
 
   // Once the case itself is closed, preserve that terminal state. The explicit

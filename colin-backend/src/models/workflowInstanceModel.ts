@@ -73,6 +73,14 @@ export interface IWorkflowInstance extends Document {
 
   steps: IInstanceStep[];
 
+  /**
+   * Steps that belonged to a superseded workflow template. They are removed from
+   * the active checklist (so the Case Workspace, Case Management and the earned
+   * fees only ever reflect the current template) but kept here read-only so the
+   * historical work, its ticks and its completion stamps are never destroyed.
+   */
+  archivedSteps: IInstanceStep[];
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -165,6 +173,8 @@ const WorkflowInstanceSchema = new Schema<IWorkflowInstance>(
     currentStepKey: { type: String },
 
     steps: { type: [InstanceStepSchema], default: [] },
+
+    archivedSteps: { type: [InstanceStepSchema], default: [] },
   },
   { timestamps: true }
 );
