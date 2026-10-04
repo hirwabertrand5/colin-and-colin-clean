@@ -11,6 +11,14 @@ import { sendEmailResend } from '../services/emailResendService';
 
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
+import AuditLog from '../models/auditLogModel';
+import CaseDocument from '../models/documentModel';
+import CaseEvent from '../models/eventModel';
+import Invoice from '../models/invoiceModel';
+import Notification from '../models/notificationModel';
+import ClientReport from '../models/clientReportModel';
+import PettyCashExpense from '../models/pettyCashExpenseModel';
+import TaskAttachment from '../models/taskAttachmentModel';
 import { buildInstanceSteps } from '../utils/workflowCompute';
 import { buildUpdatedInstanceSteps, updateCaseWorkflowProgress } from './workflowController';
 import { computeCompletedPercentFromInstance } from '../utils/workflowPercentages';
@@ -270,12 +278,35 @@ const buildMatterTaskStages = (caseRecord: any, dueDate: string, assignedAt = ne
   ];
 };
 
+/**
+ * The cases list only renders identity, assignment, workflow-progress and
+ * deadline information. Free-text blobs (description, client-report draft
+ * fields) are never shown there but were being hydrated and shipped on every
+ * list load, which is what made the Cases page feel slow.
+ */
+const CASE_LIST_PROJECTION = {
+  description: 0,
+  caseSummary: 0,
+  caseParties: 0,
+  introduction: 0,
+  workDone: 0,
+  nextAction: 0,
+  upcomingMilestone: 0,
+  recentDevelopment: 0,
+  documentsAdded: 0,
+  closing: 0,
+  serviceRequested: 0,
+  clientInputDecision: 0,
+  updateReportDate: 0,
+  estimatedDuration: 0,
+} as const;
+
 export const getAllCases = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
 
     if (isAdminCaseRole(role)) {
-      const cases = await Case.find().sort({ updatedAt: -1 });
+      const cases = await Case.find({}, CASE_LIST_PROJECTION).sort({ updatedAt: -1 }).lean();
       return res.json(cases);
     }
 
@@ -291,17 +322,32 @@ export const getAllCases = async (req: AuthRequest, res: Response) => {
           ],
         }
       : null;
-    const assignedCases = me && assignedFilter ? await Case.find(assignedFilter).sort({ updatedAt: -1 }) : [];
-    const taskCaseIds = me
-      ? await Task.distinct('caseId', {
-          $or: [{ assignee: me }, { supervisor: me }, { 'taskStages.staffMember': me }],
-        })
+
+    // These three lookups are independent, so they run together instead of
+    // one after the other.
+    const [assignedCases, taskCaseIds, yellowCandidates] = await Promise.all([
+      me && assignedFilter
+        ? Case.find(assignedFilter, CASE_LIST_PROJECTION).sort({ updatedAt: -1 }).lean()
+        : Promise.resolve([] as any[]),
+      me
+        ? Task.distinct('caseId', {
+            $or: [{ assignee: me }, { supervisor: me }, { 'taskStages.staffMember': me }],
+          })
+        : Promise.resolve([] as any[]),
+      Case.find(
+        {
+          status: { $nin: ['Closed', 'Temporarily Closed'] },
+          'workflowProgress.status': { $ne: 'Completed' },
+        },
+        CASE_LIST_PROJECTION
+      )
+        .sort({ updatedAt: -1 })
+        .lean(),
+    ]);
+
+    const taskCases = taskCaseIds.length
+      ? await Case.find({ _id: { $in: taskCaseIds } }, CASE_LIST_PROJECTION).sort({ updatedAt: -1 }).lean()
       : [];
-    const taskCases = taskCaseIds.length ? await Case.find({ _id: { $in: taskCaseIds } }).sort({ updatedAt: -1 }) : [];
-    const yellowCandidates = await Case.find({
-      status: { $nin: ['Closed', 'Temporarily Closed'] },
-      'workflowProgress.status': { $ne: 'Completed' },
-    }).sort({ updatedAt: -1 });
     const yellowCases = yellowCandidates.filter((c: any) => isPublicYellowCase(c));
 
     // Interns only see cases actually assigned to them plus approaching-deadline
@@ -1099,7 +1145,59 @@ export const deleteCase = async (req: AuthRequest, res: Response) => {
     const deleted = await Case.findById(req.params.id).lean();
     if (!deleted) return res.status(404).json({ message: 'Case not found.' });
 
+    const caseObjectId = new mongoose.Types.ObjectId(String(deleted._id));
+    const caseFilter = { caseId: caseObjectId };
+
+    // Delete the case together with EVERY record that belongs to it. Deleting
+    // only the case used to leave its workflow instance, tasks, documents,
+    // invoices and events behind as orphans: the alignment/audit tooling then
+    // still counted the matter, task lists showed rows with "Matter
+    // unavailable", and nothing could be reconciled any more.
+    const taskIds = (
+      await Task.find(caseFilter).select('_id').lean()
+    ).map((task: any) => task._id);
+
+    const [instanceResult, taskResult] = await Promise.all([
+      WorkflowInstance.deleteMany(caseFilter),
+      Task.deleteMany(caseFilter),
+    ]);
+
+    const [attachmentResult, documentResult, eventResult, invoiceResult, notificationResult, reportResult, expenseResult, takeRequestResult, auditResult] =
+      await Promise.all([
+        taskIds.length
+          ? TaskAttachment.deleteMany({ taskId: { $in: taskIds } })
+          : Promise.resolve({ deletedCount: 0 } as any),
+        CaseDocument.deleteMany(caseFilter),
+        CaseEvent.deleteMany(caseFilter),
+        Invoice.deleteMany(caseFilter),
+        Notification.deleteMany(caseFilter),
+        ClientReport.deleteMany(caseFilter),
+        PettyCashExpense.deleteMany(caseFilter),
+        CaseTakeRequest.deleteMany(caseFilter),
+        AuditLog.deleteMany(caseFilter),
+      ]);
+
+    // The matter itself goes last: if any dependent delete fails the case is
+    // still there, so nothing can be half-deleted.
     await Case.findByIdAndDelete(req.params.id);
+
+    const removed: Record<string, number> = {
+      workflowInstances: instanceResult.deletedCount ?? 0,
+      tasks: taskResult.deletedCount ?? 0,
+      taskAttachments: attachmentResult?.deletedCount ?? 0,
+      documents: documentResult.deletedCount ?? 0,
+      events: eventResult.deletedCount ?? 0,
+      invoices: invoiceResult.deletedCount ?? 0,
+      notifications: notificationResult.deletedCount ?? 0,
+      clientReports: reportResult.deletedCount ?? 0,
+      pettyCashExpenses: expenseResult.deletedCount ?? 0,
+      takeRequests: takeRequestResult.deletedCount ?? 0,
+      auditLogs: auditResult.deletedCount ?? 0,
+    };
+    const removedSummary = Object.entries(removed)
+      .filter(([, value]) => Number(value) > 0)
+      .map(([key, value]) => `${value} ${key}`)
+      .join(', ');
 
     const actor = actorFromReq(req);
     await writeAudit({
@@ -1108,10 +1206,12 @@ export const deleteCase = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'CASE_DELETED',
       message: 'Deleted case',
-      detail: `${deleted.caseNo || ''} • ${deleted.parties || ''}`.trim(),
+      detail:
+        `${deleted.caseNo || ''} • ${deleted.parties || ''}`.trim() +
+        (removedSummary ? ` • cascaded: ${removedSummary}` : ' • nothing else referenced it'),
     });
 
-    return res.json({ message: 'Case deleted.' });
+    return res.json({ message: 'Case deleted.', removed });
   } catch {
     return res.status(500).json({ message: 'Failed to delete case.' });
   }

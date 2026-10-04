@@ -230,6 +230,44 @@ const syncCaseWorkflowInstanceFromTemplate = async (caseId: string, template: an
 };
 
 /**
+ * Template lookups used on every case-workspace read.
+ *
+ * Reconciling an instance with its canonical template needs the linked template
+ * plus the canonical template of its matter type. Both used to be separate
+ * queries on EVERY workflow / Case Management read, which is exactly the
+ * latency users felt when opening a matter. The template collection is small
+ * (dozens of documents) and only changes when an administrator edits it, so it
+ * is cached for a short window and invalidated by the template endpoints.
+ */
+const TEMPLATE_INDEX_TTL_MS = 30_000;
+let templateIndexCache: {
+  at: number;
+  all: any[];
+  byId: Map<string, any>;
+  canonical: Map<string, any>;
+} | null = null;
+
+const invalidateTemplateIndexCache = () => {
+  templateIndexCache = null;
+};
+
+const loadTemplateIndex = async () => {
+  if (templateIndexCache && Date.now() - templateIndexCache.at < TEMPLATE_INDEX_TTL_MS) {
+    return templateIndexCache;
+  }
+  const templates: any[] = await WorkflowTemplate.find({})
+    .select('_id name matterType caseType version active draft updatedAt')
+    .lean();
+  templateIndexCache = {
+    at: Date.now(),
+    all: templates,
+    byId: new Map(templates.map((template: any) => [String(template._id), template])),
+    canonical: buildCanonicalTemplateIndex(templates),
+  };
+  return templateIndexCache;
+};
+
+/**
  * Re-link a case workflow to its canonical template and align the checklist.
  *
  * Cases keep whatever template they were created with. When that template is
@@ -255,17 +293,13 @@ export const reconcileInstanceTemplateWithCanonical = async (
   // A completed matter is an immutable workflow snapshot.
   if (isClosedCaseWorkflow(caseDoc, inst)) return null;
 
+  const templateIndex = await loadTemplateIndex();
   const linkedId = inst.templateId ? String(inst.templateId) : '';
-  const linked: any = linkedId ? await WorkflowTemplate.findById(linkedId).lean() : null;
+  const linked: any = linkedId ? templateIndex.byId.get(linkedId) || null : null;
 
   let targetId = '';
   if (linked) {
-    const siblings: any[] = linked.caseType
-      ? await WorkflowTemplate.find({ caseType: linked.caseType })
-          .select('name matterType caseType version active draft updatedAt')
-          .lean()
-      : await WorkflowTemplate.find({}).select('name matterType caseType version active draft updatedAt').lean();
-    const canonical: any = buildCanonicalTemplateIndex(siblings).get(
+    const canonical: any = templateIndex.canonical.get(
       templateCanonicalGroupKey(linked.matterType, linked.caseType)
     );
     targetId = canonical && String(canonical._id) !== linkedId ? String(canonical._id) : linkedId;
@@ -277,19 +311,16 @@ export const reconcileInstanceTemplateWithCanonical = async (
       return null;
     }
   } else {
-    const templates: any[] = await WorkflowTemplate.find({})
-      .select('name matterType caseType version active draft updatedAt')
-      .lean();
     const target: any =
-      resolveCanonicalTemplateForCase(templates, {
+      resolveCanonicalTemplateForCase(templateIndex.all, {
         matterType: caseDoc.workflow,
         caseType: caseDoc.caseType,
       }) ||
-      resolveCanonicalTemplateForCase(templates, {
+      resolveCanonicalTemplateForCase(templateIndex.all, {
         matterType: caseDoc.matterType,
         caseType: caseDoc.caseType,
       }) ||
-      resolveCanonicalTemplateForCase(templates, { name: caseDoc.workflow, caseType: caseDoc.caseType });
+      resolveCanonicalTemplateForCase(templateIndex.all, { name: caseDoc.workflow, caseType: caseDoc.caseType });
     if (!target) return null;
     targetId = String(target._id);
   }
@@ -757,6 +788,7 @@ export const createTemplate = async (req: AuthRequest, res: Response) => {
     normalizeTemplatePercentages(payload);
 
     const created = await WorkflowTemplate.create(payload);
+    invalidateTemplateIndexCache();
     // NOTE: We avoid writing audit here because your audit log requires a caseId.
     res.status(201).json(created);
   } catch (e: any) {
@@ -811,6 +843,7 @@ export const updateTemplate = async (req: AuthRequest, res: Response) => {
     if (!updated) {
       return res.status(409).json({ message: 'This workflow was changed by someone else. Refresh it before saving.' });
     }
+    invalidateTemplateIndexCache();
 
     // Drafts are allowed to be incomplete, so they must never rewrite the
     // workflows of live cases. Cases are synced when the workflow is published.
@@ -857,6 +890,7 @@ export const deleteTemplate = async (req: AuthRequest, res: Response) => {
 
     const deleted = await WorkflowTemplate.findByIdAndDelete(templateId);
     if (!deleted) return res.status(404).json({ message: 'Template not found.' });
+    invalidateTemplateIndexCache();
 
     res.json({ message: 'Template deleted.' });
   } catch {
@@ -890,25 +924,6 @@ export const getWorkflowForCase = async (req: AuthRequest, res: Response) => {
       await reconcileInstanceTemplateWithCanonical(c, inst);
     } catch {
       // A reconciliation failure must never block reading the workflow.
-    }
-
-    // Backfill step actions from template if missing (safe for older instances)
-    try {
-      const t: any = await WorkflowTemplate.findById(inst.templateId).lean();
-      let changed = false;
-      for (const step of inst.steps || []) {
-        const hasActions = Array.isArray(step.actions) && step.actions.length > 0;
-        if (hasActions) continue;
-        const templateStep = (t?.steps || []).find((x: any) => x.key === step.stepKey);
-        const actions = (templateStep?.actions || []).map((text: any) => ({ text: String(text || '').trim(), done: false }));
-        if (actions.length) {
-          step.actions = actions;
-          changed = true;
-        }
-      }
-      if (changed) await inst.save();
-    } catch {
-      // ignore backfill failures
     }
 
     res.json(inst.toObject());

@@ -543,17 +543,39 @@ function KeyActionsList(props: {
   const totalStages = stageGroups.length;
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800">
-      <div className="mb-3 flex items-center gap-2">
-        <ClipboardCheck className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-        <div>
-          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Key Actions</div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">
-            The workflow template&apos;s Key Actions, completed by the three assigned members. Key Actions are grouped stage by stage in workflow template order, each stage followed by its own Key Actions.
+    <div className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+        <div className="flex items-start gap-3">
+          <ClipboardCheck className="mt-0.5 h-5 w-5 shrink-0 text-gray-500 dark:text-gray-400" />
+          <div>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              Key Actions by stage
+            </h3>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              The workflow template&apos;s Key Actions, completed by the three assigned members, grouped stage by stage in workflow order.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Completed</div>
+            <div className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+              {state.steps.filter((s) => s.status === 'Completed').length}
+              <span className="text-base font-normal text-gray-500 dark:text-gray-400"> / {state.steps.length}</span>
+            </div>
+          </div>
+          <div className="h-10 w-px bg-gray-200 dark:bg-gray-700" />
+          <div className="text-right">
+            <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Stages</div>
+            <div className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
+              {stageGroups.filter((g) => g.steps.length > 0 && g.steps.every((s) => s.status === 'Completed')).length}
+              <span className="text-base font-normal text-gray-500 dark:text-gray-400"> / {totalStages}</span>
+            </div>
           </div>
         </div>
       </div>
 
+      <div className="p-5">
       {missingPercentages.length > 0 ? (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
           {missingPercentages.length} Key Action percentage{missingPercentages.length === 1 ? '' : 's'} missing. Those actions remain worth 0 until a percentage is set in the workflow.
@@ -568,31 +590,67 @@ function KeyActionsList(props: {
         ) : null}
         {stageGroups.map((stageGroup, stageIndex) => {
           const stageCompleted = stageGroup.steps.filter((s) => s.status === 'Completed').length;
+          const stagePercent = stageGroup.steps.length
+            ? Math.round((stageCompleted / stageGroup.steps.length) * 100)
+            : 0;
+          const stageState = stageCompleted === stageGroup.steps.length && stageGroup.steps.length > 0 ? 'done' : 'open';
           return (
             <section
               key={stageGroup.key}
-              className="rounded-xl border border-gray-200 bg-gray-50/60 overflow-hidden dark:border-gray-700 dark:bg-gray-900/40"
+              className={[
+                'overflow-hidden rounded-xl border bg-white dark:bg-gray-800',
+                stageState === 'done' ? 'border-emerald-200 dark:border-emerald-900' : 'border-gray-200 dark:border-gray-700',
+              ].join(' ')}
             >
-              <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-800">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-900 text-[11px] font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
-                      {stageIndex + 1}
-                    </span>
-                    Stage {stageIndex + 1} of {totalStages}
-                  </div>
-                  <h4 className="mt-1 truncate text-base font-semibold text-gray-900 dark:text-gray-100" title={stageGroup.title}>
-                    {stageGroup.title}
-                  </h4>
-                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {stageCompleted} of {stageGroup.steps.length} Key Actions completed
-                  </p>
-                </div>
-                {stageGroup.percentage ? (
-                  <span className="inline-flex items-center rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300">
-                    {stageGroup.percentage}% of matter fee
+              <header className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-gray-50/60 px-5 py-4 dark:border-gray-700 dark:bg-gray-900/40">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span
+                    className={[
+                      'mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                      stageState === 'done'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900',
+                    ].join(' ')}
+                  >
+                    {stageState === 'done' ? '✓' : stageIndex + 1}
                   </span>
-                ) : null}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
+                        Stage {stageIndex + 1} of {totalStages}
+                      </span>
+                      {stageState === 'done' ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                          Completed
+                        </span>
+                      ) : null}
+                    </div>
+                    <h4 className="mt-0.5 text-base font-semibold text-gray-900 dark:text-gray-100" title={stageGroup.title}>
+                      {stageGroup.title}
+                    </h4>
+                    <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {stageCompleted} of {stageGroup.steps.length} Key Actions completed
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  {stageGroup.percentage ? (
+                    <span className="inline-flex items-center rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300">
+                      {stageGroup.percentage}% of matter fee
+                    </span>
+                  ) : null}
+                  <div className="w-40">
+                    <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                      <span>
+                        {stageCompleted} of {stageGroup.steps.length}
+                      </span>
+                      <span className="font-semibold">{stagePercent}%</span>
+                    </div>
+                    <div className="mt-1 h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700">
+                      <div className="h-1.5 rounded-full bg-emerald-500 transition-all" style={{ width: `${stagePercent}%` }} />
+                    </div>
+                  </div>
+                </div>
               </header>
               <div className="space-y-3 p-4">
         {stageGroup.steps.map((step, actionIndex) => {
@@ -602,8 +660,12 @@ function KeyActionsList(props: {
             <div
               key={step.stepKey}
               className={[
-                'rounded-lg border overflow-hidden transition-shadow',
-                isFocused ? 'border-gray-900 shadow-md dark:border-gray-300' : 'border-gray-200 dark:border-gray-700',
+                'overflow-hidden rounded-lg border transition-shadow',
+                isFocused
+                  ? 'border-gray-900 ring-2 ring-gray-900/10 dark:border-gray-300 dark:ring-gray-300/20'
+                  : step.status === 'Completed'
+                    ? 'border-emerald-200 dark:border-emerald-900'
+                    : 'border-gray-200 dark:border-gray-700',
               ].join(' ')}
             >
               <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
@@ -707,6 +769,7 @@ function KeyActionsList(props: {
             </section>
           );
         })}
+      </div>
       </div>
     </div>
   );
