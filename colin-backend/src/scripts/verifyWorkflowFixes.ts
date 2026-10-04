@@ -101,15 +101,16 @@ const verifyMergeLogic = () => {
   const t2 = merged.find((step) => step.stepKey === 'T2');
   const t3 = merged.find((step) => step.stepKey === 'T3');
   const old1 = merged.find((step) => step.stepKey === 'OLD1');
-  const t1CheckFacts = (t1?.actions || []).filter((action: any) => action.text === 'Check facts');
-
   check('merge: template steps and case-only steps are all kept', merged.length === 4 && Boolean(t1 && t2 && t3 && old1));
   check(
-    'merge: repeated checklist text keeps one tick per occurrence',
-    t1CheckFacts.length === 2 && t1CheckFacts[0]?.done === true && t1CheckFacts[1]?.done === false
+    'merge: the retired per-step sub-checklist is not merged onto the steps',
+    (t1?.actions || []).length === 0 && (t2?.actions || []).length === 0
   );
-  check('merge: new template Key Action is added as not done', Boolean(t1?.actions.some((a: any) => a.text === 'Draft memo' && a.done === false)));
-  check('merge: case-only Key Action keeps its tick', Boolean(t1?.actions.some((a: any) => a.text === 'Case-specific extra' && a.done === true)));
+  check(
+    'merge: old case checklist items are dropped from the active step',
+    !(t1?.actions || []).some((a: any) => a.text === 'Case-specific extra')
+  );
+  check('merge: template step order is kept', merged.map((step: any) => step.stepKey).join(',') === 'T1,T2,T3,OLD1');
   check('merge: step progress status preserved', t1?.status === 'In Progress' && t3?.status === 'Awaiting Review');
   check('merge: template step percentage applied when defined', t1?.percentage === 25);
   check('merge: template stage percentage applied when defined', t1?.stagePercentage === 10);

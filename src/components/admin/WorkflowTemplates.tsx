@@ -9,7 +9,7 @@ type LegalBasis = { id: string; text: string };
 type Output = { id: string; key: string; name: string; category: string; required: boolean };
 type Timeline = { min: string; max: string; unit: Unit; text: string };
 type Section = { id: string; key: string; stage: string; percentage: string; order: number; legalBasis: LegalBasis[]; outputs: Output[]; timeline: Timeline };
-type KeyAction = { id: string; key: string; sectionKey: string; title: string; percentage: string; order: number; responsibleRole: string; checklist: string };
+type KeyAction = { id: string; key: string; sectionKey: string; title: string; percentage: string; order: number; responsibleRole: string; checklist: string; existingActions: string[]; existingFallback: boolean };
 type WorkflowForm = { name: string; matterType: string; caseType: CaseType; active: boolean; sections: Section[]; actions: KeyAction[] };
 type Template = any;
 
@@ -27,7 +27,7 @@ const blankTimeline = (): Timeline => ({ min: '', max: '', unit: 'days', text: '
 
 function uniqueKey(base: string, used: Set<string>) { let result = base; let suffix = 2; while (used.has(result)) result = `${base}_${suffix++}`; return result; }
 function newSection(position: number, used: Set<string>): Section { return { id: id('section'), key: uniqueKey(`section_${position}`, used), stage: '', percentage: '', order: position, legalBasis: [{ id: id('basis'), text: '' }], outputs: [{ id: id('output'), key: '', name: '', category: '', required: false }], timeline: blankTimeline() }; }
-function newAction(sectionKey: string, position: number, used: Set<string>): KeyAction { return { id: id('action'), key: uniqueKey(`key_action_${position}`, used), sectionKey, title: '', percentage: '', order: position, responsibleRole: '', checklist: '' }; }
+function newAction(sectionKey: string, position: number, used: Set<string>): KeyAction { return { id: id('action'), key: uniqueKey(`key_action_${position}`, used), sectionKey, title: '', percentage: '', order: position, responsibleRole: '', checklist: '', existingActions: [], existingFallback: false }; }
 function emptyForm(): WorkflowForm { return { name: '', matterType: '', caseType: 'Transactional Cases', active: true, sections: [], actions: [] }; }
 
 function readBasis(value: unknown): LegalBasis[] { return Array.isArray(value) ? value.map((item: any) => ({ id: id('basis'), text: String(typeof item === 'string' ? item : item?.text || '') })) : []; }
@@ -40,23 +40,30 @@ function readTimeline(value: any): Timeline { const timeline = value && typeof v
  * Action) text is the builder's own fallback and is not a real checklist, so it
  * is not loaded back into the editor — otherwise renaming the Key Action would
  * silently keep the old text as a stale checklist item.
+ *
+ * The raw items are also returned so `toPayload` can keep a real stored
+ * checklist when the editor saves. The editor does not currently expose a
+ * checklist field, and overwriting the stored list with the [title] fallback
+ * would wipe the Key Actions that every matter built from this template shows.
  */
-function readChecklist(step: any): string {
+function readStoredChecklist(step: any): { items: string[]; isFallback: boolean } {
   const items = Array.isArray(step?.actions)
     ? (step.actions as unknown[]).map((action) => stripKeyActionNumber(String(action))).filter(Boolean)
     : [];
   const title = stripKeyActionNumber(String(step?.title || ''));
-  if (items.length === 1 && title && items[0] === title) return '';
-  return items.join('\n');
+  return { items, isFallback: items.length === 1 && Boolean(title) && items[0] === title };
 }
 
 function toForm(template: Template): WorkflowForm {
   const sections = (Array.isArray(template?.stages) ? template.stages : []).map((stage: any, index: number): Section => ({
     id: id('section'), key: String(stage?.key || `section_${index + 1}`), stage: String(stage?.title || stage?.name || ''), percentage: typeof stage?.percentage === 'number' ? String(stage.percentage) : '', order: typeof stage?.order === 'number' ? stage.order : index + 1, legalBasis: readBasis(stage?.legalBasis), outputs: readOutputs(stage?.outputs), timeline: readTimeline(stage?.sla),
   })).sort((a: Section, b: Section) => a.order - b.order);
-  const actions = (Array.isArray(template?.steps) ? template.steps : []).map((step: any, index: number): KeyAction => ({
-    id: id('action'), key: String(step?.key || `key_action_${index + 1}`), sectionKey: String(step?.stageKey || ''), title: stripKeyActionNumber(String(step?.title || '')), percentage: typeof step?.percentage === 'number' ? String(step.percentage) : '', order: typeof step?.order === 'number' ? step.order : index + 1, responsibleRole: String(step?.responsibleRole || ''), checklist: readChecklist(step),
-  })).sort((a: KeyAction, b: KeyAction) => a.order - b.order);
+  const actions = (Array.isArray(template?.steps) ? template.steps : []).map((step: any, index: number): KeyAction => {
+    const stored = readStoredChecklist(step);
+    return {
+      id: id('action'), key: String(step?.key || `key_action_${index + 1}`), sectionKey: String(step?.stageKey || ''), title: stripKeyActionNumber(String(step?.title || '')), percentage: typeof step?.percentage === 'number' ? String(step.percentage) : '', order: typeof step?.order === 'number' ? step.order : index + 1, responsibleRole: String(step?.responsibleRole || ''), checklist: stored.isFallback ? '' : stored.items.join('\n'), existingActions: stored.items, existingFallback: stored.isFallback,
+    };
+  }).sort((a: KeyAction, b: KeyAction) => a.order - b.order);
   sections.forEach((section: Section) => { const first = (template?.steps || []).find((step: any) => String(step?.stageKey || '') === section.key); if (!first) return; if (!section.legalBasis.length) section.legalBasis = readBasis(first.legalBasis); if (!section.outputs.length) section.outputs = readOutputs(first.outputs); if (!section.timeline.min && !section.timeline.max && !section.timeline.text) section.timeline = readTimeline(first.sla); });
   return { name: String(template?.name || ''), matterType: String(template?.matterType || ''), caseType: template?.caseType || 'Transactional Cases', active: Boolean(template?.active), sections, actions };
 }
@@ -125,7 +132,7 @@ function serialiseOutputs(outputs: Output[], sectionKey: string) { return output
 function serialiseTimeline(timeline: Timeline) { const min = number(timeline.min); const max = number(timeline.max); return min === undefined && max === undefined && !timeline.text.trim() ? undefined : { ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}), ...(min !== undefined || max !== undefined ? { unit: timeline.unit } : {}), ...(timeline.text.trim() ? { text: timeline.text.trim() } : {}) }; }
 function toPayload(form: WorkflowForm, draft: boolean, legacyVersion: unknown, expectedUpdatedAt?: unknown) {
   const stages = form.sections.map((section, index) => { const sla = serialiseTimeline(section.timeline); const percentage = asPercentage(section.percentage); return { key: section.key, title: section.stage.trim(), order: index + 1, ...(percentage !== undefined ? { percentage } : {}), legalBasis: section.legalBasis.filter((item) => item.text.trim()).map((item) => ({ text: item.text.trim() })), outputs: serialiseOutputs(section.outputs, section.key), ...(sla ? { sla } : {}) }; });
-  const steps = form.actions.map((action, index) => { const section = form.sections.find((item) => item.key === action.sectionKey); const percentage = asPercentage(action.percentage); const sla = section ? serialiseTimeline(section.timeline) : undefined; const checklist = splitLines(action.checklist).map(stripKeyActionNumber); const title = stripKeyActionNumber(action.title.trim()); return { key: action.key, stageKey: action.sectionKey, title, order: index + 1, ...(percentage !== undefined ? { percentage } : {}), ...(action.responsibleRole.trim() ? { responsibleRole: action.responsibleRole.trim() } : {}), actions: checklist.length ? checklist : (title ? [title] : []), outputs: section ? serialiseOutputs(section.outputs, section.key) : [], legalBasis: section ? section.legalBasis.filter((item) => item.text.trim()).map((item) => ({ text: item.text.trim() })) : [], ...(sla ? { sla } : {}) }; });
+  const steps = form.actions.map((action, index) => { const section = form.sections.find((item) => item.key === action.sectionKey); const percentage = asPercentage(action.percentage); const sla = section ? serialiseTimeline(section.timeline) : undefined; const checklist = splitLines(action.checklist).map(stripKeyActionNumber); const title = stripKeyActionNumber(action.title.trim()); const storedChecklist = action.existingFallback ? [] : action.existingActions.map(stripKeyActionNumber).filter(Boolean); return { key: action.key, stageKey: action.sectionKey, title, order: index + 1, ...(percentage !== undefined ? { percentage } : {}), ...(action.responsibleRole.trim() ? { responsibleRole: action.responsibleRole.trim() } : {}), actions: checklist.length ? checklist : storedChecklist, outputs: section ? serialiseOutputs(section.outputs, section.key) : [], legalBasis: section ? section.legalBasis.filter((item) => item.text.trim()).map((item) => ({ text: item.text.trim() })) : [], ...(sla ? { sla } : {}) }; });
   return {
     name: form.name.trim(), matterType: form.matterType.trim(), caseType: form.caseType,
     active: draft ? false : form.active, draft, version: typeof legacyVersion === 'number' ? legacyVersion : 1,

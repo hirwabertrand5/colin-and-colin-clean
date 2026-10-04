@@ -424,11 +424,9 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         String(matter?.workflowProgress?.status || '').toLowerCase() === 'completed' ||
         String(matter?.status || '').toLowerCase() === 'closed';
 
-      const actions = steps.flatMap((step) => (Array.isArray(step?.actions) ? step.actions : []));
-      const allKeyActionsChecked = actions.length > 0 && actions.every((action: any) => Boolean(action?.done));
       const allStepsCompleted =
         steps.length > 0 && steps.every((step: any) => String(step?.status || '').toLowerCase() === 'completed');
-      const outstanding = !completed && !(allKeyActionsChecked || allStepsCompleted);
+      const outstanding = !completed && !allStepsCompleted;
 
       const matterOverdueSections = completed
         ? 0
@@ -524,10 +522,10 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
             isWithinReportRange((step as any)?.completedAt, period)
           ) {
             periodSectionsCompleted += 1;
-          }
-          const stepActions = Array.isArray((step as any)?.actions) ? (step as any).actions : [];
-          for (const action of stepActions) {
-            if (action?.done && isWithinReportRange(action?.doneAt, period)) periodKeyActionsChecked += 1;
+            // The per-step sub-checklist is retired: "Key Actions" are the
+            // workflow steps, so a Key Action counts as checked when its step
+            // completes inside the period.
+            periodKeyActionsChecked += 1;
           }
         }
 

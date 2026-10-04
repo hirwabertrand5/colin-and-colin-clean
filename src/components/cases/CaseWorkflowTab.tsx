@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { CalendarPlus, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { CalendarPlus } from 'lucide-react';
 import { TaskData } from '../../services/taskService';
 import {
   getWorkflowForCase,
   completeWorkflowStep,
   reopenWorkflowStep,
   amendWorkflowStepDeadline,
-  toggleWorkflowStepAction,
-  addWorkflowStepAction,
-  updateWorkflowStepAction,
-  deleteWorkflowStepAction,
   getCaseEarnedFees,
   CaseEarnedFees,
   WorkflowInstance,
@@ -23,7 +18,6 @@ import {
   getUrgencyColorForDueDate,
   toDateTimeLocalValue,
 } from '../../utils/workflowDeadline';
-import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 
 type Props = {
   caseId: string;
@@ -49,21 +43,14 @@ const formatMoney = (amount: number | null | undefined, currency?: string) => {
 
 export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged, tasks, currentUserName, currentUserEmail, onOpenCaseManagement }: Props) {
   void canUpload;
-  const navigate = useNavigate();
+  void canToggleActions;
+  void onOpenCaseManagement;
   const [wf, setWf] = useState<WorkflowInstance | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [busyKey, setBusyKey] = useState<string>('');
   const [template, setTemplate] = useState<WorkflowTemplate | null>(null);
   const [earned, setEarned] = useState<CaseEarnedFees | null>(null);
-  const [actionEditor, setActionEditor] = useState<{
-    stepKey: string;
-    stepTitle: string;
-    mode: 'add' | 'edit';
-    index?: number;
-    text: string;
-    position?: number;
-  } | null>(null);
 
   const canAmendDeadlines = canCompleteSteps;
   const [amendOpenFor, setAmendOpenFor] = useState<string>('');
@@ -139,107 +126,6 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     load();
     // eslint-disable-next-line
   }, [caseId]);
-
-  // The whole matter is one task now: a Key Action hands the user to the Case
-  // Management tab of this matter instead of the legacy task detail page.
-  const openCaseManagement = (stepKey: string) => {
-    if (onOpenCaseManagement) {
-      onOpenCaseManagement(stepKey);
-      return;
-    }
-    navigate(buildCaseManagementLink(caseId, stepKey));
-  };
-
-  const toggleAction = async (stepKey: string, index: number) => {
-    if (!canToggleActions) return;
-    const snapshot = wf;
-    if (!snapshot) return;
-    const snapshotStep = snapshot.steps.find((s) => s.stepKey === stepKey);
-    const snapshotAction = Array.isArray(snapshotStep?.actions) ? snapshotStep.actions[index] : undefined;
-    if (snapshotAction === undefined) return;
-
-    const nextDone = !Boolean(snapshotAction.done);
-    // Optimistic flip: reflect the change instantly so the UI never waits on the network.
-    setWf({
-      ...snapshot,
-      steps: snapshot.steps.map((s) =>
-        s.stepKey === stepKey
-          ? { ...s, actions: (s.actions || []).map((a, i) => (i === index ? { ...a, done: nextDone } : a)) }
-          : s
-      ),
-    });
-    setBusyKey(`action:${stepKey}:${index}`);
-    setErr('');
-    try {
-      const updated = await toggleWorkflowStepAction(caseId, stepKey, index);
-      setWf(updated);
-      // Reconcile case progress in the background — never block the checkbox on extra round-trips.
-      notifyWorkflowChanged();
-      // When the user ticks a key action on the case workspace, the three
-      // assigned members work through the Case Management tab (workflow →
-      // review → approval). Redirect them there with the Key Action in context.
-      if (nextDone) {
-        openCaseManagement(stepKey);
-      }
-    } catch (e: any) {
-      setWf(snapshot); // revert the optimistic flip
-      setErr(e.message || 'Failed to update key action');
-    } finally {
-      setBusyKey('');
-    }
-  };
-
-  const openAddAction = (stepKey: string, stepTitle: string, position?: number) => {
-    setActionEditor({ stepKey, stepTitle, mode: 'add', text: '', position });
-  };
-
-  const openEditAction = (stepKey: string, stepTitle: string, index: number, text: string) => {
-    setActionEditor({ stepKey, stepTitle, mode: 'edit', index, text });
-  };
-
-  const submitActionEditor = async () => {
-    if (!actionEditor) return;
-    const text = actionEditor.text.trim();
-    if (!text) {
-      setErr('Action text is required.');
-      return;
-    }
-    if (actionEditor.mode === 'add' && typeof actionEditor.position !== 'number') {
-      setErr('Choose an insertion position for the new key action.');
-      return;
-    }
-
-    try {
-      setBusyKey(`${actionEditor.mode}:${actionEditor.stepKey}:${actionEditor.index ?? 'new'}`);
-      setErr('');
-      const updated =
-        actionEditor.mode === 'add'
-          ? await addWorkflowStepAction(caseId, actionEditor.stepKey, text, actionEditor.position)
-          : await updateWorkflowStepAction(caseId, actionEditor.stepKey, Number(actionEditor.index), { text });
-      setWf(updated);
-      setActionEditor(null);
-      notifyWorkflowChanged();
-    } catch (e: any) {
-      setErr(e.message || 'Failed to save key action');
-    } finally {
-      setBusyKey('');
-    }
-  };
-
-  const removeAction = async (stepKey: string, index: number) => {
-    if (!window.confirm('Delete this key action?')) return;
-    try {
-      setBusyKey(`delete:${stepKey}:${index}`);
-      setErr('');
-      const updated = await deleteWorkflowStepAction(caseId, stepKey, index);
-      setWf(updated);
-      notifyWorkflowChanged();
-    } catch (e: any) {
-      setErr(e.message || 'Failed to delete key action');
-    } finally {
-      setBusyKey('');
-    }
-  };
 
   const onCompleteStep = async (stepKey: string) => {
     if (!canCompleteSteps) return;
@@ -322,23 +208,6 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   if (!wf) return <div className="py-8 text-gray-500">No workflow found for this case.</div>;
 
   const steps = [...wf.steps].sort((a, b) => a.order - b.order);
-  const orderedActionRefs = steps.flatMap((step) => {
-    const stepActions = (step.actions && step.actions.length ? step.actions : undefined) || undefined;
-    const derivedActions = !stepActions
-      ? (() => {
-          const templateStep = template?.steps?.find((ts) => ts.key === step.stepKey);
-          const keyActions = templateStep?.actions || [];
-          return keyActions.map((text: string) => ({ text, done: false }));
-        })()
-      : stepActions;
-    return (derivedActions || []).map((action: any, idx: number) => ({ stepKey: step.stepKey, idx, done: Boolean(action?.done) }));
-  });
-
-  const canCheckAction = (stepKey: string, idx: number) => {
-    const currentIndex = orderedActionRefs.findIndex((action) => action.stepKey === stepKey && action.idx === idx);
-    if (currentIndex <= 0) return true;
-    return orderedActionRefs.slice(0, currentIndex).every((action) => action.done);
-  };
 
   /**
    * The workflow template is authoritative for the shape of the checklist: its
@@ -588,45 +457,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         const arr = steps;
         // Check if previous step is completed (or this is the first step)
         const previousStepCompleted = index <= 0 || (arr[index - 1]?.status === 'Completed');
-        // A section whose Key Actions are all ticked counts as cleared even if
-        // its big completion checkbox is still pending: the server ticks it
-        // automatically as soon as the last Key Action is saved (and the repair
-        // pass clears older matters), so interns/associates — who cannot tick
-        // the big checkbox themselves — are never blocked on the previous
-        // section's pending checkbox.
-        const previousStep = index === 0 ? undefined : arr[index - 1];
-        const previousStepStoredActions =
-          previousStep && Array.isArray(previousStep.actions) && previousStep.actions.length
-            ? previousStep.actions
-            : undefined;
-        const previousStepActions =
-          previousStepStoredActions ||
-          (previousStep
-            ? (template?.steps?.find((ts) => ts.key === previousStep.stepKey)?.actions || []).map((text: string) => ({
-                text,
-                done: false,
-              }))
-            : []);
-        const previousStepChecklistDone =
-          previousStepActions.length > 0 && previousStepActions.every((action: any) => Boolean(action?.done));
-        const previousStepCleared = previousStepCompleted || previousStepChecklistDone;
 
         // Determine if checkbox should be disabled for completing
         const isCompleted = s.status === 'Completed';
         const isLoading = busyKey === `complete:${s.stepKey}`;
 
-        const stepActions = (s.actions && s.actions.length ? s.actions : undefined) || undefined;
-        const derivedActions = !stepActions
-          ? (() => {
-              const templateStep = template?.steps?.find((ts) => ts.key === s.stepKey);
-              const keyActions = templateStep?.actions || [];
-              return keyActions.map((text: string) => ({ text, done: false }));
-            })()
-          : stepActions;
-
-        const hasActions = (derivedActions || []).length > 0;
-        const allActionsDone = !hasActions || (derivedActions || []).every((a) => a.done);
-        const cannotComplete = !isCompleted && (!previousStepCompleted || !allActionsDone);
+        const cannotComplete = !isCompleted && !previousStepCompleted;
         const extensionHistory = Array.isArray(s.extensionHistory) ? s.extensionHistory : [];
         const latestExtension = extensionHistory[extensionHistory.length - 1];
         
@@ -636,16 +472,11 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           tooltipMessage = 'Click to reopen step';
         } else if (!previousStepCompleted) {
           tooltipMessage = 'Complete previous steps first';
-        } else if (!allActionsDone) {
-          tooltipMessage = 'Complete all key actions first';
         } else {
           tooltipMessage = 'Click to mark as complete';
         }
 
-        const keyActions = derivedActions || [];
         const keyActionValue = keyActionValueOf(s.stepKey);
-        const canManageActions = canCompleteSteps && s.status !== 'Completed';
-        const canToggleStepActions = canToggleActions || canCompleteSteps;
 
         return (
         <div key={s.stepKey} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
@@ -684,28 +515,11 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     </span>
                   );
                 })()}
-                {!previousStepCleared && !isCompleted && (
+                {!previousStepCompleted && !isCompleted && (
                   <span className="text-xs text-gray-500 dark:text-gray-400" title="Previous steps must be completed first">
                     ← Complete previous steps first
                   </span>
                 )}
-                {!allActionsDone && !isCompleted && hasActions && (
-                  <span className="text-xs text-amber-600 dark:text-amber-400" title="Pending key actions">
-                    ⏳ Key actions pending
-                  </span>
-                )}
-                {hasActions ? (
-                  <span
-                    className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
-                      allActionsDone
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-                        : 'border-gray-300 bg-gray-50 text-gray-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
-                    }`}
-                    title={allActionsDone ? 'All Key Actions under this Step are completed' : 'Some Key Actions under this Step are still incomplete'}
-                  >
-                    {allActionsDone ? 'Step: Done' : 'Step: In Progress'}
-                  </span>
-                ) : null}
                 {latestExtension ? (
                   <span
                     className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
@@ -795,106 +609,6 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             </div>
           </div>
 
-          {/* Key Actions section below the step header */}
-          {keyActions.length > 0 ? (
-            <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Key Actions</div>
-                {canManageActions ? (
-                  <button
-                    type="button"
-                    onClick={() => openAddAction(s.stepKey, s.title, keyActions.length)}
-                    className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add key action
-                  </button>
-                ) : null}
-              </div>
-              <ul className="space-y-2">
-                {keyActions.map((action: any, idx: number) => {
-                  const isBusy = busyKey === `action:${s.stepKey}:${idx}` || busyKey === `delete:${s.stepKey}:${idx}`;
-                  const isDone = Boolean(action?.done);
-                  const label = typeof action === 'string' ? action : String(action?.text || '');
-                  return (
-                    <li key={idx} className="flex items-start gap-3">
-                      {canToggleStepActions ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleAction(s.stepKey, idx)}
-                          disabled={isBusy || (!isDone && (!previousStepCleared || !canCheckAction(s.stepKey, idx)))}
-                          className={`mt-0.5 h-5 w-5 rounded border flex items-center justify-center ${
-                            isDone ? 'bg-green-600 border-green-600' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
-                          } disabled:opacity-60`}
-                          title={
-                            !isDone && !canCheckAction(s.stepKey, idx)
-                              ? 'Complete the previous key action first'
-                              : !previousStepCleared
-                                ? 'Complete previous steps first'
-                                : 'Toggle key action'
-                          }
-                        >
-                          {isDone ? <span className="text-white text-xs">✓</span> : null}
-                        </button>
-                      ) : (
-                        <div
-                          className={`mt-0.5 h-5 w-5 rounded border flex items-center justify-center ${
-                            isDone ? 'bg-green-600 border-green-600' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
-                          }`}
-                        >
-                          {isDone ? <span className="text-white text-xs">✓</span> : null}
-                        </div>
-                      )}
-                      <div className={`min-w-0 flex-1 text-sm ${isDone ? 'text-gray-500' : 'text-gray-700 dark:text-gray-200'}`}>
-                        <span className="mr-2 font-semibold text-gray-400">{idx + 1}.</span>
-                        {label}
-                      </div>
-                      {canManageActions ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => openEditAction(s.stepKey, s.title, idx, label)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-                            title="Edit key action"
-                            disabled={busyKey === `edit:${s.stepKey}:${idx}`}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeAction(s.stepKey, idx)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-300 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-red-900/20"
-                            title="Delete key action"
-                            disabled={busyKey === `delete:${s.stepKey}:${idx}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : canManageActions ? (
-            <div className="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">Key Actions</div>
-                <button
-                  type="button"
-                  onClick={() => openAddAction(s.stepKey, s.title, 0)}
-                  className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add key action
-                </button>
-              </div>
-              <div className="rounded-lg border border-dashed border-gray-300 bg-white px-3 py-4 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
-                No key actions configured for this step.
-              </div>
-            </div>
-          ) : null}
-
           {amendOpenFor === s.stepKey && canAmendDeadlines ? (
                 <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
               <div className="text-sm font-semibold text-gray-900">Amend deadline</div>
@@ -979,115 +693,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         );
       })}
 
-      {actionEditor ? (
-        <div className="fixed inset-0 z-50 flex">
-          <button
-            type="button"
-            aria-label="Close key action editor"
-            className="absolute inset-0 bg-gray-900/50"
-            onClick={() => setActionEditor(null)}
-          />
-          <div className="relative ml-auto flex h-full w-full max-w-md flex-col bg-white shadow-2xl dark:bg-gray-900">
-            <div className="flex items-start justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-800">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
-                  {actionEditor.mode === 'add' ? 'Add key action' : 'Edit key action'}
-                </div>
-                <h3 className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">{actionEditor.stepTitle}</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActionEditor(null)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                title="Close"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5">
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
-                <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
-                  Action text
-                </label>
-                <textarea
-                  value={actionEditor.text}
-                  onChange={(e) => setActionEditor((curr) => (curr ? { ...curr, text: e.target.value } : curr))}
-                  rows={5}
-                  className="mt-2 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none ring-0 focus:border-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                  placeholder="Enter a key action"
-                />
-                {actionEditor.mode === 'add' ? (
-                  <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-                    <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
-                      Insert position
-                    </label>
-                    <select
-                      value={typeof actionEditor.position === 'number' ? String(actionEditor.position) : ''}
-                      onChange={(e) =>
-                        setActionEditor((curr) =>
-                          curr
-                            ? {
-                                ...curr,
-                                position: e.target.value === '' ? undefined : Number(e.target.value),
-                              }
-                            : curr
-                        )
-                      }
-                      className="mt-2 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-                    >
-                      <option value="">Choose a position</option>
-                      {Array.from(
-                        { length: (wf?.steps?.find((step) => step.stepKey === actionEditor.stepKey)?.actions?.length || 0) + 1 },
-                        (_, idx) => (
-                          <option key={idx} value={idx}>
-                            {idx === 0 ? 'At the start' : `After action ${idx}`}
-                          </option>
-                        )
-                      )}
-                    </select>
-                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Position 0 inserts the item at the top of the checklist.
-                    </p>
-                  </div>
-                ) : null}
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  {actionEditor.mode === 'add'
-                    ? 'Choose where the new key action should be inserted.'
-                    : 'Update the action text without changing its completion status.'}
-                </p>
-              </div>
-            </div>
-
-            <div className="border-t border-gray-200 px-5 py-4 dark:border-gray-800">
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActionEditor(null)}
-                  className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={submitActionEditor}
-                  disabled={
-                    busyKey === `${actionEditor.mode}:${actionEditor.stepKey}:${actionEditor.index ?? 'new'}` ||
-                    !String(actionEditor.text || '').trim()
-                  }
-                  className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {busyKey === `${actionEditor.mode}:${actionEditor.stepKey}:${actionEditor.index ?? 'new'}`
-                    ? 'Saving…'
-                    : actionEditor.mode === 'add'
-                      ? 'Add key action'
-                      : 'Save changes'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
+
+

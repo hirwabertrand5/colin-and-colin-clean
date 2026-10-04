@@ -7,12 +7,12 @@
  * Actions defined in Templates settings, while nothing that carries progress is
  * destroyed:
  *
- * - completed ticks follow their action TEXT (never a position), so a reorder
- *   or re-wording can never move finished work to another key action;
  * - a step keeps its own deadline, status, completion stamp and extensions;
- * - a Key Action that exists only on the case survives when it is ticked;
- * - an unticked leftover of an older template is dropped — that leftover is
- *   exactly the drift this alignment removes;
+ * - the per-step sub-checklist is retired: every stored checklist item leaves
+ *   the active checklist; when it was ticked, its record (text, tick and
+ *   timestamp) is returned so the caller archives it on the instance instead of
+ *   losing the finished work;
+ * - an unticked leftover of an older checklist is simply dropped;
  * - a whole step that is not in the template is ARCHIVED, not listed: it leaves
  *   the active checklist (so the Case Workspace, Case Management and the earned
  *   fees only ever show the current template's stages and Key Actions) while the
@@ -30,80 +30,18 @@ import { stripManualNumberPrefix } from './workflowText';
 const actionKey = (value: unknown) =>
   stripManualNumberPrefix(value).replace(/\s+/g, ' ').trim().toLowerCase();
 
-const tokenize = (value: unknown) =>
-  new Set(
-    String(value || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim()
-      .split(' ')
-      .filter((word) => word.length > 2)
-  );
-
-/** Token-overlap similarity, 0–1. Used only to propose a carry-forward. */
-const similarity = (a: Set<string>, b: Set<string>) => {
-  if (!a.size || !b.size) return 0;
-  let shared = 0;
-  for (const token of a) if (b.has(token)) shared += 1;
-  return shared / Math.min(a.size, b.size);
-};
-
-export type CarriedProgress = {
-  templateStepKey: string;
-  actionText: string;
-  /** The superseded/previous wording this tick was carried over from. */
-  fromText: string;
-  score: number;
-};
-
 /**
- * Collect every Key Action that was already ticked anywhere on the matter —
- * including steps from a superseded template — so that work is never silently
- * lost when the checklist is rebuilt from the current template.
+ * A ticked checklist item taken off the active checklist when the per-step
+ * sub-checklist was retired. The caller stores these records on the instance
+ * so finished work is never destroyed.
  */
-export const collectCompletedActionTexts = (steps: any[] | undefined): Array<{ text: string; doneAt?: any }> => {
-  const pool: Array<{ text: string; doneAt?: any }> = [];
-  const seen = new Set<string>();
-  for (const step of Array.isArray(steps) ? steps : []) {
-    for (const action of Array.isArray(step?.actions) ? step.actions : []) {
-      if (!action?.done) continue;
-      const text = String(action?.text || '').trim();
-      const key = actionKey(text);
-      if (!text || !key || seen.has(key)) continue;
-      seen.add(key);
-      pool.push({ text, doneAt: action?.doneAt });
-    }
-  }
-  return pool;
-};
-
-/**
- * Propose, for one unticked template Key Action, the previously ticked wording it
- * most likely supersedes. Deliberately conservative: an exact normalised match
- * always wins, and a fuzzy match must clear the threshold AND be a clear single
- * winner. Anything ambiguous returns null so it is reported for a human instead of
- * being guessed at.
- */
-export const proposeCarryForward = (
-  actionText: unknown,
-  pool: Array<{ text: string; doneAt?: any }>,
-  threshold = 0.62
-): { text: string; doneAt?: any; score: number } | null => {
-  const target = actionKey(actionText);
-  if (!target) return null;
-  for (const candidate of pool) {
-    if (actionKey(candidate.text) === target) return { ...candidate, score: 1 };
-  }
-  const targetTokens = tokenize(actionText);
-  if (!targetTokens.size) return null;
-  const scored = pool
-    .map((candidate) => ({ candidate, score: similarity(targetTokens, tokenize(candidate.text)) }))
-    .filter((entry) => entry.score >= threshold)
-    .sort((a, b) => b.score - a.score);
-  if (!scored.length) return null;
-  // Ambiguous (two different wordings equally plausible) -> do not guess.
-  if (scored.length > 1 && Math.abs(scored[0]!.score - scored[1]!.score) < 0.15) return null;
-  return { ...scored[0]!.candidate, score: scored[0]!.score };
+export type ArchivedActionRecord = {
+  stepKey: string;
+  stepTitle: string;
+  text: string;
+  done: boolean;
+  doneAt?: any;
+  reason: 'sub-checklist-retired';
 };
 
 export type WorkflowAlignmentSummary = {
@@ -114,11 +52,8 @@ export type WorkflowAlignmentSummary = {
   droppedSteps: string[];
   droppedActions: string[];
   keptLegacySteps: string[];
-  keptLegacyActions: string[];
-  /** Ticks carried onto the current template's Key Actions from older wording. */
-  carriedProgress: CarriedProgress[];
-  /** Previously ticked wording that maps to no current Key Action (review these). */
-  unmatchedProgress: string[];
+  /** Ticked checklist items archived off the checklist (labels). */
+  archivedLegacyActions: string[];
 };
 
 export type WorkflowAlignmentResult = {
@@ -126,6 +61,8 @@ export type WorkflowAlignmentResult = {
   steps: any[];
   /** Superseded steps, preserved so the caller can archive rather than lose them. */
   archivedSteps: any[];
+  /** Ticked checklist items, preserved so the caller can archive them. */
+  archivedActions: ArchivedActionRecord[];
   summary: WorkflowAlignmentSummary;
 };
 
@@ -143,6 +80,7 @@ export const hasSupersededTemplateSteps = (existingSteps: any[] | undefined, tem
     (step: any) => !templateKeys.has(String(step?.stepKey || ''))
   );
 };
+
 
 export const alignInstanceStepsToTemplate = (
   existingSteps: any[] | undefined,
@@ -170,80 +108,34 @@ export const alignInstanceStepsToTemplate = (
     droppedSteps: [],
     droppedActions: [],
     keptLegacySteps: [],
-    keptLegacyActions: [],
-    carriedProgress: [],
-    unmatchedProgress: [],
+    archivedLegacyActions: [],
   };
 
-  // Every tick the matter has ever earned, wherever it was recorded. Rebuilding
-  // the checklist from the template must never quietly undo finished work, so an
-  // unticked template Key Action adopts the wording it supersedes.
-  const completedPool = collectCompletedActionTexts(existingSteps);
-  const claimed = new Set<string>();
-  const carriedProgress: CarriedProgress[] = [];
+  const archivedActions: ArchivedActionRecord[] = [];
 
   const steps: any[] = builtSteps.map((templateStep: any) => {
     const previous: any = previousByKey.get(String(templateStep.stepKey));
     if (previous) summary.matchedSteps += 1;
     else summary.addedTemplateSteps += 1;
 
-    // Queue previous ticks per normalized action text so repeated checklist
-    // items keep their own tick.
-    const remaining = new Map<string, any[]>();
+    // The per-step sub-checklist is retired: every checklist item the case
+    // stores leaves the active checklist. Ticked work is never lost — its
+    // record (text, tick and timestamp) is returned for the caller to archive.
     for (const action of Array.isArray(previous?.actions) ? previous.actions : []) {
-      const key = actionKey(action?.text);
-      if (!key) continue;
-      const queue = remaining.get(key) || [];
-      queue.push(action);
-      remaining.set(key, queue);
-    }
-
-    const mergedActions: any[] = (templateStep.actions || []).map((action: any) => {
-      const text = stripManualNumberPrefix(action?.text);
+      const text = stripManualNumberPrefix(String(action?.text || ''));
       const key = actionKey(text);
-      const queue = remaining.get(key) || [];
-      const matched = queue.shift();
-      if (queue.length) remaining.set(key, queue);
-      else remaining.delete(key);
-
-      // No tick on this very step: adopt one recorded elsewhere on the matter
-      // (typically under an older template's wording) when it is unambiguous.
-      if (!matched?.done) {
-        const proposal = proposeCarryForward(
-          text,
-          completedPool.filter((entry) => !claimed.has(actionKey(entry.text)))
-        );
-        if (proposal) {
-          claimed.add(actionKey(proposal.text));
-          carriedProgress.push({
-            templateStepKey: String(templateStep.stepKey),
-            actionText: text,
-            fromText: proposal.text,
-            score: proposal.score,
-          });
-          return { text, done: true, ...(proposal.doneAt ? { doneAt: proposal.doneAt } : {}) };
-        }
-      }
-
-      if (!matched) summary.addedActions += 1;
-      return {
+      if (!text || !key) continue;
+      summary.droppedActions.push(`${templateStep.stepKey} :: ${text}`);
+      if (!action?.done || !keepLegacyProgress) continue;
+      archivedActions.push({
+        stepKey: String(templateStep.stepKey),
+        stepTitle: String(templateStep.title || ''),
         text,
-        done: Boolean(matched?.done),
-        ...(matched?.doneAt ? { doneAt: matched.doneAt } : {}),
-      };
-    });
-
-    for (const queue of remaining.values()) {
-      for (const action of queue) {
-        const text = String(action?.text || '').trim();
-        if (!text) continue;
-        if (!action?.done || !keepLegacyProgress) {
-          summary.droppedActions.push(`${templateStep.stepKey} :: ${text}`);
-          continue;
-        }
-        mergedActions.push({ text, done: true, ...(action?.doneAt ? { doneAt: action.doneAt } : {}) });
-        summary.keptLegacyActions.push(`${templateStep.stepKey} :: ${text}`);
-      }
+        done: true,
+        ...(action?.doneAt ? { doneAt: action.doneAt } : {}),
+        reason: 'sub-checklist-retired',
+      });
+      summary.archivedLegacyActions.push(`${templateStep.stepKey} :: ${text}`);
     }
 
     const templateStepPercentage = parsePercentage(templateStepByKey.get(String(templateStep.stepKey))?.percentage);
@@ -267,15 +159,16 @@ export const alignInstanceStepsToTemplate = (
       submittedAt: previous?.submittedAt,
       reviewedAt: previous?.reviewedAt,
       extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
-      actions: mergedActions,
+      actions: [],
       outputs: templateStep.outputs,
     };
   });
 
   // Steps the template no longer defines are removed from the active checklist
   // and returned separately so the caller can archive them. `keepLegacyProgress`
-  // now only decides whether an unticked leftover is discarded outright or
-  // archived too — either way it never stays on the checklist.
+  // decides whether superseded work that carries progress is archived (the
+  // default) or dropped outright (opt-in pruning) — either way it never stays on
+  // the checklist.
   const builtKeys = new Set(builtSteps.map((step: any) => String(step?.stepKey || '')));
   const archivedSteps: any[] = [];
   for (const step of Array.isArray(existingSteps) ? existingSteps : []) {
@@ -284,11 +177,6 @@ export const alignInstanceStepsToTemplate = (
     const label = `${stepKey} :: ${String(step?.title || '')}`.trim();
     const hasCompletedAction = (Array.isArray(step?.actions) ? step.actions : []).some((action: any) => action?.done);
     const isCompleted = String(step?.status || '') === 'Completed';
-    // A leftover with no progress at all carries no history worth keeping, so it
-    // is always simply dropped. `keepLegacyProgress` only decides the fate of
-    // superseded work that DOES carry progress: archived (the default, so it is
-    // preserved off the checklist) or discarded when the caller explicitly opts
-    // into pruning.
     if (!hasCompletedAction && !isCompleted) {
       summary.droppedSteps.push(label);
       continue;
@@ -301,15 +189,6 @@ export const alignInstanceStepsToTemplate = (
     summary.keptLegacySteps.push(label);
   }
 
-  return { steps, archivedSteps, summary: {
-    ...summary,
-    carriedProgress,
-    // Previously ticked wording that no current Key Action claims. Reported
-    // rather than dropped, so a person can confirm the intent — the record is
-    // still preserved on the archived steps.
-    unmatchedProgress: completedPool
-      .filter((entry) => !claimed.has(actionKey(entry.text)))
-      .map((entry) => entry.text),
-  } };
+  return { steps, archivedSteps, archivedActions, summary };
 };
 

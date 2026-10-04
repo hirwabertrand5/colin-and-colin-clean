@@ -12,9 +12,10 @@
  *   type (published, newest version, most recently updated);
  * - rebuilds the case checklist from that template so the Case Workspace shows
  *   exactly the Key Actions defined in Templates settings;
- * - keeps every tick, deadline, completed step and extension (ticks follow the
- *   action text, never a position);
- * - drops only untouched leftovers of the old/superseded template;
+ * - keeps every deadline, completed step and extension;
+ * - retires the per-step sub-checklist: ticked checklist items are archived on
+ *   the instance (text, tick and timestamp preserved) and unticked leftovers
+ *   are dropped, so the checklist shows only the template's Key Actions;
  * - syncs Suggested Matter Type / matterType / caseType with the template so
  *   every screen shows the same values.
  *
@@ -25,7 +26,9 @@
  * started on a flattened 60-step copy of a workflow) is ARCHIVED by default: it
  * leaves the active checklist — so the Case Workspace, Case Management and the
  * earned fees only ever show the current template's stages and Key Actions —
- * while the full record is preserved on the workflow instance.
+ * while the full record is preserved on the workflow instance. The same applies
+ * to a completed checklist item (Key Action) that the template no longer
+ * defines: it is archived on the instance's `archivedActions`.
  * Pass --prune-legacy to delete it outright instead, so the checklist matches the
  * template 1:1; every pruned item is written to the case audit log.
  *
@@ -51,11 +54,8 @@ type AlignmentLine = {
   droppedSteps: string[];
   droppedActions: string[];
   keptLegacySteps: string[];
-  keptLegacyActions: string[];
-  /** Ticks moved onto the current template's Key Actions from older wording. */
-  carriedProgress: Array<{ templateStepKey: string; actionText: string; fromText: string; score: number }>;
-  /** Previously ticked wording that matched no current Key Action — review these. */
-  unmatchedProgress: string[];
+  /** Ticked case-only Key Actions now stored on the instance's archive. */
+  archivedActions: Array<{ stepKey: string; text: string; done: boolean }>;
   /** Total superseded steps now stored on the instance's archive. */
   archivedSteps: number;
 };
@@ -129,9 +129,11 @@ const isTerminalMatter = (caseDoc: any, inst: any) =>
       droppedSteps: result.summary.droppedSteps,
       droppedActions: result.summary.droppedActions,
       keptLegacySteps: result.summary.keptLegacySteps,
-      keptLegacyActions: result.summary.keptLegacyActions,
-      carriedProgress: result.summary.carriedProgress || [],
-      unmatchedProgress: result.summary.unmatchedProgress || [],
+      archivedActions: (result.archivedActions || []).map((action: any) => ({
+        stepKey: String(action?.stepKey || ''),
+        text: String(action?.text || ''),
+        done: Boolean(action?.done),
+      })),
       archivedSteps: result.archivedSteps?.length || 0,
     });
   }
@@ -143,22 +145,18 @@ const isTerminalMatter = (caseDoc: any, inst: any) =>
   if (pruneLegacy) {
     console.log('Mode: --prune-legacy — completed work from superseded templates is deleted outright and recorded in the case audit log.');
   } else {
-    console.log('Superseded steps are archived off the checklist by default: they disappear from the Case Workspace and Case Management, while their full record is preserved on the workflow instance.');
+    console.log('Superseded steps and case-only Key Actions are archived off the checklist by default: they disappear from the Case Workspace and Case Management, while their full record is preserved on the workflow instance.');
   }
 
   for (const line of changes) {
     console.log(
       `  ${line.caseNo} | ${line.parties} | -> ${line.template} | +${line.addedSteps} step(s) +${line.addedActions} key action(s) ` +
         `| -${line.droppedSteps.length} stale step(s) -${line.droppedActions.length} stale key action(s) ` +
-        `| archived legacy: ${line.keptLegacySteps.length} step(s), ${line.keptLegacyActions.length} key action(s)`
+        `| archived legacy: ${line.keptLegacySteps.length} step(s), ${line.archivedActions.length} key action(s)`
     );
-    for (const dropped of line.droppedActions.slice(0, 3)) console.log(`      dropped key action: ${dropped}`);
     for (const kept of line.keptLegacySteps.slice(0, 3)) console.log(`      archived superseded step (removed from the checklist, record kept): ${kept}`);
-    for (const p of line.carriedProgress.slice(0, 5)) {
-      console.log(`      RESTORED ${p.templateStepKey}: "${p.actionText}"  <-  "${p.fromText}"  (${p.score.toFixed(2)})`);
-    }
-    for (const u of line.unmatchedProgress.slice(0, 5)) {
-      console.log(`      REVIEW: previously ticked wording with no current Key Action match: "${u}"`);
+    for (const archived of line.archivedActions.slice(0, 5)) {
+      console.log(`      archived retired key action (removed from the checklist, record kept): ${archived.stepKey} :: "${archived.text}"${archived.done ? ' [ticked]' : ''}`);
     }
   }
 

@@ -57,6 +57,10 @@ export const addMinutes = (start: Date, minutes: number | undefined) => {
 /**
  * Workflow templates no longer create fee amounts. A step's value is always
  * derived later from its Key Action percentage and the matter contract value.
+ *
+ * The per-step sub-checklist (template `actions`) is retired: a case checklist
+ * shows only the template's stages and Key Actions (steps). Legacy checklist
+ * items stored on live instances are archived by the alignment pass.
  */
 export const buildInstanceSteps = (template: IWorkflowTemplate | any, startDate: Date) => {
   const steps = (template?.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
@@ -88,7 +92,7 @@ export const buildInstanceSteps = (template: IWorkflowTemplate | any, startDate:
       slaMinutes: typeof sla.minutes === 'number' ? sla.minutes : undefined,
       slaText: sla.text,
       responsibleRole: typeof step.responsibleRole === 'string' ? step.responsibleRole : undefined,
-      actions: (step.actions || []).map((text: any) => ({ text: String(text || '').trim(), done: false })),
+      actions: [],
       outputs: (step.outputs || []).map((output: any) => ({
         key: output.key,
         name: output.name,

@@ -9,7 +9,6 @@ import {
   CaseManagementState,
   CaseManagementStep,
 } from '../../services/caseManagementService';
-import { toggleWorkflowStepAction } from '../../services/workflowInstanceService';
 import { getDocumentsForCase, addDocumentToCase, deleteDocument, CaseDocument } from '../../services/documentService';
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 
@@ -156,14 +155,10 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
   const myRole = state?.myRole || 'none';
   const isMember = myRole === 'initiator' || myRole === 'reviewer' || myRole === 'approver' || myRole === 'admin';
 
-  const canToggleStep = (step: CaseManagementStep) =>
-    isMember && step.status !== 'Completed';
-
   const canRequestReview = (step: CaseManagementStep) =>
     (myRole === 'initiator' || myRole === 'admin') &&
     step.status !== 'Completed' &&
-    step.status !== 'Awaiting Review' &&
-    step.actions.every((a) => a.done);
+    step.status !== 'Awaiting Review';
 
   const canRequestApproval = (step: CaseManagementStep) =>
     (myRole === 'reviewer' || myRole === 'admin') &&
@@ -180,20 +175,6 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
     setState(next);
     setQualityDraft(next.qualityScore == null ? '' : String(next.qualityScore));
     void onWorkflowChanged?.();
-  };
-
-  const toggleAction = async (step: CaseManagementStep, index: number) => {
-    if (!canToggleStep(step)) return;
-    setBusy(`toggle:${step.stepKey}:${index}`);
-    setErr('');
-    try {
-      await toggleWorkflowStepAction(caseId, step.stepKey, index, false);
-      refresh(await getCaseManagement(caseId));
-    } catch (e: any) {
-      setErr(e.message || 'Failed to update key action.');
-    } finally {
-      setBusy('');
-    }
   };
 
   const doRequestReview = async (step: CaseManagementStep) => {
@@ -286,11 +267,9 @@ const earned = state?.earnedFees;
       <KeyActionsList
         state={state}
         busy={busy}
-        canToggleStep={canToggleStep}
         canRequestReview={canRequestReview}
         canRequestApproval={canRequestApproval}
         canApprove={canApprove}
-        onToggle={toggleAction}
         onRequestReview={doRequestReview}
         onRequestApproval={doRequestApproval}
         onApprove={doApprove}
@@ -491,11 +470,9 @@ function QualityScorePanel({ state, qualityDraft, onDraft, onSave, saving }: { s
 function KeyActionsList(props: {
   state: CaseManagementState;
   busy: string;
-  canToggleStep: (step: CaseManagementStep) => boolean;
   canRequestReview: (step: CaseManagementStep) => boolean;
   canRequestApproval: (step: CaseManagementStep) => boolean;
   canApprove: (step: CaseManagementStep) => boolean;
-  onToggle: (step: CaseManagementStep, index: number) => void;
   onRequestReview: (step: CaseManagementStep) => void;
   onRequestApproval: (step: CaseManagementStep) => void;
   onApprove: (step: CaseManagementStep) => void;
@@ -504,11 +481,9 @@ function KeyActionsList(props: {
   const {
     state,
     busy,
-    canToggleStep,
     canRequestReview,
     canRequestApproval,
     canApprove,
-    onToggle,
     onRequestReview,
     onRequestApproval,
     onApprove,
@@ -623,7 +598,6 @@ function KeyActionsList(props: {
         {stageGroup.steps.map((step, actionIndex) => {
           const chipClass = STATUS_CHIP[step.status] || STATUS_CHIP['Not Started'];
           const isFocused = focusStepKey && step.stepKey === focusStepKey;
-          const allDone = step.actions.every((a) => a.done);
           return (
             <div
               key={step.stepKey}
@@ -654,19 +628,8 @@ function KeyActionsList(props: {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${chipClass}`}>{LIFECYCLE_LABEL[step.status] || step.status}</span>
-                  {step.actions.length > 0 ? (
-                    <span
-                      className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
-                        allDone
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-                          : 'border-gray-300 bg-gray-50 text-gray-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
-                      }`}
-                      title={allDone ? 'All Key Actions under this Step are completed' : 'Some Key Actions under this Step are still incomplete'}
-                    >
-                      {allDone ? 'Step: Done' : 'Step: In Progress'}
-                    </span>
-                  ) : null}
                 </div>
+
               </div>
 
               <div className="grid grid-cols-1 gap-3 px-5 py-3 text-xs text-gray-600 dark:text-gray-400 sm:grid-cols-2 lg:grid-cols-3">
@@ -701,32 +664,6 @@ function KeyActionsList(props: {
                   </div>
                 ) : null}
               </div>
-<div className="border-t border-gray-100 px-5 py-3 dark:border-gray-700">
-                {step.actions.length === 0 ? (
-                  <div className="text-xs text-gray-500 dark:text-gray-400">No key actions configured for this step.</div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {step.actions.map((action, index) => {
-                      const canToggle = canToggleStep(step);
-                      return (
-                        <label key={`${step.stepKey}-${index}`} className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={action.done}
-                            onChange={() => canToggle && onToggle(step, index)}
-                            disabled={!canToggle || busy === `toggle:${step.stepKey}:${index}`}
-                            className="mt-0.5 h-4 w-4 rounded border-gray-300"
-                          />
-                          <span className="text-sm text-gray-900 dark:text-gray-100">
-                            <span className="mr-2 font-semibold text-gray-400">{index + 1}.</span>
-                            {action.text}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
 
               {(canRequestReview(step) || canRequestApproval(step) || canApprove(step)) && (
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-5 py-3 dark:border-gray-700">
@@ -734,8 +671,8 @@ function KeyActionsList(props: {
                     <button
                       type="button"
                       onClick={() => onRequestReview(step)}
-                      disabled={busy === `review:${step.stepKey}` || !allDone}
-                      title={allDone ? 'Send the completed work to the Reviewer' : 'Complete all key actions first'}
+                      disabled={busy === `review:${step.stepKey}`}
+                      title="Send the completed work to the Reviewer"
                       className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Send className="h-3.5 w-3.5" /> Send to Reviewer

@@ -64,6 +64,17 @@ export interface IInstanceStep {
   outputs: IInstanceOutput[];
 }
 
+export interface IInstanceArchivedAction {
+  /** The template step the removed checklist item belonged to. */
+  stepKey: string;
+  stepTitle?: string;
+  text: string;
+  done: boolean;
+  doneAt?: Date;
+  reason: string;
+  archivedAt?: Date;
+}
+
 export interface IWorkflowInstance extends Document {
   caseId: mongoose.Types.ObjectId;
   templateId: mongoose.Types.ObjectId;
@@ -80,6 +91,15 @@ export interface IWorkflowInstance extends Document {
    * historical work, its ticks and its completion stamps are never destroyed.
    */
   archivedSteps: IInstanceStep[];
+
+  /**
+   * Ticked Key Actions (checklist items) that were removed from the active
+   * checklist because the current template does not define them — for example
+   * items left behind by an older template or added directly on the matter.
+   * Their tick, wording and timestamp are preserved here even though the item
+   * no longer appears in the Case Workspace / Case Management checklist.
+   */
+  archivedActions: IInstanceArchivedAction[];
 
   createdAt: Date;
   updatedAt: Date;
@@ -164,6 +184,19 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
   { _id: false }
 );
 
+const InstanceArchivedActionSchema = new Schema<IInstanceArchivedAction>(
+  {
+    stepKey: { type: String, required: true },
+    stepTitle: { type: String },
+    text: { type: String, required: true },
+    done: { type: Boolean, default: true },
+    doneAt: { type: Date },
+    reason: { type: String, default: 'not-in-template' },
+    archivedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const WorkflowInstanceSchema = new Schema<IWorkflowInstance>(
   {
     caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true, unique: true, index: true },
@@ -175,6 +208,8 @@ const WorkflowInstanceSchema = new Schema<IWorkflowInstance>(
     steps: { type: [InstanceStepSchema], default: [] },
 
     archivedSteps: { type: [InstanceStepSchema], default: [] },
+
+    archivedActions: { type: [InstanceArchivedActionSchema], default: [] },
   },
   { timestamps: true }
 );

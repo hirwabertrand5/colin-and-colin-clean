@@ -15,7 +15,6 @@ import {
   computeStepWorkTimelinessScore,
   getMatterQualityScore,
   normalizeEffectiveWorkflowSteps,
-  resolveEffectiveStepActions,
 } from '../utils/caseEarnedFees';
 import { buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages';
 import { completeStepForCase, reconcileInstanceTemplateWithCanonical } from './workflowController';
@@ -97,10 +96,6 @@ const isCaseInitiator = (caseDoc: any, req: AuthRequest) => {
   return Boolean(assignments.initiator && match(assignments.initiator));
 };
 
-const allKeyActionsDone = (step: any) => {
-  const actions = Array.isArray(step?.actions) ? step.actions : [];
-  return actions.length === 0 || actions.every((action: any) => Boolean(action?.done));
-};
 const findAssignedUserIds = async (names: string[]) => {
   const ids: string[] = [];
   const seen = new Set<string>();
@@ -159,9 +154,6 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
     submittedAt: step?.submittedAt,
     reviewedAt: step?.reviewedAt,
     timelinessScore: computeStepWorkTimelinessScore(step),
-    // Same checklist the Case Workspace shows: the instance keeps the progress,
-    // the template provides the Key Action text for legacy steps that stored none.
-    actions: resolveEffectiveStepActions(step, template),
   }));
 
   const myRole = resolveMyCaseRole(caseDoc, req);
@@ -213,30 +205,6 @@ const loadCaseManagementContext = async (req: AuthRequest) => {
     ? await WorkflowTemplate.findById(inst.templateId).lean()
     : null;
 
-  // Legacy instances store no actions on their steps, which left Case Management
-  // without a checklist even though the Overview tab derived it from the
-  // template. Backfill and persist the template's Key Actions here so the
-  // checklist, review/approval guards and action toggles all stay in sync.
-  if (inst && template) {
-    let actionsBackfilled = false;
-    for (const step of inst.steps || []) {
-      const hasActions = Array.isArray(step?.actions) && step.actions.length > 0;
-      if (hasActions) continue;
-      const actions = resolveEffectiveStepActions(step, template);
-      if (actions.length) {
-        step.actions = actions;
-        actionsBackfilled = true;
-      }
-    }
-    if (actionsBackfilled) {
-      try {
-        await inst.save();
-      } catch {
-        // buildCaseManagementState still derives the actions from the template.
-      }
-    }
-  }
-
   const [tasks, paidInvoices] = await Promise.all([
     Task.find({ caseId }).lean(),
     Invoice.find({ caseId, status: 'Paid' }).select('amount').lean(),
@@ -286,9 +254,6 @@ export const requestReview = async (req: AuthRequest, res: Response) => {
     if (!step) return res.status(404).json({ message: 'Key Action not found.' });
     if (String(step.status || '').toLowerCase() === 'completed') {
       return res.status(400).json({ message: 'This Key Action is already completed.' });
-    }
-    if (!allKeyActionsDone(step)) {
-      return res.status(400).json({ message: 'Complete all key actions before requesting a review.' });
     }
 
     step.status = 'Awaiting Review';

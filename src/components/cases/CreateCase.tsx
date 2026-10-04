@@ -118,7 +118,6 @@ export default function CreateCase({
       percent: 0,
       completedValue: { amount: 0, currency: 'RWF' },
     },
-    initialWorkflowActions: {},
   });
 
   const statuses = [
@@ -380,20 +379,19 @@ export default function CreateCase({
         matterTiming,
         workflowAutomation: true,
         workflowTemplateId: formData.workflowTemplateId,
-        initialWorkflowActions: formData.initialWorkflowActions || {},
         budget: plannedValueAmount > 0 ? String(plannedValueAmount) : formData.budget,
         workflowProgress: {
           ...(formData.workflowProgress || {}),
-          percent: actionProgressPercent,
+          percent: 0,
           plannedValue: { amount: plannedValueAmount, currency: plannedValueCurrency },
-          completedValue: { amount: previewEarnedValue, currency: plannedValueCurrency },
+          completedValue: { amount: 0, currency: plannedValueCurrency },
         },
         billingSettings: {
           paymentMode: 'postpaid',
           currency: plannedValueCurrency,
           prepaidTotal: 0,
           prepaidRemaining: 0,
-          accruedUnbilled: previewEarnedValue,
+          accruedUnbilled: 0,
         },
       });
       setSuccess(successMessage);
@@ -590,100 +588,6 @@ export default function CreateCase({
     });
     return Array.from(groups.entries());
   }, [selectedWorkflowSteps]);
-
-  const orderedActionRefs = useMemo(
-    () =>
-      selectedWorkflowSteps.flatMap((workflowStep) =>
-        workflowStep.actions.map((text, actionIndex) => ({
-          stepKey: workflowStep.key,
-          actionIndex,
-          text,
-        }))
-      ),
-    [selectedWorkflowSteps]
-  );
-
-  const isInitialActionChecked = (stepKey: string, actionIndex: number) =>
-    Boolean(formData.initialWorkflowActions?.[stepKey]?.includes(actionIndex));
-
-  const checkedActionCount = orderedActionRefs.filter((action) =>
-    isInitialActionChecked(action.stepKey, action.actionIndex)
-  ).length;
-  const actionProgressPercent =
-    orderedActionRefs.length > 0 ? Math.round((checkedActionCount / orderedActionRefs.length) * 100) : 0;
-  const previewEarnedValue = Math.round((plannedValueAmount * actionProgressPercent) / 100);
-
-  useEffect(() => {
-    setFormData((prev) => {
-      const allowed = new Map<string, Set<number>>();
-      orderedActionRefs.forEach((action) => {
-        if (!allowed.has(action.stepKey)) allowed.set(action.stepKey, new Set());
-        allowed.get(action.stepKey)?.add(action.actionIndex);
-      });
-      const cleaned: Record<string, number[]> = {};
-      Object.entries(prev.initialWorkflowActions || {}).forEach(([stepKey, indexes]) => {
-        const valid = (indexes || []).filter((idx) => allowed.get(stepKey)?.has(idx));
-        if (valid.length) cleaned[stepKey] = valid;
-      });
-      return { ...prev, initialWorkflowActions: cleaned };
-    });
-  }, [orderedActionRefs]);
-
-  const canCheckInitialAction = (stepKey: string, actionIndex: number) => {
-    const flatIndex = orderedActionRefs.findIndex(
-      (action) => action.stepKey === stepKey && action.actionIndex === actionIndex
-    );
-    if (flatIndex <= 0) return true;
-    return orderedActionRefs
-      .slice(0, flatIndex)
-      .every((action) => isInitialActionChecked(action.stepKey, action.actionIndex));
-  };
-
-  const toggleInitialAction = (stepKey: string, actionIndex: number) => {
-    const isChecked = isInitialActionChecked(stepKey, actionIndex);
-    if (!isChecked && !canCheckInitialAction(stepKey, actionIndex)) return;
-
-    setFormData((prev) => {
-      const current = prev.initialWorkflowActions || {};
-      const next: Record<string, number[]> = Object.fromEntries(
-        Object.entries(current).map(([key, indexes]) => [key, [...(indexes || [])]])
-      );
-
-      if (isChecked) {
-        const flatIndex = orderedActionRefs.findIndex(
-          (action) => action.stepKey === stepKey && action.actionIndex === actionIndex
-        );
-        for (const ref of orderedActionRefs.slice(flatIndex)) {
-          next[ref.stepKey] = (next[ref.stepKey] || []).filter((idx) => idx !== ref.actionIndex);
-          if (next[ref.stepKey].length === 0) delete next[ref.stepKey];
-        }
-      } else {
-        next[stepKey] = Array.from(new Set([...(next[stepKey] || []), actionIndex])).sort((a, b) => a - b);
-      }
-
-      const percent =
-        orderedActionRefs.length > 0
-          ? Math.round(
-              (orderedActionRefs.filter((action) => next[action.stepKey]?.includes(action.actionIndex)).length /
-                orderedActionRefs.length) *
-                100
-            )
-          : 0;
-
-      return {
-        ...prev,
-        initialWorkflowActions: next,
-        workflowProgress: {
-          ...(prev.workflowProgress || {}),
-          percent,
-          completedValue: {
-            amount: Math.round((parseMoneyInput(prev.workflowProgress?.plannedValue?.amount) * percent) / 100),
-            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
-          },
-        },
-      };
-    });
-  };
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -1122,20 +1026,6 @@ export default function CreateCase({
                         {plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Enter value'}
                       </div>
                     </div>
-                    <div className="rounded-lg border border-gray-200 bg-white p-3 sm:col-span-3">
-                      <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-                        <span>Key action progress</span>
-                        <span>
-                          {checkedActionCount}/{orderedActionRefs.length} actions • {actionProgressPercent}%
-                        </span>
-                      </div>
-                      <div className="mt-2 h-2 rounded-full bg-gray-200">
-                        <div className="h-2 rounded-full bg-gray-900" style={{ width: `${actionProgressPercent}%` }} />
-                      </div>
-                      <div className="mt-2 text-xs text-gray-600">
-                        Collected preview: <span className="font-semibold text-gray-900">{formatCurrency(previewEarnedValue, plannedValueCurrency)}</span>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -1159,33 +1049,6 @@ export default function CreateCase({
                                   <div className="mt-2 text-sm text-gray-600">
                                     {step.slaLabel ? `Expected duration: ${step.slaLabel}` : 'Duration not defined'}
                                   </div>
-                                  {step.actions.length > 0 ? (
-                                    <div className="mt-4 space-y-2">
-                                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Key actions</div>
-                                      {step.actions.map((action, actionIndex) => {
-                                        const checked = isInitialActionChecked(step.key, actionIndex);
-                                        const canCheck = canCheckInitialAction(step.key, actionIndex);
-                                        return (
-                                          <label key={`${step.key}-${actionIndex}`} className="flex items-start gap-3 text-sm">
-                                            <button
-                                              type="button"
-                                              onClick={() => toggleInitialAction(step.key, actionIndex)}
-                                              disabled={!checked && !canCheck}
-                                              className={`mt-0.5 h-5 w-5 rounded border flex items-center justify-center ${
-                                                checked ? 'border-green-600 bg-green-600' : 'border-gray-300 bg-white'
-                                              } disabled:cursor-not-allowed disabled:opacity-50`}
-                                              title={!checked && !canCheck ? 'Check the previous key action first' : 'Toggle key action'}
-                                            >
-                                              {checked ? <Check className="h-3.5 w-3.5 text-white" /> : null}
-                                            </button>
-                                            <span className={checked ? 'text-gray-700' : 'text-gray-700'}>{action}</span>
-                                          </label>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : (
-                                    <div className="mt-4 text-xs text-gray-500">No key actions configured for this step.</div>
-                                  )}
                                 </div>
 
                                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
@@ -1243,8 +1106,6 @@ export default function CreateCase({
                   ['Next expected deadline', workflowSummary?.nextDueAt ? formatDeadlineDateTime(workflowSummary.nextDueAt) : 'TBD'],
                   ['Estimated completion', workflowSummary?.completionDate ? formatDeadlineDateTime(workflowSummary.completionDate) : 'TBD'],
                   ['Contract value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
-                  ['Key action progress', `${checkedActionCount}/${orderedActionRefs.length} actions checked (${actionProgressPercent}%)`],
-                  ['Collected preview', formatCurrency(previewEarnedValue, plannedValueCurrency)],
                 ].map(([k, v]) => (
                   <div key={k} className="grid grid-cols-3 gap-4 py-3 border-b border-gray-200">
                     <span className="text-sm text-gray-600">{k}:</span>

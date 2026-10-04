@@ -169,39 +169,6 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
 
   const mergedSteps = builtSteps.map((nextStep: any) => {
     const previous = existingByKey.get(String(nextStep.stepKey));
-    const previousActions = Array.isArray(previous?.actions) ? previous.actions : [];
-    // A text can legitimately occur more than once. Keep a queue for each
-    // text instead of a single Map value, otherwise repeated checklist items
-    // are silently lost during a later template sync.
-    const remainingPreviousActions = new Map<string, any[]>();
-    for (const action of previousActions) {
-      const text = String(action?.text || '').trim();
-      if (!text) continue;
-      const matchingActions = remainingPreviousActions.get(text) || [];
-      matchingActions.push(action);
-      remainingPreviousActions.set(text, matchingActions);
-    }
-    const mergedActions = (nextStep.actions || []).map((action: any) => {
-      const text = String(action?.text || '').trim();
-      const matchingActions = remainingPreviousActions.get(text) || [];
-      const previousAction = matchingActions.shift();
-      if (matchingActions.length) remainingPreviousActions.set(text, matchingActions);
-      else remainingPreviousActions.delete(text);
-      return {
-        text,
-        done: Boolean(previousAction?.done),
-        ...(previousAction?.doneAt ? { doneAt: previousAction.doneAt } : {}),
-      };
-    });
-    // Key actions that only exist on the case keep their tick state.
-    const caseOnlyActions = Array.from(remainingPreviousActions.values())
-      .flat()
-      .map((action: any) => ({
-        text: String(action?.text || '').trim(),
-        done: Boolean(action?.done),
-        ...(action?.doneAt ? { doneAt: action.doneAt } : {}),
-      }))
-      .filter((action: any) => action.text);
 
     const templateStep = templateStepByKey.get(String(nextStep.stepKey));
     const templateStage = templateStageByKey.get(String(nextStep.stageKey));
@@ -221,7 +188,7 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
       status: previous?.status || nextStep.status,
       completedAt: previous?.completedAt,
       extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
-      actions: [...mergedActions, ...caseOnlyActions],
+      actions: [],
       outputs: nextStep.outputs,
     };
   });
@@ -304,9 +271,11 @@ export const reconcileInstanceTemplateWithCanonical = async (
     targetId = canonical && String(canonical._id) !== linkedId ? String(canonical._id) : linkedId;
     // Already canonical: still repair when the case carries steps the template no
     // longer defines. A matter drifts exactly like this when an earlier alignment
-    // kept the old template's steps, and without this check the stale stages stay
-    // on the checklist forever.
-    if (targetId === linkedId && !options.force && !hasSupersededTemplateSteps(inst.steps, linked)) return null;
+    // kept the old template's steps; without this check the stale entries stay on
+    // the checklist forever.
+    if (targetId === linkedId && !options.force && !hasSupersededTemplateSteps(inst.steps, linked)) {
+      return null;
+    }
   } else {
     const templates: any[] = await WorkflowTemplate.find({})
       .select('name matterType caseType version active draft updatedAt')
@@ -330,7 +299,7 @@ export const reconcileInstanceTemplateWithCanonical = async (
 
   const wfStart =
     resolveDeadlineDateTime(caseDoc.workflowStartDate || caseDoc.createdAt || new Date()) || new Date();
-  const { steps, archivedSteps, summary } = alignInstanceStepsToTemplate(inst.steps, template, wfStart, {
+  const { steps, archivedSteps, archivedActions, summary } = alignInstanceStepsToTemplate(inst.steps, template, wfStart, {
     keepLegacyProgress: !options.pruneLegacy,
   });
 
@@ -347,15 +316,34 @@ export const reconcileInstanceTemplateWithCanonical = async (
   }
   const mergedArchivedSteps = Array.from(archivedByKey.values());
 
+  // The same safety net for checklist items the template no longer defines: a
+  // ticked case-only Key Action is archived by step + text, so repeated repairs
+  // can never lose or duplicate the record of the finished work.
+  const archivedActionKey = (action: any) =>
+    `${String(action?.stepKey || '')}::${String(action?.text || '').replace(/\s+/g, ' ').trim().toLowerCase()}`;
+  const archivedActionsByKey = new Map<string, any>();
+  for (const action of Array.isArray(inst.archivedActions) ? inst.archivedActions : []) {
+    const key = archivedActionKey(action);
+    if (key !== '::') archivedActionsByKey.set(key, action);
+  }
+  for (const action of archivedActions) {
+    const key = archivedActionKey(action);
+    if (key !== '::' && !archivedActionsByKey.has(key)) archivedActionsByKey.set(key, action);
+  }
+  const mergedArchivedActions = Array.from(archivedActionsByKey.values());
+
   const changed =
     String(inst.templateId || '') !== String(targetId) ||
     summary.addedTemplateSteps > 0 ||
     summary.addedActions > 0 ||
     summary.droppedSteps.length > 0 ||
     summary.droppedActions.length > 0 ||
-    archivedSteps.length > 0;
+    archivedSteps.length > 0 ||
+    archivedActions.length > 0;
   if (!changed) return null;
-  if (options.dryRun) return { template, summary, changed, steps, archivedSteps: mergedArchivedSteps };
+  if (options.dryRun) {
+    return { template, summary, changed, steps, archivedSteps: mergedArchivedSteps, archivedActions: mergedArchivedActions };
+  }
 
   const tracked = inst.currentStepKey
     ? steps.find((step: any) => step.stepKey === inst.currentStepKey)
@@ -370,10 +358,14 @@ export const reconcileInstanceTemplateWithCanonical = async (
   inst.steps = steps;
   inst.currentStepKey = nextCurrentStepKey;
   await inst.save();
-  // Written explicitly as well: the archive is the safety net for work that is no
-  // longer on the checklist, so it must never depend on schema casting to land.
-  await inst.collection.updateOne({ _id: inst._id }, { $set: { archivedSteps: mergedArchivedSteps } });
+  // Written explicitly as well: the archives are the safety net for work that is
+  // no longer on the checklist, so they must never depend on schema casting to land.
+  await inst.collection.updateOne(
+    { _id: inst._id },
+    { $set: { archivedSteps: mergedArchivedSteps, archivedActions: mergedArchivedActions } }
+  );
   inst.archivedSteps = mergedArchivedSteps;
+  inst.archivedActions = mergedArchivedActions;
 
   caseDoc.workflowTemplateId = template._id;
   caseDoc.matterType = template.matterType;
@@ -391,15 +383,15 @@ export const reconcileInstanceTemplateWithCanonical = async (
       `${String(template.name || template.matterType)} • ` +
       `${summary.addedTemplateSteps} new step(s), -${summary.droppedSteps.length} stale step(s), ` +
       `-${summary.droppedActions.length} stale key action(s)` +
-      (summary.keptLegacySteps.length || summary.keptLegacyActions.length
-        ? `, kept ${summary.keptLegacySteps.length} completed legacy step(s) and ${summary.keptLegacyActions.length} completed legacy key action(s)`
+      (summary.keptLegacySteps.length || summary.archivedLegacyActions.length
+        ? `, archived ${summary.keptLegacySteps.length} superseded step(s) and ${summary.archivedLegacyActions.length} superseded completed key action(s)`
         : '') +
       (options.pruneLegacy && (summary.droppedSteps.length || summary.droppedActions.length)
         ? `, pruned legacy work: ${[...summary.droppedSteps, ...summary.droppedActions].slice(0, 12).join(' | ')}`
         : ''),
   });
 
-  return { template, summary, steps, archivedSteps: mergedArchivedSteps };
+  return { template, summary, steps, archivedSteps: mergedArchivedSteps, archivedActions: mergedArchivedActions };
 };
 
 
@@ -438,8 +430,10 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   // Completed steps are weighted by their stage's percentage of the workflow.
   const stageBreakdown = computeStageBreakdownFromInstance(activeSteps);
   const stageWeightedPercent = computeCompletedPercentFromInstance(activeSteps);
-  // Fall back to the action-based percent for legacy instances without percentages.
-  const percent = checkedActions > 0 ? (stageWeightedPercent > 0 ? stageWeightedPercent : actionPercent) : 0;
+  // Completed steps (stage-weighted) are the source of truth on their own: the
+  // per-step sub-checklist is retired, so a completed step earns its value even
+  // though no checklist ticks exist.
+  const percent = stageWeightedPercent > 0 ? stageWeightedPercent : checkedActions > 0 ? actionPercent : 0;
   const completedValueAmount = Math.round((existingPlannedAmount * percent) / 100);
 
   // Once the case itself is closed, preserve that terminal state. The explicit
@@ -519,18 +513,9 @@ const completeStepInternal = async (actor: { actorName: string; actorUserId?: st
   const step = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
   if (!step) throw new Error('Step not found.');
 
-  // Enforce checklist completion if actions exist
-  const actions = Array.isArray(step.actions) ? step.actions : [];
-  const hasActions = actions.length > 0;
-  const allActionsDone = !hasActions || actions.every((a: any) => a?.done === true);
-  if (!allActionsDone) {
-    const remaining = actions.filter((a: any) => !a?.done).map((a: any) => a?.text).filter(Boolean);
-    const err: any = new Error('Cannot complete step. Pending key actions.');
-    err.statusCode = 400;
-    err.remainingActions = remaining;
-    throw err;
-  }
-
+  // The per-step sub-checklist is retired, so completion is no longer gated on
+  // checklist ticks: the step checkbox / Case Management lifecycle is the only
+  // signal needed to complete a Key Action.
   const previousStepStatus = step.status;
   step.status = 'Completed';
   step.completedAt = new Date();

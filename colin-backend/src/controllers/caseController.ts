@@ -145,29 +145,6 @@ const calculateActionProgress = (steps: any[], plannedAmount: number) => {
 
 const generateCaseNo = () => buildYearlySequence('case', 'CASE');
 
-const applySequentialInitialActions = (steps: any[], rawInitialActions: any) => {
-  const allowed = rawInitialActions && typeof rawInitialActions === 'object' ? rawInitialActions : {};
-  const orderedRefs = (steps || [])
-    .slice()
-    .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
-    .flatMap((step: any) =>
-      (Array.isArray(step.actions) ? step.actions : []).map((action: any, index: number) => ({
-        step,
-        action,
-        index,
-      }))
-    );
-
-  for (const ref of orderedRefs) {
-    const requestedIndexes = Array.isArray(allowed?.[ref.step.stepKey]) ? allowed[ref.step.stepKey] : [];
-    const requested = requestedIndexes.map((value: any) => Number(value)).includes(ref.index);
-    if (!requested) break;
-    ref.action.done = true;
-    ref.action.doneAt = new Date();
-    if (ref.step.status === 'Not Started') ref.step.status = 'In Progress';
-  }
-};
-
 const buildTakeRequestNotificationHtml = (opts: {
   requestNo: string;
   caseNo: string;
@@ -417,7 +394,6 @@ export const createCase = async (req: AuthRequest, res: Response) => {
       const template: any = await WorkflowTemplate.findById(workflowTemplateId).lean();
       if (template) {
         const steps = buildInstanceSteps(template, normalizedWorkflowStartDate);
-        applySequentialInitialActions(steps as any[], (req.body as any)?.initialWorkflowActions);
         createdWorkflowSteps = steps as any[];
 
         const inst = await WorkflowInstance.create({

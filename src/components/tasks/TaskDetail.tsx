@@ -269,23 +269,9 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     !isApprovedLocked &&
     task.approvalStatus === 'Pending';
 
-  const workflowChecklistItems = useMemo<DerivedChecklistItem[]>(() => {
-    if (!workflowInstance?.steps?.length) return [];
-
-    const linkedSteps = task?.workflowStepKey
-      ? workflowInstance.steps.filter((step) => step.stepKey === task.workflowStepKey)
-      : workflowInstance.steps;
-    return linkedSteps.flatMap((step) =>
-      (step.actions || []).map((action, actionIndex) => ({
-        id: `${step.stepKey}-${actionIndex}`,
-        item: action.text,
-        completed: Boolean(action.done),
-        stepKey: step.stepKey,
-        stepTitle: step.title,
-        actionIndex,
-      }))
-    );
-  }, [workflowInstance, task?.workflowStepKey]);
+  // The per-step sub-checklist was retired from the workflow: a task now only
+  // ever shows its own manual checklist.
+  const workflowChecklistItems = useMemo<DerivedChecklistItem[]>(() => [], []);
 
   const manualChecklistItems = task?.checklist || [];
 

@@ -11,7 +11,10 @@
  *      by action text, deadlines, status and completed history;
  *   C. unticked leftovers of a superseded template are removed;
  *   D. completed legacy work is preserved by default and pruned only when the
- *      caller asks for it.
+ *      caller asks for it;
+ *   E. the retired per-step sub-checklist leaves the active checklist: ticked
+ *      items are archived with their tick and timestamp, unticked items are
+ *      dropped, and the step itself keeps its status and deadline.
  *
  * Pure functions only — no database is touched. Run with:
  *   npx tsx src/scripts/verifyMatterTypeAlignment.ts
@@ -155,19 +158,17 @@ const civPreLit = aligned.steps.find((step: any) => step.stepKey === 'CIV_2_PRE_
 
 check('every template step is present', Boolean(civIntake && civPreLit));
 check(
-  'ticks survive numbering and follow the action text',
-  Boolean(
-    civIntake?.actions?.find(
-      (action: any) => action.text === 'Conflict check, open file, sign retainer and collect documents'
-    )?.done
-  )
-);
-check('unticked template actions stay unticked', civIntake?.actions?.[1]?.done === false);
-check(
   'the live deadline is kept',
   civIntake?.dueAt instanceof Date && civIntake.dueAt.toISOString() === '2026-01-08T09:00:00.000Z'
 );
-check('the missing template actions are added (1 in an existing step + 1 new step)', aligned.summary.addedActions === 2);
+check('the active checklist no longer carries a per-step sub-checklist', civIntake?.actions?.length === 0);
+check(
+  'the ticked checklist item is archived with its numbered text cleaned',
+  aligned.archivedActions.length === 1 &&
+    aligned.archivedActions[0]?.text === 'Conflict check, open file, sign retainer and collect documents' &&
+    aligned.archivedActions[0]?.done === true &&
+    aligned.archivedActions[0]?.reason === 'sub-checklist-retired'
+);
 check(
   'a completed legacy step is ARCHIVED, not listed on the active checklist',
   aligned.summary.keptLegacySteps.length === 1 && aligned.archivedSteps.length === 1
@@ -235,6 +236,19 @@ check(
   withLeftover.archivedSteps.some((step: any) => String(step.stepKey) === 'key_action_1') &&
     !withLeftover.steps.some((step: any) => String(step.stepKey) === 'key_action_1')
 );
+check(
+  'the unticked stale key action is dropped, not archived',
+  withLeftover.summary.droppedActions.some((text: string) => text.includes('Stale unticked extra key action')) &&
+    !withLeftover.archivedActions.some((action: any) => action.text.includes('Stale unticked extra key action'))
+);
+check(
+  'the ticked checklist item on the matching step is archived, not lost',
+  withLeftover.archivedActions.some(
+    (action: any) =>
+      action.stepKey === 'CIV_1_INTAKE' &&
+      action.text === 'Conflict check, open file, sign retainer and collect documents'
+  )
+);
 
 console.log('\nD. Opt-in pruning of completed legacy work');
 const pruned = alignInstanceStepsToTemplate(caseSteps, civilTemplate, start, { keepLegacyProgress: false });
@@ -244,6 +258,73 @@ check(
 );
 check('pruned legacy work is not archived either', pruned.archivedSteps.length === 0);
 check('the checklist then matches the template exactly', pruned.steps.length === civilTemplate.steps.length);
+
+const prunedExtras = alignInstanceStepsToTemplate(
+  [
+    {
+      stepKey: 'CIV_1_INTAKE',
+      title: 'Client intake and due diligence',
+      stageKey: 'intake',
+      order: 1,
+      status: 'In Progress',
+      actions: [
+        { text: 'Conflict check, open file, sign retainer and collect documents', done: true },
+        { text: 'Zzz ticked case-only key action', done: true },
+      ],
+    },
+  ],
+  civilTemplate,
+  start,
+  { keepLegacyProgress: false }
+);
+check(
+  'a ticked case-only key action is pruned, not archived, when pruning is requested',
+  prunedExtras.archivedActions.length === 0 &&
+    prunedExtras.summary.droppedActions.some((text: string) => text.includes('Zzz ticked case-only key action'))
+);
+
+console.log('\nE. The retired per-step sub-checklist leaves the checklist and keeps its record');
+const retired = alignInstanceStepsToTemplate(
+  [
+    {
+      stepKey: 'CIV_1_INTAKE',
+      title: 'Client intake and due diligence',
+      stageKey: 'intake',
+      order: 1,
+      status: 'In Progress',
+      startAt: new Date('2026-01-05T09:00:00.000Z'),
+      dueAt: new Date('2026-01-08T09:00:00.000Z'),
+      percentage: 0,
+      actions: [
+        { text: 'Conflict check, open file, sign retainer and collect documents', done: true, doneAt: new Date('2026-01-06T00:00:00.000Z') },
+        { text: 'Follow up on president certificate confirming successful mediation', done: true, doneAt: new Date('2026-01-07T00:00:00.000Z') },
+        { text: 'Unticked extra key action', done: false },
+      ],
+    },
+  ],
+  civilTemplate,
+  start
+);
+const retiredIntake = retired.steps.find((step: any) => String(step.stepKey) === 'CIV_1_INTAKE');
+check('the step itself stays on the active checklist', Boolean(retiredIntake));
+check('no sub-checklist item stays on the active checklist', retiredIntake?.actions?.length === 0);
+check(
+  'every ticked checklist item is archived with its tick and timestamp',
+  retired.archivedActions.length === 2 &&
+    retired.archivedActions.every(
+      (action: any) => action.done === true && action.doneAt instanceof Date && action.reason === 'sub-checklist-retired'
+    )
+);
+check(
+  'the unticked checklist item is dropped, not archived',
+  retired.summary.droppedActions.some((text: string) => text.includes('Unticked extra key action')) &&
+    !retired.archivedActions.some((action: any) => action.text === 'Unticked extra key action')
+);
+check('the step lifecycle is untouched', retiredIntake?.status === 'In Progress');
+check(
+  'the step deadline is untouched',
+  retiredIntake?.dueAt instanceof Date && retiredIntake.dueAt.toISOString() === '2026-01-08T09:00:00.000Z'
+);
 
 console.log(`\n${passed} passed, ${failed} failed.`);
 process.exit(failed ? 1 : 0);
