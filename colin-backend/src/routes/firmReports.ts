@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/authMiddleware';
 import { getFirmReports, getMyProductivityEarningsReport } from '../controllers/firmReportsController';
+import { getStaffEarningsReport } from '../controllers/staffEarningsController';
 
 const router = express.Router();
 
@@ -41,6 +42,18 @@ router.get(
   authenticate,
   authorize(MANAGEMENT_REPORT_ROLES),
   getFirmReports
+);
+
+/**
+ * Period-based Staff Earnings, attributed to the period in which each Key
+ * Action was completed. Management-only, matching the existing reporting
+ * permissions (no new role set invented).
+ */
+router.get(
+  '/reports/staff-earnings',
+  authenticate,
+  authorize(MANAGEMENT_REPORT_ROLES),
+  getStaffEarningsReport
 );
 
 export default router;

@@ -85,20 +85,50 @@ export const computeStepTimelinessAt = (step: any, eventTime?: Date | null): num
  *   3. completedAt   — the step was completed without a submit event
  *   4. reviewedAt    — defensive fallback
  */
-export const resolveStepWorkTime = (step: any): Date | null => {
+export type StepWorkTime = {
+  /** The moment the work was finished (null when no timestamp exists). */
+  at: Date | null;
+  /** Which stored timestamp decided `at` — surfaced in reports for audit. */
+  source: 'submitted' | 'lastActionTicked' | 'completed' | 'reviewed' | null;
+};
+
+/**
+ * The moment the WORK on a step was finished, together with the field that
+ * decided it. Timeliness is based on this, so a member's score never waits for
+ * the reviewer/signer to act:
+ *   1. submittedAt   — the work was submitted for review
+ *   2. latest doneAt — every Key Action is checked (the moment the last one was ticked)
+ *   3. completedAt   — the step was completed without a submit event
+ *   4. reviewedAt    — defensive fallback
+ *
+ * Reports need to show WHICH timestamp attributed the work to a period, so the
+ * source is returned rather than hidden. `resolveStepWorkTime` is the thin
+ * timestamp-only wrapper so existing callers keep working unchanged.
+ */
+export const resolveStepWorkTimeWithSource = (step: any): StepWorkTime => {
   const submittedAt = resolveDeadlineDateTime(step?.submittedAt);
-  if (submittedAt) return submittedAt;
+  if (submittedAt) return { at: submittedAt, source: 'submitted' };
 
   const actions = Array.isArray(step?.actions) ? step.actions : [];
   if (actions.length && actions.every((action: any) => Boolean(action?.done))) {
     const times = actions
       .map((action: any) => resolveDeadlineDateTime(action?.doneAt))
       .filter((date: Date | undefined): date is Date => Boolean(date));
-    if (times.length) return new Date(Math.max(...times.map((date: Date) => date.getTime())));
+    if (times.length) {
+      return { at: new Date(Math.max(...times.map((date: Date) => date.getTime()))), source: 'lastActionTicked' };
+    }
   }
 
-  return resolveDeadlineDateTime(step?.completedAt) || resolveDeadlineDateTime(step?.reviewedAt) || null;
+  const completedAt = resolveDeadlineDateTime(step?.completedAt);
+  if (completedAt) return { at: completedAt, source: 'completed' };
+
+  const reviewedAt = resolveDeadlineDateTime(step?.reviewedAt);
+  if (reviewedAt) return { at: reviewedAt, source: 'reviewed' };
+
+  return { at: null, source: null };
 };
+
+export const resolveStepWorkTime = (step: any): Date | null => resolveStepWorkTimeWithSource(step).at;
 
 /** Timeliness from when the Key Actions were checked / the work was submitted. */
 export const computeStepWorkTimelinessScore = (step: any): number | null =>

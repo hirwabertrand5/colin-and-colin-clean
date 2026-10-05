@@ -30,6 +30,7 @@ import {
   ServiceNode,
 } from "../../constants/legalServicesTree";
 import TableExport from "../ui/TableExport";
+import StaffEarningsReport from "./StaffEarningsReport";
 
 export type BillingFinanceView =
   | "financial-dashboard"
@@ -860,6 +861,11 @@ export default function BillingFinancePage({
     "payment-follow-up",
     "collection-triggers",
   ];
+  // "Fee Earned" and "By Staff" are the same report: the period-based staff
+  // earnings detail, attributed to the period each Key Action was completed in.
+  // Reusing both views keeps one authoritative figure rather than a competing
+  // summary table.
+  const isStaffEarningsView = view === "fee-earned" || view === "by-staff";
   const hasSupportedTable =
     isInvoiceView ||
     [
@@ -1032,6 +1038,8 @@ export default function BillingFinancePage({
           sortDir={invoiceSortDir}
           onSort={handleInvoiceSort}
         />
+      ) : isStaffEarningsView ? (
+        <StaffEarningsReport userRole={userRole} />
       ) : hasSupportedTable ? (
         <FinanceTable
           view={view}
