@@ -17,6 +17,7 @@ import {
   normalizeEffectiveWorkflowSteps,
 } from '../utils/caseEarnedFees';
 import { buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages';
+import { canEnterQualityScore, isAllowedQualityScoreRole } from '../utils/caseAssignmentPermissions';
 import { completeStepForCase, reconcileInstanceTemplateWithCanonical } from './workflowController';
 
 const isAdmin = (role?: string) =>
@@ -33,17 +34,11 @@ const isAdmin = (role?: string) =>
   role === 'executive_assistant';
 
 /**
- * Quality Score editing is restricted to the Reviewer of the case and to
- * Managing Partner / Partner / Executive Assistant roles. The Case Initiator is
- * never allowed to enter or edit the Quality Score.
+ * Quality Score editing is restricted to the Reviewer and Approver of the case
+ * and to Managing Partner / Partner / Executive Assistant roles. The Case
+ * Initiator is never allowed to enter or edit the Quality Score. The rule lives
+ * in `canEnterQualityScore` so this handler and the state builder agree.
  */
-const isAllowedQualityScoreRole = (role?: string) =>
-  role === 'managing_partner' ||
-  role === 'executive_managing_partner' ||
-  role === 'partner' ||
-  role === 'executive_partner' ||
-  role === 'executive_assistant';
-
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
 
 const actorFromReq = (req: AuthRequest) => ({
@@ -94,6 +89,18 @@ const isCaseInitiator = (caseDoc: any, req: AuthRequest) => {
   };
   const assignments = getCaseAssignments(caseDoc);
   return Boolean(assignments.initiator && match(assignments.initiator));
+};
+
+/**
+ * Single source of truth for Quality Score permission: the Reviewer and the
+ * Approver of the matter, plus the senior supervisory roles — never the Case
+ * Initiator. Used both when building the Case Management state (to decide
+ * whether the input is shown) and when saving the score, so the UI can never
+ * offer an action the API refuses.
+ */
+const canEnterQualityScoreFor = (caseDoc: any, req: AuthRequest, myRole?: string) => {
+  if (isCaseInitiator(caseDoc, req)) return false;
+  return canEnterQualityScore(caseDoc, req.user, myRole as any);
 };
 
 const findAssignedUserIds = async (names: string[]) => {
@@ -159,12 +166,10 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
   const myRole = resolveMyCaseRole(caseDoc, req);
   const { qualityScore, qualityScoredBy, qualityScoredAt } = getMatterQualityScore(caseDoc);
 
-  // Quality Score editing is available to the Reviewer of this case and to the
-  // Managing Partner / Partner / Executive Assistant roles — never to the Case
-  // Initiator (who may also hold one of those roles).
-  const canEnterQualityScore =
-    !isCaseInitiator(caseDoc, req) &&
-    (myRole === 'reviewer' || isAllowedQualityScoreRole(req.user?.role));
+  // Quality Score editing is available to the Reviewer and the Approver of this
+  // matter, and to the Managing Partner / Partner / Executive Assistant roles —
+  // never to the Case Initiator (who may also hold one of those roles).
+  const canEnterQualityScore = canEnterQualityScoreFor(caseDoc, req, myRole);
 
   return {
     caseId: String(caseDoc?._id || ''),
@@ -420,9 +425,13 @@ export const setQualityScore = async (req: AuthRequest, res: Response) => {
     const ctx = await loadCaseManagementContext(req);
     if (!ctx.caseDoc) return res.status(404).json({ message: 'Case not found.' });
 
+    // The Reviewer and the Approver of the matter enter the Quality Score, as
+    // do the Managing Partner / Partner / Executive Assistant roles. The Case
+    // Initiator is never allowed to, even when they also hold one of those
+    // roles.
     const myRole = resolveMyCaseRole(ctx.caseDoc, req);
-    if (myRole === 'initiator' || isCaseInitiator(ctx.caseDoc, req) || (myRole !== 'reviewer' && !isAllowedQualityScoreRole(req.user?.role))) {
-      return res.status(403).json({ message: 'Only the Reviewer, Managing Partner, Partner or Executive Assistant can enter the Quality Score. The Case Initiator cannot.' });
+    if (myRole === 'initiator' || isCaseInitiator(ctx.caseDoc, req) || !canEnterQualityScoreFor(ctx.caseDoc, req, myRole)) {
+      return res.status(403).json({ message: 'Only the Reviewer or Approver of this matter, or a Managing Partner, Partner or Executive Assistant, can enter the Quality Score. The Case Initiator cannot.' });
     }
 
     const score = Number(qualityScore);

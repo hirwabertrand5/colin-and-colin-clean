@@ -78,27 +78,27 @@ router.post(
   attachOutputDocument
 );
 
-// Step completion (admin only)
+// Key Action completion / reopening and deadline amendments.
+// These are opened up to the members assigned to the matter (Initiator,
+// Reviewer, Signer/Approver) so they can record the work they did; the
+// controllers enforce that permission per case.
 router.post(
   '/cases/:caseId/steps/:stepKey/complete',
   authenticate,
-  authorize(ADMIN_ROLES),
   completeStep
 );
 
-// Step reopening (admin only)
+// Reopen a completed Key Action
 router.post(
   '/cases/:caseId/steps/:stepKey/reopen',
   authenticate,
-  authorize(ADMIN_ROLES),
   reopenStep
 );
 
-// Deadline extension (admin only)
+// Deadline amendment
 router.post(
   '/cases/:caseId/steps/:stepKey/extend-deadline',
   authenticate,
-  authorize(ADMIN_ROLES),
   extendStepDeadline
 );
 

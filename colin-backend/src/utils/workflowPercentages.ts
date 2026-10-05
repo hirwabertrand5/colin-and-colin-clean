@@ -296,21 +296,32 @@ export const computeStageBreakdownFromInstance = (instanceSteps: any[]): StagePe
  * Percentage of the workflow that is completed, weighted by step percentages.
  * Falls back to a simple completed-steps/total-steps ratio when the instance
  * carries no percentages (legacy instances).
+ *
+ * Invariant: a workflow whose Key Actions are ALL completed is 100% complete.
+ *
+ * This matters because many templates carry no step weights at all, and others
+ * carry weights authored to sum to less than 100. A matter created from such a
+ * template was previously stuck at, say, 12.5% while showing every Key Action
+ * ticked and the matter closed. Weighting is still used for partial progress,
+ * because that is what it is good for.
  */
 export const computeCompletedPercentFromInstance = (instanceSteps: any[]): number => {
   const steps = Array.isArray(instanceSteps) ? instanceSteps : [];
+  if (!steps.length) return 0;
+
+  const completedSteps = steps.filter((step) => String(step?.status || '') === 'Completed');
+
+  // Every Key Action done means the workflow is finished, whatever the weights say.
+  if (completedSteps.length === steps.length) return 100;
+
   const totalWeight = steps.reduce((sum, step) => sum + (Number(step?.percentage) || 0), 0);
 
   if (totalWeight > 0) {
-    const completedWeight = steps
-      .filter((step) => String(step?.status || '') === 'Completed')
-      .reduce((sum, step) => sum + (Number(step?.percentage) || 0), 0);
+    const completedWeight = completedSteps.reduce((sum, step) => sum + (Number(step?.percentage) || 0), 0);
     return round2(Math.max(0, Math.min(100, completedWeight)));
   }
 
-  if (!steps.length) return 0;
-  const completed = steps.filter((step) => String(step?.status || '') === 'Completed').length;
-  return Math.round((completed / steps.length) * 100);
+  return Math.round((completedSteps.length / steps.length) * 100);
 };
 
 /**

@@ -128,9 +128,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const onCompleteStep = async (stepKey: string) => {
     if (!canCompleteSteps) return;
     const snapshot = wf;
-    // Optimistic: the tick must feel instant, so the card flips before the
-    // request resolves and the user is handed straight over to Case Management
-    // to send the finished work to the Reviewer / Signer.
+    // Optimistic: the tick must feel instant, so the card flips immediately.
     setErr('');
     setBusyKey(`complete:${stepKey}`);
     setWf((current) =>
@@ -145,12 +143,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           }
         : current
     );
-    if (onOpenCaseManagement) onOpenCaseManagement(stepKey);
-    else navigate(buildCaseManagementLink(caseId, stepKey));
     try {
       const updated = await completeWorkflowStep(caseId, stepKey);
       setWf(updated);
       notifyWorkflowChanged();
+      // Hand over to Case Management only once the tick is confirmed, so a
+      // refused completion (earlier Key Action still pending) never navigates
+      // away and hides the error.
+      if (onOpenCaseManagement) onOpenCaseManagement(stepKey);
+      else navigate(buildCaseManagementLink(caseId, stepKey));
     } catch (e: any) {
       setWf(snapshot); // revert the optimistic tick if the server refused
       setErr(e.message || 'Failed to complete step');
@@ -456,14 +457,9 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
               Workflow journey
             </div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {currentStepRef ? currentStepRef.title : wf.status === 'Completed' ? 'Workflow completed' : 'Workflow not started yet'}
-              </h3>
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                {completedSteps} of {steps.length} Key Actions completed
-              </span>
-            </div>
+            <h3 className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {currentStepRef ? currentStepRef.title : wf.status === 'Completed' ? 'Workflow completed' : 'Workflow not started yet'}
+            </h3>
             <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {wf.status === 'Completed'
                 ? 'All Key Actions are done.'
@@ -633,9 +629,14 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           <div className="space-y-4 p-4">
           {stageGroup.steps.map((s, actionIndex) => {
         const index = steps.findIndex((candidate) => candidate.stepKey === s.stepKey);
-        const arr = steps;
-        // Check if previous step is completed (or this is the first step)
-        const previousStepCompleted = index <= 0 || (arr[index - 1]?.status === 'Completed');
+
+        // A Key Action unlocks only when EVERY earlier Key Action in workflow
+        // order is completed - not just the one before it. Checking only the
+        // immediate predecessor let the UI offer a tick the server then refused
+        // with 409 whenever an earlier gap existed (e.g. after a template edit
+        // inserted a new action). This mirrors the `completeStep` guard exactly.
+        const blockers = index <= 0 ? [] : steps.slice(0, index).filter((candidate) => candidate.status !== 'Completed');
+        const previousStepCompleted = blockers.length === 0;
 
         // Determine if checkbox should be disabled for completing
         const isCompleted = s.status === 'Completed';
@@ -650,7 +651,10 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         if (isCompleted) {
           tooltipMessage = 'Click to reopen step';
         } else if (!previousStepCompleted) {
-          tooltipMessage = 'Complete previous steps first';
+          tooltipMessage = `Complete the earlier Key Action(s) first: ${blockers
+            .slice(0, 3)
+            .map((b) => b.title || b.stepKey)
+            .join(', ')}${blockers.length > 3 ? ` (+${blockers.length - 3} more)` : ''}`;
         } else {
           tooltipMessage = 'Click to mark as complete';
         }
@@ -722,11 +726,21 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 ) : s.slaText ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Duration: {s.slaText}</span>
                 ) : null}
-                {!previousStepCompleted && !isCompleted && (
-                  <span className="text-xs text-gray-500 dark:text-gray-400" title="Previous steps must be completed first">
-                    ← Complete previous steps first
+                {!previousStepCompleted && !isCompleted ? (
+                  <span
+                    className="text-xs text-gray-500 dark:text-gray-400"
+                    title={`Complete the earlier Key Action(s) first: ${blockers
+                      .slice(0, 3)
+                      .map((b) => b.title || b.stepKey)
+                      .join(', ')}${blockers.length > 3 ? ` (+${blockers.length - 3} more)` : ''}`}
+                  >
+                    ← Complete{' '}
+                    {blockers.length === 1
+                      ? (blockers[0]?.title || blockers[0]?.stepKey)
+                      : `the ${blockers.length} earlier Key Action${blockers.length === 1 ? '' : 's'}`}{' '}
+                    first
                   </span>
-                )}
+                ) : null}
                 {latestExtension ? (
                   <span
                     className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"

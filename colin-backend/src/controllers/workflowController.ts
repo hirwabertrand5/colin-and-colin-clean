@@ -1,4 +1,4 @@
-import { Response } from 'express';
+﻿import { Response } from 'express';
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import WorkflowTemplate from '../models/workflowTemplateModel';
@@ -24,6 +24,7 @@ import {
 } from '../utils/workflowPercentages';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
+import { canManageWorkflowStepsOfCase as canManageWorkflowStepsOfCaseFor } from '../utils/caseAssignmentPermissions';
 import { calculateCollectedKeyActionEarnings } from '../utils/keyActionEarnings';
 import { computeCaseEarnedFees } from '../utils/caseEarnedFees';
 import { normalizeTemplateActionText } from '../utils/workflowText';
@@ -273,7 +274,7 @@ const loadTemplateIndex = async () => {
  * Cases keep whatever template they were created with. When that template is
  * deleted, replaced by a re-import (new _id) or shadowed by a duplicate, the
  * Case Workspace would keep showing the old Key Actions while Templates
- * settings shows the maintained one — the exact mismatch reported for matters
+ * settings shows the maintained one â€” the exact mismatch reported for matters
  * such as Civil Litigation. This resolver always points the case at the single
  * canonical template for its matter type + case type (published, newest
  * version, most recently updated) and rebuilds the checklist from it without
@@ -411,7 +412,7 @@ export const reconcileInstanceTemplateWithCanonical = async (
     action: 'WORKFLOW_TEMPLATE_ALIGNED',
     message: 'Workflow checklist aligned with the current template',
     detail:
-      `${String(template.name || template.matterType)} • ` +
+      `${String(template.name || template.matterType)} â€¢ ` +
       `${summary.addedTemplateSteps} new step(s), -${summary.droppedSteps.length} stale step(s), ` +
       `-${summary.droppedActions.length} stale key action(s)` +
       (summary.keptLegacySteps.length || summary.archivedLegacyActions.length
@@ -457,7 +458,7 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   const actionTotal = actions.length;
   const actionPercent = actionTotal > 0 ? Math.round((checkedActions / actionTotal) * 100) : 0;
 
-  // Stage-weighted completion percent — the source of truth for earned fees.
+  // Stage-weighted completion percent â€” the source of truth for earned fees.
   // Completed steps are weighted by their stage's percentage of the workflow.
   const stageBreakdown = computeStageBreakdownFromInstance(activeSteps);
   const stageWeightedPercent = computeCompletedPercentFromInstance(activeSteps);
@@ -548,6 +549,31 @@ const completeStepInternal = async (actor: { actorName: string; actorUserId?: st
   // checklist ticks: the step checkbox / Case Management lifecycle is the only
   // signal needed to complete a Key Action.
   const previousStepStatus = step.status;
+
+  // Key Actions run in workflow order: every earlier Key Action must be
+  // completed before this one can be. This check lives here, in the shared
+  // completion helper, so it applies to EVERY path - the Overview checkbox,
+  // the Case Management approval, and repair/automation scripts alike. Checking
+  // only the immediate predecessor is not enough: a gap anywhere earlier in the
+  // workflow must block completion.
+  const orderedForGuard = (inst.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+  const guardIndex = orderedForGuard.findIndex((s: any) => s.stepKey === stepKey);
+  if (guardIndex > 0) {
+    const blockers = orderedForGuard
+      .slice(0, guardIndex)
+      .filter((s: any) => String(s?.status || '') !== 'Completed');
+    if (blockers.length) {
+      const error: any = new Error(
+        `Complete the earlier Key Action(s) first: ${blockers
+          .slice(0, 3)
+          .map((s: any) => s.title || s.stepKey)
+          .join(', ')}${blockers.length > 3 ? ` (+${blockers.length - 3} more)` : ''}.`
+      );
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
   step.status = 'Completed';
   step.completedAt = new Date();
 
@@ -578,9 +604,9 @@ const completeStepInternal = async (actor: { actorName: string; actorUserId?: st
     return ref?.stageKey;
   })();
 
-  const stepDetailParts = [`${stepKey} • ${step.title}`];
+  const stepDetailParts = [`${stepKey} â€¢ ${step.title}`];
   if (previousStepStatus) stepDetailParts.push(`from ${previousStepStatus} to ${step.status}`);
-  if (prevStage && newStage && prevStage !== newStage) stepDetailParts.push(`stage: ${prevStage} → ${newStage}`);
+  if (prevStage && newStage && prevStage !== newStage) stepDetailParts.push(`stage: ${prevStage} â†’ ${newStage}`);
 
   await writeAudit({
     caseId: String(c._id),
@@ -588,7 +614,7 @@ const completeStepInternal = async (actor: { actorName: string; actorUserId?: st
     ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
     action: 'WORKFLOW_STEP_COMPLETED',
     message: 'Completed workflow step',
-    detail: stepDetailParts.join(' • '),
+    detail: stepDetailParts.join(' â€¢ '),
   });
 
   // If the case workflow status changed, write a CASE_UPDATED audit entry
@@ -600,7 +626,7 @@ const completeStepInternal = async (actor: { actorName: string; actorUserId?: st
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'CASE_UPDATED',
       message: 'Case workflow status updated',
-      detail: `Workflow status: ${previousCaseWorkflowStatus || 'unknown'} → ${newCaseWorkflowStatus}`,
+      detail: `Workflow status: ${previousCaseWorkflowStatus || 'unknown'} â†’ ${newCaseWorkflowStatus}`,
     });
   }
 
@@ -656,7 +682,7 @@ const completeStepInternal = async (actor: { actorName: string; actorUserId?: st
  * Workspace Overview: as soon as every Key Action of a section is ticked the
  * section is marked complete, so members who may tick Key Actions but cannot
  * tick the section checkbox (interns, trainees, associates) can still finish a
- * section — and unlock the next one. The ordered walk also clears any earlier
+ * section â€” and unlock the next one. The ordered walk also clears any earlier
  * section left fully ticked but pending, and stops at the first section that
  * still has pending Key Actions or is awaiting review/approval.
  *
@@ -729,6 +755,14 @@ const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) =>
     return [assignee, supervisor].some((value) => value && (value === meName || value === meEmail)) || stageMatch;
   });
 };
+
+/**
+ * Overview-tab write permission (tick a Key Action, amend a deadline).
+ * Delegates to the shared predicate so the API and the Case Workspace UI can
+ * never disagree about who may do this.
+ */
+const canManageWorkflowStepsOfCase = (req: AuthRequest, foundCase: any) =>
+  canManageWorkflowStepsOfCaseFor(foundCase, req.user);
 
 // ---------- Templates ----------
 export const listActiveTemplates = async (req: AuthRequest, res: Response) => {
@@ -917,7 +951,7 @@ export const getWorkflowForCase = async (req: AuthRequest, res: Response) => {
     const inst: any = await WorkflowInstance.findOne({ caseId: new mongoose.Types.ObjectId(caseId) });
     if (!inst) return res.status(404).json({ message: 'No workflow instance for this case.' });
 
-    // ✅ Self-heal: a case created against a template that was later deleted,
+    // âœ… Self-heal: a case created against a template that was later deleted,
     // re-imported or replaced by a duplicate is re-linked to the canonical
     // template here, so the checklist always matches Templates settings.
     try {
@@ -932,7 +966,7 @@ export const getWorkflowForCase = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// ---------- Earned fees (Firm Reports → Productivity formula per matter) ----------
+// ---------- Earned fees (Firm Reports â†’ Productivity formula per matter) ----------
 export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
   try {
     const { caseId } = req.params as any;
@@ -960,7 +994,7 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
     );
 
     // Legacy instances (created before percentages existed) store no
-    // percentage on their steps — derive them from the template so percentages
+    // percentage on their steps â€” derive them from the template so percentages
     // and earned values are still correct everywhere.
     let effectiveSteps: any[] = Array.isArray(inst?.steps) ? inst.steps : [];
     if (template && !effectiveSteps.some((step: any) => Number(step?.percentage) > 0)) {
@@ -1132,7 +1166,7 @@ export const attachOutputDocument = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_OUTPUT_UPLOADED',
       message: 'Attached deliverable to workflow output',
-      detail: `${stepKey} • ${outputKey} • ${doc.name || 'Document'}`,
+      detail: `${stepKey} â€¢ ${outputKey} â€¢ ${doc.name || 'Document'}`,
     });
 
     res.json(inst);
@@ -1150,18 +1184,20 @@ export const completeStep = async (req: AuthRequest, res: Response) => {
   try {
     const { caseId, stepKey } = req.params as any;
 
+    // Complete a Key Action (admin, or the matter's assigned members).
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
 
-    if (!isAdmin(req.user?.role)) {
-      const allowed = await canAssociateLikeAccessCase(req, c);
-      if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
-        return res.status(403).json({ message: 'Forbidden.' });
-      }
+    if (!canManageWorkflowStepsOfCase(req, c)) {
+      return res.status(403).json({ message: 'Only the members assigned to this matter can complete its Key Actions.' });
     }
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+
+    // Ordering is enforced inside `completeStepInternal`, so the Overview checkbox,
+    // Case Management approval and the repair scripts all share one rule and
+    // return the same 409.
     const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
     res.json(updated);
   } catch (e: any) {
@@ -1173,15 +1209,17 @@ export const completeStep = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Reopen a completed step (admin only)
+// Reopen a completed step (admin, or the matter's assigned members)
 export const reopenStep = async (req: AuthRequest, res: Response) => {
   try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
     const { caseId, stepKey } = req.params as any;
 
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!canManageWorkflowStepsOfCase(req, c)) {
+      return res.status(403).json({ message: 'Only the members assigned to this matter can reopen its Key Actions.' });
+    }
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
@@ -1216,7 +1254,7 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_STEP_REOPENED',
       message: 'Reopened workflow step',
-      detail: `${stepKey} • ${step.title}`,
+      detail: `${stepKey} â€¢ ${step.title}`,
     });
 
     res.json(inst);
@@ -1225,16 +1263,18 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Amend a workflow step deadline (admin only)
+// Amend a workflow step deadline (admin, or the matter's assigned members)
 export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
   try {
-    if (!isAdmin(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
-
     const { caseId, stepKey } = req.params as any;
     const { extendDays, newDueAt, reason } = req.body || {};
 
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!canManageWorkflowStepsOfCase(req, c)) {
+      return res.status(403).json({ message: 'Only the members assigned to this matter can amend its deadlines.' });
+    }
 
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
@@ -1289,7 +1329,7 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_STEP_DEADLINE_EXTENDED',
       message: 'Updated workflow step deadline',
-      detail: `${stepKey} • ${dayOffset}d${reason ? ` • ${String(reason).trim()}` : ''}`,
+      detail: `${stepKey} â€¢ ${dayOffset}d${reason ? ` â€¢ ${String(reason).trim()}` : ''}`,
     });
 
     res.json(inst);
@@ -1349,7 +1389,7 @@ export const addStepAction = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_STEP_ACTION_ADDED',
       message: 'Added workflow key action',
-      detail: `${stepKey} • ${actionText}`,
+      detail: `${stepKey} â€¢ ${actionText}`,
     });
 
     return res.json(inst);
@@ -1419,7 +1459,7 @@ export const updateStepAction = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_STEP_ACTION_UPDATED',
       message: 'Updated workflow key action',
-      detail: `${stepKey} • ${actionText}`,
+      detail: `${stepKey} â€¢ ${actionText}`,
     });
 
     return res.json(inst);
@@ -1462,7 +1502,7 @@ export const deleteStepAction = async (req: AuthRequest, res: Response) => {
     // ticked: run the same ordered auto-complete pass as ticking the last Key
     // Action, so the big completion checkbox on the Case Workspace Overview is
     // checked automatically. A section left without any Key Action is never
-    // auto-completed — nothing proves the work is done.
+    // auto-completed â€” nothing proves the work is done.
     const actor = actorFromReq(req);
     const autoCompletedKeys = await autoCompleteFullyCheckedSteps(actor, c, inst);
     if (autoCompletedKeys.length > 0) {
@@ -1472,7 +1512,7 @@ export const deleteStepAction = async (req: AuthRequest, res: Response) => {
         ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
         action: 'WORKFLOW_STEP_ACTION_DELETED',
         message: 'Deleted workflow key action',
-        detail: `${stepKey} • ${removed?.text || 'Action removed'}`,
+        detail: `${stepKey} â€¢ ${removed?.text || 'Action removed'}`,
       });
       return res.json(inst);
     }
@@ -1486,7 +1526,7 @@ export const deleteStepAction = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_STEP_ACTION_DELETED',
       message: 'Deleted workflow key action',
-      detail: `${stepKey} • ${removed?.text || 'Action removed'}`,
+      detail: `${stepKey} â€¢ ${removed?.text || 'Action removed'}`,
     });
 
     return res.json(inst);
@@ -1665,7 +1705,7 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
         if (orderedStep.stepKey === stepKey) {
           orderedStep.status = 'In Progress';
           orderedStep.completedAt = undefined;
-          // Unchecking an action means the work is no longer fully submitted —
+          // Unchecking an action means the work is no longer fully submitted â€”
           // bring the case-management lifecycle back to In Progress.
           orderedStep.submittedAt = undefined;
           orderedStep.reviewedAt = undefined;
@@ -1687,16 +1727,16 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_STEP_ACTION_TOGGLED',
       message: 'Updated workflow key action',
-      detail: `${stepKey} • ${target.text} • ${nextDone ? 'done' : 'not done'}`,
+      detail: `${stepKey} â€¢ ${target.text} â€¢ ${nextDone ? 'done' : 'not done'}`,
     });
 
     // Ticking Key Actions can complete a section: when every Key Action of a
     // section is ticked, the big completion checkbox on the Case Workspace
-    // Overview is checked automatically — this is what unlocks the next
+    // Overview is checked automatically â€” this is what unlocks the next
     // section. The ordered pass also clears any earlier section left fully
     // ticked but pending, because members without matter-management permission
     // (interns/associates) cannot tick that checkbox themselves.
-    // Case Management keeps autoComplete:false so its review → approval chain
+    // Case Management keeps autoComplete:false so its review â†’ approval chain
     // still runs before the section completes.
     const allowAutoComplete = (req.body as any)?.autoComplete !== false;
     if (nextDone && allowAutoComplete) {

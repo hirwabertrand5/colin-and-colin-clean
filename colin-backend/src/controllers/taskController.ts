@@ -634,8 +634,25 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
 
     if (andFilters.length) filter.$and = andFilters;
 
-    const tasks = await Task.find(filter).sort({ dueDate: 1, createdAt: -1 });
-    res.json(tasks);
+    // Never return tasks whose matter has been deleted. This list is read
+    // straight from the tasks collection (not joined to cases), so without this
+    // guard any task that outlives its matter keeps appearing on dashboards and
+    // task boards. Deleting a matter now cascades its tasks, so this is a
+    // belt-and-braces guard against records that predate the cascade or were
+    // written while a matter was being removed.
+    const tasks = await Task.find(filter)
+      .sort({ dueDate: 1, createdAt: -1 })
+      .lean();
+    const taskCaseIds = Array.from(new Set(tasks.map((task: any) => String(task?.caseId || '')).filter(Boolean)));
+    const liveCaseIds = new Set(
+      taskCaseIds.length
+        ? (await Case.find({ _id: { $in: taskCaseIds.map((id) => new mongoose.Types.ObjectId(id)) } })
+            .select('_id')
+            .lean()
+          ).map((matter: any) => String(matter._id))
+        : []
+    );
+    res.json(tasks.filter((task: any) => liveCaseIds.has(String(task?.caseId || ''))));
   } catch {
     res.status(500).json({ message: 'Failed to fetch tasks.' });
   }

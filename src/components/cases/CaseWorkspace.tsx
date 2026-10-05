@@ -88,7 +88,7 @@ import {
   CaseWorkspaceTabName,
   normalizeCaseWorkspaceTab,
 } from '../../utils/caseWorkspaceLinks';
-import { caseMatchesAssignee, formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
+import { caseMatchesAssignee, formatCaseAssignedTo, getCaseAssignments, normalizeCaseAssignee, setCaseAssignmentSlot } from '../../utils/caseAssignments';
 import {
   formatDeadlineDateTime,
   resolveDeadlineDateTime,
@@ -337,13 +337,28 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalLoading, setApprovalLoading] = useState(false);
 
-  const canWorkOnWorkflowActions = useMemo(() => {
+  // Who may record work on the Case Workspace Overview tab: tick off a Key
+  // Action they completed and amend a deadline.
+  //
+  // This mirrors the server guard `canManageWorkflowStepsOfCase` exactly -
+  // administrators, plus the three members assigned to this matter
+  // (Initiator, Reviewer, Signer/Approver). Keeping both sides in step means
+  // the controls are never shown to someone the API would reject.
+  const canWorkOnWorkflowSteps = useMemo(() => {
     if (!caseData?._id) return false;
+    if (isAdminRole) return true;
     const meName = normalizeIdentity(currentUser?.name);
     const meEmail = normalizeIdentity(currentUser?.email);
-    // Every signed-in user who can view the matter may tick key actions.
-    return Boolean(meName || meEmail);
-  }, [caseData?._id, currentUser?.email, currentUser?.name]);
+    if (!meName && !meEmail) return false;
+    const identities = [meName, meEmail].filter(Boolean);
+    const slots = getCaseAssignments(caseData);
+    return [slots.initiator, slots.reviewer, slots.signerApprover, normalizeCaseAssignee(caseData?.assignedTo)].some(
+      (value) => {
+        const normalized = normalizeIdentity(value);
+        return Boolean(normalized) && identities.includes(normalized);
+      }
+    );
+  }, [caseData, currentUser?.email, currentUser?.name, isAdminRole]);
 
   const [newTask, setNewTask] = useState<
     Omit<TaskData, '_id' | 'caseId' | 'createdAt' | 'updatedAt'> & { description?: string }
@@ -1630,8 +1645,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
             {caseData?._id ? (
               <CaseWorkflowTab
                 caseId={caseData._id}
-                canCompleteSteps={canManageCase}
-                canToggleActions={canWorkOnWorkflowActions}
+                canCompleteSteps={canWorkOnWorkflowSteps}
+                canToggleActions={canWorkOnWorkflowSteps}
                 canUpload={true}
                 tasks={tasks}
                 currentUserName={currentUser?.name}
