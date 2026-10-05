@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { CalendarPlus } from 'lucide-react';
 import { TaskData } from '../../services/taskService';
 import {
@@ -17,9 +16,9 @@ import {
   formatDueCountdown,
   getUrgencyClass,
   getUrgencyColorForDueDate,
+  isStepWorkDone,
   toDateTimeLocalValue,
 } from '../../utils/workflowDeadline';
-import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 
 type Props = {
   caseId: string;
@@ -30,7 +29,7 @@ type Props = {
   tasks?: TaskData[];
   currentUserName?: string;
   currentUserEmail?: string;
-  /** When provided, Key Actions opened by the three assigned members redirect to the Case Management tab. */
+  /** Kept for backwards-compatible callers; ticking stays in the Overview. */
   onOpenCaseManagement?: (stepKey?: string) => void;
 };
 
@@ -46,7 +45,7 @@ const formatMoney = (amount: number | null | undefined, currency?: string) => {
 export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged, tasks, currentUserName, currentUserEmail, onOpenCaseManagement }: Props) {
   void canUpload;
   void canToggleActions;
-  const navigate = useNavigate();
+  void onOpenCaseManagement;
   const [wf, setWf] = useState<WorkflowInstance | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
@@ -129,6 +128,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     if (!canCompleteSteps) return;
     const snapshot = wf;
     // Optimistic: the tick must feel instant, so the card flips immediately.
+    // Optimistically mirror the server's new state: a tick records 'Done'
+    // (work finished), NOT 'Completed' (which only an approval may write).
     setErr('');
     setBusyKey(`complete:${stepKey}`);
     setWf((current) =>
@@ -137,7 +138,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             ...current,
             steps: current.steps.map((step) =>
               step.stepKey === stepKey
-                ? { ...step, status: 'Completed', completedAt: new Date().toISOString() as any }
+                ? { ...step, status: 'Done', completedAt: undefined }
                 : step
             ),
           }
@@ -147,11 +148,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       const updated = await completeWorkflowStep(caseId, stepKey);
       setWf(updated);
       notifyWorkflowChanged();
-      // Hand over to Case Management only once the tick is confirmed, so a
-      // refused completion (earlier Key Action still pending) never navigates
-      // away and hides the error.
-      if (onOpenCaseManagement) onOpenCaseManagement(stepKey);
-      else navigate(buildCaseManagementLink(caseId, stepKey));
+      // Stay on this checklist so staff can tick the rest of the Key Actions
+      // without being sent away to Case Management after every action.
     } catch (e: any) {
       setWf(snapshot); // revert the optimistic tick if the server refused
       setErr(e.message || 'Failed to complete step');
@@ -280,14 +278,16 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   // Journey helpers: these drive the "where does the workflow start, where is it
   // now and where does it end" summary. They are presentation only - every value
   // comes from the same instance/template data the stage cards already render.
-  const completedSteps = steps.filter((s) => s.status === 'Completed').length;
+  // Progress reflects WORK DONE (ticked), not approval - so the journey and the
+  // stage bars move the moment a Key Action is ticked, exactly like the tick.
+  const completedSteps = steps.filter((s) => isStepWorkDone(s)).length;
   const overallPercent = steps.length ? Math.round((completedSteps / steps.length) * 100) : 0;
   const currentStepRef = steps.find((s) => s.stepKey === wf.currentStepKey) || null;
   const currentStageIndex = currentStepRef
     ? stageGroups.findIndex((group) => group.key === String(currentStepRef.stageKey || ''))
     : -1;
   const stageState = (stageGroup: (typeof stageGroups)[number], stageIndex: number) => {
-    if (stageGroup.steps.length > 0 && stageGroup.steps.every((s) => s.status === 'Completed')) return 'done';
+    if (stageGroup.steps.length > 0 && stageGroup.steps.every((s) => isStepWorkDone(s))) return 'done';
     if (stageIndex === currentStageIndex) return 'current';
     if (stageGroup.steps.some((s) => s.status === 'In Progress' || s.status === 'Awaiting Review' || s.status === 'Awaiting Approval')) {
       return 'current';
@@ -477,7 +477,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             <div className="text-right">
               <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">Stages</div>
               <div className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-                {stageGroups.filter((group) => group.steps.length > 0 && group.steps.every((s) => s.status === 'Completed')).length}
+                {stageGroups.filter((group) => group.steps.length > 0 && group.steps.every((s) => isStepWorkDone(s))).length}
                 <span className="text-base font-normal text-gray-500 dark:text-gray-400"> / {totalStages}</span>
               </div>
             </div>
@@ -489,7 +489,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           <ol className="flex min-w-max items-start gap-0">
             {stageGroups.map((stageGroup, stageIndex) => {
               const state = stageState(stageGroup, stageIndex);
-              const done = stageGroup.steps.filter((s) => s.status === 'Completed').length;
+              const done = stageGroup.steps.filter((s) => isStepWorkDone(s)).length;
               const isLast = stageIndex === stageGroups.length - 1;
               return (
                 <li key={stageGroup.key} className="flex items-start">
@@ -538,7 +538,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       </div>
 
       {stageGroups.map((stageGroup, stageIndex) => {
-        const stageDone = stageGroup.steps.filter((s) => s.status === 'Completed').length;
+        const stageDone = stageGroup.steps.filter((s) => isStepWorkDone(s)).length;
         const state = stageState(stageGroup, stageIndex);
         const stagePercent = stageGroup.steps.length ? Math.round((stageDone / stageGroup.steps.length) * 100) : 0;
         const stageWindow = stageGroup.steps.length
@@ -627,37 +627,18 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             </div>
           </header>
           <div className="space-y-4 p-4">
-          {stageGroup.steps.map((s, actionIndex) => {
-        const index = steps.findIndex((candidate) => candidate.stepKey === s.stepKey);
-
-        // A Key Action unlocks only when EVERY earlier Key Action in workflow
-        // order is completed - not just the one before it. Checking only the
-        // immediate predecessor let the UI offer a tick the server then refused
-        // with 409 whenever an earlier gap existed (e.g. after a template edit
-        // inserted a new action). This mirrors the `completeStep` guard exactly.
-        const blockers = index <= 0 ? [] : steps.slice(0, index).filter((candidate) => candidate.status !== 'Completed');
-        const previousStepCompleted = blockers.length === 0;
-
-        // Determine if checkbox should be disabled for completing
+              {stageGroup.steps.map((s, actionIndex) => {
+        // Overview ticks are intentionally independent: any Key Action can be
+        // recorded as done here, while review and approval happen separately in
+        // Case Management when the team is ready.
+        const isTicked = isStepWorkDone(s);
         const isCompleted = s.status === 'Completed';
         const isLoading = busyKey === `complete:${s.stepKey}`;
 
-        const cannotComplete = !isCompleted && !previousStepCompleted;
         const extensionHistory = Array.isArray(s.extensionHistory) ? s.extensionHistory : [];
         const latestExtension = extensionHistory[extensionHistory.length - 1];
-        
-        // Build tooltip message
-        let tooltipMessage = '';
-        if (isCompleted) {
-          tooltipMessage = 'Click to reopen step';
-        } else if (!previousStepCompleted) {
-          tooltipMessage = `Complete the earlier Key Action(s) first: ${blockers
-            .slice(0, 3)
-            .map((b) => b.title || b.stepKey)
-            .join(', ')}${blockers.length > 3 ? ` (+${blockers.length - 3} more)` : ''}`;
-        } else {
-          tooltipMessage = 'Click to mark as complete';
-        }
+
+        const tooltipMessage = isTicked ? 'Click to reopen Key Action' : 'Click to mark Key Action as done';
 
         const keyActionValue = keyActionValueOf(s.stepKey);
 
@@ -666,7 +647,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           key={s.stepKey}
           className={[
             'flex overflow-hidden rounded-lg border bg-white dark:bg-gray-800',
-            isCompleted
+            isTicked
               ? 'border-emerald-200 dark:border-emerald-900'
               : s.stepKey === wf.currentStepKey
                 ? 'border-gray-900 ring-1 ring-gray-900/5 dark:border-gray-400'
@@ -677,7 +658,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           <div
             className={[
               'w-1.5 shrink-0',
-              isCompleted
+              isTicked
                 ? 'bg-emerald-500'
                 : s.status === 'In Progress'
                   ? 'bg-gray-900 dark:bg-gray-100'
@@ -700,9 +681,11 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
                     isCompleted
                       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                      : s.status === 'In Progress'
-                        ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                        : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+                      : isTicked
+                        ? 'bg-teal-100 text-teal-700 dark:bg-teal-950/50 dark:text-teal-300'
+                        : s.status === 'In Progress'
+                          ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
                   ].join(' ')}
                 >
                   {s.status}
@@ -726,21 +709,6 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 ) : s.slaText ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Duration: {s.slaText}</span>
                 ) : null}
-                {!previousStepCompleted && !isCompleted ? (
-                  <span
-                    className="text-xs text-gray-500 dark:text-gray-400"
-                    title={`Complete the earlier Key Action(s) first: ${blockers
-                      .slice(0, 3)
-                      .map((b) => b.title || b.stepKey)
-                      .join(', ')}${blockers.length > 3 ? ` (+${blockers.length - 3} more)` : ''}`}
-                  >
-                    ← Complete{' '}
-                    {blockers.length === 1
-                      ? (blockers[0]?.title || blockers[0]?.stepKey)
-                      : `the ${blockers.length} earlier Key Action${blockers.length === 1 ? '' : 's'}`}{' '}
-                    first
-                  </span>
-                ) : null}
                 {latestExtension ? (
                   <span
                     className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
@@ -761,7 +729,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             {/* Action zone: amendment + complete/reopen, grouped so the tick is
                 always the last thing the eye lands on. */}
             <div className="flex shrink-0 items-center gap-2">
-              {canAmendDeadlines && s.status !== 'Completed' && (
+              {canAmendDeadlines && !isCompleted && (
                 <button
                   type="button"
                   onClick={() => {
@@ -783,9 +751,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
               {canCompleteSteps && (
                 <button
-                  disabled={isLoading || cannotComplete}
+                  disabled={isLoading}
                   onClick={() => {
-                    if (isCompleted) {
+                    // Clicking a ticked Key Action reopens it; clicking an
+                    // unticked one records the work as done. The tick state is
+                    // "work done", which includes 'Done' - not just 'Completed'.
+                    if (isTicked) {
                       onReopenStep(s.stepKey);
                     } else {
                       onCompleteStep(s.stepKey);
@@ -794,7 +765,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   className="flex items-center justify-center w-10 h-10 rounded-lg bg-green-50 dark:bg-gray-700 border-2 border-green-600 dark:border-green-400 shadow-sm hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   title={tooltipMessage}
                 >
-                  {isCompleted ? (
+                  {isTicked ? (
                     <div className="w-6 h-6 bg-green-500 rounded flex items-center justify-center border-2 border-green-700 shadow-sm">
                       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -896,5 +867,4 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     </div>
   );
 }
-
 

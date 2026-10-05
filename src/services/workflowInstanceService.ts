@@ -12,7 +12,7 @@ export type WorkflowInstance = {
     title: string;
     stageKey: string;
     order: number;
-    status: 'Not Started' | 'In Progress' | 'Completed';
+    status: 'Not Started' | 'In Progress' | 'Done' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';
     startAt?: string;
     dueAt?: string;
     completedAt?: string;

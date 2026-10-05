@@ -1,6 +1,47 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type StepStatus = 'Not Started' | 'In Progress' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';
+/**
+ * Lifecycle of a Key Action.
+ *
+ *  Not Started -> In Progress -> Done -> Awaiting Review -> Awaiting Approval -> Completed
+ *
+ * 'Done' means the assigned member has ticked the work as finished. It is
+ * deliberately distinct from 'Completed' (which means APPROVED) and from
+ * 'Awaiting Review' (which means the Initiator has submitted it). Without that
+ * middle state a tick either jumped straight past the review chain - leaving
+ * nothing for the Reviewer to do - or could not be sent to the Reviewer at all.
+ *
+ * Ticking never waits for review: as soon as a Key Action is 'Done' the next
+ * one in sequence unlocks, so the team keeps moving while the Reviewer and
+ * Signer/Approver work through the queue in their own time.
+ */
+export type StepStatus =
+  | 'Not Started'
+  | 'In Progress'
+  | 'Done'
+  | 'Awaiting Review'
+  | 'Awaiting Approval'
+  | 'Completed';
+
+/**
+ * Whether the work itself has been ticked as done by the assigned member.
+ *
+ * This is deliberately separate from approval: a Key Action counts as "work
+ * done" as soon as it is ticked, and that is what unlocks the next Key Action
+ * in sequence. A Key Action waits for nobody - the Reviewer and Approver can
+ * work through the queue independently, in their own time.
+ *
+ * Only 'Not Started' / 'In Progress' mean the work itself is not done yet.
+ */
+export const isStepWorkDone = (step: { status?: string } | null | undefined): boolean => {
+  const status = String(step?.status || '');
+  return (
+    status === 'Done' ||
+    status === 'Awaiting Review' ||
+    status === 'Awaiting Approval' ||
+    status === 'Completed'
+  );
+};
 
 export interface IInstanceOutput {
   key: string;
@@ -125,7 +166,13 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     stageKey: { type: String, required: true },
     order: { type: Number, required: true },
 
-    status: { type: String, enum: ['Not Started', 'In Progress', 'Awaiting Review', 'Awaiting Approval', 'Completed'], default: 'Not Started' },
+    // 'Done' is the ticked-but-not-submitted state. It must be in the enum or
+    // Mongoose rejects the write and the tick fails to save.
+    status: {
+      type: String,
+      enum: ['Not Started', 'In Progress', 'Done', 'Awaiting Review', 'Awaiting Approval', 'Completed'],
+      default: 'Not Started',
+    },
     startAt: { type: Date },
     dueAt: { type: Date },
     completedAt: { type: Date },

@@ -38,6 +38,8 @@ const formatMoney = (amount: number | null | undefined, currency?: string) => {
 const STATUS_CHIP: Record<string, string> = {
   'Not Started': 'border border-gray-300 bg-gray-50 text-gray-600',
   'In Progress': 'border border-blue-200 bg-blue-50 text-blue-700',
+  // 'Done' = work ticked by the assigned member, still to be submitted for review.
+  Done: 'border border-teal-200 bg-teal-50 text-teal-700',
   'Awaiting Review': 'border border-amber-200 bg-amber-50 text-amber-800',
   'Awaiting Approval': 'border border-violet-200 bg-violet-50 text-violet-700',
   Completed: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -46,6 +48,7 @@ const STATUS_CHIP: Record<string, string> = {
 const LIFECYCLE_LABEL: Record<string, string> = {
   'Not Started': 'Not started',
   'In Progress': 'In progress',
+  Done: 'Done - awaiting submission',
   'Awaiting Review': 'Awaiting review',
   'Awaiting Approval': 'Awaiting approval',
   Completed: 'Completed',
@@ -155,17 +158,24 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
   const myRole = state?.myRole || 'none';
   const isMember = myRole === 'initiator' || myRole === 'reviewer' || myRole === 'approver' || myRole === 'admin';
 
+  // The Initiator submits work the assigned member has ticked as done. Ticking
+  // records 'Done' - which is deliberately NOT an approval - so a ticked Key
+  // Action can always be handed to the Reviewer instead of being locked as
+  // already finished.
   const canRequestReview = (step: CaseManagementStep) =>
     (myRole === 'initiator' || myRole === 'admin') &&
     step.status !== 'Completed' &&
-    step.status !== 'Awaiting Review';
+    step.status !== 'Awaiting Review' &&
+    step.status !== 'Awaiting Approval';
 
+  // The Reviewer forwards reviewed work to the Signer/Approver.
   const canRequestApproval = (step: CaseManagementStep) =>
     (myRole === 'reviewer' || myRole === 'admin') &&
     step.status !== 'Completed' &&
     step.status !== 'Awaiting Approval' &&
-    (step.status === 'Awaiting Review' || step.status === 'In Progress');
+    (step.status === 'Awaiting Review' || step.status === 'Done' || step.status === 'In Progress');
 
+  // The Signer/Approver is the only role that signs work off as 'Completed'.
   const canApprove = (step: CaseManagementStep) =>
     (myRole === 'approver' || myRole === 'admin') &&
     step.status !== 'Completed' &&

@@ -1,4 +1,23 @@
 export type UrgencyColor = 'blue' | 'green' | 'yellow' | 'red' | 'gray';
+
+/**
+ * Whether the work behind a Key Action has been ticked as done.
+ *
+ * Mirrors `isStepWorkDone` in the backend. "Work done" is deliberately separate
+ * from "approved": ticking records that the work is finished and immediately
+ * unlocks the next Key Action in sequence, while the Reviewer and
+ * Signer/Approver sign it off afterwards through Case Management. A Key Action
+ * therefore never has to wait on the review chain before it can be ticked.
+ */
+export const isStepWorkDone = (step: { status?: string } | null | undefined): boolean => {
+  const status = String(step?.status || '');
+  return (
+    status === 'Done' ||
+    status === 'Awaiting Review' ||
+    status === 'Awaiting Approval' ||
+    status === 'Completed'
+  );
+};
 export type DeadlineZone = 'excellent' | 'good' | 'delayed' | 'risk' | 'untracked';
 
 export const clamp01 = (n: number) => Math.max(0, Math.min(1, n));

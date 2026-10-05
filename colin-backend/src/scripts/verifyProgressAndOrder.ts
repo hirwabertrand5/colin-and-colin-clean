@@ -6,20 +6,22 @@
  *     ticked. `computeCompletedPercentFromInstance` weighted progress by step
  *     percentages, and many templates carry no weights (or weights that do not
  *     reach 100), so a finished workflow could never report 100%.
- *  2. Key Actions could be completed out of order, because only the UI
- *     disabled the checkbox - bulk operations and direct API calls bypassed it.
+ *  2. The Overview's Key Action sequence could use stored step orders that
+ *     did not match the stage-by-stage sequence shown to the user.
  *
  * Pure functions only - no database is touched. Run with:
  *   npm run verify:progress-and-order
  */
 import { computeCompletedPercentFromInstance } from '../utils/workflowPercentages';
+import { isStepWorkDone } from '../models/workflowInstanceModel';
 
-/** Mirrors the guard added to `completeStep`. */
+/** Mirrors the Case Workspace Overview's visible sequence lock. */
 const blockersBefore = (steps: any[], stepKey: string) => {
   const ordered = steps.slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   const index = ordered.findIndex((s: any) => s.stepKey === stepKey);
   if (index <= 0) return [];
-  return ordered.slice(0, index).filter((s: any) => String(s?.status || '') !== 'Completed');
+  // Work done, not approval, is what unlocks the next Key Action.
+  return ordered.slice(0, index).filter((s: any) => !isStepWorkDone(s));
 };
 
 let passed = 0;
@@ -68,7 +70,7 @@ check('no steps -> 0', computeCompletedPercentFromInstance([]) === 0);
 check('undefined input -> 0', computeCompletedPercentFromInstance(undefined as any) === 0);
 check('one step done -> 100', computeCompletedPercentFromInstance([step('a', 1, 'Completed')]) === 100);
 
-console.log('\nD. A Key Action cannot be completed before its predecessors');
+console.log('\nD. The Overview only unlocks the next visible Key Action');
 const allDone = [step('a', 1, 'Completed'), step('b', 2, 'Completed'), step('c', 3, 'Completed')];
 check('the first step has no blockers', blockersBefore(allDone, 'a').length === 0);
 check('the last step is blocked only while earlier work is pending', blockersBefore([step('a', 1, 'Completed'), step('b', 2, 'Not Started'), step('c', 3, 'Not Started')], 'c').length === 1);
@@ -81,6 +83,50 @@ check('step order is respected even if stored out of order', blockersBefore([ste
 console.log('\nE. Order guard allows legitimate progress');
 check('completing in sequence is always allowed', blockersBefore([step('a', 1, 'Completed'), step('b', 2, 'In Progress'), step('c', 3, 'Not Started')], 'b').length === 0);
 check('an unknown step key is not blocked', blockersBefore(allDone, 'missing').length === 0);
+
+console.log('\nF. A ticked Key Action is "work done" and stays ticked');
+// Regression: the tick used to be written as 'Completed', then the UI decided
+// "is this ticked?" by checking status === 'Completed'. Once ticking started
+// recording 'Done', the checkbox appeared to tick and then silently reverted.
+check("a freshly ticked key action counts as work done", isStepWorkDone({ status: 'Done' }));
+check('work done survives the submit and approve transitions', ['Awaiting Review', 'Awaiting Approval', 'Completed'].every((status) => isStepWorkDone({ status })));
+check('work that has not been ticked is not done', !isStepWorkDone({ status: 'Not Started' }) && !isStepWorkDone({ status: 'In Progress' }));
+check('a missing status is not treated as done', !isStepWorkDone({ status: '' }) && !isStepWorkDone(undefined));
+
+// The next key action must unlock off a tick, never off an approval.
+const ticked = [step('a', 1, 'Done'), step('b', 2, 'Not Started'), step('c', 3, 'Not Started')];
+check('ticking unlocks the next key action without any approval', blockersBefore(ticked, 'b').length === 0);
+check('and the one after that stays blocked until b is ticked', blockersBefore(ticked, 'c').length === 1);
+const submittedNotApproved = [step('a', 1, 'Awaiting Approval'), step('b', 2, 'Not Started'), step('c', 3, 'Not Started')];
+check('work submitted but not yet approved still unlocks the next one', blockersBefore(submittedNotApproved, 'b').length === 0);
+
+console.log('\nG. Display order governs the lock, not interleaved stored order');
+const displayOrder = (stages: string[], workflowSteps: any[]) => {
+  const stageRank = new Map(stages.map((stage, index) => [stage, index]));
+  return workflowSteps
+    .map((workflowStep, index) => ({ workflowStep, index }))
+    .sort((a, b) =>
+      (stageRank.get(a.workflowStep.stageKey) ?? Number.MAX_SAFE_INTEGER) -
+        (stageRank.get(b.workflowStep.stageKey) ?? Number.MAX_SAFE_INTEGER) ||
+      a.workflowStep.order - b.workflowStep.order ||
+      a.index - b.index
+    )
+    .map(({ workflowStep }) => workflowStep);
+};
+const interleaved = [
+  { ...step('first-visible', 10, 'Done'), stageKey: 'intake' },
+  { ...step('later-stage', 2, 'Not Started'), stageKey: 'closing' },
+  { ...step('second-visible', 20, 'Not Started'), stageKey: 'intake' },
+];
+const visibleSequence = displayOrder(['intake', 'closing'], interleaved);
+check(
+  'the second visible Key Action follows the first visible Key Action',
+  visibleSequence.map((workflowStep) => workflowStep.stepKey).join(',') === 'first-visible,second-visible,later-stage'
+);
+check(
+  'a ticked first visible Key Action unlocks the second despite interleaved stored order',
+  !isStepWorkDone(visibleSequence[1]) && isStepWorkDone(visibleSequence[0])
+);
 
 console.log(`\nResult: ${passed} passed, ${failed} failed.`);
 if (failed > 0) process.exit(1);

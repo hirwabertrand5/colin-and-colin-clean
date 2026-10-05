@@ -23,6 +23,7 @@
     "audit:workflow-integrity": "tsx src/scripts/auditWorkflowIntegrity.ts",
     "inspect:closed-matters": "tsx src/scripts/inspectClosedMatters.ts",
     "inspect:archived-ticks": "tsx src/scripts/inspectArchivedTicks.ts",
+    "inspect:step-order": "tsx src/scripts/inspectStepOrder.ts",
     "repair:workflow-progress": "tsx src/scripts/repairWorkflowProgress.ts",
     "repair:workflow-progress:apply": "tsx src/scripts/repairWorkflowProgress.ts --apply",
     "clean:orphaned-cases": "tsx src/scripts/cleanOrphanedCaseRecords.ts",

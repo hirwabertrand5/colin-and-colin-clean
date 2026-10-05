@@ -2,7 +2,7 @@
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import WorkflowTemplate from '../models/workflowTemplateModel';
-import WorkflowInstance from '../models/workflowInstanceModel';
+import WorkflowInstance, { isStepWorkDone } from '../models/workflowInstanceModel';
 import Case from '../models/caseModel';
 import Invoice from '../models/invoiceModel';
 import Document from '../models/documentModel';
@@ -24,7 +24,10 @@ import {
 } from '../utils/workflowPercentages';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
-import { canManageWorkflowStepsOfCase as canManageWorkflowStepsOfCaseFor } from '../utils/caseAssignmentPermissions';
+import {
+  canManageWorkflowStepsOfCase as canManageWorkflowStepsOfCaseFor,
+  resolveAssignedSlot,
+} from '../utils/caseAssignmentPermissions';
 import { calculateCollectedKeyActionEarnings } from '../utils/keyActionEarnings';
 import { computeCaseEarnedFees } from '../utils/caseEarnedFees';
 import { normalizeTemplateActionText } from '../utils/workflowText';
@@ -56,6 +59,8 @@ const isAssociateLike = (role?: string) =>
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
   actorUserId: req.user?.id as string | undefined,
+  actorEmail: req.user?.email as string | undefined,
+  actorRole: req.user?.role as string | undefined,
 });
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
@@ -541,52 +546,55 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   await c.save(session ? { session } : undefined);
 };
 
-const completeStepInternal = async (actor: { actorName: string; actorUserId?: string | undefined }, c: any, inst: any, stepKey: string) => {
+const completeStepInternal = async (
+  actor: { actorName: string; actorUserId?: string | undefined; actorEmail?: string | undefined; actorRole?: string | undefined },
+  c: any,
+  inst: any,
+  stepKey: string,
+  options?: { finalApproval?: boolean }
+) => {
   const step = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
   if (!step) throw new Error('Step not found.');
 
-  // The per-step sub-checklist is retired, so completion is no longer gated on
-  // checklist ticks: the step checkbox / Case Management lifecycle is the only
-  // signal needed to complete a Key Action.
+  // Ticking a Key Action records that the WORK IS DONE - it is neither an
+  // approval nor a submission. Without a distinct 'Done' state a tick either
+  // jumped straight past the review chain (leaving the Reviewer nothing to do)
+  // or could not be sent to the Reviewer at all. Now the Initiator can submit a
+  // ticked Key Action, the Reviewer forwards it to the Signer/Approver, and only
+  // an approval writes 'Completed'.
   const previousStepStatus = step.status;
 
-  // Key Actions run in workflow order: every earlier Key Action must be
-  // completed before this one can be. This check lives here, in the shared
-  // completion helper, so it applies to EVERY path - the Overview checkbox,
-  // the Case Management approval, and repair/automation scripts alike. Checking
-  // only the immediate predecessor is not enough: a gap anywhere earlier in the
-  // workflow must block completion.
-  const orderedForGuard = (inst.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-  const guardIndex = orderedForGuard.findIndex((s: any) => s.stepKey === stepKey);
-  if (guardIndex > 0) {
-    const blockers = orderedForGuard
-      .slice(0, guardIndex)
-      .filter((s: any) => String(s?.status || '') !== 'Completed');
-    if (blockers.length) {
-      const error: any = new Error(
-        `Complete the earlier Key Action(s) first: ${blockers
-          .slice(0, 3)
-          .map((s: any) => s.title || s.stepKey)
-          .join(', ')}${blockers.length > 3 ? ` (+${blockers.length - 3} more)` : ''}.`
-      );
-      error.statusCode = 409;
-      throw error;
-    }
+  const finalApproval = Boolean(options?.finalApproval);
+  const orderedSteps = (inst.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+
+  if (finalApproval) {
+    // Signed off by the Approver.
+    step.status = 'Completed';
+    step.completedAt = new Date();
+  } else {
+    // Work ticked as done by the assigned member; ready to be submitted.
+    step.status = 'Done';
+    step.completedAt = undefined;
   }
 
-  step.status = 'Completed';
-  step.completedAt = new Date();
-
-  const sorted = (inst.steps || []).slice().sort((a: any, b: any) => a.order - b.order);
-  const idx = sorted.findIndex((x: any) => x.stepKey === stepKey);
-  const next = sorted[idx + 1];
-
-  if (next) {
-    inst.currentStepKey = next.stepKey;
-    const nextRef = inst.steps.find((x: any) => x.stepKey === next.stepKey);
-    if (nextRef && nextRef.status === 'Not Started') nextRef.status = 'In Progress';
+  // `currentStepKey` tracks the action still in flight through the review chain:
+  // it stays on the ticked action until it is APPROVED, then moves on. Ticking
+  // does not have to wait for the Reviewer or Approver - the next Key Action
+  // unlocks immediately, because "work done" (what ticking records) is checked
+  // separately from "approved" when deciding what may be ticked next.
+  if (step.status === 'Completed') {
+    const nextOpen = orderedSteps.find((candidate: any) => String(candidate.status || '') !== 'Completed');
+    if (nextOpen) {
+      inst.currentStepKey = nextOpen.stepKey;
+      if (nextOpen.status === 'Not Started') nextOpen.status = 'In Progress';
+      inst.status = 'Active';
+    } else {
+      inst.currentStepKey = undefined;
+      inst.status = 'Completed';
+    }
   } else {
-    inst.status = 'Completed';
+    inst.status = 'Active';
+    inst.currentStepKey = stepKey;
   }
 
   await inst.save();
@@ -1195,9 +1203,9 @@ export const completeStep = async (req: AuthRequest, res: Response) => {
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
 
-    // Ordering is enforced inside `completeStepInternal`, so the Overview checkbox,
-    // Case Management approval and the repair scripts all share one rule and
-    // return the same 409.
+    // The Overview controls the visible, stage-by-stage sequence. Completion
+    // here deliberately does not impose a second order guard: a tick must not
+    // be rejected merely because a template stores interleaved step orders.
     const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
     res.json(updated);
   } catch (e: any) {
@@ -1227,11 +1235,16 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
     const wasCompletedMatter = isClosedCaseWorkflow(c, inst);
     const step = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
     if (!step) return res.status(404).json({ message: 'Step not found.' });
-    if (step.status !== 'Completed') return res.status(400).json({ message: 'Step is not completed.' });
+    // Reopening applies to any ticked Key Action: 'Done' (work recorded but not
+    // yet approved) as well as 'Completed'. Checking only 'Completed' made a
+    // freshly ticked action impossible to undo.
+    if (!isStepWorkDone(step)) return res.status(400).json({ message: 'This Key Action has not been ticked as done yet.' });
 
     // Reopen the step
     step.status = 'In Progress';
     step.completedAt = undefined;
+    step.submittedAt = undefined;
+    step.reviewedAt = undefined;
 
     // Update current step to this one
     inst.currentStepKey = stepKey;
@@ -1670,52 +1683,15 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
     if (!target) return res.status(404).json({ message: 'Action not found.' });
 
     const nextDone = !Boolean(target.done);
-    if (nextDone) {
-      const orderedSteps = (inst.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-      const flatActions = orderedSteps.flatMap((orderedStep: any) =>
-        (orderedStep.actions || []).map((action: any, idx: number) => ({
-          step: orderedStep,
-          action,
-          idx,
-          key: orderedStep.stepKey,
-        }))
-      );
-      const currentFlatIndex = flatActions.findIndex((item: any) => item.key === stepKey && item.idx === actionIndex);
-      const previousIncomplete = flatActions.slice(0, currentFlatIndex).find((item: any) => !item.action?.done);
-      if (previousIncomplete) {
-        return res.status(400).json({ message: 'Complete the previous key action first.' });
-      }
-    }
-
     target.done = nextDone;
     target.doneAt = nextDone ? new Date() : undefined;
 
     if (step.status === 'Not Started') step.status = 'In Progress';
     if (!nextDone) {
-      const orderedSteps = (inst.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-      const stepIndex = orderedSteps.findIndex((orderedStep: any) => orderedStep.stepKey === stepKey);
-      for (const orderedStep of orderedSteps.slice(stepIndex)) {
-        const actionsToReset = orderedStep.stepKey === stepKey
-          ? (orderedStep.actions || []).slice(actionIndex + 1)
-          : (orderedStep.actions || []);
-        for (const action of actionsToReset) {
-          action.done = false;
-          action.doneAt = undefined;
-        }
-        if (orderedStep.stepKey === stepKey) {
-          orderedStep.status = 'In Progress';
-          orderedStep.completedAt = undefined;
-          // Unchecking an action means the work is no longer fully submitted â€”
-          // bring the case-management lifecycle back to In Progress.
-          orderedStep.submittedAt = undefined;
-          orderedStep.reviewedAt = undefined;
-        } else {
-          orderedStep.status = 'Not Started';
-          orderedStep.completedAt = undefined;
-          orderedStep.submittedAt = undefined;
-          orderedStep.reviewedAt = undefined;
-        }
-      }
+      step.status = 'In Progress';
+      step.completedAt = undefined;
+      step.submittedAt = undefined;
+      step.reviewedAt = undefined;
       inst.status = 'Active';
       inst.currentStepKey = stepKey;
     }

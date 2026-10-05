@@ -29,6 +29,7 @@ import {
   toggleStepAction,
   fixCaseWorkflowMismatches,
   updateTemplate,
+  completeStepForCase,
 } from '../controllers/workflowController';
 import { updateCase } from '../controllers/caseController';
 import { getExecutiveAssistantDashboard } from '../controllers/dashboardController';
@@ -64,7 +65,7 @@ const mockRes = () => {
   return { res, captured };
 };
 
-const verifyMergeLogic = () => {
+const verifyMergeLogic = async () => {
   const template = {
     stages: [
       { key: 'S1', title: 'Intake', percentage: 10 },
@@ -129,6 +130,96 @@ const verifyMergeLogic = () => {
     isWorkflowInstanceCompleted({ status: 'Active', steps: [{ status: 'Completed' }, { status: 'In Progress' }] }) === false
   );
   check('completed: an empty step list is not completed', isWorkflowInstanceCompleted({ status: 'Active', steps: [] }) === false);
+
+  const workflow = {
+    _id: '507f1f77bcf86cd799439011',
+    status: 'In Progress',
+    caseAssignments: { initiator: 'Alice', reviewer: 'Bob', signerApprover: 'Carol' },
+    save: async () => undefined,
+    workflowProgress: { status: 'In Progress' },
+  } as any;
+  const saveSpy = async () => undefined;
+  const inst: any = {
+    _id: 'inst-1',
+    status: 'Active',
+    currentStepKey: 'T1',
+    steps: [
+      { stepKey: 'T1', title: 'Collect facts', stageKey: 'S1', order: 1, status: 'In Progress' },
+      { stepKey: 'T2', title: 'Prepare draft', stageKey: 'S1', order: 2, status: 'Not Started' },
+    ],
+    save: saveSpy,
+  };
+  const actor = { actorName: 'Alice', actorEmail: 'alice@example.com', actorUserId: '507f1f77bcf86cd799439012', actorRole: 'associate' } as any;
+  const beforeApprovalOpen = { ...inst };
+  beforeApprovalOpen.steps = inst.steps.map((step: any) => ({ ...step }));
+  beforeApprovalOpen.currentStepKey = 'T1';
+  const afterInitiator = { ...beforeApprovalOpen, save: saveSpy };
+  afterInitiator.steps = beforeApprovalOpen.steps.map((step: any) => ({ ...step }));
+  await completeStepForCase(actor, workflow, afterInitiator, 'T1');
+  check('review flow: a tick records the work as done, not as approved', afterInitiator.steps[0].status === 'Done');
+  check('review flow: current step stays on the in-flight action until approval', afterInitiator.currentStepKey === 'T1');
+
+  const reviewerActor = { actorName: 'Bob', actorEmail: 'bob@example.com', actorUserId: '507f1f77bcf86cd799439013', actorRole: 'associate' } as any;
+  const pendingApproval = { ...afterInitiator, save: saveSpy };
+  pendingApproval.steps = afterInitiator.steps.map((step: any) => ({ ...step }));
+  pendingApproval.steps[0].status = 'Awaiting Review';
+  pendingApproval.currentStepKey = 'T1';
+  await completeStepForCase(reviewerActor, workflow, pendingApproval, 'T1', { finalApproval: true });
+  check('review flow: final approval marks the step complete', pendingApproval.steps[0].status === 'Completed');
+  check('review flow: the workflow advances to the next step only on final approval', pendingApproval.currentStepKey === 'T2');
+
+  const independentlyCompletableWorkflow = {
+    _id: '507f1f77bcf86cd799439014',
+    status: 'In Progress',
+    caseAssignments: { initiator: 'Alice', reviewer: 'Bob', signerApprover: 'Carol' },
+    save: async () => undefined,
+    workflowProgress: { status: 'In Progress' },
+  } as any;
+  const independentlyCompletableInst = {
+    _id: 'inst-2',
+    status: 'Active',
+    currentStepKey: 'T1',
+    steps: [
+      { stepKey: 'T1', title: 'Collect facts', stageKey: 'S1', order: 1, status: 'Awaiting Review', actions: [{ text: 'Check facts', done: true }] },
+      { stepKey: 'T2', title: 'Prepare draft', stageKey: 'S1', order: 2, status: 'Not Started', actions: [{ text: 'Draft memo', done: false }] },
+    ],
+    save: async () => undefined,
+  } as any;
+  await completeStepForCase(actor, independentlyCompletableWorkflow, independentlyCompletableInst, 'T2');
+  check(
+    'independent workflow: a later key action can be ticked while an earlier one awaits review',
+    independentlyCompletableInst.steps[1].status === 'Done'
+  );
+
+  const noOrderRejectionInst = {
+    _id: 'inst-3',
+    status: 'Active',
+    currentStepKey: 'T1',
+    steps: [
+      { stepKey: 'T1', title: 'Collect facts', stageKey: 'S1', order: 1, status: 'In Progress' },
+      { stepKey: 'T2', title: 'Prepare draft', stageKey: 'S1', order: 2, status: 'Not Started' },
+    ],
+    save: async () => undefined,
+  } as any;
+  await completeStepForCase(actor, independentlyCompletableWorkflow, noOrderRejectionInst, 'T2');
+  check(
+    'independent workflow: the completion API never adds a conflicting order rejection',
+    noOrderRejectionInst.steps[1].status === 'Done'
+  );
+
+  await completeStepForCase(
+    reviewerActor,
+    independentlyCompletableWorkflow,
+    independentlyCompletableInst,
+    'T2',
+    { finalApproval: true }
+  );
+  check(
+    'independent workflow: approving one action does not complete the workflow while another action is pending',
+    independentlyCompletableInst.status === 'Active' &&
+      independentlyCompletableInst.steps[0].status === 'Awaiting Review' &&
+      independentlyCompletableInst.currentStepKey === 'T1'
+  );
 
   check(
     'percent: weighted by step percentages',
@@ -331,7 +422,7 @@ const run = async () => {
   await connectDB();
 
   console.log('\nA. Workflow merge + completion logic (no database writes)');
-  verifyMergeLogic();
+  await verifyMergeLogic();
 
   console.log('\nB. API guards - stale saves and closed matters (rejection paths only)');
   await verifyControllerGuards();

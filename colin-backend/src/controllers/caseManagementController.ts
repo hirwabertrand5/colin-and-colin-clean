@@ -329,7 +329,7 @@ export const requestApproval = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'This Key Action is already completed.' });
     }
     const current = String(step.status || '');
-    if (current !== 'Awaiting Review' && current !== 'In Progress') {
+    if (current !== 'Awaiting Review' && current !== 'Done' && current !== 'In Progress') {
       return res.status(400).json({ message: 'The work must be submitted for review before approval can be requested.' });
     }
 
@@ -406,7 +406,7 @@ export const approveStep = async (req: AuthRequest, res: Response) => {
     }
 
     const actor = actorFromReq(req);
-    await completeStepForCase(actor, ctx.caseDoc, ctx.inst, stepKey);
+    await completeStepForCase(actor, ctx.caseDoc, ctx.inst, stepKey, { finalApproval: true });
 
     const state = await buildCaseManagementState({ ...ctx, req });
     return res.json(state);
