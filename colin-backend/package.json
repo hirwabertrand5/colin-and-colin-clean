@@ -31,6 +31,8 @@
     "retire:step-checklists": "tsx src/scripts/retireStepChecklists.ts",
     "retire:step-checklists:apply": "tsx src/scripts/retireStepChecklists.ts --apply",
     "backup:workflows": "tsx src/scripts/backupWorkflowData.ts",
+    "purge:workflow-templates": "tsx src/scripts/purgeWorkflowTemplates.ts",
+    "purge:workflow-templates:apply": "tsx src/scripts/purgeWorkflowTemplates.ts --apply",
     "backup:case-records": "tsx src/scripts/backupCaseRecords.ts",
     "normalize:workflows": "ts-node src/scripts/normalizeWorkflowNumbering.ts",
     "reset:password": "tsx src/scripts/resetUserPassword.ts"

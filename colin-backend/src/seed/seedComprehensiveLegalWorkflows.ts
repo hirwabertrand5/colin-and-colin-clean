@@ -479,10 +479,18 @@ const templates: WorkflowSeed[] = [
   },
 ];
 
+// The SEALED_TEMPLATE_NAMES whitelist below only keeps seed entries whose templates
+// survived the post-audit purge (every surviving template is active AND carries
+// Key Action percentages). Everything purged must NOT be re-invoked here:
+// server.ts runs this function on EVERY boot and each seed uses upsert
+// ($setOnInsert), so any deleted template listed here comes straight back.
+const SEALED_TEMPLATE_NAMES = new Set(['Auction & Mortgage Enforcement']);
+
 export const seedComprehensiveLegalWorkflows = async () => {
   const seeded = [];
 
   for (const template of templates) {
+    if (!SEALED_TEMPLATE_NAMES.has(template.name)) continue;
     await WorkflowTemplate.updateMany(
       { name: template.name, version: { $lt: template.version } },
       { $set: { active: false } }

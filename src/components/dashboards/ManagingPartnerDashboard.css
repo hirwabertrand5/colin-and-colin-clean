@@ -179,6 +179,19 @@
   padding: 14px;
 }
 
+.mp-card-clickable {
+  cursor: pointer;
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+
+.mp-card-clickable:hover,
+.mp-card-clickable:focus-visible {
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.1);
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  transform: translateY(-1px);
+}
+
 .mp-card-header {
   align-items: center;
   display: flex;

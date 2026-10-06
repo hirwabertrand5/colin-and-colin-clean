@@ -1,34 +1,21 @@
-import { seedDueDiligenceTemplate } from './seedDueDiligence';
 import { seedNGORegistrationTemplate } from './seedNGORegistration';
-import { seedArbitrationTemplate } from './seedArbitration';
-import { seedCommercialWorkflowTemplate } from './seedCommercialWorkflow';
-import { seedLaborProcedureTemplate } from './seedLaborProcedure';
-import { seedBusinessRegistrationTemplate } from './seedBusinessRegistration';
 import { seedBusinessRegistrationTemplateV2 } from './seedBusinessRegistrationV2';
-import { seedCriminalProcedureTemplate } from './seedCriminalProcedure';
-import { seedTontineRegistrationTemplate } from './seedTontineRegistration';
-import { seedDataProtectionLicensesTemplate } from './seedDataProtectionLicenses';
-import { seedImmigrationTemplate } from './seedImmigration';
 import { seedComprehensiveLegalWorkflows } from './seedComprehensiveLegalWorkflows';
-import { seedVehicleOwnershipTransferTemplate } from './seedVehicleOwnershipTransfer';
 import { seedClientExperienceTemplates } from './seedClientExperienceTemplates';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import { normalizeTemplatePercentages } from '../utils/workflowPercentages';
 
 export const seedAllWorkflowTemplates = async () => {
-  await seedDueDiligenceTemplate();
+  // ONLY seeds whose templates survived the purge may run here. server.ts calls
+  // this on EVERY boot and each seed upserts ($setOnInsert), so re-invoking a
+  // purged template's seed resurrects it. Purged (do NOT re-add):
+  //  Due Diligence, Arbitration, Commercial Litigation, Labor, Business
+  //  Registration v1, Criminal Procedure, Tontine, Data Protection,
+  //  Immigration, Vehicle Ownership (+ all non-Auction comprehensive entries,
+  //  whitelisted inside seedComprehensiveLegalWorkflows).
   await seedNGORegistrationTemplate();
-  await seedArbitrationTemplate();
-  await seedCommercialWorkflowTemplate();
-  await seedLaborProcedureTemplate();
-  await seedBusinessRegistrationTemplate();
   await seedBusinessRegistrationTemplateV2();
-  await seedCriminalProcedureTemplate();
-  await seedTontineRegistrationTemplate();
-  await seedDataProtectionLicensesTemplate();
-  await seedImmigrationTemplate();
   await seedComprehensiveLegalWorkflows();
-  await seedVehicleOwnershipTransferTemplate();
   await seedClientExperienceTemplates();
 
   // Clamp any manual percentages already stored on the templates so earned-fee

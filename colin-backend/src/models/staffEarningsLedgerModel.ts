@@ -77,7 +77,7 @@ export interface IStaffEarningsLedger extends Document {
 
 const StaffEarningsLedgerSchema = new Schema<IStaffEarningsLedger>(
   {
-    entryKey: { type: String, required: true, index: true },
+    entryKey: { type: String, required: true },
     revision: { type: Number, required: true, default: 1 },
 
     caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true, index: true },

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Briefcase,
   CheckSquare,
@@ -238,8 +238,26 @@ function DashboardCard({
   className?: string;
   children: React.ReactNode;
 }) {
+  const navigate = useNavigate();
+  const navigateFromCard = (event: React.MouseEvent<HTMLElement>) => {
+    if (!to || (event.target instanceof Element && event.target.closest('a, button, input, select, textarea, [role="button"], [role="link"]'))) return;
+    navigate(to);
+  };
+  const navigateFromKeyboard = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!to || event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    navigate(to);
+  };
+
   return (
-    <section className={`mp-card ${className}`}>
+    <section
+      className={`mp-card ${to ? 'mp-card-clickable' : ''} ${className}`}
+      onClick={to ? navigateFromCard : undefined}
+      onKeyDown={to ? navigateFromKeyboard : undefined}
+      tabIndex={to ? 0 : undefined}
+      role={to ? 'link' : undefined}
+      aria-label={to ? `${title}: open source details` : undefined}
+    >
       <div className="mp-card-header">
         <h2>{title}</h2>
         {to ? (
@@ -793,7 +811,7 @@ export default function ManagingPartnerDashboard() {
           tone="green"
           trend={sources.billing ? newestMonthPair(revenueTrend) : null}
           data={sources.billing ? revenueTrend : []}
-          to="/billing"
+          to="/billing/finance/financial-dashboard/total-billed"
         />
         <MetricCard
           title="Fees Collected (YTD)"
@@ -803,7 +821,7 @@ export default function ManagingPartnerDashboard() {
           tone="teal"
           trend={sources.billing ? newestMonthPair(collectionTrend) : null}
           data={sources.billing ? collectionTrend : []}
-          to="/billing"
+          to="/billing/finance/financial-dashboard/total-collected"
         />
         <MetricCard
           title="Outstanding Receivables"
@@ -814,7 +832,7 @@ export default function ManagingPartnerDashboard() {
           trend={sources.billing ? newestMonthPair(outstandingTrend) : null}
           trendDirection="down"
           data={sources.billing ? outstandingTrend : []}
-          to="/billing/invoices"
+          to="/billing/finance/financial-dashboard/outstanding"
         />
         <MetricCard
           title="Open Tasks"
@@ -824,7 +842,7 @@ export default function ManagingPartnerDashboard() {
           tone="purple"
           trend={sources.cases ? newestMonthPair(openTaskSeries.length ? openTaskSeries : [{ label: 'Now', value: currentOpenTasks }]) : null}
           data={sources.cases ? openTaskSeries : []}
-          to="/tasks"
+          to="/matters"
         />
         <MetricCard
           title="Matters Nearing Deadline"
@@ -860,7 +878,7 @@ export default function ManagingPartnerDashboard() {
           </div>
         </DashboardCard>
 
-        <DashboardCard title="Financial Performance (YTD)" action="View full report" to="/billing" className="mp-span-4">
+        <DashboardCard title="Financial Performance (YTD)" action="View full report" to="/billing/finance/financial-dashboard" className="mp-span-4">
           <div className="mp-finance">
             <div className="mp-finance-list">
               <ValueRow color="#2563eb" label="Total Contract Value" value={formatMoney(totalContractValue)} />
@@ -927,7 +945,7 @@ export default function ManagingPartnerDashboard() {
           </div>
         </DashboardCard>
 
-        <DashboardCard title="People & Capacity Overview" action="View full capacity" to="/performance" className="mp-span-4">
+        <DashboardCard title="People & Capacity Overview" action="View full capacity" to="/management/people/capacity" className="mp-span-4">
           <div className="mp-mini-kpis">
             <div title="Active staff accounts in the user directory."><Users size={18} /><span>Total People</span><strong>{formatCount(totalPeople)}</strong></div>
             <div title="Share of the team carrying more than 3 open matters (Committed or Overloaded)."><TrendingUp size={18} /><span>Utilization</span><strong>{formatPercent(utilization)}</strong></div>
@@ -959,7 +977,7 @@ export default function ManagingPartnerDashboard() {
           </div>
         </DashboardCard>
 
-        <DashboardCard title="Clients & Business Development" action="View full pipeline" to="/matters/intake-prospects" className="mp-span-4">
+        <DashboardCard title="Clients & Business Development" action="View full pipeline" to="/management/clients-business-development" className="mp-span-4">
           <div className="mp-mini-kpis mp-mini-kpis-three">
             <div><Users size={18} /><span>Active Clients</span><strong>{sources.cases ? formatCount(new Set(activeMatters.map((matter) => matter.parties)).size) : NA}</strong></div>
             <div><Handshake size={18} /><span>New Clients (YTD)</span><strong>{sources.prospects ? formatCount(convertedProspects.length) : NA}</strong></div>
@@ -989,7 +1007,7 @@ export default function ManagingPartnerDashboard() {
           </div>
         </DashboardCard>
 
-        <DashboardCard title="Cash Flow (YTD)" action="View full cash flow" to="/billing" className="mp-span-4">
+        <DashboardCard title="Cash Flow (YTD)" action="View full cash flow" to="/billing/finance/cash-flow" className="mp-span-4">
           <div className="mp-cash-summary">
             <div><span>Money In</span><strong>{formatMoney(totalCollected)}</strong></div>
             <div><span>Money Out</span><strong>{formatMoney((directMatterCosts || 0) + toNumber(summary?.firmOperatingExpenses))}</strong></div>
