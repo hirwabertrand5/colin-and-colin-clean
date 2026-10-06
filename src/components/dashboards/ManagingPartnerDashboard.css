@@ -391,6 +391,64 @@
   overflow-wrap: anywhere;
 }
 
+/* Inner deep-links: every figure/row navigates to its exact source view.
+   Inner clicks must not bubble to the card shell navigation. */
+.mp-value-row-link,
+.mp-funnel-row-link,
+.mp-alert-row-link,
+.mp-mini-kpi-link,
+.mp-inline-link {
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.mp-mini-kpi-link {
+  display: flex;
+}
+
+.mp-value-row-link:hover,
+.mp-funnel-row-link:hover,
+.mp-alert-row-link:hover,
+.mp-mini-kpi-link:hover {
+  filter: brightness(0.97);
+}
+
+.mp-value-row-link:hover strong,
+.mp-alert-row-link:hover span,
+.mp-mini-kpi-link:hover strong {
+  color: #1d4ed8;
+}
+
+.mp-inline-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.mp-row-chevron {
+  display: inline-block;
+  margin-left: 2px;
+  vertical-align: -1px;
+}
+
+.mp-inline-link:focus-visible,
+.mp-value-row-link:focus-visible,
+.mp-funnel-row-link:focus-visible,
+.mp-alert-row-link:focus-visible,
+.mp-mini-kpi-link:focus-visible,
+.mp-activity-row:focus-visible,
+.mp-deadline-row:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.dark .mp-value-row-link:hover strong,
+.dark .mp-alert-row-link:hover span,
+.dark .mp-mini-kpi-link:hover strong,
+.dark .mp-inline-link:hover {
+  color: #93c5fd;
+}
+
 .mp-deadline-row,
 .mp-activity-row {
   align-items: center;

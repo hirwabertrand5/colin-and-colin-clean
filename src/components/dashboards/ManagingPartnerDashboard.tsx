@@ -45,6 +45,7 @@ import { getActivePettyCashFund, PettyCashFund } from '../../services/pettyCashS
 import { getStaffUsers, User as StaffUser } from '../../services/userService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { caseMatchesAssignee } from '../../utils/caseAssignments';
+import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import './ManagingPartnerDashboard.css';
 
@@ -344,6 +345,31 @@ function ValueRow({ color, label, value }: { color: string; label: string; value
   );
 }
 
+/** Stop a click on an inner link/row from also triggering the card shell navigation. */
+const stopCardNavigation = (event: React.SyntheticEvent) => {
+  event.stopPropagation();
+};
+
+/**
+ * A ValueRow whose value deep-links to the exact source view of that figure.
+ * Renders as a plain row (no dead link) when `to` is absent.
+ */
+function LinkedValueRow({ color, label, value, to, title }: { color: string; label: string; value: React.ReactNode; to?: string; title?: string }) {
+  if (!to) return <ValueRow color={color} label={label} value={value} />;
+  return (
+    <Link
+      to={to}
+      title={title || `Open ${label} source`}
+      className="mp-value-row mp-value-row-link"
+      onClick={stopCardNavigation}
+    >
+      <span className="mp-dot" style={{ backgroundColor: color }} />
+      <span>{label}</span>
+      <strong>{value} <ChevronRight size={11} className="mp-row-chevron" /></strong>
+    </Link>
+  );
+}
+
 function Donut({
   data,
   centerValue,
@@ -374,26 +400,31 @@ function Donut({
   );
 }
 
-function Funnel({ rows }: { rows: Array<{ label: string; value: number; color: string }> }) {
+function Funnel({ rows }: { rows: Array<{ label: string; value: number; color: string; to?: string }> }) {
   const max = Math.max(...rows.map((row) => row.value), 1);
-  return (
-    <div className="mp-funnel">
-      {rows.map((row, index) => (
-        <div
-          key={row.label}
-          className="mp-funnel-row"
-          style={{
-            width: `${Math.max(42, (row.value / max) * 100)}%`,
-            backgroundColor: row.color,
-            marginLeft: `${index * 3}%`,
-          }}
-        >
-          <strong>{formatCount(row.value)}</strong>
-          <span>{row.label}</span>
-        </div>
-      ))}
-    </div>
-  );
+  const body = rows.map((row, index) => {
+    const style = {
+      width: `${Math.max(42, (row.value / max) * 100)}%`,
+      backgroundColor: row.color,
+      marginLeft: `${index * 3}%`,
+    };
+    const inner = (
+      <>
+        <strong>{formatCount(row.value)}</strong>
+        <span>{row.label}</span>
+      </>
+    );
+    return row.to ? (
+      <Link key={row.label} to={row.to} className="mp-funnel-row mp-funnel-row-link" style={style} onClick={stopCardNavigation}>
+        {inner}
+      </Link>
+    ) : (
+      <div key={row.label} className="mp-funnel-row" style={style}>
+        {inner}
+      </div>
+    );
+  });
+  return <div className="mp-funnel">{body}</div>;
 }
 
 function HorizontalBars({
@@ -507,7 +538,9 @@ export default function ManagingPartnerDashboard() {
         nextSources.fund = true;
       }
       if (results[8].status === 'fulfilled') {
-        setStaff(results[8].value);
+        // Keep the working-team directory: only active staff appear on this
+        // board (Total People, Capacity Distribution, Utilization).
+        setStaff(results[8].value.filter((person) => person?.isActive !== false));
         nextSources.staff = true;
       }
 
@@ -645,13 +678,13 @@ export default function ManagingPartnerDashboard() {
     const completion = cases.filter((matter) => isMatterCompleted(matter)).length;
     const closed = cases.filter(isClosedMatter).length;
     return [
-      { label: 'Inquiry / Intake', value: inquiry, color: '#1d4ed8' },
-      { label: 'Assessment', value: assessment, color: '#2563eb' },
-      { label: 'Engagement', value: engagement, color: '#06b6d4' },
-      { label: 'Active', value: active, color: '#22c55e' },
-      { label: 'Review', value: review, color: '#f59e0b' },
-      { label: 'Completion', value: completion, color: '#fb923c' },
-      { label: 'Closed', value: closed, color: '#ef4444' },
+      { label: 'Inquiry / Intake', value: inquiry, color: '#1d4ed8', to: '/matters/intake-prospects' },
+      { label: 'Assessment', value: assessment, color: '#2563eb', to: '/matters' },
+      { label: 'Engagement', value: engagement, color: '#06b6d4', to: '/matters' },
+      { label: 'Active', value: active, color: '#22c55e', to: '/matters' },
+      { label: 'Review', value: review, color: '#f59e0b', to: '/tasks/awaiting-review' },
+      { label: 'Completion', value: completion, color: '#fb923c', to: '/matters' },
+      { label: 'Closed', value: closed, color: '#ef4444', to: '/matters/closed' },
     ];
   }, [activeMatters, cases, openProspects.length, tasks]);
 
@@ -753,12 +786,12 @@ export default function ManagingPartnerDashboard() {
     : null;
 
   const managementAlerts = useMemo(() => {
-    const alerts: Array<{ tone: AlertTone; text: string; time: string }> = [];
-    if (highRiskMatters && highRiskMatters > 0) alerts.push({ tone: 'critical', text: `${highRiskMatters} matters require your immediate attention`, time: 'Live' });
-    if (pendingInvoiceTotal > 0) alerts.push({ tone: 'high', text: `${pendingInvoices.length} invoices are pending (${formatMoney(pendingInvoiceTotal)})`, time: 'Live' });
-    if (overdueTasks.length > 0) alerts.push({ tone: 'high', text: `${overdueTasks.length} matters are overdue`, time: 'Live' });
-    if (nearDeadlines.length > 0) alerts.push({ tone: 'medium', text: `${nearDeadlines.length} deadlines due in the next 7 days`, time: 'Live' });
-    if (conflictReviews && conflictReviews > 0) alerts.push({ tone: 'medium', text: `${conflictReviews} conflict checks require review`, time: 'Live' });
+    const alerts: Array<{ tone: AlertTone; text: string; time: string; to: string }> = [];
+    if (highRiskMatters && highRiskMatters > 0) alerts.push({ tone: 'critical', text: `${highRiskMatters} matters require your immediate attention`, time: 'Live', to: '/management/risk-compliance?view=critical-matters' });
+    if (pendingInvoiceTotal > 0) alerts.push({ tone: 'high', text: `${pendingInvoices.length} invoices are pending (${formatMoney(pendingInvoiceTotal)})`, time: 'Live', to: '/billing/finance/invoicing/pending' });
+    if (overdueTasks.length > 0) alerts.push({ tone: 'high', text: `${overdueTasks.length} matters are overdue`, time: 'Live', to: '/matters' });
+    if (nearDeadlines.length > 0) alerts.push({ tone: 'medium', text: `${nearDeadlines.length} deadlines due in the next 7 days`, time: 'Live', to: '/deadlines/upcoming' });
+    if (conflictReviews && conflictReviews > 0) alerts.push({ tone: 'medium', text: `${conflictReviews} conflict checks require review`, time: 'Live', to: '/management/risk-compliance?view=conflicts' });
     return alerts.slice(0, 5);
   }, [conflictReviews, highRiskMatters, nearDeadlines.length, overdueTasks.length, pendingInvoiceTotal, pendingInvoices.length]);
 
@@ -852,7 +885,7 @@ export default function ManagingPartnerDashboard() {
           tone="red"
           trend={null}
           data={[]}
-          to="/calendar"
+          to="/deadlines/upcoming"
         />
       </div>
 
@@ -881,13 +914,13 @@ export default function ManagingPartnerDashboard() {
         <DashboardCard title="Financial Performance (YTD)" action="View full report" to="/billing/finance/financial-dashboard" className="mp-span-4">
           <div className="mp-finance">
             <div className="mp-finance-list">
-              <ValueRow color="#2563eb" label="Total Contract Value" value={formatMoney(totalContractValue)} />
-              <ValueRow color="#06b6d4" label="Total Billed" value={formatMoney(totalBilled)} />
-              <ValueRow color="#22c55e" label="Total Collected" value={formatMoney(totalCollected)} />
-              <ValueRow color="#f97316" label="Outstanding (Receivables)" value={formatMoney(outstandingValue)} />
-              <ValueRow color="#8b5cf6" label="Direct Matter Costs" value={formatMoney(directMatterCosts)} />
-              <ValueRow color="#eab308" label="Gross Profit" value={formatMoney(grossProfit)} />
-              <ValueRow color="#64748b" label="Gross Profit Margin" value={formatPercent(grossProfitMargin)} />
+              <LinkedValueRow color="#2563eb" label="Total Contract Value" value={formatMoney(totalContractValue)} to="/billing/finance/financial-dashboard/contract-value" title="Open the Total Contract Value breakdown" />
+              <LinkedValueRow color="#06b6d4" label="Total Billed" value={formatMoney(totalBilled)} to="/billing/finance/financial-dashboard/total-billed" title="Open the Total Billed breakdown" />
+              <LinkedValueRow color="#22c55e" label="Total Collected" value={formatMoney(totalCollected)} to="/billing/finance/financial-dashboard/total-collected" title="Open the Total Collected breakdown" />
+              <LinkedValueRow color="#f97316" label="Outstanding (Receivables)" value={formatMoney(outstandingValue)} to="/billing/finance/financial-dashboard/outstanding" title="Open the Outstanding receivables breakdown" />
+              <LinkedValueRow color="#8b5cf6" label="Direct Matter Costs" value={formatMoney(directMatterCosts)} to="/billing/finance/financial-dashboard/direct-matter-costs" title="Open the Direct Matter Costs breakdown" />
+              <LinkedValueRow color="#eab308" label="Gross Profit" value={formatMoney(grossProfit)} to="/billing/finance/financial-dashboard/gross-profit" title="Open the Gross Profit breakdown" />
+              <LinkedValueRow color="#64748b" label="Gross Profit Margin" value={formatPercent(grossProfitMargin)} to="/billing/finance/financial-dashboard/gross-profit-margin" title="Open the Gross Profit Margin breakdown" />
             </div>
             <div className="mp-finance-chart">
               <h3>Revenue vs Collections</h3>
@@ -908,11 +941,19 @@ export default function ManagingPartnerDashboard() {
               <div className="mp-profit-cards">
                 <div>
                   <span>Net Profit</span>
-                  <strong>{formatMoney(netProfit)}</strong>
+                  <strong>
+                    <Link to="/billing/finance/financial-dashboard/net-profit" className="mp-inline-link" onClick={stopCardNavigation} title="Open the Net Profit breakdown">
+                      {formatMoney(netProfit)}
+                    </Link>
+                  </strong>
                 </div>
                 <div>
                   <span>Net Profit Margin</span>
-                  <strong>{formatPercent(netProfitMargin)}</strong>
+                  <strong>
+                    <Link to="/billing/finance/financial-dashboard/net-profit-margin" className="mp-inline-link" onClick={stopCardNavigation} title="Open the Net Profit Margin breakdown">
+                      {formatPercent(netProfitMargin)}
+                    </Link>
+                  </strong>
                 </div>
               </div>
             </div>
@@ -925,8 +966,11 @@ export default function ManagingPartnerDashboard() {
               upcomingDeadlines.map((event) => {
                 const day = new Date(`${event.date}T00:00:00`);
                 const diffDays = Math.ceil((day.getTime() - new Date(`${today}T00:00:00`).getTime()) / 86400000);
+                // Exact record: the matter's Case Management tab when the event is
+                // matter-linked (buildCaseManagementLink), else the deadline page.
+                const eventHref = event.caseId ? buildCaseManagementLink(event.caseId) : '/deadlines/upcoming';
                 return (
-                  <Link to="/calendar" className="mp-deadline-row" key={event._id || `${event.title}-${event.date}`}>
+                  <Link to={eventHref} className="mp-deadline-row" key={event._id || `${event.title}-${event.date}`} onClick={stopCardNavigation} title={event.caseId ? 'Open this matter in Case Management' : 'Open Upcoming Deadlines'}>
                     <div className="mp-deadline-date">
                       <span>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
                       <strong>{day.toLocaleDateString('en-US', { day: '2-digit' })}</strong>
@@ -947,10 +991,10 @@ export default function ManagingPartnerDashboard() {
 
         <DashboardCard title="People & Capacity Overview" action="View full capacity" to="/management/people/capacity" className="mp-span-4">
           <div className="mp-mini-kpis">
-            <div title="Active staff accounts in the user directory."><Users size={18} /><span>Total People</span><strong>{formatCount(totalPeople)}</strong></div>
-            <div title="Share of the team carrying more than 3 open matters (Committed or Overloaded)."><TrendingUp size={18} /><span>Utilization</span><strong>{formatPercent(utilization)}</strong></div>
-            <div title="Remaining planned value of open matters (planned value minus completed value)."><CircleDollarSign size={18} /><span>Billable Capacity</span><strong>{formatMoney(billableCapacity)}</strong></div>
-            <div title="Unfilled matter-team roles (Initiator, Reviewer, Signer/Approver) on open matters."><Briefcase size={18} /><span>Open Positions</span><strong>{formatCount(openPositions)}</strong></div>
+            <Link to="/management/people/all-staff" className="mp-mini-kpi-link" onClick={stopCardNavigation} title="Active staff accounts in the user directory."><Users size={18} /><span>Total People</span><strong>{formatCount(totalPeople)}</strong></Link>
+            <Link to="/management/people/utilisation" className="mp-mini-kpi-link" onClick={stopCardNavigation} title="Share of the team carrying more than 3 open matters (Committed or Overloaded)."><TrendingUp size={18} /><span>Utilization</span><strong>{formatPercent(utilization)}</strong></Link>
+            <Link to="/management/matters/financial-status" className="mp-mini-kpi-link" onClick={stopCardNavigation} title="Remaining planned value of open matters (planned value minus completed value)."><CircleDollarSign size={18} /><span>Billable Capacity</span><strong>{formatMoney(billableCapacity)}</strong></Link>
+            <Link to="/management/people/capacity" className="mp-mini-kpi-link" onClick={stopCardNavigation} title="Unfilled matter-team roles (Initiator, Reviewer, Signer/Approver) on open matters."><Briefcase size={18} /><span>Open Positions</span><strong>{formatCount(openPositions)}</strong></Link>
           </div>
           <div className="mp-two-col">
             <div>
@@ -979,9 +1023,9 @@ export default function ManagingPartnerDashboard() {
 
         <DashboardCard title="Clients & Business Development" action="View full pipeline" to="/management/clients-business-development" className="mp-span-4">
           <div className="mp-mini-kpis mp-mini-kpis-three">
-            <div><Users size={18} /><span>Active Clients</span><strong>{sources.cases ? formatCount(new Set(activeMatters.map((matter) => matter.parties)).size) : NA}</strong></div>
-            <div><Handshake size={18} /><span>New Clients (YTD)</span><strong>{sources.prospects ? formatCount(convertedProspects.length) : NA}</strong></div>
-            <div><WalletCards size={18} /><span>Pipeline Value</span><strong>{formatMoney(pipelineValue)}</strong></div>
+            <Link to="/management/clients-business-development?view=client-0" className="mp-mini-kpi-link" onClick={stopCardNavigation} title="Open the client portfolio (unique clients from matter records)."><Users size={18} /><span>Active Clients</span><strong>{sources.cases ? formatCount(new Set(activeMatters.map((matter) => matter.parties)).size) : NA}</strong></Link>
+            <Link to="/management/clients-business-development?view=business-4" className="mp-mini-kpi-link" onClick={stopCardNavigation} title="Open conversion performance (converted prospect records)."><Handshake size={18} /><span>New Clients (YTD)</span><strong>{sources.prospects ? formatCount(convertedProspects.length) : NA}</strong></Link>
+            <Link to="/management/clients-business-development?view=business-1" className="mp-mini-kpi-link" onClick={stopCardNavigation} title="Open the active prospect pipeline."><WalletCards size={18} /><span>Pipeline Value</span><strong>{formatMoney(pipelineValue)}</strong></Link>
           </div>
           <div className="mp-two-col">
             <div>
@@ -998,20 +1042,20 @@ export default function ManagingPartnerDashboard() {
 
         <DashboardCard title="Risk & Compliance Overview" action="View all" to="/management/risk-compliance?view=risk-overview" className="mp-span-3">
           <div className="mp-risk-list">
-            <ValueRow color="#ef4444" label="High Risk Matters" value={formatCount(highRiskMatters)} />
-            <ValueRow color="#ef4444" label="Conflicts Requiring Review" value={formatCount(conflictReviews)} />
+            <LinkedValueRow color="#ef4444" label="Matters Overdue" value={formatCount(complianceExceptions)} to="/matters" title="Open the matters list (overdue matters)" />
+            <LinkedValueRow color="#ef4444" label="Conflicts Requiring Review" value={formatCount(conflictReviews)} to="/management/risk-compliance?view=conflicts" title="Open flagged conflict checks" />
             <ValueRow color="#f59e0b" label="KYC / AML Pending" value={NA} />
-            <ValueRow color="#f59e0b" label="Regulatory Deadlines" value={formatCount(regulatoryDeadlines)} />
-            <ValueRow color="#ef4444" label="Compliance Exceptions" value={formatCount(complianceExceptions)} />
+            <LinkedValueRow color="#f59e0b" label="Regulatory Deadlines" value={formatCount(regulatoryDeadlines)} to="/deadlines/regulatory" title="Open regulatory deadlines" />
+            <LinkedValueRow color="#ef4444" label="Critical Matters (priority high or ≤25% progress)" value={formatCount(highRiskMatters)} to="/management/risk-compliance?view=critical-matters" title="Open critical matters" />
             <ValueRow color="#f59e0b" label="Documents Expiring (30 days)" value={NA} />
           </div>
         </DashboardCard>
 
         <DashboardCard title="Cash Flow (YTD)" action="View full cash flow" to="/billing/finance/cash-flow" className="mp-span-4">
           <div className="mp-cash-summary">
-            <div><span>Money In</span><strong>{formatMoney(totalCollected)}</strong></div>
-            <div><span>Money Out</span><strong>{formatMoney((directMatterCosts || 0) + toNumber(summary?.firmOperatingExpenses))}</strong></div>
-            <div><span>Petty Cash</span><strong>{sources.fund ? formatMoney(activeFund?.remainingAmount ?? null) : NA}</strong></div>
+            <div><span>Money In</span><strong><Link to="/billing/finance/financial-dashboard/total-collected" className="mp-inline-link" onClick={stopCardNavigation} title="Open the Total Collected breakdown">{formatMoney(totalCollected)}</Link></strong></div>
+            <div><span>Money Out</span><strong><Link to="/billing/finance/financial-dashboard/direct-matter-costs" className="mp-inline-link" onClick={stopCardNavigation} title="Open matter costs and operating expenses">{formatMoney((directMatterCosts || 0) + toNumber(summary?.firmOperatingExpenses))}</Link></strong></div>
+            <div><span>Petty Cash</span><strong><Link to="/petty-cash" className="mp-inline-link" onClick={stopCardNavigation} title="Open the active petty cash fund">{sources.fund ? formatMoney(activeFund?.remainingAmount ?? null) : NA}</Link></strong></div>
           </div>
           <ResponsiveContainer width="100%" height={150}>
             <ComposedChart data={cashRows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
@@ -1030,11 +1074,11 @@ export default function ManagingPartnerDashboard() {
           <div className="mp-alerts">
             {managementAlerts.length ? (
               managementAlerts.map((alert) => (
-                <div className="mp-alert-row" key={alert.text}>
+                <Link to={alert.to} className="mp-alert-row mp-alert-row-link" key={alert.text} onClick={stopCardNavigation} title="Open the source of this alert">
                   <AlertPill tone={alert.tone} />
                   <span>{alert.text}</span>
                   <em>{alert.time}</em>
-                </div>
+                </Link>
               ))
             ) : (
               <EmptyState label="No active management alerts." />
@@ -1046,7 +1090,7 @@ export default function ManagingPartnerDashboard() {
           <div className="mp-activity-list">
             {recentActivities.length ? (
               recentActivities.map((activity) => (
-                <Link to={activity.caseId ? `/matters/${activity.caseId}` : '/matters'} key={activity._id} className="mp-activity-row">
+                <Link to={activity.caseId ? `/matters/${activity.caseId}` : '/matters'} key={activity._id} className="mp-activity-row" onClick={stopCardNavigation} title={activity.caseId ? 'Open this matter' : 'Open the matters list'}>
                   <FileText size={15} />
                   <div>
                     <strong>{activity.message || activity.action || NA}</strong>
