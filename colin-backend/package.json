@@ -35,6 +35,9 @@
     "purge:workflow-templates:apply": "tsx src/scripts/purgeWorkflowTemplates.ts --apply",
     "backup:case-records": "tsx src/scripts/backupCaseRecords.ts",
     "normalize:workflows": "ts-node src/scripts/normalizeWorkflowNumbering.ts",
+    "audit:currency": "tsx src/scripts/auditRwfCurrency.ts",
+    "normalize:currency": "tsx src/scripts/normalizeRwfCurrency.ts",
+    "normalize:currency:apply": "tsx src/scripts/normalizeRwfCurrency.ts --apply",
     "reset:password": "tsx src/scripts/resetUserPassword.ts"
   },
   "dependencies": {

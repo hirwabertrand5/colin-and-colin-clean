@@ -35,7 +35,7 @@ const PettyCashFundSchema = new Schema<IPettyCashFund>(
     name: { type: String, required: true, trim: true },
     description: { type: String },
 
-    currency: { type: String, default: 'RWF' },
+    currency: { type: String, enum: ['RWF'], default: 'RWF' },
 
     initialAmount: { type: Number, required: true, min: 0 },
     spentAmount: { type: Number, required: true, default: 0, min: 0 },

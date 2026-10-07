@@ -67,7 +67,7 @@ export interface IWorkflowTemplate extends Document {
 const FeeSpecSchema = new Schema<IFeeSpec>(
   {
     type: { type: String, enum: ['fixed', 'range', 'percentage', 'text', 'included'], required: true },
-    currency: { type: String },
+    currency: { type: String, enum: ['RWF'], default: 'RWF' },
     min: { type: Number },
     max: { type: Number },
     percentage: { type: Number },

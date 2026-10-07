@@ -243,10 +243,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
     return task?.relatedClient || 'Case unavailable';
   }, [caseData, task?.relatedClient]);
 
-  const billingCurrency = useMemo(
-    () => caseData?.billingSettings?.currency || caseData?.workflowProgress?.plannedValue?.currency || 'RWF',
-    [caseData?.billingSettings?.currency, caseData?.workflowProgress?.plannedValue?.currency]
-  );
+  const billingCurrency = useMemo(() => 'RWF' as const, []);
 
   const workflowStage = useMemo(
     () => task?.workflowStage || inferWorkflowStageFromStatus(task?.status),

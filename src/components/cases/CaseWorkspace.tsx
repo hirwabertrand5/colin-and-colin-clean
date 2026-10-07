@@ -156,8 +156,7 @@ const getPlannedAmount = (caseData?: CaseData | null) =>
     ? caseData.workflowProgress.plannedValue.amount
     : parseBudgetToNumber(caseData?.budget);
 
-const getPlannedCurrency = (caseData?: CaseData | null) =>
-  caseData?.workflowProgress?.plannedValue?.currency || caseData?.billingSettings?.currency || 'RWF';
+const getPlannedCurrency = (_caseData?: CaseData | null) => 'RWF' as const;
 
 const getInvoiceStatusChip = (status: Invoice['status']) => {
   return status === 'Paid' ? 'bg-green-50 text-green-700' : 'bg-yellow-400 text-black';
@@ -3632,12 +3631,12 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                               ...(c.workflowProgress || {}),
                               plannedValue: {
                                 amount: Number.isFinite(amount) ? amount : 0,
-                                currency: c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF',
+                                currency: 'RWF' as const,
                               },
                             },
                             billingSettings: {
                               ...(c.billingSettings || {}),
-                              currency: c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF',
+                              currency: 'RWF' as const,
                               prepaidTotal: 0,
                               prepaidRemaining: 0,
                             },

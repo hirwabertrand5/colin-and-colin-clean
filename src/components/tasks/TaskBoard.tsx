@@ -260,7 +260,8 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
 
   const renderCard = (card: MatterCard) => {
     const { caseData } = card;
-    const currency = caseData.workflowProgress?.plannedValue?.currency || caseData.billingSettings?.currency || 'RWF';
+    // Single-currency policy: always display RWF (amounts are never converted).
+    const currency = 'RWF' as const;
     const percent = Math.max(0, Math.min(100, Number(caseData.workflowProgress?.percent) || 0));
     const matterLabel = caseData.workflow || caseData.matterType || caseData.caseType || 'Matter';
     const practicePath = getCasePracticePath(caseData);

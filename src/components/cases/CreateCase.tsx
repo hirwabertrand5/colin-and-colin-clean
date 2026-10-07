@@ -424,7 +424,8 @@ export default function CreateCase({
   };
 
   const plannedValueAmount = parseMoneyInput(formData.workflowProgress?.plannedValue?.amount);
-  const plannedValueCurrency = formData.workflowProgress?.plannedValue?.currency || formData.billingSettings?.currency || 'RWF';
+  // Single-currency policy: the whole system operates in RWF only.
+  const plannedValueCurrency = 'RWF' as const;
 
   const selectedWorkflowTemplate = useMemo(
     () => templates.find((t) => t._id === formData.workflowTemplateId),
@@ -432,7 +433,7 @@ export default function CreateCase({
   );
 
   useEffect(() => {
-    const currency = plannedValueCurrency || 'RWF';
+    const currency = 'RWF' as const;
     setFormData((prev) => ({
       ...prev,
       billingSettings: {
@@ -938,17 +939,17 @@ export default function CreateCase({
                           ...(prev.workflowProgress || {}),
                           plannedValue: {
                             amount: amount || undefined,
-                            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+                            currency: 'RWF' as const,
                           },
                           completedValue: {
                             amount: Math.round((amount * (prev.workflowProgress?.percent || 0)) / 100),
-                            currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+                            currency: 'RWF' as const,
                           },
                         },
                         billingSettings: {
                           ...(prev.billingSettings || {}),
                           paymentMode: 'postpaid',
-                          currency: prev.workflowProgress?.plannedValue?.currency || 'RWF',
+                          currency: 'RWF' as const,
                           prepaidTotal: 0,
                           prepaidRemaining: 0,
                           accruedUnbilled: Math.round((amount * (prev.workflowProgress?.percent || 0)) / 100),
@@ -966,33 +967,12 @@ export default function CreateCase({
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Currency</label>
                   <input
-                    value={plannedValueCurrency}
-                    onChange={(e) => {
-                      const currency = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'RWF';
-                      setFormData((prev) => ({
-                        ...prev,
-                        workflowProgress: {
-                          ...(prev.workflowProgress || {}),
-                          plannedValue: {
-                            ...(prev.workflowProgress?.plannedValue || {}),
-                            currency,
-                          },
-                          completedValue: {
-                            amount: prev.workflowProgress?.completedValue?.amount || 0,
-                            currency,
-                          },
-                        },
-                        billingSettings: {
-                          ...(prev.billingSettings || {}),
-                          paymentMode: 'postpaid',
-                          currency,
-                          prepaidTotal: 0,
-                          prepaidRemaining: 0,
-                        },
-                      }));
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                    placeholder="RWF"
+                    value="RWF"
+                    readOnly
+                    disabled
+                    aria-readonly="true"
+                    title="RWF"
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-gray-100 text-gray-900 cursor-not-allowed"
                   />
                 </div>
               </div>

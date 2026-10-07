@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import usePageTitle from '../../hooks/usePageTitle';
-import { getAllProspects, getProspectStats, deleteProspect, convertProspectToMatter, Prospect } from '../../services/prospectService';
+import { getAllProspects, getProspectStats, deleteProspect, Prospect } from '../../services/prospectService';
 import ProspectForm from './ProspectForm';
 import SortableHeader from '../ui/SortableHeader';
 import TableExport from '../ui/TableExport';
@@ -126,18 +126,6 @@ export default function IntakeProspects() {
     }
   };
 
-  const handleConvert = async (prospect: Prospect) => {
-    if (normalizeStage(prospect.stage) !== 'converted') return;
-    if (!window.confirm(`Create a matter from "${prospect.clientName}"?`)) return;
-    try {
-      await convertProspectToMatter(prospect._id);
-      setError('');
-      await loadData();
-    } catch (err: any) {
-      setError(getErrorMessage(err, 'Failed to convert prospect to matter'));
-    }
-  };
-
   const handleFormClose = () => {
     setShowForm(false);
     setSelectedProspect(null);
@@ -246,7 +234,8 @@ export default function IntakeProspects() {
   const formatEstimatedValue = (prospect: Prospect) => {
     const money = formatMoney(prospect.estimatedMatterValue);
     if (!money) return 'Not set';
-    return `${prospect.estimatedMatterCurrency || 'RWF'} ${money}`;
+    // Single-currency policy: always display RWF (amounts are never converted).
+    return `RWF ${money}`;
   };
 
   const getLegalClassificationLabel = (prospect: Prospect) =>
@@ -292,14 +281,31 @@ export default function IntakeProspects() {
     return Array.from({ length: totalPages }, (_, index) => index + 1);
   }, [totalPages]);
 
-  const getActionButton = (prospect: Prospect) => (
-    <Link
-      to={`/matters/intake-prospects/${prospect._id}`}
-      className="text-sm font-semibold text-gray-700 transition hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-    >
-      Open →
-    </Link>
-  );
+  const getActionButton = (prospect: Prospect) => {
+    // Terminal prospects are already moved: Converted lives in Active Matters,
+    // Non-Converted lives in Closed Matters.
+    const matterId = typeof prospect.convertedToMatters === 'string'
+      ? prospect.convertedToMatters
+      : (prospect.convertedToMatters as any)?._id || '';
+    if ((prospect.stage === 'Converted' || prospect.stage === 'Non-Converted') && matterId) {
+      return (
+        <Link
+          to={`/matters/${matterId}`}
+          className="text-sm font-semibold text-gray-700 transition hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+        >
+          View matter →
+        </Link>
+      );
+    }
+    return (
+      <Link
+        to={`/matters/intake-prospects/${prospect._id}`}
+        className="text-sm font-semibold text-gray-700 transition hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+      >
+        Open →
+      </Link>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pt-20 pb-8">
@@ -490,7 +496,7 @@ export default function IntakeProspects() {
 
       {/* Prospect Form Modal */}
       {showForm && (
-        <ProspectForm prospect={selectedProspect} onClose={handleFormClose} />
+        <ProspectForm prospect={selectedProspect} onClose={handleFormClose} onSaved={() => loadData()} />
       )}
     </div>
   );

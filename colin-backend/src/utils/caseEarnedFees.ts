@@ -8,6 +8,7 @@ import {
   resolveMemberTpa,
 } from './workflowPercentages';
 import { resolveDeadlineDateTime } from './deadlineUtils';
+import { SINGLE_CURRENCY } from './currency';
 
 /**
  * Central earned-fee engine for a single matter — the single source of truth
@@ -328,9 +329,8 @@ export const computeCaseEarnedFees = ({
   });
   const earnedValue = earnings.eligibleCollectedValue; // never exceeds completed value or paid invoices
 
-  const currency = String(
-    caseDoc?.workflowProgress?.plannedValue?.currency || caseDoc?.billingSettings?.currency || 'RWF'
-  );
+  // Single-currency policy: always report RWF (amounts are never converted).
+  const currency = SINGLE_CURRENCY;
   const stages = computeStageBreakdownFromInstance(Array.isArray(workflowInstance?.steps) ? workflowInstance.steps : []);
   const { qualityScore, qualityScoredBy, qualityScoredAt } = getMatterQualityScore(caseDoc);
 

@@ -111,15 +111,15 @@ export interface CaseData {
     };
     percent?: number;
     nextDueAt?: string;
-    plannedValue?: { amount?: number; currency?: string };
-    completedValue?: { amount?: number; currency?: string };
+    plannedValue?: { amount?: number; currency?: 'RWF' };
+    completedValue?: { amount?: number; currency?: 'RWF' };
   };
 
   takeRequestState?: TakeRequestState;
 
   billingSettings?: {
     paymentMode?: 'prepaid' | 'postpaid';
-    currency?: string;
+    currency?: 'RWF';
     prepaidTotal?: number;
     prepaidRemaining?: number;
     accruedUnbilled?: number;

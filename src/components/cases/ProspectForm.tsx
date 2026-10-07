@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { createProspect, updateProspect, Prospect, ProspectStage } from '../../services/prospectService';
 import { getRoleSuggestions } from '../../constants/partyRoles';
@@ -9,6 +10,7 @@ interface ProspectFormProps {
   prospect?: Prospect | null;
   onClose: () => void;
   layout?: 'modal' | 'side-over';
+  onSaved?: (saved: Prospect) => void;
 }
 
 const STAGES = [
@@ -61,17 +63,7 @@ const normalizeCompletedStages = (value: unknown, activeStage?: ProspectStage): 
 };
 const CONVERTED_OUTCOMES = ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'];
 const NON_CONVERTED_OUTCOMES = ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'];
-const ESTIMATED_CURRENCIES = [
-  { code: 'RWF', label: 'Rwandan Franc (RWF)' },
-  { code: 'USD', label: 'US Dollar (USD)' },
-  { code: 'EUR', label: 'Euro (EUR)' },
-  { code: 'GBP', label: 'British Pound (GBP)' },
-  { code: 'KES', label: 'Kenyan Shilling (KES)' },
-  { code: 'UGX', label: 'Ugandan Shilling (UGX)' },
-  { code: 'TZS', label: 'Tanzanian Shilling (TZS)' },
-  { code: 'CNY', label: 'Chinese Yuan (CNY - ¥)' },
-  { code: 'INR', label: 'Indian Rupee (INR - ₹)' },
-] as const;
+// Single-currency policy: the whole system operates in RWF only. No selector is shown.
 
 const flattenLegalServiceOptions = (nodes: typeof LEGAL_SERVICES_TREE, prefix = ''): Array<{ id: string; label: string }> =>
   nodes.flatMap((node) => {
@@ -87,12 +79,17 @@ const getUserId = (value?: string | { _id: string } | null) => {
   return typeof value === 'string' ? value : value._id;
 };
 
-export default function ProspectForm({ prospect, onClose, layout = 'modal' }: ProspectFormProps) {
+export default function ProspectForm({ prospect, onClose, layout = 'modal', onSaved }: ProspectFormProps) {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Terminal-move dialog: ticking Converted / Non-Converted on edit moves the
+  // prospect to Active / Closed matters. Confirm first, then show where it went.
+  const [terminalTarget, setTerminalTarget] = useState<null | 'Converted' | 'Non-Converted'>(null);
+  const [movedInfo, setMovedInfo] = useState<null | { stage: 'Converted' | 'Non-Converted'; prospectNo?: string; clientName?: string; matterId?: string }>(null);
 
   const [partiesStructured, setPartiesStructured] = useState(false);
   const [partiesList, setPartiesList] = useState<Array<{ name: string; role: string }>>(
@@ -276,6 +273,16 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
   };
 
   const handleStageToggle = (stageValue: ProspectStage) => {
+    // Ticking a terminal checkbox on an existing prospect asks for confirmation:
+    // Converted moves it to Active Matters, Non-Converted moves it to Closed Matters.
+    if (prospect && (stageValue === 'Converted' || stageValue === 'Non-Converted')) {
+      const alreadyTerminal = prospect.stage === stageValue;
+      const checkedNow = !form.completedStages.includes(stageValue);
+      if (!alreadyTerminal && checkedNow) {
+        setTerminalTarget(stageValue);
+        return;
+      }
+    }
     setForm((prev) => {
       const isCompleted = prev.completedStages.includes(stageValue);
       const stageOrder = STAGE_CHECKLIST.map((stage) => stage.value as ProspectStage);
@@ -323,7 +330,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
     const feeValue = Number(form.estimatedFeeValue);
     if (form.estimatedMatterValue && !Number.isFinite(matterValue)) return 'Estimated matter value must be a number.';
     if (form.estimatedFeeValue && !Number.isFinite(feeValue)) return 'Estimated fee value must be a number.';
-    if (!form.estimatedMatterCurrency) return 'Please select a currency for the estimated matter value.';
+    // Single-currency policy: currency is always RWF — no selection needed.
     if (!form.paymentArrangement) return 'Please select a billing trigger.';
     if (!form.paymentMethod) return 'Please select a payment method.';
     if (form.paymentArrangement === 'Installments') {
@@ -362,7 +369,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
         referralSource: form.referralSource.trim(),
         estimatedMatterValue: form.estimatedMatterValue ? Number(form.estimatedMatterValue) : undefined,
         estimatedFeeValue: form.estimatedFeeValue ? Number(form.estimatedFeeValue) : undefined,
-        estimatedMatterCurrency: form.estimatedMatterCurrency || 'RWF',
+        estimatedMatterCurrency: 'RWF',
         paymentArrangement: form.paymentArrangement || undefined,
         paymentMethod: form.paymentMethod || undefined,
         installmentCount: form.installmentCount ? Number(form.installmentCount) : undefined,
@@ -383,9 +390,19 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
       };
 
       if (prospect) {
-        await updateProspect(prospect._id, data);
+        const saved = await updateProspect(prospect._id, data);
+        const movedStage = data.stage === 'Converted' || data.stage === 'Non-Converted' ? data.stage : null;
+        const wasAlreadyTerminal = prospect.stage === data.stage && Boolean((prospect as any).convertedToMatters);
+        if (movedStage && !wasAlreadyTerminal) {
+          const matterId = (saved as any)?.matterId || (typeof (saved as any)?.convertedToMatters === 'string' ? (saved as any).convertedToMatters : (saved as any)?.convertedToMatters?._id) || '';
+          setMovedInfo({ stage: movedStage, prospectNo: saved?.prospectNo || prospect?.prospectNo, clientName: saved?.clientName || data.clientName, matterId: matterId ? String(matterId) : undefined });
+          onSaved?.(saved);
+          return;
+        }
+        onSaved?.(saved);
       } else {
-        await createProspect(data);
+        const saved = await createProspect(data);
+        onSaved?.(saved);
       }
 
       onClose();
@@ -407,7 +424,7 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-              {prospect ? 'Edit Prospect' : 'New Prospect'}
+              {prospect ? 'Update Prospect' : 'New Prospect'}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Capture essential client intake details and keep the prospect workflow focused.
@@ -713,17 +730,14 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
 
                   <div className="mt-4">
                     <label className="mb-1 block text-sm font-medium text-slate-900 dark:text-slate-100">Currency</label>
-                    <select
-                      value={form.estimatedMatterCurrency}
-                      onChange={(e) => setForm({ ...form, estimatedMatterCurrency: e.target.value as any })}
-                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    >
-                      {ESTIMATED_CURRENCIES.map((currency) => (
-                        <option key={currency.code} value={currency.code}>
-                          {currency.label}
-                        </option>
-                      ))}
-                    </select>
+                    <input
+                      value="RWF"
+                      readOnly
+                      disabled
+                      aria-readonly="true"
+                      title="RWF"
+                      className="w-full cursor-not-allowed rounded-xl border border-gray-300 bg-gray-100 px-3 py-2 text-gray-900 outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    />
                   </div>
 
                   <div className="mt-4">
@@ -810,6 +824,12 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Assignment & Workflow</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Choose the accountable team and set the prospect stage.</p>
+              </div>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                {prospect && (prospect.stage === 'Converted' || prospect.stage === 'Non-Converted')
+                  ? `This prospect is already ${prospect.stage === 'Converted' ? 'in Active Matters' : 'in Closed Matters'} and can no longer be moved from here.`
+                  : 'Converted moves the prospect to Active Matters. Non-Converted moves it to Closed Matters.'}
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -958,6 +978,102 @@ export default function ProspectForm({ prospect, onClose, layout = 'modal' }: Pr
           </div>
         </form>
       </div>
+
+      {/* Confirm terminal move: ticking Converted / Non-Converted on edit */}
+      {terminalTarget && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[1px]">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-900 dark:shadow-black/50">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Move prospect to {terminalTarget === 'Converted' ? 'Active Matters' : 'Closed Matters'}?
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+              {terminalTarget === 'Converted'
+                ? 'Ticking Converted will move this prospect to Active Matters and start its matter lifecycle.'
+                : 'Ticking Non-Converted will move this prospect to Closed Matters as a closed history record.'}{' '}
+              Please select the conversion outcome, then confirm.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setTerminalTarget(null)}
+                className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = terminalTarget;
+                  setTerminalTarget(null);
+                  setForm((prev) => {
+                    const stageOrder = STAGE_CHECKLIST.map((stage) => stage.value as ProspectStage);
+                    const stageIndex = stageOrder.indexOf(target);
+                    const precedingStages = stageIndex >= 0 ? stageOrder.slice(0, stageIndex + 1) : [target];
+                    return {
+                      ...prev,
+                      completedStages: Array.from(new Set([...prev.completedStages, ...precedingStages])),
+                      stage: target,
+                      conversionOutcome: prev.conversionOutcome || '',
+                    };
+                  });
+                }}
+                className="flex-1 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
+              >
+                Tick {terminalTarget}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Moved dialog: shown after a terminal save */}
+      {movedInfo && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-[1px]">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-900 dark:shadow-black/50">
+            <div className="flex items-center gap-3">
+              <span className={`flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold ${movedInfo.stage === 'Converted' ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-100'}`}>
+                ✓
+              </span>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Prospect moved to {movedInfo.stage === 'Converted' ? 'Active Matters' : 'Closed Matters'}
+              </h3>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+              {movedInfo.prospectNo || movedInfo.clientName ? (
+                <>
+                  <span className="font-semibold text-gray-900 dark:text-white">{movedInfo.prospectNo}</span>
+                  {movedInfo.clientName ? ` — ${movedInfo.clientName}` : ''} is now{' '}
+                </>
+              ) : (
+                <>This prospect is now </>
+              )}
+              {movedInfo.stage === 'Converted' ? (
+                <>in Active Matters and follows the matter lifecycle.</>
+              ) : (
+                <>in Closed Matters as a closed record.</>
+              )}
+            </p>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => { setMovedInfo(null); onClose(); }}
+                className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                Back to prospects
+              </button>
+              {movedInfo.matterId && (
+                <button
+                  type="button"
+                  onClick={() => { const id = movedInfo.matterId; setMovedInfo(null); onClose(); if (id) navigate(`/matters/${id}`); }}
+                  className="flex-1 rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
+                >
+                  Open {movedInfo.stage === 'Converted' ? 'Active' : 'Closed'} Matter
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

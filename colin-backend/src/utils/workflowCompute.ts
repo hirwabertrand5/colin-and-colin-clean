@@ -1,11 +1,8 @@
 import { ISlaSpec, IWorkflowTemplate } from '../models/workflowTemplateModel';
+import { SINGLE_CURRENCY } from './currency';
 import { parsePercentage, resolveStagePercentages } from './workflowPercentages';
 
-export const normalizeCurrency = (raw: string | undefined) => {
-  const value = (raw || '').trim().toUpperCase();
-  if (!value) return undefined;
-  return value === 'FRW' ? 'RWF' : value;
-};
+export const normalizeCurrency = (_raw?: string) => SINGLE_CURRENCY;
 
 const UNIT_TO_MINUTES: Record<string, number> = {
   hour: 60,

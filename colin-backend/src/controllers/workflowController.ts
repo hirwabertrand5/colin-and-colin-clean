@@ -12,6 +12,7 @@ import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps, isStepChecklistReadyToAutoComplete } from '../utils/workflowCompute';
+import { SINGLE_CURRENCY } from '../utils/currency';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import {
   buildRoleByName,
@@ -452,7 +453,7 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
     typeof c.workflowProgress?.plannedValue?.amount === 'number'
       ? c.workflowProgress.plannedValue.amount
       : Number(String(c.budget || '').replace(/[^\d.]/g, '')) || 0;
-  const existingCurrency = c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF';
+  const existingCurrency = SINGLE_CURRENCY;
   // Progress reflects the ACTIVE checklist only. Steps that belonged to a
   // superseded template are no longer part of the workflow, so counting their
   // ticks here is exactly what made the bar report progress while the visible
@@ -997,9 +998,7 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
       ? await WorkflowTemplate.findById(inst.templateId).lean()
       : null;
 
-    const currency = String(
-      c.workflowProgress?.plannedValue?.currency || c.billingSettings?.currency || 'RWF'
-    );
+    const currency = SINGLE_CURRENCY;
 
     // Legacy instances (created before percentages existed) store no
     // percentage on their steps â€” derive them from the template so percentages

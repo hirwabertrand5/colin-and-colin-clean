@@ -7,7 +7,7 @@ export interface PettyCashFund {
   _id: string;
   name: string;
   description?: string;
-  currency: string;
+  currency: 'RWF';
 
   initialAmount: number;
   spentAmount: number;

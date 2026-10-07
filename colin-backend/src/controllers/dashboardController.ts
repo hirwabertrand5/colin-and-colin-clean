@@ -2,6 +2,8 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 
+import { SINGLE_CURRENCY } from '../utils/currency';
+
 import Case from '../models/caseModel';
 import Task from '../models/taskModel';
 import Event from '../models/eventModel';
@@ -453,9 +455,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       const myRows = earned.team.filter((member) => meKeys.includes(normalizeKey(member.name)));
       if (!myRows.length) continue;
 
-      currency = String(
-        matter?.workflowProgress?.plannedValue?.currency || matter?.billingSettings?.currency || currency
-      );
+      currency = SINGLE_CURRENCY;
 
       const myTimeliness = myRows
         .map((member) => member.timelinessScore)

@@ -304,14 +304,14 @@ const CaseSchema = new Schema<ICase>(
         plannedValue: {
           type: {
             amount: { type: Number, min: 0 },
-            currency: { type: String, trim: true },
+            currency: { type: String, enum: ['RWF'], default: 'RWF', trim: true },
           },
           default: {},
         },
         completedValue: {
           type: {
             amount: { type: Number, min: 0 },
-            currency: { type: String, trim: true },
+            currency: { type: String, enum: ['RWF'], default: 'RWF', trim: true },
           },
           default: {},
         },
@@ -345,7 +345,7 @@ const CaseSchema = new Schema<ICase>(
     billingSettings: {
       type: {
         paymentMode: { type: String, enum: ['prepaid', 'postpaid'], default: 'postpaid' },
-        currency: { type: String, trim: true, default: 'RWF' },
+        currency: { type: String, enum: ['RWF'], default: 'RWF', trim: true },
         prepaidTotal: { type: Number, min: 0, default: 0 },
         prepaidRemaining: { type: Number, min: 0, default: 0 },
         accruedUnbilled: { type: Number, min: 0, default: 0 },

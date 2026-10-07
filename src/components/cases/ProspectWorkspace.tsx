@@ -48,31 +48,11 @@ const TABS = [
 
 type ProspectTab = (typeof TABS)[number]['id'];
 
-const getCurrencySymbol = (currency?: string) => {
-  switch (currency) {
-    case 'USD':
-      return '$';
-    case 'EUR':
-      return '€';
-    case 'GBP':
-      return '£';
-    case 'CNY':
-      return '¥';
-    case 'INR':
-      return '₹';
-    default:
-      return currency || 'RWF';
-  }
-};
-
 const formatEstimatedValue = (prospect?: Prospect | null) => {
   const rawValue = (prospect as Prospect & { estimated_matter_value?: number } | null | undefined)?.estimatedMatterValue;
   if (typeof rawValue !== 'number' || Number.isNaN(rawValue)) return 'Not set';
-  const currency = prospect?.estimatedMatterCurrency || 'RWF';
-  const symbol = getCurrencySymbol(currency);
-  const formattedValue = rawValue.toLocaleString();
-  if (currency === 'RWF') return `${currency} ${formattedValue}`;
-  return `${currency} ${symbol} ${formattedValue}`;
+  // Single-currency policy: always display RWF (amount never converted).
+  return `RWF ${rawValue.toLocaleString()}`;
 };
 
 const formatEstimatedFeeValue = (prospect?: Prospect | null) => {
@@ -81,11 +61,8 @@ const formatEstimatedFeeValue = (prospect?: Prospect | null) => {
   if (rawValue === undefined || rawValue === null || rawValue === '') return 'Not set';
   const numericValue = typeof rawValue === 'number' ? rawValue : Number(rawValue);
   if (!Number.isFinite(numericValue)) return 'Not set';
-  const currency = prospectData?.estimatedMatterCurrency || prospectData?.estimated_matter_currency || 'RWF';
-  const symbol = getCurrencySymbol(currency);
-  const formattedValue = numericValue.toLocaleString();
-  if (currency === 'RWF') return `${currency} ${formattedValue}`;
-  return `${currency} ${symbol} ${formattedValue}`;
+  // Single-currency policy: always display RWF (amount never converted).
+  return `RWF ${numericValue.toLocaleString()}`;
 };
 
 const getDisplayName = (value?: string | { name?: string } | null) => {
@@ -366,7 +343,7 @@ export default function ProspectWorkspace() {
                     onClick={() => setShowEditForm(true)}
                     className="inline-flex items-center rounded-lg bg-gray-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-gray-700 dark:bg-blue-600 dark:hover:bg-blue-500"
                   >
-                    Edit Prospect
+                    Update Prospect
                   </button>
                 </div>
               </div>

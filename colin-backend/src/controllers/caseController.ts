@@ -20,6 +20,7 @@ import ClientReport from '../models/clientReportModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import TaskAttachment from '../models/taskAttachmentModel';
 import { buildInstanceSteps } from '../utils/workflowCompute';
+import { SINGLE_CURRENCY, isRwfCurrency } from '../utils/currency';
 import { buildUpdatedInstanceSteps, updateCaseWorkflowProgress } from './workflowController';
 import { computeCompletedPercentFromInstance } from '../utils/workflowPercentages';
 import { buildYearlySequence } from '../utils/counter';
@@ -368,6 +369,17 @@ export const createCase = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden.' });
     }
 
+    // Single-currency policy: the whole system operates in RWF only.
+    const requestedCurrencies = [
+      (req.body as any)?.workflowProgress?.plannedValue?.currency,
+      (req.body as any)?.workflowProgress?.completedValue?.currency,
+      (req.body as any)?.billingSettings?.currency,
+    ].filter((v) => String(v ?? '').trim() !== '');
+    const badCurrency = requestedCurrencies.find((v) => !isRwfCurrency(v));
+    if (badCurrency) {
+      return res.status(400).json({ message: 'Only RWF is supported.' });
+    }
+
     const workflowAutomation = (req.body as any)?.workflowAutomation !== false && (req.body as any)?.matterTiming !== 'historical';
     const caseAssignments = normalizeCaseAssignmentsPayload(req.body);
     const caseNo = String((req.body as any)?.caseNo || '').trim() || (await generateCaseNo());
@@ -387,27 +399,21 @@ export const createCase = async (req: AuthRequest, res: Response) => {
               percent: 0,
               plannedValue: {
                 amount: parseMoney((req.body as any)?.workflowProgress?.plannedValue?.amount) || undefined,
-                currency:
-                  (req.body as any)?.workflowProgress?.plannedValue?.currency ||
-                  (req.body as any)?.billingSettings?.currency ||
-                  'RWF',
+                currency: SINGLE_CURRENCY,
               },
               completedValue: {
                 amount: 0,
-                currency:
-                  (req.body as any)?.workflowProgress?.plannedValue?.currency ||
-                  (req.body as any)?.billingSettings?.currency ||
-                  'RWF',
+                currency: SINGLE_CURRENCY,
               },
             },
           }),
     });
 
-    // Normalize billing settings if provided
+    // Normalize billing settings if provided — currency is always forced to RWF.
     const bs = (req.body as any)?.billingSettings;
     if (bs && typeof bs === 'object') {
       const paymentMode = String(bs.paymentMode || 'postpaid') === 'prepaid' ? 'prepaid' : 'postpaid';
-      const currency = String(bs.currency || 'RWF').trim().toUpperCase() || 'RWF';
+      const currency = SINGLE_CURRENCY;
       const prepaidTotal = Number(bs.prepaidTotal);
       const normalizedPrepaidTotal = Number.isFinite(prepaidTotal) && prepaidTotal > 0 ? prepaidTotal : 0;
 
@@ -461,10 +467,7 @@ export const createCase = async (req: AuthRequest, res: Response) => {
 
         const requestedPlannedAmount = parseMoney((req.body as any)?.workflowProgress?.plannedValue?.amount) || parseMoney((req.body as any)?.budget);
         const plannedAmount = requestedPlannedAmount;
-        const plannedCurrency =
-          (req.body as any)?.workflowProgress?.plannedValue?.currency ||
-          (newCase as any).billingSettings?.currency ||
-          'RWF';
+        const plannedCurrency = SINGLE_CURRENCY;
         const actionProgress = calculateActionProgress(steps as any[], plannedAmount);
         newCase.workflowProgress = {
           status: 'In Progress',
@@ -1000,7 +1003,19 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     }
 
     const nextAssignments = normalizeCaseAssignmentsPayload(req.body);
+    // Single-currency policy: reject any non-RWF currency explicitly sent by the client.
+    const updateRequestedCurrencies = [
+      (req.body as any)?.workflowProgress?.plannedValue?.currency,
+      (req.body as any)?.workflowProgress?.completedValue?.currency,
+      (req.body as any)?.billingSettings?.currency,
+    ].filter((v) => String(v ?? '').trim() !== '');
+    if (updateRequestedCurrencies.some((v) => !isRwfCurrency(v))) {
+      return res.status(400).json({ message: 'Only RWF is supported.' });
+    }
     const updatePayload: any = { ...(req.body as any) };
+    if (updatePayload?.billingSettings && typeof updatePayload.billingSettings === 'object') {
+      updatePayload.billingSettings = { ...updatePayload.billingSettings, currency: SINGLE_CURRENCY };
+    }
     // Workflow state belongs to the workflow controller. A stale edit form used
     // to submit an old workflowProgress object and overwrite the live state.
     delete updatePayload.workflowProgress;
@@ -1062,10 +1077,7 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
             parseMoney((req.body as any)?.budget) ||
             parseMoney(updated.workflowProgress?.plannedValue?.amount);
           const plannedAmount = requestedPlannedAmount;
-          const plannedCurrency =
-            (req.body as any)?.workflowProgress?.plannedValue?.currency ||
-            updated.billingSettings?.currency ||
-            'RWF';
+          const plannedCurrency = SINGLE_CURRENCY;
           updated.workflowProgress = {
             ...(updated.workflowProgress || {}),
             plannedValue: { ...(typeof plannedAmount === 'number' ? { amount: plannedAmount } : {}), currency: plannedCurrency },
@@ -1080,7 +1092,7 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
       const plannedAmount = parseMoney((req.body as any).workflowProgress.plannedValue.amount);
       if (plannedAmount > 0) {
         const plannedCurrency =
-          (req.body as any).workflowProgress.plannedValue.currency || updated.billingSettings?.currency || 'RWF';
+          SINGLE_CURRENCY;
         const inst: any = await WorkflowInstance.findOne({ caseId: updated._id }).lean();
         if (!inst) {
           return res.status(400).json({ message: 'The matter has no workflow instance to update.' });

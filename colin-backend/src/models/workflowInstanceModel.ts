@@ -210,7 +210,7 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     },
 
     feeAmount: { type: Number, min: 0 },
-    feeCurrency: { type: String, trim: true },
+    feeCurrency: { type: String, enum: ['RWF'], default: 'RWF', trim: true },
     feeText: { type: String },
     feeRangeMin: { type: Number, min: 0 },
     feeRangeMax: { type: Number, min: 0 },

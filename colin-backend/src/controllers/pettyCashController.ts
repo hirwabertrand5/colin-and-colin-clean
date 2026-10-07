@@ -6,6 +6,7 @@ import CaseModel from '../models/caseModel';
 import User from '../models/userModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { notifyRoles } from '../services/notifyService';
+import { SINGLE_CURRENCY } from '../utils/currency';
 
 const ALLOWED_ROLES = ['managing_director', 'executive_assistant'];
 
@@ -43,11 +44,15 @@ export const listFunds = async (req: AuthRequest, res: Response) => {
 
 export const createFund = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, initialAmount } = req.body || {};
+    const { name, description, initialAmount, currency } = req.body || {};
     const num = Number(initialAmount);
 
     if (!name || !Number.isFinite(num) || num <= 0) {
       return res.status(400).json({ message: 'name and initialAmount (>0) are required.' });
+    }
+    // Single-currency policy: the whole system operates in RWF only.
+    if (String(currency ?? '').trim() !== '' && String(currency).trim().toUpperCase() !== SINGLE_CURRENCY && String(currency).trim().toUpperCase() !== 'FRW') {
+      return res.status(400).json({ message: 'Only RWF is supported.' });
     }
 
     const existingActive = await PettyCashFund.findOne({ status: 'active' });
@@ -62,6 +67,7 @@ export const createFund = async (req: AuthRequest, res: Response) => {
     const fundPayload: any = {
       name: String(name).trim(),
       description: description ? String(description).trim() : '',
+      currency: SINGLE_CURRENCY,
       initialAmount: num,
       spentAmount: 0,
       remainingAmount: num,

@@ -7,6 +7,13 @@ import ProspectFeedback from '../models/prospectFeedbackModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { buildYearlySequence } from '../utils/counter';
 import { sendEmailResend } from '../services/emailResendService';
+import { SINGLE_CURRENCY, isRwfCurrency } from '../utils/currency';
+import WorkflowTemplate from '../models/workflowTemplateModel';
+import WorkflowInstance from '../models/workflowInstanceModel';
+import { buildInstanceSteps } from '../utils/workflowCompute';
+import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
+import { computeCompletedPercentFromInstance } from '../utils/workflowPercentages';
+import { resolveCanonicalTemplateForCase, normalizeTemplateMatchValue } from '../utils/workflowTemplateMatch';
 
 const isAdminRole = (role?: string) =>
   role === 'managing_director' ||
@@ -40,7 +47,8 @@ const validStages = [
 const terminalStages = ['Converted', 'Non-Converted'];
 const convertedOutcomes = ['Quick Advisory', 'Legal Opinion', 'Full Engagement', 'Repeat Client', 'Retainer Client'];
 const nonConvertedOutcomes = ['Pricing', 'Competitor', 'No Response', 'Internal Handling', 'Conflict', 'Other'];
-const supportedCurrencies = ['RWF', 'USD', 'EUR', 'GBP', 'KES', 'UGX', 'TZS', 'CNY', 'INR'];
+// Single-currency policy: the whole system operates in RWF only.
+const RWF_ONLY_MESSAGE = 'Only RWF is supported.';
 
 const cleanString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 const getRouteId = (value: unknown) => (typeof value === 'string' ? value : '');
@@ -50,8 +58,11 @@ const toOptionalNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 const normalizeCurrency = (value: unknown) => {
+  // Single-currency policy: accept empty (defaults to RWF later), RWF, or FRW (normalised to RWF).
+  // Any other code returns undefined so the caller can reject the request with a 400.
   const cleaned = cleanString(value).toUpperCase();
-  return supportedCurrencies.includes(cleaned) ? cleaned : undefined;
+  if (!cleaned) return undefined;
+  return isRwfCurrency(cleaned) ? SINGLE_CURRENCY : undefined;
 };
 const normalizePracticeArea = (value: unknown) => {
   const cleaned = cleanString(value);
@@ -141,7 +152,10 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
   };
 };
 
-const validateProspectPayload = async (payload: ReturnType<typeof getProspectPayload>) => {
+const validateProspectPayload = async (payload: ReturnType<typeof getProspectPayload>, rawBody?: any) => {
+  // Single-currency enforcement: reject any non-RWF currency explicitly sent by the client.
+  const rawCurrency = cleanString(rawBody?.estimatedMatterCurrency);
+  if (rawCurrency && !isRwfCurrency(rawCurrency)) return RWF_ONLY_MESSAGE;
   if (!payload.clientName) return 'Client name is required.';
   if (!payload.contact.name) return 'Contact person is required.';
   if (!payload.inquiryDescription) return 'Inquiry description is required.';
@@ -233,7 +247,27 @@ const createMatterFromTerminalProspect = async (
 
   const assigneeSource = prospect.responsibleAssociate || prospect.assignedTo;
   const assignee = await User.findById(assigneeSource).select('name').lean();
+  const assigneeName = assignee?.name || actorName || 'Unassigned';
   const caseNo = await buildYearlySequence('case', 'CASE');
+
+  // Derive structured assignments so non-admin roles can see the matter too:
+  // the prospect's responsible associate becomes initiator, responsible partner
+  // becomes reviewer, and the actor becomes signer/approver.
+  const partnerSource = prospect.responsiblePartner;
+  const partner = partnerSource ? await User.findById(partnerSource).select('name').lean() : null;
+  const initiatorName = assignee?.name || actorName || 'Unassigned';
+  const reviewerName = partner?.name || '';
+  const signerName = actorName && actorName !== 'Unassigned' ? actorName : reviewerName || initiatorName;
+  const caseAssignments = {
+    ...(initiatorName ? { initiator: initiatorName } : {}),
+    ...(reviewerName ? { reviewer: reviewerName } : {}),
+    ...(signerName ? { signerApprover: signerName } : {}),
+  };
+  const assignedToDisplay = [
+    initiatorName ? `Initiator: ${initiatorName}` : '',
+    reviewerName ? `Reviewer: ${reviewerName}` : '',
+    signerName ? `Signer/Approver: ${signerName}` : '',
+  ].filter(Boolean).join(' | ') || assigneeName;
 
   const newCase = new Case({
     caseNo,
@@ -248,13 +282,14 @@ const createMatterFromTerminalProspect = async (
         isPrimary: true,
       },
     ],
-    assignedTo: assignee?.name || actorName || 'Unassigned',
+    assignedTo: assignedToDisplay,
+    ...(Object.keys(caseAssignments).length ? { caseAssignments } : {}),
     status: matterStatus,
     priority: 'Medium',
     caseType: 'Transactional Cases',
     billingSettings: {
       paymentMode: 'postpaid',
-      currency: prospect.estimatedMatterCurrency || 'RWF',
+      currency: SINGLE_CURRENCY,
     },
     matterTiming: matterStatus === 'Closed' ? 'historical' : 'new',
     workflowAutomation: matterStatus !== 'Closed',
@@ -265,6 +300,73 @@ const createMatterFromTerminalProspect = async (
   });
 
   const savedCase = await newCase.save();
+
+  // Attach a workflow so the matter behaves like a normal Active Matter:
+  // resolve the canonical template from the prospect's legal-service path,
+  // create its instance, and seed planned/completed values.
+  if (matterStatus === 'Active') {
+    try {
+      const labels = Array.isArray(prospect.legalServicePath) ? prospect.legalServicePath : [];
+      const leafLabel = labels.length ? String(labels[labels.length - 1]?.label || '') : '';
+      const templates: any[] = await WorkflowTemplate.find({ active: true }).lean();
+      const template = resolveCanonicalTemplateForCase(templates, {
+        matterType: leafLabel || prospect.enquiryNature,
+        name: leafLabel || prospect.enquiryNature,
+        caseType: 'Transactional Cases',
+      }) || templates.find((t) => normalizeTemplateMatchValue(t?.matterType) && normalizeTemplateMatchValue(leafLabel || prospect.enquiryNature || '').includes(normalizeTemplateMatchValue(t?.matterType)));
+      if (template) {
+        const startDate = resolveDeadlineDateTime(new Date()) || new Date();
+        const steps = buildInstanceSteps(template, startDate);
+        const inst = await WorkflowInstance.create({
+          caseId: savedCase._id,
+          templateId: template._id,
+          status: 'Active',
+          currentStepKey: steps[0]?.stepKey,
+          steps,
+        });
+        const plannedAmount = Number(prospect.estimatedFeeValue || prospect.estimatedMatterValue) || undefined;
+        // Fresh workflow: nothing is checked yet, so progress starts at 0.
+        const startPercent = computeCompletedPercentFromInstance(steps as any[]);
+        const startCompleted = typeof plannedAmount === 'number' ? Math.round((plannedAmount * startPercent) / 100) : 0;
+        savedCase.workflowTemplateId = template._id as any;
+        savedCase.workflowInstanceId = inst._id as any;
+        savedCase.matterType = template.matterType;
+        savedCase.workflow = template.matterType;
+        savedCase.caseType = template.caseType;
+        savedCase.workflowStartDate = startDate;
+        savedCase.workflowProgress = {
+          status: 'In Progress',
+          percent: startPercent,
+          ...(inst.currentStepKey ? { currentStepKey: inst.currentStepKey } : {}),
+          ...(steps[0]?.title ? { currentStepTitle: steps[0].title } : {}),
+          ...(steps[0]?.startAt ? { currentStepStartAt: steps[0].startAt } : {}),
+          ...(steps[0]?.dueAt ? { currentStepDueAt: steps[0].dueAt } : {}),
+          nextDueAt: steps[0]?.dueAt,
+          plannedValue: { ...(typeof plannedAmount === 'number' ? { amount: plannedAmount } : {}), currency: SINGLE_CURRENCY },
+          completedValue: { amount: startCompleted, currency: SINGLE_CURRENCY },
+        } as any;
+        (savedCase as any).billingSettings = {
+          ...((savedCase as any).billingSettings || {}),
+          currency: SINGLE_CURRENCY,
+          prepaidTotal: 0,
+          prepaidRemaining: 0,
+          accruedUnbilled: startCompleted,
+        };
+        await savedCase.save();
+      } else {
+        savedCase.workflowProgress = {
+          status: 'Not Started',
+          percent: 0,
+          plannedValue: { currency: SINGLE_CURRENCY } as any,
+          completedValue: { amount: 0, currency: SINGLE_CURRENCY } as any,
+        } as any;
+        await savedCase.save();
+      }
+    } catch (err) {
+      console.error('attach workflow to converted prospect matter failed:', err);
+    }
+  }
+
   prospect.convertedToMatters = savedCase._id;
   prospect.stage = matterStatus === 'Closed' ? 'Non-Converted' : 'Converted';
   prospect.engagementDate = new Date();
@@ -398,7 +500,7 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
     }
 
     const payload = getProspectPayload(req.body, req.user?.id);
-    const validationMessage = await validateProspectPayload(payload);
+    const validationMessage = await validateProspectPayload(payload, req.body);
     if (validationMessage) {
       return res.status(400).json({ message: validationMessage });
     }
@@ -459,7 +561,7 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
     }
 
     const updates = getProspectPayload(req.body, String(prospect.assignedTo));
-    const validationMessage = await validateProspectPayload(updates);
+    const validationMessage = await validateProspectPayload(updates, req.body);
     if (validationMessage) {
       return res.status(400).json({ message: validationMessage });
     }
@@ -495,9 +597,9 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
       .populate('responsiblePartner', 'name email role')
       .populate('responsibleAssociate', 'name email role')
       .populate('createdBy', 'name email')
-      .populate('convertedToMatters', 'caseNo');
+      .populate('convertedToMatters', 'caseNo status');
 
-    return res.json(populated);
+    return res.json({ ...populated!.toObject(), matterId: (populated as any)?.convertedToMatters?._id || (populated as any)?.convertedToMatters || null });
   } catch (error: any) {
     console.error('updateProspect error:', error);
     if (error?.name === 'ValidationError') {
