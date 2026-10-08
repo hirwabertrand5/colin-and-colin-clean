@@ -1013,6 +1013,13 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Only RWF is supported.' });
     }
     const updatePayload: any = { ...(req.body as any) };
+    delete updatePayload._id;
+    delete updatePayload.id;
+    delete updatePayload.createdAt;
+    delete updatePayload.updatedAt;
+    delete updatePayload.__v;
+    delete updatePayload.workflowInstanceId;
+    delete updatePayload.takeRequestState;
     if (updatePayload?.billingSettings && typeof updatePayload.billingSettings === 'object') {
       updatePayload.billingSettings = { ...updatePayload.billingSettings, currency: SINGLE_CURRENCY };
     }

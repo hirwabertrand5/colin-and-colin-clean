@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getAllProspects, getProspectStats, deleteProspect, Prospect } from '../../services/prospectService';
 import ProspectForm from './ProspectForm';
@@ -56,6 +56,7 @@ const getErrorMessage = (error: any, fallback: string) =>
 
 export default function IntakeProspects() {
   usePageTitle('Intake & Prospects');
+  const navigate = useNavigate();
   const PROSPECTS_PER_PAGE = 10;
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -425,8 +426,24 @@ export default function IntakeProspects() {
                   {paginatedProspects.map((prospect, index) => {
                     const doneAt = formatDoneAt(prospect.createdAt || prospect.dateReceived || prospect.updatedAt);
                     const doneByName = getDoneByName(prospect);
+                    // Keep in sync with getActionButton(): terminal prospects open
+                    // the converted matter, everything else opens the prospect.
+                    const matterId = typeof prospect.convertedToMatters === 'string'
+                      ? prospect.convertedToMatters
+                      : (prospect.convertedToMatters as any)?._id || '';
+                    const rowHref = (prospect.stage === 'Converted' || prospect.stage === 'Non-Converted') && matterId
+                      ? `/matters/${matterId}`
+                      : `/matters/intake-prospects/${prospect._id}`;
                     return (
-                    <tr key={prospect._id} className="align-top transition-colors hover:bg-gray-50/70 dark:hover:bg-gray-700/40">
+                    <tr
+                      key={prospect._id}
+                      onClick={() => navigate(rowHref)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') navigate(rowHref);
+                      }}
+                      tabIndex={0}
+                      className="cursor-pointer align-top transition-colors hover:bg-gray-50/70 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-gray-400 dark:hover:bg-gray-700/40"
+                    >
                       <td className="px-4 py-4 text-sm font-semibold text-gray-500 dark:text-gray-400">
                         {(currentPage - 1) * PROSPECTS_PER_PAGE + index + 1}
                       </td>
@@ -442,7 +459,7 @@ export default function IntakeProspects() {
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{getCurrentStageLabel(prospect)}</td>
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{doneAt}</td>
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{doneByName || '—'}</td>
-                      <td className="px-5 py-4">{getActionButton(prospect)}</td>
+                      <td className="px-5 py-4" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{getActionButton(prospect)}</td>
                     </tr>
                     );
                   })}

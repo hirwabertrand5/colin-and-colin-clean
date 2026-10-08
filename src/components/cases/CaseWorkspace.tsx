@@ -579,7 +579,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       .finally(() => setTemplateLoading(false));
   }, [caseData?.workflowTemplateId]);
 
-  // Edit modal bootstrapping: templates + decision-tree path
+  // Edit modal bootstrapping: templates + decision-tree path.
+  // Initialized once per opening so typing in the form never resets the tree.
   useEffect(() => {
     if (!showEditCase) {
       editModalInitializedRef.current = false;
@@ -605,7 +606,53 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       setPartiesStructured(false);
       setPartiesList(editCaseData?.parties ? [{ name: editCaseData.parties, role: '' }] : []);
     }
-  }, [showEditCase, editCaseData, editModalInitializedRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEditCase]);
+
+  // Keep the saved Legal Service classification in sync with the decision-tree
+  // edits. Previously the tree selection lived only in `editServicePath` and was
+  // never written back into `editCaseData`, so classification changes were
+  // silently dropped on save. The Case Type only follows the tree when it
+  // actually changed (so a manually chosen template is never overridden).
+  useEffect(() => {
+    if (!showEditCase || !editModalInitializedRef.current) return;
+    const nodes: ServiceNode[] = [];
+    let currentNodes = LEGAL_SERVICES_TREE;
+    for (const id of editServicePath) {
+      const match = currentNodes.find((node) => node.id === id);
+      if (!match) break;
+      nodes.push(match);
+      currentNodes = match.children || [];
+    }
+    const legalServicePath = nodes.map((node) => ({ id: node.id, label: node.label }));
+    let derivedCaseType: CaseData['caseType'] | null = null;
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      if (nodes[i].caseType) {
+        derivedCaseType = nodes[i].caseType as CaseData['caseType'];
+        break;
+      }
+    }
+    // The workflow/template dropdown is manual. Only suggest the derived case
+    // type while the user has not picked a template for this edit session; once
+    // a template is set, the template (not the tree) owns caseType/workflow.
+    const templateSelected = Boolean(editCaseData?.workflowTemplateId);
+    setEditCaseData((prev) => {
+      if (!prev) return prev;
+      const prevPath = prev.legalServicePath || [];
+      const samePath =
+        prevPath.length === legalServicePath.length &&
+        prevPath.every((item, index) => item.id === legalServicePath[index]?.id);
+      const sameCaseType = !derivedCaseType || prev.caseType === derivedCaseType || templateSelected;
+      if (samePath && sameCaseType) return prev;
+      return {
+        ...prev,
+        legalServicePath,
+        ...(!templateSelected && derivedCaseType && prev.caseType !== derivedCaseType
+          ? { caseType: derivedCaseType }
+          : {}),
+      };
+    });
+  }, [showEditCase, editServicePath, editCaseData?.workflowTemplateId]);
 
   const stageChecklistItems = useMemo(() => {
     if (!workflowInstance) return [];
@@ -1054,7 +1101,38 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
     try {
       const finalParties = partiesStructured ? partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') : editCaseData.parties;
-      const payload = { ...editCaseData, parties: finalParties } as CaseData;
+      // Never send server-owned fields back: a stale _id / timestamps /
+      // workflow state / take-request lock either throws ("Modifying path
+      // `_id` is not allowed") or silently clobbers live workflow data, which
+      // is exactly why saves looked like they did nothing.
+      const {
+        _id: _ignoredEditId,
+        createdAt: _ignoredEditCreatedAt,
+        updatedAt: _ignoredEditUpdatedAt,
+        __v: _ignoredEditVersion,
+        workflowProgress: _ignoredEditProgress,
+        workflowInstanceId: _ignoredEditInstanceId,
+        takeRequestState: _ignoredEditTakeState,
+        ...editableFields
+      } = editCaseData as CaseData & { createdAt?: unknown; updatedAt?: unknown; __v?: unknown };
+      void _ignoredEditId;
+      void _ignoredEditCreatedAt;
+      void _ignoredEditUpdatedAt;
+      void _ignoredEditVersion;
+      void _ignoredEditProgress;
+      void _ignoredEditInstanceId;
+      void _ignoredEditTakeState;
+      // The Contract Value input only feeds the planned amount. The backend
+      // applies it through its own workflow-progress flow, so send just that
+      // slice (a full stale workflowProgress object is ignored by design).
+      const plannedAmount = Number(String(editCaseData.budget ?? '').replace(/[^\d.]/g, ''));
+      const payload = {
+        ...editableFields,
+        parties: finalParties,
+        ...(Number.isFinite(plannedAmount) && plannedAmount > 0
+          ? { workflowProgress: { plannedValue: { amount: plannedAmount, currency: 'RWF' as const } } }
+          : {}),
+      } as CaseData;
       await updateCase(editCaseData._id, payload);
       setShowEditCase(false);
       const updated = await getCaseById(editCaseData._id);

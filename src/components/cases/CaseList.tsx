@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Briefcase, ArrowUpDown, ShieldQuestion, Loader2 } from 'lucide-react';
 import { UserRole } from '../../App';
 import { getAllCases, deleteCase, CaseData, requestTakeCase } from '../../services/caseService';
@@ -41,6 +41,7 @@ type SortKey = 'nextDeadline' | 'createdAt' | 'caseNo' | 'parties' | 'assignedTo
 type SortDir = 'asc' | 'desc';
 
 export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
+  const navigate = useNavigate();
   const CASES_PER_PAGE = 10;
 
   const isTemporaryClosedMode = mode === 'temporarilyClosed';
@@ -451,7 +452,15 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
 
             <tbody className="divide-y divide-gray-200">
               {paginatedCases.map((item, index) => (
-                <tr key={item._id} className="hover:bg-gray-50 transition-colors">
+                <tr
+                  key={item._id}
+                  onClick={() => item._id && navigate(`/cases/${item._id}`)}
+                  onKeyDown={(e) => {
+                    if ((e.key === 'Enter' || e.key === ' ') && item._id) navigate(`/cases/${item._id}`);
+                  }}
+                  tabIndex={0}
+                  className="cursor-pointer hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-gray-400"
+                >
                   <td className="px-6 py-5 text-sm text-gray-500">
                     {(currentPage - 1) * CASES_PER_PAGE + index + 1}
                   </td>
@@ -511,7 +520,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                     ) : null}
                   </td>
 
-                  <td className="px-6 py-5">
+                  <td className="px-6 py-5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                     <div className="flex flex-col items-start gap-2">
                       <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">
                         Open →
@@ -526,7 +535,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
                         <>
                           <button
                             type="button"
-                            onClick={() => handleRequestTakeCase(item._id)}
+                            onClick={(e) => { e.stopPropagation(); handleRequestTakeCase(item._id); }}
                             disabled={requestingCaseId === item._id}
                             title="Request to be assigned to this yellow urgent matter"
                             className="inline-flex items-center gap-1.5 rounded-full border border-gray-900 bg-gray-900 px-2.5 py-1 text-[10px] font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"

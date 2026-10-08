@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Search, Briefcase, ArrowUpDown } from 'lucide-react';
 import { UserRole } from '../../App';
 import { getAllCases, CaseData } from '../../services/caseService';
@@ -24,6 +24,7 @@ const isAssociateLike = (role: UserRole) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
 
 export default function ClosedCases({ userRole }: ClosedCasesProps) {
+  const navigate = useNavigate();
   const CASES_PER_PAGE = 10;
 
   usePageTitle('Closed Matters');
@@ -285,7 +286,15 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
 
             <tbody className="divide-y divide-gray-200">
               {paginatedCases.map((item, index) => (
-                <tr key={item._id} className="hover:bg-gray-50 transition-colors">
+                <tr
+                  key={item._id}
+                  onClick={() => item._id && navigate(`/cases/${item._id}`)}
+                  onKeyDown={(e) => {
+                    if ((e.key === 'Enter' || e.key === ' ') && item._id) navigate(`/cases/${item._id}`);
+                  }}
+                  tabIndex={0}
+                  className="cursor-pointer hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-gray-400"
+                >
                   <td className="px-6 py-5 text-sm text-gray-500">{(currentPage - 1) * CASES_PER_PAGE + index + 1}</td>
                   <td className="px-6 py-5 text-sm font-medium text-gray-900">{item.caseNo}</td>
                   <td className="px-6 py-5 text-sm text-gray-900">{item.parties}</td>
@@ -307,7 +316,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
                       <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getDeadlinePillClassForCase(item)}`}>{formatDueCountdown(item.workflowProgress?.nextDueAt || item.workflowProgress?.currentStepDueAt)}</div>
                     ) : null}
                   </td>
-                  <td className="px-6 py-5">
+                  <td className="px-6 py-5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                     <Link to={`/cases/${item._id}`} className="text-sm font-medium text-gray-700 hover:text-gray-900">Open →</Link>
                   </td>
                 </tr>
