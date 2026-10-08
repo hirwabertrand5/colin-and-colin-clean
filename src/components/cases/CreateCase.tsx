@@ -309,23 +309,40 @@ export default function CreateCase({
 
   
 
-  // Keep formData.caseType always in sync with tree selection
+  // Keep legalServicePath in sync with tree selection.
+  // Workflow selection is fully manual via the dropdown (normal workflow lifecycle)
+  // so we never overwrite workflow/workflowTemplateId here.
   useEffect(() => {
     const ct = resolveCaseTypeFromSelection(selectedServiceNodes);
-    const suggested = resolveSuggestedMatterType(selectedServiceNodes);
     const legalServicePath = selectedServiceNodes.map((node) => ({ id: node.id, label: node.label }));
 
-    setFormData((prev) => ({
-      ...prev,
-      caseType: ct || prev.caseType,
-      workflow: suggested || prev.workflow,
-      legalServicePath,
-    }));
+    setFormData((prev) => {
+      // If the user already picked a workflow manually, its template is the
+      // source of truth for caseType/workflow — don't override it when the
+      // Legal Service path changes.
+      if (prev.workflowTemplateId) {
+        return {
+          ...prev,
+          legalServicePath,
+        };
+      }
+      return {
+        ...prev,
+        caseType: ct || prev.caseType,
+        legalServicePath,
+      };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedServiceNodes]);
 
   const computedCaseType = useMemo(
     () => resolveCaseTypeFromSelection(selectedServiceNodes),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedServiceNodes]
+  );
+
+  const suggestedMatterType = useMemo(
+    () => resolveSuggestedMatterType(selectedServiceNodes),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedServiceNodes]
   );
@@ -410,7 +427,7 @@ export default function CreateCase({
       const caseNoOk = hideCaseNo ? true : Boolean(formData.caseNo && String(formData.caseNo).trim());
       const assignments = formData.caseAssignments || {};
       const assigneeOk = Boolean(assignments.initiator && assignments.reviewer && assignments.signerApprover);
-      return Boolean(caseNoOk && partiesOk && assigneeOk && formData.assignedTo && isServiceSelectionValid());
+      return Boolean(caseNoOk && partiesOk && assigneeOk && formData.assignedTo && isServiceSelectionValid() && formData.workflowTemplateId);
     }
     if (step === 2) {
       return Boolean(formData.workflowTemplateId && formData.workflowStartDate && plannedValueAmount > 0);
@@ -451,10 +468,12 @@ export default function CreateCase({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plannedValueCurrency]);
 
-  // Auto-select a workflow template when the service-line decision tree suggests a matter type.
+  // Default the workflow dropdown to the Legal Service suggestion on first load,
+  // but never overwrite a manual user choice afterwards (normal workflow lifecycle).
   useEffect(() => {
     if (templatesLoading) return;
     if (templateManuallySelected) return;
+    if (formData.workflowTemplateId) return;
 
     const suggested = resolveSuggestedMatterType(selectedServiceNodes);
     const ct = resolveCaseTypeFromSelection(selectedServiceNodes);
@@ -463,12 +482,15 @@ export default function CreateCase({
     const match = findMatchingWorkflowTemplate(templates, suggested, ct);
     if (!match) return;
 
-    setFormData((prev) => ({
-      ...prev,
-      workflowTemplateId: match._id,
-      caseType: match.caseType as CaseType,
-      workflow: match.matterType,
-    }));
+    setFormData((prev) => {
+      if (prev.workflowTemplateId) return prev;
+      return {
+        ...prev,
+        workflowTemplateId: match._id,
+        caseType: match.caseType as CaseType,
+        workflow: match.matterType,
+      };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedServiceNodes, templates, templatesLoading, templateManuallySelected]);
 
@@ -699,15 +721,69 @@ export default function CreateCase({
                   )}
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-3">
-                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Workflow</div>
-                  <div className="mt-2 text-sm font-semibold text-gray-900">{formData.workflow || '—'}</div>
-                  <div className="mt-1 text-xs text-gray-500">Auto-selected from Legal Service path.</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-gray-500">Workflow *</div>
+                  <select
+                    value={formData.workflowTemplateId || ''}
+                    onChange={(e) => {
+                      const templateId = e.target.value;
+                      const match = templates.find((t) => t._id === templateId);
+                      setTemplateManuallySelected(true);
+                      setFormData((prev) => ({
+                        ...prev,
+                        workflowTemplateId: templateId,
+                        ...(match
+                          ? {
+                              caseType: match.caseType as CaseType,
+                              workflow: match.matterType,
+                            }
+                          : { workflow: '' }),
+                      }));
+                    }}
+                    className="mt-2 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  >
+                    <option value="">Select a workflow…</option>
+                    {templates.map((t) => (
+                      <option key={t._id} value={t._id}>
+                        {t.name} — {t.matterType} ({t.caseType})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {templatesLoading
+                      ? 'Loading workflows…'
+                      : suggestedMatterType
+                        ? `Suggested from Legal Service path: ${suggestedMatterType}. You can keep it or choose another.`
+                        : 'Choose the workflow to drive tasks, deadlines and progress.'}
+                  </div>
+                  {templateManuallySelected && suggestedMatterType ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const match = findMatchingWorkflowTemplate(templates, suggestedMatterType, computedCaseType as WorkflowTemplate['caseType']);
+                        setTemplateManuallySelected(false);
+                        if (match) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            workflowTemplateId: match._id,
+                            caseType: match.caseType as CaseType,
+                            workflow: match.matterType,
+                          }));
+                        }
+                      }}
+                      className="mt-1 text-xs font-medium text-gray-700 underline hover:text-gray-900"
+                    >
+                      Reset to suggested workflow
+                    </button>
+                  ) : null}
+                  {!formData.workflowTemplateId && (
+                    <div className="mt-1 text-xs text-red-600">Please select a workflow to continue.</div>
+                  )}
                 </div>
               </div>
 
-              {formData.workflow ? (
+              {formData.workflow && selectedWorkflowTemplate ? (
                 <p className="text-xs text-gray-600 mt-3">
-                  Suggested matter type: <span className="font-medium">{formData.workflow}</span>
+                  Selected workflow: <span className="font-medium">{selectedWorkflowTemplate.name} — {formData.workflow}</span>
                 </p>
               ) : null}
 
@@ -918,7 +994,7 @@ export default function CreateCase({
                 </div>
                 {!selectedWorkflowTemplate ? (
                   <div className="text-xs text-red-600">
-                    No workflow template matched the selected Legal Service path. Update the Legal Service selection.
+                    Please select a workflow from the dropdown in Step 1 to continue.
                   </div>
                 ) : null}
               </div>
