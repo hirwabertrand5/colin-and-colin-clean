@@ -97,6 +97,8 @@ export interface IInstanceStep {
 
   /** Title of the stage this step belongs to (snapshotted from the template). */
   stageTitle?: string;
+  /** Authoritative position of the stage in the template (drives next-deadline order). */
+  stageOrder?: number;
   /** Weight of the stage this step belongs to (0–100). */
   stagePercentage?: number;
   /** Step-level weight (0–100) applied to this step when it is completed. */
@@ -223,6 +225,7 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     responsibleRole: { type: String, trim: true },
 
     stageTitle: { type: String, trim: true },
+    stageOrder: { type: Number },
     stagePercentage: { type: Number, min: 0, max: 100 },
     percentage: { type: Number, min: 0, max: 100 },
 

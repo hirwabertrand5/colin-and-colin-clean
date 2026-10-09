@@ -223,7 +223,14 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   if (err) return <div className="py-4 text-red-700 bg-red-50 border border-red-100 rounded px-4">{err}</div>;
   if (!wf) return <div className="py-8 text-gray-500">No workflow found for this case.</div>;
 
-  const steps = [...wf.steps].sort((a, b) => a.order - b.order);
+  // Authoritative stage order first (persisted `stageOrder`, backfilled from
+  // legacy `order`), then action order — so deadlines always read sequentially.
+  const stageRankOf = (s: WorkflowInstance['steps'][number]) =>
+    typeof (s as { stageOrder?: unknown }).stageOrder === 'number' &&
+    Number.isFinite((s as { stageOrder?: number }).stageOrder as number)
+      ? Number((s as { stageOrder?: number }).stageOrder)
+      : Number(s.order ?? 0);
+  const steps = [...wf.steps].sort((a, b) => stageRankOf(a) - stageRankOf(b) || a.order - b.order);
 
   /**
    * The workflow template is authoritative for the shape of the checklist: its

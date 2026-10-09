@@ -128,7 +128,16 @@ const caseCompletionDate = (c: any, inst: any): Date | null => {
 /** Next/current due date of the open portion of the case workflow. */
 const caseNextDueAt = (c: any, inst: any): Date | null => {
   if (inst && !wholeCaseCompleted(inst)) {
-    const steps = (Array.isArray(inst.steps) ? inst.steps : []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+    // First pending Key Action in authoritative stage/step order (never the
+    // smallest date or the first array item). Legacy steps without
+    // `stageOrder` fall back to `order`.
+    const steps = (Array.isArray(inst.steps) ? inst.steps : []).slice().sort((a: any, b: any) => {
+      const aHas = typeof a?.stageOrder === 'number' && Number.isFinite(a.stageOrder);
+      const bHas = typeof b?.stageOrder === 'number' && Number.isFinite(b.stageOrder);
+      if (aHas && bHas && a.stageOrder !== b.stageOrder) return a.stageOrder - b.stageOrder;
+      if (aHas !== bHas) return aHas ? -1 : 1;
+      return (a.order || 0) - (b.order || 0);
+    });
     const open = steps.find((s: any) => String(s?.status || '').trim().toLowerCase() !== 'completed');
     if (open?.dueAt) return stepDate(open.dueAt);
     for (const s of steps) if (s?.dueAt) return stepDate(s.dueAt);

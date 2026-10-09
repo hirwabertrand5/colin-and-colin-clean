@@ -513,8 +513,13 @@ function KeyActionsList(props: {
    * ordered by their template `order`, and each stage is placed by its earliest
    * step, which is the template's own stage sequence.
    */
+  const stageRankOfStep = (s: CaseManagementStep) =>
+    typeof (s as { stageOrder?: unknown }).stageOrder === 'number' &&
+    Number.isFinite((s as { stageOrder?: number }).stageOrder as number)
+      ? Number((s as { stageOrder?: number }).stageOrder)
+      : Number(s.order ?? 0);
   const orderedSteps = useMemo(
-    () => [...state.steps].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    () => [...state.steps].sort((a, b) => stageRankOfStep(a) - stageRankOfStep(b) || (a.order ?? 0) - (b.order ?? 0)),
     [state.steps]
   );
   const stageGroups = useMemo(() => {

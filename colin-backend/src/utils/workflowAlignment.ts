@@ -146,6 +146,12 @@ export const alignInstanceStepsToTemplate = (
       // A live step keeps its own deadline; only brand-new steps get fresh ones.
       startAt: previous?.startAt ? new Date(previous.startAt) : templateStep.startAt,
       dueAt: previous?.dueAt ? new Date(previous.dueAt) : templateStep.dueAt,
+      stageOrder:
+        typeof templateStep?.stageOrder === 'number'
+          ? templateStep.stageOrder
+          : typeof previous?.stageOrder === 'number'
+            ? previous.stageOrder
+            : undefined,
       percentage:
         templateStepPercentage === undefined && Number(previous?.percentage) > 0
           ? Number(previous.percentage)

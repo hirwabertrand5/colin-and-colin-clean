@@ -18,6 +18,8 @@ export type CaseManagementStep = {
   title: string;
   stageKey: string;
   stageTitle: string;
+  /** Authoritative stage position (absent on legacy instances — falls back to `order`). */
+  stageOrder?: number;
   stagePercentage: number;
   percentage: number;
   order: number;

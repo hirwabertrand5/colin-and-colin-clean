@@ -12,6 +12,8 @@ export type WorkflowInstance = {
     title: string;
     stageKey: string;
     order: number;
+    /** Authoritative stage position (absent on legacy instances — falls back to `order`). */
+    stageOrder?: number;
     status: 'Not Started' | 'In Progress' | 'Done' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';
     startAt?: string;
     dueAt?: string;

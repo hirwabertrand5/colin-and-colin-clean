@@ -12,6 +12,7 @@ import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps, isStepChecklistReadyToAutoComplete } from '../utils/workflowCompute';
+import { selectNextScheduledStepKey } from '../utils/workflowSchedule';
 import { SINGLE_CURRENCY } from '../utils/currency';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import {
@@ -182,8 +183,14 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
     const templateStepPercentage = parsePercentage(templateStep?.percentage);
     const templateStagePercentage = parsePercentage(templateStage?.percentage);
 
+    // Manually amended deadlines (extension history) are preserved: only a
+    // step with no recorded history takes the freshly planned schedule.
+    const hasManualDeadline = Array.isArray(previous?.extensionHistory) && previous.extensionHistory.length > 0;
     return {
       ...nextStep,
+      startAt: previous?.startAt ? new Date(previous.startAt) : nextStep.startAt,
+      dueAt: hasManualDeadline && previous?.dueAt ? new Date(previous.dueAt) : nextStep.dueAt,
+      stageOrder: typeof nextStep?.stageOrder === 'number' ? nextStep.stageOrder : previous?.stageOrder,
       percentage:
         templateStepPercentage === undefined && Number(previous?.percentage) > 0
           ? Number(previous.percentage)
@@ -201,12 +208,21 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
   });
 
   // Steps the template no longer defines stay on the case with their progress.
+  // Ordering is authoritative stage order first (`stageOrder`, backfilled
+  // from the legacy `order` so old instances sort identically), then action
+  // order — never raw action order alone.
   const builtKeys = new Set(builtSteps.map((step: any) => String(step?.stepKey)));
   const removedFromTemplate = (existingSteps || [])
     .filter((step: any) => !builtKeys.has(String(step?.stepKey)))
     .map((step: any) => ({ ...step }));
 
-  return [...mergedSteps, ...removedFromTemplate].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const stageRankOf = (step: any) =>
+    typeof step?.stageOrder === 'number' && Number.isFinite(step.stageOrder)
+      ? Number(step.stageOrder)
+      : Number(step?.order ?? 0);
+  return [...mergedSteps, ...removedFromTemplate].sort(
+    (a, b) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0))
+  );
 };
 
 const syncCaseWorkflowInstanceFromTemplate = async (caseId: string, template: any, wfStart: Date) => {
@@ -434,11 +450,12 @@ export const reconcileInstanceTemplateWithCanonical = async (
 
 
 const computeNextDueAt = (inst: any) => {
-  const pending = (inst.steps || [])
-    .filter((s: any) => s.status !== 'Completed')
-    .slice()
-    .sort((a: any, b: any) => (a.order || 0) - (b.order || 0))[0];
-  return pending?.dueAt;
+  // Next deadline = first pending Key Action in authoritative stage/step
+  // order (never the smallest date or the first array item). Steps created
+  // before `stageOrder` existed fall back to `order`.
+  const nextKey = selectNextScheduledStepKey(inst.steps);
+  if (nextKey) return (inst.steps || []).find((s: any) => String(s?.stepKey || '') === nextKey)?.dueAt;
+  return undefined;
 };
 
 export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mongoose.ClientSession) => {
@@ -566,7 +583,13 @@ const completeStepInternal = async (
   const previousStepStatus = step.status;
 
   const finalApproval = Boolean(options?.finalApproval);
-  const orderedSteps = (inst.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+  // Stage order first (`stageOrder`, backfilled for legacy instances), then
+  // action order — so the current step always advances sequentially.
+  const stageRankOf = (s: any) =>
+    typeof s?.stageOrder === 'number' && Number.isFinite(s.stageOrder) ? Number(s.stageOrder) : Number(s?.order ?? 0);
+  const orderedSteps = (inst.steps || [])
+    .slice()
+    .sort((a: any, b: any) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0)));
 
   if (finalApproval) {
     // Signed off by the Approver.
@@ -702,7 +725,12 @@ export const autoCompleteFullyCheckedSteps = async (
   c: any,
   inst: any
 ): Promise<string[]> => {
-  const ordered = (inst.steps || []).slice().sort((a: any, b: any) => (a?.order || 0) - (b?.order || 0));
+  // Stage order first, then action order — the pass must walk sequentially.
+  const stageRankOf = (s: any) =>
+    typeof s?.stageOrder === 'number' && Number.isFinite(s.stageOrder) ? Number(s.stageOrder) : Number(s?.order ?? 0);
+  const ordered = (inst.steps || [])
+    .slice()
+    .sort((a: any, b: any) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0)));
   const completedKeys: string[] = [];
   for (const step of ordered) {
     if (String(step?.status || '') === 'Completed') continue;
@@ -1302,7 +1330,13 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       return Number.isFinite(next.getTime()) ? next : undefined;
     };
 
-    const orderedSteps = (inst.steps || []).slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+    // "Downstream" = later in authoritative stage/step order, so an amended
+    // deadline shifts the actions that actually follow it.
+    const stageRankOf = (s: any) =>
+      typeof s?.stageOrder === 'number' && Number.isFinite(s.stageOrder) ? Number(s.stageOrder) : Number(s?.order ?? 0);
+    const orderedSteps = (inst.steps || [])
+      .slice()
+      .sort((a: any, b: any) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0)));
     const currentIndex = orderedSteps.findIndex((s: any) => s.stepKey === stepKey);
     const downstreamSteps = currentIndex >= 0 ? orderedSteps.slice(currentIndex + 1) : [];
 

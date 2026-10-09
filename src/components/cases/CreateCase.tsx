@@ -8,6 +8,7 @@ import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesT
 import { getRoleSuggestions } from '../../constants/partyRoles';
 import { formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
+import { buildWorkflowSchedule } from '../../utils/workflowSchedule';
 
 type StaffUser = {
   _id: string;
@@ -494,33 +495,6 @@ export default function CreateCase({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedServiceNodes, templates, templatesLoading, templateManuallySelected]);
 
-  const toMinutesFromSla = (sla: any): number => {
-    if (!sla) return 0;
-    const unit = sla.unit;
-    const value = typeof sla.max === 'number' ? sla.max : typeof sla.min === 'number' ? sla.min : undefined;
-    if (typeof value === 'number' && unit) {
-      if (unit === 'hours') return Math.round(value * 60);
-      if (unit === 'days') return Math.round(value * 24 * 60);
-      if (unit === 'weeks') return Math.round(value * 7 * 24 * 60);
-    }
-    const text = String(sla.text || '').toLowerCase().trim();
-    if (!text) return 0;
-    if (/^\\d+(\\.\\d+)?$/.test(text)) return Math.round(Number(text) * 60);
-
-    let total = 0;
-    const re = /(\\d+(\\.\\d+)?)\\s*(weeks?|w|days?|d|hours?|hrs?|hr|h)\\b/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text))) {
-      const n = Number(m[1]);
-      const u = m[3];
-      if (!Number.isFinite(n)) continue;
-      if (u === 'week' || u === 'weeks' || u === 'w') total += n * 7 * 24 * 60;
-      else if (u === 'day' || u === 'days' || u === 'd') total += n * 24 * 60;
-      else total += n * 60;
-    }
-    return Math.max(0, Math.round(total));
-  };
-
   const formatCurrency = (amount?: number, currency?: string) => {
     if (typeof amount !== 'number' || Number.isNaN(amount)) return '—';
     return `${currency || 'RWF'} ${amount.toLocaleString()}`;
@@ -547,26 +521,42 @@ export default function CreateCase({
   const selectedWorkflowSteps = useMemo<PreviewWorkflowStep[]>(() => {
     if (!selectedWorkflowTemplate || !formData.workflowStartDate) return [];
 
-    const stages: Array<{ key: string; title?: string; name?: string }> = Array.isArray(
+    const stages: Array<{ key: string; title?: string; name?: string; order?: number }> = Array.isArray(
       (selectedWorkflowTemplate as any).stages
     )
       ? (selectedWorkflowTemplate as any).stages
       : [];
     const stageTitleByKey = new Map(stages.map((s) => [s.key, s.title || s.name || s.key]));
+    const stageOrderByKey = new Map(
+      [...stages].sort((a, b) => Number(a?.order ?? 0) - Number(b?.order ?? 0)).map((s, index) => [s.key, index])
+    );
 
     const steps = Array.isArray((selectedWorkflowTemplate as any).steps)
-      ? [...(selectedWorkflowTemplate as any).steps].sort((a: any, b: any) => (a.order || 0) - (b.order || 0))
+      ? [...(selectedWorkflowTemplate as any).steps].sort((a: any, b: any) => {
+          const rankA = stageOrderByKey.has(String(a?.stageKey || ''))
+            ? Number(stageOrderByKey.get(String(a?.stageKey || '')))
+            : Number.MAX_SAFE_INTEGER;
+          const rankB = stageOrderByKey.has(String(b?.stageKey || ''))
+            ? Number(stageOrderByKey.get(String(b?.stageKey || '')))
+            : Number.MAX_SAFE_INTEGER;
+          if (rankA !== rankB) return rankA - rankB;
+          return Number(a?.order ?? 0) - Number(b?.order ?? 0);
+        })
       : [];
 
     const start = resolveDeadlineDateTime(formData.workflowStartDate);
     if (!start) return [];
-    let cursor = new Date(start);
+    // Stage-sequential plan shared with the backend: durations belong to
+    // stages, inheriting actions share the stage deadline, and each stage
+    // starts when the previous stage's window ends.
+    const scheduledByKey = new Map(
+      buildWorkflowSchedule(selectedWorkflowTemplate as never, new Date(start)).map((item) => [item.key, item])
+    );
 
     return steps.map((s: any, index: number) => {
-      const minutes = toMinutesFromSla(s.sla);
-      const stepStart = new Date(cursor);
-      const dueAt = new Date(stepStart.getTime() + minutes * 60_000);
-      cursor = new Date(dueAt);
+      const plan = scheduledByKey.get(String(s?.key || ''));
+      const stepStart = plan ? new Date(plan.startAt) : new Date(start);
+      const dueAt = plan ? new Date(plan.dueAt) : new Date(stepStart);
 
       const percentage = typeof s?.percentage === 'number' && s.percentage >= 0 ? s.percentage : undefined;
       const slaLabel = typeof s?.sla?.max === 'number' && s?.sla?.unit ? `${s.sla.max} ${s.sla.unit}` : s?.sla?.text || '—';
@@ -591,7 +581,10 @@ export default function CreateCase({
   const workflowSummary = useMemo(() => {
     if (selectedWorkflowSteps.length === 0) return null;
 
-    const nextStep = selectedWorkflowSteps.find((step) => step.dueAt >= new Date());
+    // The roadmap preview shows the full planned sequence, so the "next"
+    // deadline is the first Key Action in workflow order (not the first date
+    // >= now, which skips to a later stage once stage 1 is in the past).
+    const nextStep = selectedWorkflowSteps[0];
     const finalStep = selectedWorkflowSteps[selectedWorkflowSteps.length - 1];
 
     return {

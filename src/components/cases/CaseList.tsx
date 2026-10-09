@@ -234,8 +234,9 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
     };
 
     const nextDueAtMs = (c: CaseData) => {
-      // Use only the current active step due date for sorting (business rule)
-      const raw = c.workflowProgress?.currentStepDueAt;
+      // Next deadline = authoritative progress date, with the pending-action
+      // date as fallback (business rule). Never an unrelated action's date.
+      const raw = c.workflowProgress?.currentStepDueAt || c.workflowProgress?.nextDueAt;
       if (!raw) return Number.MAX_SAFE_INTEGER;
       const ms = resolveDeadlineDateTime(raw)?.getTime() ?? Number.NaN;
       return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;

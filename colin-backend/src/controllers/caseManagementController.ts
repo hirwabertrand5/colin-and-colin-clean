@@ -151,6 +151,7 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
     title: String(step?.title || step?.stepKey || 'Key Action'),
     stageKey: String(step?.stageKey || ''),
     stageTitle: String(step?.stageTitle || step?.stageKey || 'Stage'),
+    ...(typeof step?.stageOrder === 'number' ? { stageOrder: Number(step.stageOrder) } : {}),
     stagePercentage: Number(step?.stagePercentage) || 0,
     percentage: Number(step?.percentage) || 0,
     order: Number(step?.order) || 0,
