@@ -12,7 +12,7 @@ import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps, isStepChecklistReadyToAutoComplete } from '../utils/workflowCompute';
-import { selectNextScheduledStepKey } from '../utils/workflowSchedule';
+import { hasActiveFixedAmendment, selectNextScheduledStepKey } from '../utils/workflowSchedule';
 import { SINGLE_CURRENCY } from '../utils/currency';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import {
@@ -183,13 +183,17 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
     const templateStepPercentage = parsePercentage(templateStep?.percentage);
     const templateStagePercentage = parsePercentage(templateStage?.percentage);
 
-    // Manually amended deadlines (extension history) are preserved: only a
-    // step with no recorded history takes the freshly planned schedule.
+    // Manually amended deadlines are preserved from the persisted history:
+    // - an active FIXED amendment pins this step's stored effective deadline
+    //   (never the freshly planned schedule, never shifted downstream);
+    // - any other amendment history keeps the stored deadline.
+    // Only a step with no recorded history takes the planned schedule.
     const hasManualDeadline = Array.isArray(previous?.extensionHistory) && previous.extensionHistory.length > 0;
+    const pinnedFixed = hasActiveFixedAmendment(previous) && previous?.dueAt ? new Date(previous.dueAt) : undefined;
     return {
       ...nextStep,
       startAt: previous?.startAt ? new Date(previous.startAt) : nextStep.startAt,
-      dueAt: hasManualDeadline && previous?.dueAt ? new Date(previous.dueAt) : nextStep.dueAt,
+      dueAt: pinnedFixed || (hasManualDeadline && previous?.dueAt ? new Date(previous.dueAt) : nextStep.dueAt),
       stageOrder: typeof nextStep?.stageOrder === 'number' ? nextStep.stageOrder : previous?.stageOrder,
       percentage:
         templateStepPercentage === undefined && Number(previous?.percentage) > 0
@@ -1303,11 +1307,17 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Amend a workflow step deadline (admin, or the matter's assigned members)
+// Amend a workflow step deadline (admin, or the matter's assigned members).
+// Two persisted modes (stored per amendment record, never frontend-only):
+// - `standard` (default, incl. all legacy records): shift this Key Action AND
+//   all downstream deadlines by the same delta;
+// - `fixed`: pin ONLY this Key Action's effective deadline; downstream
+//   deadlines never move because of it.
 export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
   try {
     const { caseId, stepKey } = req.params as any;
-    const { extendDays, newDueAt, reason } = req.body || {};
+    const { extendDays, newDueAt, reason, mode } = req.body || {};
+    const amendmentMode = mode === 'fixed' ? 'fixed' : 'standard';
 
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
@@ -1348,6 +1358,8 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Resulting due date is invalid.' });
     }
     const dayOffset = (newDue.getTime() - oldDue.getTime()) / (24 * 60 * 60 * 1000);
+    // Each amendment is a distinct history record carrying its own mode, so a
+    // later amendment never overwrites the mode of an earlier one.
     step.dueAt = newDue;
     step.extensionHistory = Array.isArray(step.extensionHistory) ? step.extensionHistory : [];
     step.extensionHistory.push({
@@ -1357,12 +1369,24 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       reason: String(reason || '').trim(),
       grantedBy: req.user?.name || 'System',
       grantedAt: new Date(),
+      mode: amendmentMode,
     });
 
-    const deltaMs = newDue.getTime() - oldDue.getTime();
+    // Standard amendments propagate; Fixed Deadline amendments pin ONLY this
+    // Key Action. Downstream actions keep their own effective deadlines.
+    // (Fixed steps also keep downstream `startAt` untouched: shifting a start
+    // while pinning the due would silently rewrite the stage window.)
+    const deltaMs = amendmentMode === 'fixed' ? 0 : newDue.getTime() - oldDue.getTime();
     for (const downstream of downstreamSteps) {
-      if (downstream.startAt) downstream.startAt = shiftDate(downstream.startAt, deltaMs) || downstream.startAt;
-      if (downstream.dueAt) downstream.dueAt = shiftDate(downstream.dueAt, deltaMs) || downstream.dueAt;
+      // A downstream Key Action pinned by its own active Fixed Deadline is
+      // never shifted by an earlier Standard amendment either.
+      if (hasActiveFixedAmendment(downstream)) continue;
+      if (amendmentMode !== 'fixed' && downstream.startAt) {
+        downstream.startAt = shiftDate(downstream.startAt, deltaMs) || downstream.startAt;
+      }
+      if (amendmentMode !== 'fixed' && downstream.dueAt) {
+        downstream.dueAt = shiftDate(downstream.dueAt, deltaMs) || downstream.dueAt;
+      }
     }
 
     await inst.save();
@@ -1374,7 +1398,7 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       actorName: actor.actorName,
       ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
       action: 'WORKFLOW_STEP_DEADLINE_EXTENDED',
-      message: 'Updated workflow step deadline',
+      message: amendmentMode === 'fixed' ? 'Pinned workflow step deadline (fixed)' : 'Updated workflow step deadline',
       detail: `${stepKey} â€¢ ${dayOffset}d${reason ? ` â€¢ ${String(reason).trim()}` : ''}`,
     });
 
@@ -1383,6 +1407,124 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: e?.message || 'Failed to amend deadline.' });
   }
 };
+
+// Revoke one amendment record (by index) without erasing history. The step's
+// effective deadline is reconciled from the remaining valid history: the
+// newest still-active record's `newDueAt` wins; when nothing active remains,
+// the recorded pre-amendment baseline is restored. Later amendments are
+// preserved and downstream deadlines are reconciled per their own modes.
+// If the revoked record's downstream shifts cannot be safely reconciled
+// (a downstream step carries its own active amendments), the handler stops
+// and reports the conflict instead of silently overwriting dates.
+export const revokeStepDeadlineAmendment = async (req: AuthRequest, res: Response) => {
+  try {
+    const { caseId, stepKey, index } = req.params as any;
+    const { reason } = req.body || {};
+
+    const c: any = await Case.findById(caseId);
+    if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!canManageWorkflowStepsOfCase(req, c)) {
+      return res.status(403).json({ message: 'Only the members assigned to this matter can amend its deadlines.' });
+    }
+
+    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+
+    const step = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
+    if (!step) return res.status(404).json({ message: 'Step not found.' });
+    const history = Array.isArray(step.extensionHistory) ? step.extensionHistory : [];
+    const recordIndex = Number(index);
+    if (!Number.isInteger(recordIndex) || recordIndex < 0 || recordIndex >= history.length) {
+      return res.status(404).json({ message: 'Amendment record not found.' });
+    }
+    const record = history[recordIndex];
+    if (record?.revoked === true) return res.status(400).json({ message: 'Amendment is already revoked.' });
+
+    const stageRankOf = (s: any) =>
+      typeof s?.stageOrder === 'number' && Number.isFinite(s.stageOrder) ? Number(s.stageOrder) : Number(s?.order ?? 0);
+    const orderedSteps = (inst.steps || [])
+      .slice()
+      .sort((a: any, b: any) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0)));
+    const currentIndex = orderedSteps.findIndex((s: any) => s.stepKey === stepKey);
+    const downstreamSteps = currentIndex >= 0 ? orderedSteps.slice(currentIndex + 1) : [];
+
+    // Conflict guard: a revoked STANDARD amendment previously shifted
+    // downstream steps. If any downstream step now carries its own active
+    // amendments (fixed OR standard), un-shifting by the revoked delta would
+    // silently rewrite an independently amended deadline — stop and report.
+    const revokedMode = record?.mode === 'fixed' ? 'fixed' : 'standard';
+    const conflicts: string[] = [];
+    if (revokedMode === 'standard') {
+      for (const downstream of downstreamSteps) {
+        const own = Array.isArray(downstream?.extensionHistory)
+          ? downstream.extensionHistory.some((entry: any) => entry?.revoked !== true)
+          : false;
+        if (own) conflicts.push(String(downstream.stepKey || downstream.title || 'step'));
+      }
+      if (conflicts.length > 0) {
+        return res.status(409).json({
+          message: 'Revocation would overwrite independently amended downstream deadlines.',
+          conflicts,
+        });
+      }
+    }
+
+    record.revoked = true;
+    record.revokedBy = req.user?.name || 'System';
+    record.revokedAt = new Date();
+    if (String(reason || '').trim()) record.revokeReason = String(reason).trim();
+
+    // Reconcile this step from remaining valid history (never by subtracting
+    // days): newest active `newDueAt` wins; otherwise the earliest recorded
+    // `previousDueAt` baseline is restored.
+    const remaining = history.filter((entry: any) => entry?.revoked !== true);
+    if (remaining.length > 0) {
+      const latest = remaining[remaining.length - 1];
+      if (latest?.newDueAt) step.dueAt = new Date(latest.newDueAt);
+    } else if (history[0]?.previousDueAt) {
+      step.dueAt = new Date(history[0].previousDueAt);
+    }
+
+    // Undo the revoked STANDARD propagation downstream. FIXED revocations
+    // touch nothing downstream (they never moved it).
+    if (revokedMode === 'standard') {
+      const prevMs = record?.previousDueAt ? new Date(record.previousDueAt).getTime() : NaN;
+      const nextMs = record?.newDueAt ? new Date(record.newDueAt).getTime() : NaN;
+      const undoMs = Number.isFinite(prevMs) && Number.isFinite(nextMs) ? prevMs - nextMs : 0;
+      if (undoMs !== 0) {
+        const shiftDate = (value?: Date, offsetMs = 0) => {
+          if (!value) return undefined;
+          const next = new Date(value.getTime() + offsetMs);
+          return Number.isFinite(next.getTime()) ? next : undefined;
+        };
+        for (const downstream of downstreamSteps) {
+          if (hasActiveFixedAmendment(downstream)) continue;
+          if (downstream.startAt) downstream.startAt = shiftDate(downstream.startAt, undoMs) || downstream.startAt;
+          if (downstream.dueAt) downstream.dueAt = shiftDate(downstream.dueAt, undoMs) || downstream.dueAt;
+        }
+      }
+    }
+
+    await inst.save();
+    await updateCaseWorkflowProgress(c, inst);
+
+    const actor = actorFromReq(req);
+    await writeAudit({
+      caseId: String(c._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'WORKFLOW_STEP_DEADLINE_REVOKED',
+      message: 'Revoked workflow step deadline amendment',
+      detail: `${stepKey} #${recordIndex} (${revokedMode})`,
+    });
+
+    res.json(inst);
+  } catch (e: any) {
+    res.status(500).json({ message: e?.message || 'Failed to revoke deadline amendment.' });
+  }
+};
+
 
 // ---- Stub/placeholder handlers for admin workflow maintenance endpoints ----
 // These are intentionally minimal to avoid server startup errors when route

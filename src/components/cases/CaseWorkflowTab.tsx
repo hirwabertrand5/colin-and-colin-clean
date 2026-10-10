@@ -6,9 +6,11 @@ import {
   completeWorkflowStep,
   reopenWorkflowStep,
   amendWorkflowStepDeadline,
+  revokeWorkflowStepDeadlineAmendment,
   getCaseEarnedFees,
   CaseEarnedFees,
   WorkflowInstance,
+  DeadlineAmendmentMode,
 } from '../../services/workflowInstanceService';
 import { getWorkflowTemplateById, WorkflowTemplate } from '../../services/workflowService';
 import {
@@ -57,6 +59,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const [amendOpenFor, setAmendOpenFor] = useState<string>('');
   const [amendDate, setAmendDate] = useState<string>('');
   const [amendReason, setAmendReason] = useState<string>('');
+  const [amendMode, setAmendMode] = useState<DeadlineAmendmentMode>('standard');
+  const [revokeReason, setRevokeReason] = useState<string>('');
 
   const load = async () => {
     setLoading(true);
@@ -197,14 +201,31 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
       setBusyKey(`amend:${stepKey}`);
       setErr('');
-      const updated = await amendWorkflowStepDeadline(caseId, stepKey, selected.toISOString(), amendReason);
+      const updated = await amendWorkflowStepDeadline(caseId, stepKey, selected.toISOString(), amendReason, amendMode);
       setWf(updated);
       notifyWorkflowChanged();
       setAmendOpenFor('');
       setAmendDate('');
       setAmendReason('');
+      setAmendMode('standard');
     } catch (e: any) {
       setErr(e.message || 'Failed to amend deadline');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const onRevokeAmendment = async (stepKey: string, recordIndex: number) => {
+    if (!canAmendDeadlines) return;
+    try {
+      setBusyKey(`revoke:${stepKey}:${recordIndex}`);
+      setErr('');
+      const updated = await revokeWorkflowStepDeadlineAmendment(caseId, stepKey, recordIndex, revokeReason);
+      setWf(updated);
+      notifyWorkflowChanged();
+      setRevokeReason('');
+    } catch (e: any) {
+      setErr(e.message || 'Failed to revoke amendment');
     } finally {
       setBusyKey('');
     }
@@ -799,7 +820,18 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
                   />
                 </div>
-                <div className="md:col-span-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Amendment mode</label>
+                  <select
+                    value={amendMode}
+                    onChange={(e) => setAmendMode(e.target.value as DeadlineAmendmentMode)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                  >
+                    <option value="standard">Standard — shift this + downstream</option>
+                    <option value="fixed">Fixed — pin only this key action</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Reason (optional)</label>
                   <input
                     value={amendReason}
@@ -809,6 +841,10 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   />
                 </div>
               </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Fixed Deadline pins only this key action. It stays fixed across reloads and recalculations until
+                explicitly changed or revoked.
+              </p>
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -816,6 +852,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     setAmendOpenFor('');
                     setAmendDate('');
                     setAmendReason('');
+                    setAmendMode('standard');
                   }}
                   className="px-3 py-2 border border-gray-300 rounded text-gray-700 hover:bg-white"
                 >
@@ -837,12 +874,23 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             <div className="px-5 py-3 border-b border-amber-100 bg-amber-50">
               <div className="text-xs font-semibold uppercase tracking-wide text-amber-900">Extension history</div>
               <div className="mt-2 space-y-2">
-                {extensionHistory.slice().reverse().map((extension, extIndex) => (
-                  <div key={`${extension.grantedAt || extIndex}`} className="text-xs text-amber-900">
+                {extensionHistory
+                  .map((extension, recordIndex) => ({ extension, recordIndex }))
+                  .reverse()
+                  .map(({ extension, recordIndex }) => (
+                  <div key={`${extension.grantedAt || recordIndex}`} className="text-xs text-amber-900">
                     <span className="font-semibold">
                       {extension.days > 0 ? '+' : ''}
                       {extension.days} day{Math.abs(extension.days) === 1 ? '' : 's'}
                     </span>
+                    <span className="ml-1 rounded-full border border-amber-300 px-1.5 py-0.5 font-semibold">
+                      {(extension.mode || 'standard') === 'fixed' ? 'Fixed' : 'Standard'}
+                    </span>
+                    {extension.revoked === true ? (
+                      <span className="ml-1 rounded-full border border-gray-400 px-1.5 py-0.5 font-semibold text-gray-600">
+                        Revoked
+                      </span>
+                    ) : null}
                     {extension.previousDueAt && extension.newDueAt ? (
                       <span>
                         {' '}
@@ -851,6 +899,17 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     ) : null}
                     {extension.reason ? <span> • {extension.reason}</span> : null}
                     {extension.grantedBy ? <span> • granted by {extension.grantedBy}</span> : null}
+                    {extension.revoked === true && extension.revokedBy ? <span> • revoked by {extension.revokedBy}</span> : null}
+                    {extension.revoked !== true && canAmendDeadlines ? (
+                      <button
+                        type="button"
+                        onClick={() => onRevokeAmendment(s.stepKey, recordIndex)}
+                        disabled={busyKey === `revoke:${s.stepKey}:${recordIndex}`}
+                        className="ml-2 underline hover:no-underline disabled:opacity-60"
+                      >
+                        {busyKey === `revoke:${s.stepKey}:${recordIndex}` ? 'Revoking…' : 'Revoke'}
+                      </button>
+                    ) : null}
                   </div>
                 ))}
               </div>

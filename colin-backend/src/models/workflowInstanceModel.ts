@@ -53,6 +53,8 @@ export interface IInstanceOutput {
   uploadedAt?: Date;
 }
 
+export type DeadlineAmendmentMode = 'standard' | 'fixed';
+
 export interface IInstanceStep {
   stepKey: string;
   title: string;
@@ -74,6 +76,20 @@ export interface IInstanceStep {
     reason?: string;
     grantedBy?: string;
     grantedAt?: Date;
+    /**
+     * Amendment mode, persisted per record (never frontend-only state):
+     * - `standard` shifts this Key Action AND all downstream deadlines;
+     * - `fixed` pins ONLY this Key Action's effective deadline; downstream
+     *   deadlines never move because of it.
+     * Legacy records predate the field and keep historical behavior
+     * (`standard`) — they are never auto-classified as fixed.
+     */
+    mode?: DeadlineAmendmentMode;
+    /** A revoked amendment stays in history but no longer governs the deadline. */
+    revoked?: boolean;
+    revokedBy?: string;
+    revokedAt?: Date;
+    revokeReason?: string;
   }>;
 
   actions: Array<{
@@ -190,6 +206,11 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
             reason: { type: String, trim: true },
             grantedBy: { type: String, trim: true },
             grantedAt: { type: Date, default: Date.now },
+            mode: { type: String, enum: ['standard', 'fixed'] },
+            revoked: { type: Boolean, default: false },
+            revokedBy: { type: String, trim: true },
+            revokedAt: { type: Date },
+            revokeReason: { type: String, trim: true },
           },
           { _id: false }
         ),

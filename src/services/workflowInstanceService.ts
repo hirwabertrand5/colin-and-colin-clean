@@ -18,14 +18,7 @@ export type WorkflowInstance = {
     startAt?: string;
     dueAt?: string;
     completedAt?: string;
-    extensionHistory?: Array<{
-      previousDueAt?: string;
-      newDueAt?: string;
-      days: number;
-      reason?: string;
-      grantedBy?: string;
-      grantedAt?: string;
-    }>;
+    extensionHistory?: AmendmentRecord[];
 
     actions?: Array<{
       text: string;
@@ -158,11 +151,28 @@ export const extendWorkflowStepDeadline = async (
   return res.json();
 };
 
+export type DeadlineAmendmentMode = 'standard' | 'fixed';
+
+export type AmendmentRecord = {
+  previousDueAt?: string;
+  newDueAt?: string;
+  days: number;
+  reason?: string;
+  grantedBy?: string;
+  grantedAt?: string;
+  mode?: DeadlineAmendmentMode;
+  revoked?: boolean;
+  revokedBy?: string;
+  revokedAt?: string;
+  revokeReason?: string;
+};
+
 export const amendWorkflowStepDeadline = async (
   caseId: string,
   stepKey: string,
   newDueAt: string,
-  reason?: string
+  reason?: string,
+  mode?: DeadlineAmendmentMode
 ): Promise<WorkflowInstance> => {
   const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/extend-deadline`, {
     method: 'POST',
@@ -170,10 +180,29 @@ export const amendWorkflowStepDeadline = async (
       'Content-Type': 'application/json',
       Authorization: `Bearer ${getToken()}`,
     },
-    body: JSON.stringify({ newDueAt, reason }),
+    body: JSON.stringify({ newDueAt, reason, ...(mode ? { mode } : {}) }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || 'Failed to amend deadline');
+  return data;
+};
+
+export const revokeWorkflowStepDeadlineAmendment = async (
+  caseId: string,
+  stepKey: string,
+  index: number,
+  reason?: string
+): Promise<WorkflowInstance> => {
+  const res = await fetch(`${API_URL}/workflows/cases/${caseId}/steps/${stepKey}/amendments/${index}/revoke`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ ...(reason ? { reason } : {}) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || (data.conflicts ? `Revocation conflicts: ${data.conflicts.join(', ')}` : 'Failed to revoke amendment'));
   return data;
 };
 

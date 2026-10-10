@@ -1,4 +1,5 @@
 import { ISlaSpec } from '../models/workflowTemplateModel';
+import type { DeadlineAmendmentMode } from '../models/workflowInstanceModel';
 
 const UNIT_TO_MINUTES: Record<string, number> = {
   hour: 60,
@@ -216,4 +217,49 @@ export const selectNextScheduledStepKey = (
     return Number(a?.order ?? 0) - Number(b?.order ?? 0);
   });
   return ordered.find((step) => String(step?.status || '') !== 'Completed')?.stepKey;
+};
+
+export type AmendmentRecord = {
+  previousDueAt?: Date | string;
+  newDueAt?: Date | string;
+  days?: number;
+  reason?: string;
+  grantedBy?: string;
+  grantedAt?: Date | string;
+  mode?: DeadlineAmendmentMode;
+  revoked?: boolean;
+  revokedBy?: string;
+  revokedAt?: Date | string;
+  revokeReason?: string;
+};
+
+const normalizeMode = (mode: unknown): DeadlineAmendmentMode => (mode === 'fixed' ? 'fixed' : 'standard');
+
+/** Legacy records predate `mode` and keep historical behavior (`standard`). */
+export const amendmentModeOf = (record: AmendmentRecord | null | undefined): DeadlineAmendmentMode =>
+  normalizeMode(record?.mode);
+
+export const isActiveAmendment = (record: AmendmentRecord | null | undefined): boolean =>
+  Boolean(record) && record?.revoked !== true;
+
+/** A Fixed Deadline pins ONLY its own Key Action while active. */
+export const hasActiveFixedAmendment = (step: { extensionHistory?: AmendmentRecord[] } | null | undefined): boolean =>
+  Array.isArray(step?.extensionHistory) &&
+  (step.extensionHistory as AmendmentRecord[]).some((record) => isActiveAmendment(record) && amendmentModeOf(record) === 'fixed');
+
+/** Active (non-revoked) amendment history, oldest first, each a distinct operation. */
+export const activeAmendmentsOf = (step: { extensionHistory?: AmendmentRecord[] } | null | undefined): AmendmentRecord[] =>
+  (Array.isArray(step?.extensionHistory) ? (step.extensionHistory as AmendmentRecord[]) : []).filter(isActiveAmendment);
+
+/** Effective deadline from remaining valid history: newest active `newDueAt` wins. */
+export const effectiveAmendedDueAt = (
+  step: { dueAt?: Date | string; extensionHistory?: AmendmentRecord[] } | null | undefined
+): Date | undefined => {
+  const active = activeAmendmentsOf(step);
+  if (!active.length) return undefined;
+  const latest = active[active.length - 1] as AmendmentRecord;
+  const pinned = latest?.newDueAt ? new Date(latest.newDueAt) : null;
+  if (pinned && Number.isFinite(pinned.getTime())) return pinned;
+  const current = step?.dueAt ? new Date(step.dueAt) : null;
+  return current && Number.isFinite(current.getTime()) ? current : undefined;
 };

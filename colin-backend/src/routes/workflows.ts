@@ -16,6 +16,7 @@ import {
   completeStep,
   reopenStep,
   extendStepDeadline,
+  revokeStepDeadlineAmendment,
   addStep,
   addStepAction,
   updateStep,
@@ -100,6 +101,13 @@ router.post(
   '/cases/:caseId/steps/:stepKey/extend-deadline',
   authenticate,
   extendStepDeadline
+);
+
+// Revoke one deadline amendment record (history-aware, never destructive)
+router.post(
+  '/cases/:caseId/steps/:stepKey/amendments/:index/revoke',
+  authenticate,
+  revokeStepDeadlineAmendment
 );
 
 // Key actions (admin only)
