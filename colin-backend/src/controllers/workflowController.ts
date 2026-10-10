@@ -12,7 +12,11 @@ import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps, isStepChecklistReadyToAutoComplete } from '../utils/workflowCompute';
-import { hasActiveFixedAmendment, selectNextScheduledStepKey } from '../utils/workflowSchedule';
+import {
+  hasActiveFixedAmendment,
+  selectNextScheduledStepKey,
+  selectNextWorkPendingStepKey,
+} from '../utils/workflowSchedule';
 import { SINGLE_CURRENCY } from '../utils/currency';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import {
@@ -454,18 +458,28 @@ export const reconcileInstanceTemplateWithCanonical = async (
 
 
 const computeNextDueAt = (inst: any) => {
-  // Next deadline = first pending Key Action in authoritative stage/step
-  // order (never the smallest date or the first array item). Steps created
-  // before `stageOrder` existed fall back to `order`.
-  const nextKey = selectNextScheduledStepKey(inst.steps);
+  // Next deadline = first WORK-pending Key Action in authoritative stage/step
+  // order (never the smallest date or the first array item). Ticking the last
+  // action of a stage therefore surfaces the next stage's deadline at once;
+  // approval (`Completed`) is not required. Steps created before `stageOrder`
+  // existed fall back to `order`.
+  const nextKey = selectNextWorkPendingStepKey(inst.steps) || selectNextScheduledStepKey(inst.steps);
   if (nextKey) return (inst.steps || []).find((s: any) => String(s?.stepKey || '') === nextKey)?.dueAt;
   return undefined;
 };
 
 export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mongoose.ClientSession) => {
   const nextDueAt = computeNextDueAt(inst);
-  const currentStep = inst.currentStepKey
-    ? (inst.steps || []).find((s: any) => s.stepKey === inst.currentStepKey)
+  // Displayed "current step" = first Key Action whose WORK is still pending
+  // (not ticked), in stage/step order. When a stage's actions are all ticked,
+  // this is already the next stage's first action — even while the ticked
+  // actions still move through review/approval (`inst.currentStepKey` stays on
+  // the in-flight action until approval). Falls back to the in-flight action
+  // when every action's work is done.
+  const workPendingKey = selectNextWorkPendingStepKey(inst.steps);
+  const displayStepKey = workPendingKey || inst.currentStepKey;
+  const currentStep = displayStepKey
+    ? (inst.steps || []).find((s: any) => s.stepKey === displayStepKey)
     : null;
   const currentStepExtension = Array.isArray(currentStep?.extensionHistory) && currentStep.extensionHistory.length
     ? currentStep.extensionHistory[currentStep.extensionHistory.length - 1]
@@ -504,17 +518,21 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
     String(c?.workflowProgress?.status || '').trim() === 'Completed';
   c.workflowProgress = {
     status: workflowCompleted ? 'Completed' : 'In Progress',
-    currentStepKey: inst.currentStepKey,
+    // Displayed current step follows WORK done (ticked), so the Case List
+    // "Current Step" and "Next Deadline" columns advance the moment a stage's
+    // actions are all ticked. `inst.currentStepKey` (review-chain pointer) is
+    // intentionally NOT used here.
+    currentStepKey: displayStepKey,
     currentStepTitle: (() => {
-      if (!inst.currentStepKey) return undefined;
+      if (!displayStepKey) return undefined;
       return currentStep?.title;
     })(),
     currentStepStartAt: (() => {
-      if (!inst.currentStepKey) return undefined;
+      if (!displayStepKey) return undefined;
       return currentStep?.startAt;
     })(),
     currentStepDueAt: (() => {
-      if (!inst.currentStepKey) return undefined;
+      if (!displayStepKey) return undefined;
       return currentStep?.dueAt;
     })(),
     currentStepExtension: currentStepExtension

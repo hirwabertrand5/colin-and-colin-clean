@@ -1,5 +1,5 @@
 import { buildInstanceSteps } from '../utils/workflowCompute';
-import { buildWorkflowSchedule, selectNextScheduledStepKey } from '../utils/workflowSchedule';
+import { buildWorkflowSchedule, selectNextScheduledStepKey, selectNextWorkPendingStepKey } from '../utils/workflowSchedule';
 
 let failures = 0;
 const check = (label: string, cond: boolean, detail?: string) => {
@@ -132,6 +132,30 @@ const START = new Date('2026-10-09T12:00:00.000Z');
     { stepKey: 'c', status: 'Not Started', stageOrder: 2, order: 3, dueAt: new Date('2026-10-11T12:00:00Z') },
   ];
   check('7. next is first pending in stage order', selectNextScheduledStepKey(steps as never) === 'b');
+}
+
+// 7b. Displayed current step follows WORK done (ticked), not approval: when a
+// stage's actions are all ticked (Done, not yet Completed), the next stage's
+// first action is already the current step.
+{
+  const steps = [
+    { stepKey: 'i1', status: 'Done', stageOrder: 0, order: 1 },
+    { stepKey: 'i2', status: 'Done', stageOrder: 0, order: 6 },
+    { stepKey: 'p1', status: 'In Progress', stageOrder: 1, order: 2 },
+    { stepKey: 'p2', status: 'Not Started', stageOrder: 1, order: 3 },
+  ];
+  check('7b. fully ticked stage surfaces next stage first action', selectNextWorkPendingStepKey(steps as never) === 'p1');
+  const partial = [
+    { stepKey: 'i1', status: 'Done', stageOrder: 0, order: 1 },
+    { stepKey: 'i2', status: 'In Progress', stageOrder: 0, order: 6 },
+    { stepKey: 'p1', status: 'Not Started', stageOrder: 1, order: 2 },
+  ];
+  check('7b. partially ticked stage stays on its unticked action', selectNextWorkPendingStepKey(partial as never) === 'i2');
+  const reviewChain = [
+    { stepKey: 'i1', status: 'Awaiting Review', stageOrder: 0, order: 1 },
+    { stepKey: 'p1', status: 'Not Started', stageOrder: 1, order: 2 },
+  ];
+  check('7b. awaiting-review counts as work done', selectNextWorkPendingStepKey(reviewChain as never) === 'p1');
 }
 
 // 9/11. buildInstanceSteps (persisted) matches the schedule (preview).

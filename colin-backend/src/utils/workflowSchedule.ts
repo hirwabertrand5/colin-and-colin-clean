@@ -1,4 +1,5 @@
 import { ISlaSpec } from '../models/workflowTemplateModel';
+import { isStepWorkDone } from '../models/workflowInstanceModel';
 import type { DeadlineAmendmentMode } from '../models/workflowInstanceModel';
 
 const UNIT_TO_MINUTES: Record<string, number> = {
@@ -217,6 +218,28 @@ export const selectNextScheduledStepKey = (
     return Number(a?.order ?? 0) - Number(b?.order ?? 0);
   });
   return ordered.find((step) => String(step?.status || '') !== 'Completed')?.stepKey;
+};
+
+/**
+ * First Key Action whose WORK is still pending (not ticked), in authoritative
+ * stage/step order. "Work done" (ticked: Done / Awaiting Review / Awaiting
+ * Approval / Completed) is deliberately separate from "approved" (Completed):
+ * ticking the last action of a stage must immediately surface the next stage's
+ * first action as the current step, without waiting for the review chain.
+ */
+export const selectNextWorkPendingStepKey = (
+  steps: Array<{ stepKey?: string; status?: string; stageOrder?: number; order?: number }> | undefined
+): string | undefined => {
+  const ordered = (Array.isArray(steps) ? steps : []).slice().sort((a, b) => {
+    const aHasStage = typeof a?.stageOrder === 'number' && Number.isFinite(a.stageOrder);
+    const bHasStage = typeof b?.stageOrder === 'number' && Number.isFinite(b.stageOrder);
+    if (aHasStage && bHasStage && (a.stageOrder as number) !== (b.stageOrder as number)) {
+      return (a.stageOrder as number) - (b.stageOrder as number);
+    }
+    if (aHasStage !== bHasStage) return aHasStage ? -1 : 1;
+    return Number(a?.order ?? 0) - Number(b?.order ?? 0);
+  });
+  return ordered.find((step) => !isStepWorkDone(step))?.stepKey;
 };
 
 export type AmendmentRecord = {
