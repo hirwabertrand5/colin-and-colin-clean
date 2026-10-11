@@ -70,6 +70,13 @@ type StatCard = {
   icon: React.ComponentType<any>;
   tone?: Tone;
   href?: string;
+  /**
+   * Whether the figure follows the Reporting period filter.
+   *  - 'period'  → recalculated for the selected period.
+   *  - 'current' → a live snapshot / constant that the period cannot change.
+   * Rendered as a small badge so a reader never mistakes one for the other.
+   */
+  scope?: 'period' | 'current';
 };
 
 type MatterRow = CaseData & {
@@ -380,7 +387,25 @@ function StatCardView({ stat, loading }: { stat: StatCard; loading: boolean }) {
         <Icon className="h-5 w-5" />
       </div>
       <div className={`text-2xl font-semibold ${loading ? 'text-gray-900' : tone.text}`}>{loading ? '…' : stat.value}</div>
-      <div className="mt-1 text-sm text-gray-600">{stat.label}</div>
+      <div className="mt-1 flex items-center gap-2 text-sm text-gray-600">
+        <span>{stat.label}</span>
+        {stat.scope && (
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              stat.scope === 'period'
+                ? 'bg-blue-50 text-blue-700'
+                : 'bg-gray-100 text-gray-500'
+            }`}
+            title={
+              stat.scope === 'period'
+                ? 'Recalculated for the selected Reporting period'
+                : 'A live snapshot — the Reporting period does not change this figure'
+            }
+          >
+            {stat.scope === 'period' ? 'In period' : 'Current'}
+          </span>
+        )}
+      </div>
       {stat.helper ? <div className="mt-2 text-xs text-gray-500">{stat.helper}</div> : null}
     </div>
   );
@@ -750,7 +775,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   /** Selected-period figures (undefined while showing all-time numbers). */
   const period = summary?.period;
   // Per-matter rows straight from the Case Workspace → Earned Fees tables.
-  const matterFeeRows = summary?.rows || [];
+  // When a period is selected, only the matters that actually had activity
+  // inside it are listed, so every row on screen belongs to the period.
+  const allMatterFeeRows = summary?.rows || [];
+  const matterFeeRows = useMemo(
+    () => (period ? allMatterFeeRows.filter((row) => row.inPeriod) : allMatterFeeRows),
+    [allMatterFeeRows, period]
+  );
   const feeScoredMatters = matterFeeRows.filter((row) => row.earnedFee != null);
   const summaryCompletionRate =
     summary && summary.mattersAssigned > 0
@@ -844,27 +875,96 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     // When a reporting period is selected these figures describe that window;
     // otherwise they are the all-time values the dashboard always had.
     const period = summary?.period;
+    const periodSuffix = period ? ` in ${period.label}` : '';
     const timeliness = period?.averageTimelinessScore ?? summary?.averageTimelinessScore ?? null;
     const quality = period?.averageQualityScore ?? summary?.averageQualityScore ?? null;
     const fees = period ? period.feesEarned : summary?.feesEarnedTotal ?? null;
     const stats: StatCard[] = [
-      { label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Active Matters', value: String(assigned), helper: 'Matters where you are the Initiator, Reviewer or Signer/Approver', icon: Briefcase, tone: 'blue', href: '/matters' },
-      { label: 'Tasks Outstanding', value: String(outstanding), helper: 'Matters where the Key Actions are not all checked yet', icon: CheckSquare, tone: outstanding ? 'amber' : 'green', href: '/tasks' },
-      { label: 'Overdue Tasks', value: String(overdue), helper: 'Workflow sections past their deadline in your matters', icon: AlertTriangle, tone: overdue ? 'red' : 'green', href: '/tasks' },
-      { label: 'On-Time Completion', value: timeliness == null ? 'Pending' : `${timeliness}%`, helper: period ? `Average Timeliness of your Earned Fees rows in matters worked in ${period.label}` : 'Average Timeliness of your row in each Case Workspace', icon: Clock, tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber', href: '/performance' },
-      { label: 'Quality Score', value: quality == null ? 'Pending' : `${quality}%`, helper: period ? `Average Quality Score on matters worked in ${period.label}` : 'Average Quality Score on the matters assigned to you', icon: Award, tone: 'purple', href: '/performance' },
-      { label: 'Tasks Completed', value: String(period ? period.tasksCompleted : completedMatters), helper: period ? `Tasks completed in ${period.label}` : 'Matters where the workflow is completed', icon: TrendingUp, tone: 'green', href: '/performance' },
+      // ---- Current-state snapshots: the period cannot change these. --------
+      // "Outstanding" and "overdue" are defined against work that is NOT yet
+      // done, so they carry no completion date a past period could filter on.
+      // They are labelled as snapshots rather than given invented period values.
+      {
+        label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Active Matters',
+        value: period ? String(period.mattersWithActivity) : String(assigned),
+        helper: period
+          ? `Matters you worked on${periodSuffix} (${assigned} assigned in total)`
+          : 'Matters where you are the Initiator, Reviewer or Signer/Approver',
+        icon: Briefcase,
+        tone: 'blue',
+        href: '/matters',
+        scope: period ? 'period' : 'current',
+      },
+      {
+        label: 'Tasks Outstanding',
+        value: String(outstanding),
+        helper: 'Matters where the Key Actions are not all checked yet — current position',
+        icon: CheckSquare,
+        tone: outstanding ? 'amber' : 'green',
+        href: '/tasks',
+        scope: 'current',
+      },
+      {
+        label: 'Overdue Tasks',
+        value: String(overdue),
+        helper: 'Workflow sections past their deadline in your open matters — current position',
+        icon: AlertTriangle,
+        tone: overdue ? 'red' : 'green',
+        href: '/tasks',
+        scope: 'current',
+      },
+      // ---- Period activity: recalculated for the selected window. ----------
+      {
+        label: 'On-Time Completion',
+        value: timeliness == null ? 'Pending' : `${timeliness}%`,
+        helper: period
+          ? `Average Timeliness of your Earned Fees rows in matters worked${periodSuffix}`
+          : 'Average Timeliness of your row in each Case Workspace',
+        icon: Clock,
+        tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber',
+        href: '/performance',
+        scope: period ? 'period' : 'current',
+      },
+      {
+        label: 'Quality Score',
+        value: quality == null ? 'Pending' : `${quality}%`,
+        helper: period
+          ? `Average Quality Score on matters worked${periodSuffix}`
+          : 'Average Quality Score on the matters assigned to you',
+        icon: Award,
+        tone: 'purple',
+        href: '/performance',
+        scope: period ? 'period' : 'current',
+      },
+      {
+        label: 'Tasks Completed',
+        value: String(period ? period.tasksCompleted : completedMatters),
+        helper: period ? `Tasks completed${periodSuffix}` : 'Matters where the workflow is completed',
+        icon: TrendingUp,
+        tone: 'green',
+        href: '/performance',
+        scope: period ? 'period' : 'current',
+      },
+      // TPA is a role constant — never period-scoped.
       profile.financialScope === 'own'
-        ? { label: 'TPA', value: `${summary?.tpaPercent ?? profile.tpa}%`, helper: 'Your role participation share', icon: DollarSign, tone: 'green' }
-        : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Planned value of your assigned matters', icon: DollarSign, tone: 'green' },
-      { label: 'Fees Earned', value: fees == null ? 'Pending' : formatFees(fees), helper: period ? `Earned from payments received in ${period.label}` : 'Sum of your Earned fee rows in the Case Workspace tables', icon: DollarSign, tone: fees && fees > 0 ? 'green' : 'amber' },
+        ? { label: 'TPA', value: `${summary?.tpaPercent ?? profile.tpa}%`, helper: 'Your role participation share', icon: DollarSign, tone: 'green', scope: 'current' as const }
+        : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Planned value of your assigned matters', icon: DollarSign, tone: 'green', scope: 'current' as const },
+      {
+        label: 'Fees Earned',
+        value: fees == null ? 'Pending' : formatFees(fees),
+        helper: period ? `Earned from payments received${periodSuffix}` : 'Sum of your Earned fee rows in the Case Workspace tables',
+        icon: DollarSign,
+        tone: fees && fees > 0 ? 'green' : 'amber',
+        scope: period ? 'period' : 'current',
+      },
     ];
     if (period) {
       stats.push(
-        { label: 'Key Actions Checked', value: String(period.keyActionsChecked), helper: `Key Actions you checked in ${period.label}`, icon: CheckCircle2, tone: 'blue' },
-        { label: 'Sections Completed', value: String(period.sectionsCompleted), helper: `Workflow sections completed in ${period.label}`, icon: CheckSquare, tone: 'green' },
-        { label: 'Collected in Period', value: formatFees(period.collectedValue), helper: `Payments received in ${period.label} across your matters`, icon: DollarSign, tone: 'green' },
-        { label: 'Matters Completed', value: String(period.mattersCompleted), helper: `Your matters whose workflow completed in ${period.label}`, icon: TrendingUp, tone: 'purple' },
+        { label: 'Key Actions Checked', value: String(period.keyActionsChecked), helper: `Key Actions you checked${periodSuffix}`, icon: CheckCircle2, tone: 'blue', scope: 'period' },
+        { label: 'Sections Completed', value: String(period.sectionsCompleted), helper: `Workflow sections completed${periodSuffix}`, icon: CheckSquare, tone: 'green', scope: 'period' },
+        { label: 'Collected in Period', value: formatFees(period.collectedValue), helper: `Payments received${periodSuffix} across your matters`, icon: DollarSign, tone: 'green', scope: 'period' },
+        { label: 'Matters Completed', value: String(period.mattersCompleted), helper: `Your matters whose workflow completed${periodSuffix}`, icon: TrendingUp, tone: 'purple', scope: 'period' },
+        { label: 'Matters Opened', value: String(period.mattersCreatedInPeriod), helper: `Matters assigned to you that were created${periodSuffix} (entry date)`, icon: Briefcase, tone: 'blue', scope: 'period' },
       );
     }
     return stats;
@@ -1240,8 +1340,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           </div>
 
           <div className="mt-5 border-t border-gray-200 pt-3">
-            <div className="mb-2 text-sm font-medium text-gray-900">
-              Fee breakdown by matter {period ? `· ${period.label}` : '(Case Workspace)'}
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-sm font-medium text-gray-900">
+              <span>Fee breakdown by matter {period ? `· ${period.label}` : '(Case Workspace)'}</span>
+              {period && (
+                <span className="text-xs font-normal text-gray-500">
+                  {matterFeeRows.length} of {allMatterFeeRows.length} assigned matters had activity in this period
+                </span>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-[1240px] w-full text-left text-sm">
@@ -1265,7 +1370,9 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                   {matterFeeRows.length === 0 ? (
                     <tr>
                       <td colSpan={period ? 11 : 9} className="px-4 py-8 text-center text-gray-500">
-                        No matters assigned yet. Earned fees appear here once a matter is assigned to you and scored in its Case Workspace.
+                        {period
+                          ? `None of your ${allMatterFeeRows.length} assigned matters had activity in ${period.label}. Choose a different period, or All time to see every matter.`
+                          : 'No matters assigned yet. Earned fees appear here once a matter is assigned to you and scored in its Case Workspace.'}
                       </td>
                     </tr>
                   ) : (

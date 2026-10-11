@@ -204,6 +204,13 @@ type StaffDashboardMatterRow = {
   completed: boolean;
   outstanding: boolean;
   overdueSections: number;
+  /**
+   * True when this matter had ANY activity inside the selected period (a section
+   * completed, the matter completed, a task completed, or a payment received).
+   * Lets the dashboard list only the matters a period actually covers. Absent
+   * for the all-time view, where every assigned matter is in scope.
+   */
+  inPeriod?: boolean;
   /** Set only when a period was requested — eligible collected value received in the period. */
   collectedBaseInPeriod?: number;
   /** Set only when a period was requested — your earned fee from the period's payments. */
@@ -228,9 +235,13 @@ type StaffDashboardPeriod = {
   tasksCompleted: number;
   /** Your matters whose workflow completed inside the period. */
   mattersCompleted: number;
-  /** Average Timeliness of your task stages completed inside the period. */
+  /** Your matters that had any activity inside the period. */
+  mattersWithActivity: number;
+  /** Matters assigned to you that were created inside the period (entry date). */
+  mattersCreatedInPeriod: number;
+  /** Average Timeliness of your Earned Fees rows in matters worked in the period. */
   averageTimelinessScore: number | null;
-  /** Average Quality of your task stages completed inside the period. */
+  /** Average Quality of your Earned Fees rows in matters worked in the period. */
   averageQualityScore: number | null;
 };
 
@@ -250,6 +261,8 @@ const buildStaffPeriod = (
     sectionsCompleted: values?.sectionsCompleted ?? 0,
     tasksCompleted: values?.tasksCompleted ?? 0,
     mattersCompleted: values?.mattersCompleted ?? 0,
+    mattersWithActivity: values?.mattersWithActivity ?? 0,
+    mattersCreatedInPeriod: values?.mattersCreatedInPeriod ?? 0,
     averageTimelinessScore: values?.averageTimelinessScore ?? null,
     averageQualityScore: values?.averageQualityScore ?? null,
   };
@@ -411,6 +424,8 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     let periodSectionsCompleted = 0;
     let periodTasksCompleted = 0;
     let periodMattersCompleted = 0;
+    let periodMattersWithActivity = 0;
+    let periodMattersCreatedInPeriod = 0;
     const periodTimelinessScores: number[] = [];
     const periodQualityScores: number[] = [];
 
@@ -497,6 +512,8 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       if (period) {
         const collectedInPeriod = collectedInPeriodByCase.get(caseId) || 0;
         periodCollectedValue += collectedInPeriod;
+        // A payment landing inside the period is itself in-period activity.
+        if (collectedInPeriod > 0) hadInPeriodWork = true;
 
         // Same engine and role table as the all-time row — only the collected
         // value is restricted to payments received inside the period.
@@ -555,8 +572,16 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         // null, because staged per-Key-Action task records are not populated for
         // most matters.
         if (hadInPeriodWork) {
+          periodMattersWithActivity += 1;
           if (timelinessScore != null) periodTimelinessScores.push(timelinessScore);
           if (qualityScore != null) periodQualityScores.push(qualityScore);
+        }
+
+        // "Entry date" scope: matters assigned to you that were OPENED in the
+        // period. Assignment time is not stored, so creation is the only
+        // honest entry date available — never a fabricated one.
+        if (isWithinReportRange(matter?.createdAt, period)) {
+          periodMattersCreatedInPeriod += 1;
         }
       }
 
@@ -578,7 +603,11 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         outstanding,
         overdueSections: matterOverdueSections,
         ...(period
-          ? { collectedBaseInPeriod: round2(collectedBaseInPeriod || 0), earnedFeeInPeriod: earnedFeeInPeriod ?? null }
+          ? {
+              inPeriod: hadInPeriodWork,
+              collectedBaseInPeriod: round2(collectedBaseInPeriod || 0),
+              earnedFeeInPeriod: earnedFeeInPeriod ?? null,
+            }
           : {}),
       });
     }
@@ -615,6 +644,8 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       sectionsCompleted: periodSectionsCompleted,
       tasksCompleted: periodTasksCompleted,
       mattersCompleted: periodMattersCompleted,
+      mattersWithActivity: periodMattersWithActivity,
+      mattersCreatedInPeriod: periodMattersCreatedInPeriod,
       averageTimelinessScore: averageOf(periodTimelinessScores),
       averageQualityScore: averageOf(periodQualityScores),
     });

@@ -67,6 +67,11 @@ export type StaffDashboardMatterRow = {
   completed: boolean;
   outstanding: boolean;
   overdueSections: number;
+  /**
+   * True when the matter had activity inside the selected period. Present only
+   * when a period was requested — the all-time view lists every assigned matter.
+   */
+  inPeriod?: boolean;
   /** Present when a period was requested — collected value received in the period. */
   collectedBaseInPeriod?: number;
   /** Present when a period was requested — earned fee from the period's payments. */
@@ -95,6 +100,10 @@ export type StaffDashboardPeriod = {
   sectionsCompleted: number;
   tasksCompleted: number;
   mattersCompleted: number;
+  /** Your matters that had any activity inside the period. */
+  mattersWithActivity: number;
+  /** Matters assigned to you that were created inside the period (entry date). */
+  mattersCreatedInPeriod: number;
   averageTimelinessScore: number | null;
   averageQualityScore: number | null;
 };

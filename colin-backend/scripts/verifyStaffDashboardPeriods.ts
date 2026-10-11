@@ -239,11 +239,14 @@ const caseOpen = oid();
 const caseNoDates = oid();
 const templateId = oid();
 
-const makeCase = (id: mongoose.Types.ObjectId, no: string, status: string): any => ({
+const makeCase = (id: mongoose.Types.ObjectId, no: string, status: string, createdAt: Date): any => ({
   _id: id,
   caseNo: no,
   parties: `${no} Client`,
   status,
+  // Entry date — the only honest "when did this matter arrive" signal, since
+  // assignment time is not stored. Drives the "Matters Opened" period card.
+  createdAt,
   assignedTo: ME,
   caseAssignments: { initiator: ME, reviewer: 'Reviewer One', signerApprover: 'Approver One' },
   workflowProgress: { status, percent: 100, plannedValue: { amount: 1_000_000, currency: 'RWF' } },
@@ -294,12 +297,12 @@ const instanceFor = (caseId: mongoose.Types.ObjectId, completedAt: Date | null, 
 });
 
 const cases = [
-  makeCase(caseOld, 'CASE-OLD-YEAR', 'Closed'),
-  makeCase(caseLastMonth, 'CASE-LAST-MONTH', 'Closed'),
-  makeCase(caseThisMonth, 'CASE-THIS-MONTH', 'Closed'),
-  makeCase(caseOpen, 'CASE-OPEN', 'In Progress'),
+  makeCase(caseOld, 'CASE-OLD-YEAR', 'Closed', previousYearDate),
+  makeCase(caseLastMonth, 'CASE-LAST-MONTH', 'Closed', lastMonthStart),
+  makeCase(caseThisMonth, 'CASE-THIS-MONTH', 'Closed', thisMonthDate),
+  makeCase(caseOpen, 'CASE-OPEN', 'In Progress', new Date()),
   // A matter carrying an unparseable date must not crash the aggregation.
-  makeCase(caseNoDates, 'CASE-NO-DATES', 'In Progress'),
+  makeCase(caseNoDates, 'CASE-NO-DATES', 'In Progress', new Date()),
 ];
 
 const instances = [
@@ -611,6 +614,7 @@ cases.push({
   assignedTo: ME,
   caseAssignments: { initiator: ME },
   workflowProgress: {},
+  createdAt: previousYearDate,
   caseManagement: {},
 } as any);
 const withBare = await runFor(users[0], {});
@@ -626,6 +630,74 @@ check('page 1 numbering starts at 1', rowNumberFor(1, 0), 1);
 check('page 2 numbering continues at 11', rowNumberFor(2, 0), 11);
 check('page 3 numbering continues at 21', rowNumberFor(3, 0), 21);
 check('the last row of page 2 is 20', rowNumberFor(2, PAGE_SIZE - 1), 20);
+
+section('Staff Dashboard — period scoping of every figure');
+
+// Every row must declare whether it belongs to the selected period, so the UI
+// can list only the matters the period actually covers.
+check('period rows carry an explicit inPeriod flag', lastMonth.rows.every((r: any) => typeof r.inPeriod === 'boolean'), true);
+check(
+  'only the previous-month matter is flagged inPeriod for Last Month',
+  lastMonth.rows.filter((r: any) => r.inPeriod).map((r: any) => r.caseNo),
+  ['CASE-LAST-MONTH']
+);
+check(
+  'only the this-month matter is flagged inPeriod for This Month',
+  thisMonthRes.rows.filter((r: any) => r.inPeriod).map((r: any) => r.caseNo),
+  ['CASE-THIS-MONTH']
+);
+check('the period block reports how many matters had activity', lastMonth.period.mattersWithActivity, 1);
+check('This Month reports its own active matter count', thisMonthRes.period.mattersWithActivity, 1);
+check('the all-time view carries no inPeriod flag (every matter is in scope)', allTime.rows.every((r: any) => r.inPeriod === undefined), true);
+
+// Last Year spans two fixture months (the previous-year matter + nothing else).
+check(
+  'Last Year flags only the previous-year matter',
+  lastYear.rows.filter((r: any) => r.inPeriod).map((r: any) => r.caseNo),
+  ['CASE-OLD-YEAR']
+);
+
+// Every period figure must be present and numeric — none may silently vanish.
+check(
+  'every period figure is present and numeric',
+  {
+    feesEarned: typeof lastMonth.period.feesEarned,
+    collectedValue: typeof lastMonth.period.collectedValue,
+    keyActionsChecked: typeof lastMonth.period.keyActionsChecked,
+    sectionsCompleted: typeof lastMonth.period.sectionsCompleted,
+    tasksCompleted: typeof lastMonth.period.tasksCompleted,
+    mattersCompleted: typeof lastMonth.period.mattersCompleted,
+    mattersWithActivity: typeof lastMonth.period.mattersWithActivity,
+    mattersCreatedInPeriod: typeof lastMonth.period.mattersCreatedInPeriod,
+    averageTimelinessScore: typeof lastMonth.period.averageTimelinessScore,
+    averageQualityScore: typeof lastMonth.period.averageQualityScore,
+  },
+  {
+    feesEarned: 'number',
+    collectedValue: 'number',
+    keyActionsChecked: 'number',
+    sectionsCompleted: 'number',
+    tasksCompleted: 'number',
+    mattersCompleted: 'number',
+    mattersWithActivity: 'number',
+    mattersCreatedInPeriod: 'number',
+    averageTimelinessScore: 'number',
+    averageQualityScore: 'number',
+  }
+);
+
+// Entry-date scoping: "Matters Opened" uses the matter creation date, so a
+// matter created outside the window must not be counted as opened inside it.
+// Fixtures: exactly one matter was created inside Last Month (CASE-LAST-MONTH).
+check('Last Month counts only the matter created inside it', lastMonth.period.mattersCreatedInPeriod, 1);
+// Fixtures created inside This Month: CASE-THIS-MONTH, CASE-OPEN and
+// CASE-NO-DATES (the latter two are created "now"), so 3 is correct.
+check('This Month counts every matter created inside it', thisMonthRes.period.mattersCreatedInPeriod, 3);
+check(
+  'Last Year counts only matters created inside it',
+  lastYear.period.mattersCreatedInPeriod,
+  1
+);
 
 
 // Mirrors the dashboard fee table: rank rows by a metric and confirm the
