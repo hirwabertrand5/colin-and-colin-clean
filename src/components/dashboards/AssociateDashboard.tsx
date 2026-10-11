@@ -528,21 +528,30 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   }, [next30Days, today]);
 
   // Resolve the selected period into request parameters (or a friendly hint).
+  //
+  // `params === undefined` means "no reporting-period restriction" (All Time).
+  // The effect below keys off `periodKey` — a stable string — instead of the
+  // object identity, so React never refetches for two selections that resolve
+  // to the same window.
   const periodRequest = useMemo<{
+    key: string;
     params: { range?: StaffDashboardPeriodRange; from?: string; to?: string } | undefined;
     hint: string;
   }>(() => {
-    if (periodRange === 'all') return { params: undefined, hint: '' };
+    if (periodRange === 'all') return { key: 'all', params: undefined, hint: '' };
     if (periodRange === 'custom') {
       if (!customFrom || !customTo) {
-        return { params: undefined, hint: 'Select both From and To dates to apply the custom range.' };
+        // An incomplete custom range must NOT leave the previous period's
+        // figures on screen under a "Custom Range" label. Fall back to the
+        // all-time view and tell the member why.
+        return { key: 'all', params: undefined, hint: 'Select both From and To dates to apply the custom range.' };
       }
       if (customFrom > customTo) {
-        return { params: undefined, hint: 'The From date must be before the To date.' };
+        return { key: 'all', params: undefined, hint: 'The From date must be before the To date.' };
       }
-      return { params: { from: customFrom, to: customTo }, hint: '' };
+      return { key: `custom:${customFrom}:${customTo}`, params: { from: customFrom, to: customTo }, hint: '' };
     }
-    return { params: { range: periodRange }, hint: '' };
+    return { key: `range:${periodRange}`, params: { range: periodRange }, hint: '' };
   }, [periodRange, customFrom, customTo]);
 
   const fetchSummaryForPeriod = async (signal?: { cancelled: boolean }) => {
@@ -550,6 +559,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       setSummaryLoading(true);
       setError('');
       const summary = await getStaffDashboardSummary(periodRequest.params);
+      // A newer request may already have been issued; never let an older
+      // response overwrite the figures for the period now on screen.
       if (!signal?.cancelled) setStaffSummary(summary);
     } catch (e: any) {
       if (!signal?.cancelled) setError(e?.message || 'Failed to update the dashboard for the selected period.');
@@ -590,7 +601,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     return () => {
       signal.cancelled = true;
     };
-  }, [periodRequest]);
+    // `periodRequest.key` is the stable identity of the selected window; the
+    // params object is recreated on every render and must not retrigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodRequest.key]);
 
   const refreshSummary = async () => {
     setPeriodHint(periodRequest.hint);
@@ -750,6 +764,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         switch (feeSortKey) {
           case 'matter':
             return `${row.caseNo || ''} ${row.parties || ''}`;
+          case 'parties':
+            return row.parties || '';
           case 'role':
             return row.role || '';
           case 'tpa':
@@ -758,6 +774,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             return row.timelinessScore ?? null;
           case 'quality':
             return row.qualityScore ?? null;
+          case 'contract':
+            return row.contractValue ?? null;
           case 'collected':
             return row.collectedBase ?? null;
           case 'earned':
@@ -833,8 +851,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       { label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Active Matters', value: String(assigned), helper: 'Matters where you are the Initiator, Reviewer or Signer/Approver', icon: Briefcase, tone: 'blue', href: '/matters' },
       { label: 'Tasks Outstanding', value: String(outstanding), helper: 'Matters where the Key Actions are not all checked yet', icon: CheckSquare, tone: outstanding ? 'amber' : 'green', href: '/tasks' },
       { label: 'Overdue Tasks', value: String(overdue), helper: 'Workflow sections past their deadline in your matters', icon: AlertTriangle, tone: overdue ? 'red' : 'green', href: '/tasks' },
-      { label: 'On-Time Completion', value: timeliness == null ? 'Pending' : `${timeliness}%`, helper: period ? `Average Timeliness of your task stages completed in ${period.label}` : 'Average Timeliness of your row in each Case Workspace', icon: Clock, tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber', href: '/performance' },
-      { label: 'Quality Score', value: quality == null ? 'Pending' : `${quality}%`, helper: period ? `Average Quality of your task stages completed in ${period.label}` : 'Average Quality Score on the matters assigned to you', icon: Award, tone: 'purple', href: '/performance' },
+      { label: 'On-Time Completion', value: timeliness == null ? 'Pending' : `${timeliness}%`, helper: period ? `Average Timeliness of your Earned Fees rows in matters worked in ${period.label}` : 'Average Timeliness of your row in each Case Workspace', icon: Clock, tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber', href: '/performance' },
+      { label: 'Quality Score', value: quality == null ? 'Pending' : `${quality}%`, helper: period ? `Average Quality Score on matters worked in ${period.label}` : 'Average Quality Score on the matters assigned to you', icon: Award, tone: 'purple', href: '/performance' },
       { label: 'Tasks Completed', value: String(period ? period.tasksCompleted : completedMatters), helper: period ? `Tasks completed in ${period.label}` : 'Matters where the workflow is completed', icon: TrendingUp, tone: 'green', href: '/performance' },
       profile.financialScope === 'own'
         ? { label: 'TPA', value: `${summary?.tpaPercent ?? profile.tpa}%`, helper: 'Your role participation share', icon: DollarSign, tone: 'green' }
@@ -882,6 +900,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               <option value="all">All time</option>
               <option value="daily">Last Day</option>
               <option value="weekly">Last Week</option>
+              <option value="this_month">This Month</option>
               <option value="monthly">Last Month</option>
               <option value="quarterly">Last Quarter</option>
               <option value="yearly">Last Year</option>
@@ -1225,14 +1244,17 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               Fee breakdown by matter {period ? `· ${period.label}` : '(Case Workspace)'}
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-[1024px] w-full text-left text-sm">
+              <table className="min-w-[1240px] w-full text-left text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                   <tr>
+                    <th className="w-10 px-3 py-3">#</th>
                     <SortableHeader label="Matter" column="matter" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} />
+                    <SortableHeader label="Parties" column="parties" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} />
                     <SortableHeader label="Role" column="role" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} />
                     <SortableHeader label="TPA" column="tpa" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Timeliness" column="timeliness" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Quality" column="quality" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                    <SortableHeader label="Contract Value" column="contract" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Collected base" column="collected" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Earned fee" column="earned" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     {period && <SortableHeader label="Collected (period)" column="collectedPeriod" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />}
@@ -1242,20 +1264,23 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                 <tbody className="divide-y divide-gray-200">
                   {matterFeeRows.length === 0 ? (
                     <tr>
-                      <td colSpan={period ? 9 : 7} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={period ? 11 : 9} className="px-4 py-8 text-center text-gray-500">
                         No matters assigned yet. Earned fees appear here once a matter is assigned to you and scored in its Case Workspace.
                       </td>
                     </tr>
                   ) : (
-                    feePageRows.map((row) => (
+                    feePageRows.map((row, index) => (
                       <tr key={row.caseId} className="align-top">
+                        <td className="px-3 py-3 text-gray-500">{(feePageClamped - 1) * PAGE_SIZE + index + 1}</td>
                         <td className="px-4 py-3 text-gray-700">
                           <Link to={`/matters/${row.caseId}`} className="hover:text-gray-900">{row.caseNo || row.parties || '—'}</Link>
                         </td>
+                        <td className="px-4 py-3 text-gray-700">{row.parties || '—'}</td>
                         <td className="px-4 py-3 text-gray-700">{row.role || '—'}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.tpaPercent > 0 ? `${row.tpaPercent}%` : '—'}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.timelinessScore == null ? '—' : `${row.timelinessScore}%`}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.qualityScore == null ? '—' : `${row.qualityScore}%`}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.contractValue ?? 0)}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBase)}</td>
                         <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.earnedFee == null ? 'Pending' : formatFees(row.earnedFee)}</td>
                         {period && <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBaseInPeriod ?? 0)}</td>}

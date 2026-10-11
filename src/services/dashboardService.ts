@@ -60,6 +60,8 @@ export type StaffDashboardMatterRow = {
   tpaPercent: number;
   timelinessScore: number | null;
   qualityScore: number | null;
+  /** Planned contract value of the matter, as shown in its Case Workspace. */
+  contractValue: number;
   collectedBase: number;
   earnedFee: number | null;
   completed: boolean;
@@ -79,6 +81,7 @@ export type StaffDashboardPeriodRange =
   | 'quarterly'
   | 'yearly'
   | 'ytd'
+  | 'this_month'
   | 'custom';
 
 export type StaffDashboardPeriod = {

@@ -197,6 +197,8 @@ type StaffDashboardMatterRow = {
   tpaPercent: number;
   timelinessScore: number | null;
   qualityScore: number | null;
+  /** Planned contract value of the matter (Case Workspace → Contract Value). */
+  contractValue: number;
   collectedBase: number;
   earnedFee: number | null;
   completed: boolean;
@@ -488,6 +490,10 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       // ---- Period-scoped figures for this matter (requested periods only) ----
       let collectedBaseInPeriod: number | undefined;
       let earnedFeeInPeriod: number | null | undefined;
+      // Does this matter have any work that belongs to the selected period?
+      // Decided BEFORE the score is averaged, so a matter only contributes its
+      // Timeliness/Quality when it genuinely had in-period activity.
+      let hadInPeriodWork = false;
       if (period) {
         const collectedInPeriod = collectedInPeriodByCase.get(caseId) || 0;
         periodCollectedValue += collectedInPeriod;
@@ -526,6 +532,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
             // workflow steps, so a Key Action counts as checked when its step
             // completes inside the period.
             periodKeyActionsChecked += 1;
+            hadInPeriodWork = true;
           }
         }
 
@@ -536,7 +543,20 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
               if (!at || Number.isNaN(at.getTime())) return latest;
               return !latest || at.getTime() > latest.getTime() ? at : latest;
             }, null) || (instance?.updatedAt ? new Date(instance.updatedAt) : null);
-          if (isWithinReportRange(completionAt, period)) periodMattersCompleted += 1;
+          if (isWithinReportRange(completionAt, period)) {
+            periodMattersCompleted += 1;
+            hadInPeriodWork = true;
+          }
+        }
+
+        // Period Timeliness / Quality use the SAME earned-fees rows that produce
+        // the all-time figures — only the matters are restricted to those with
+        // in-period activity. Reading only `taskStages` left these permanently
+        // null, because staged per-Key-Action task records are not populated for
+        // most matters.
+        if (hadInPeriodWork) {
+          if (timelinessScore != null) periodTimelinessScores.push(timelinessScore);
+          if (qualityScore != null) periodQualityScores.push(qualityScore);
         }
       }
 
@@ -549,6 +569,9 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         tpaPercent,
         timelinessScore,
         qualityScore,
+        // The matter's own contract value, straight from the same earned-fees
+        // engine that produced the fee columns — never re-derived here.
+        contractValue: round2(Number(earned.contractValue) || 0),
         collectedBase: round2(collectedBase),
         earnedFee,
         completed,
