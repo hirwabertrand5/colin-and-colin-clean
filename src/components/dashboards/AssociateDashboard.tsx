@@ -948,7 +948,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       // TPA is a role constant — never period-scoped.
       profile.financialScope === 'own'
         ? { label: 'TPA', value: `${summary?.tpaPercent ?? profile.tpa}%`, helper: 'Your role participation share', icon: DollarSign, tone: 'green', scope: 'current' as const }
-        : { label: profile.financialScope === 'client' ? 'Portfolio Contract Value' : 'Matter Contract Value', value: formatRwf(financials.contractValue), helper: 'Planned value of your assigned matters', icon: DollarSign, tone: 'green', scope: 'current' as const },
+        : { label: profile.financialScope === 'client' ? 'Portfolio Total Contract Value' : 'Matter Total Contract Value', value: formatRwf(financials.contractValue), helper: 'Total contract value of your assigned matters', icon: DollarSign, tone: 'green', scope: 'current' as const },
       {
         label: 'Fees Earned',
         value: fees == null ? 'Pending' : formatFees(fees),
@@ -962,7 +962,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       stats.push(
         { label: 'Key Actions Checked', value: String(period.keyActionsChecked), helper: `Key Actions you checked${periodSuffix}`, icon: CheckCircle2, tone: 'blue', scope: 'period' },
         { label: 'Sections Completed', value: String(period.sectionsCompleted), helper: `Workflow sections completed${periodSuffix}`, icon: CheckSquare, tone: 'green', scope: 'period' },
-        { label: 'Contract Value', value: formatRwf(financials.contractValue), helper: 'Planned value of your assigned matters', icon: DollarSign, tone: 'green', scope: 'current' },
+        { label: 'Total Contract Value', value: formatRwf(financials.contractValue), helper: 'Total contract value of your assigned matters', icon: DollarSign, tone: 'green', scope: 'current' },
         { label: 'Matters Completed', value: String(period.mattersCompleted), helper: `Your matters whose workflow completed${periodSuffix}`, icon: TrendingUp, tone: 'purple', scope: 'period' },
         { label: 'Matters Opened', value: String(period.mattersCreatedInPeriod), helper: `Matters assigned to you that were created${periodSuffix} (entry date)`, icon: Briefcase, tone: 'blue', scope: 'period' },
       );
@@ -1198,7 +1198,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             <SectionHeader title="Matter Financial Status" description="Planned, completed, and outstanding value of the matters assigned to you." />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
-                ['Contract Value', formatRwf(financials.contractValue), 'slate' as Tone],
+                ['Total Contract Value', formatRwf(financials.contractValue), 'slate' as Tone],
                 ['Work Value in Progress', formatRwf(financials.earnedValue), 'green' as Tone],
                 ['Outstanding Value', formatRwf(financials.outstanding), 'amber' as Tone],
               ].map(([label, value, tone]) => {
@@ -1320,9 +1320,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               period
                 ? ['Fees Earned in Period', period.feesEarned == null ? 'Pending' : formatFees(period.feesEarned), `Earned from payments received in ${period.label}`]
                 : ['Fees Earned', summary?.feesEarnedTotal == null ? 'Pending' : formatFees(summary.feesEarnedTotal), 'Sum of your Earned fee rows across your matters'],
-              period
-                ? ['Collected in Period', formatFees(period.collectedValue), `Payments received in ${period.label} across your matters`]
-                : ['Collected Base', formatFees(summary?.collectedBaseTotal ?? 0), 'Eligible collected value used for your earned fees'],
+              ['Total Contract Value', formatRwf(financials.contractValue), 'Total contract value of your assigned matters'],
               ['TPA', `${summary?.tpaPercent ?? profile.tpa}%`, 'Your role participation share from the remuneration table'],
               ['Matters with Earned Fees', String(feeScoredMatters.length), `${matterFeeRows.length} matter(s) assigned to you`],
             ].map(([label, value, helper]) => (
@@ -1359,7 +1357,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                     <SortableHeader label="TPA" column="tpa" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Timeliness" column="timeliness" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Quality" column="quality" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
-                    <SortableHeader label="Contract Value" column="contract" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                    <SortableHeader label="Total Contract Value" column="contract" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Collected base" column="collected" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Earned fee" column="earned" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     {period && <SortableHeader label="Collected (period)" column="collectedPeriod" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />}
