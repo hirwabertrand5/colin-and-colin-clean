@@ -962,7 +962,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       stats.push(
         { label: 'Key Actions Checked', value: String(period.keyActionsChecked), helper: `Key Actions you checked${periodSuffix}`, icon: CheckCircle2, tone: 'blue', scope: 'period' },
         { label: 'Sections Completed', value: String(period.sectionsCompleted), helper: `Workflow sections completed${periodSuffix}`, icon: CheckSquare, tone: 'green', scope: 'period' },
-        { label: 'Collected in Period', value: formatFees(period.collectedValue), helper: `Payments received${periodSuffix} across your matters`, icon: DollarSign, tone: 'green', scope: 'period' },
+        { label: 'Contract Value', value: formatRwf(financials.contractValue), helper: 'Planned value of your assigned matters', icon: DollarSign, tone: 'green', scope: 'current' },
         { label: 'Matters Completed', value: String(period.mattersCompleted), helper: `Your matters whose workflow completed${periodSuffix}`, icon: TrendingUp, tone: 'purple', scope: 'period' },
         { label: 'Matters Opened', value: String(period.mattersCreatedInPeriod), helper: `Matters assigned to you that were created${periodSuffix} (entry date)`, icon: Briefcase, tone: 'blue', scope: 'period' },
       );

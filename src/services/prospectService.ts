@@ -69,7 +69,65 @@ export interface Prospect {
   convertedToMatters?: string;
   createdAt: Date;
   updatedAt: Date;
+
+  // ── Workflow-control layer (onboarding document) ──────────────────────────
+  stageStatus?: 'Not Started' | 'In Progress' | 'Completed' | 'Blocked';
+  stageStartedAt?: Date;
+  stageDueAt?: Date;
+  stageCompletedAt?: Date;
+  stageCompletedBy?: string;
+  delayReason?: string;
+  waitingOn?: 'Firm' | 'Client' | 'Third Party' | 'None';
+  outstandingRequirement?: string;
+  stageChecklist?: Array<{ key: string; label: string; done: boolean; doneBy?: string; doneAt?: Date | string }>;
+  lastContactDate?: Date;
+  lastFollowUpDate?: Date;
+  nextFollowUpDate?: Date;
+  followUpCount?: number;
+  followUpStatus?: string;
+  escalationRequiredAt?: Date;
+  clientResponseReceived?: boolean;
+  followUpOutcome?: string;
+  stageHistory?: Array<{
+    stage: string;
+    status?: string;
+    startedAt?: Date | string;
+    completedAt?: Date | string;
+    completedBy?: string;
+    dueAt?: Date | string;
+    delayReason?: string;
+    waitingOn?: string;
+    outstandingRequirement?: string;
+    recordedAt: Date | string;
+  }>;
+  legalOpinion?: {
+    referenceNo?: string;
+    scope?: string;
+    fee?: number;
+    paymentStatus?: 'Unpaid' | 'Part Paid' | 'Paid';
+    outcome?: string;
+    openedAt?: Date | string;
+    completedAt?: Date | string;
+    closedAt?: Date | string;
+  };
 }
+
+export interface ProspectFollowUpInput {
+  nextFollowUpDate?: string;
+  outcome?: string;
+  waitingOn?: 'Firm' | 'Client' | 'Third Party' | 'None';
+  clientResponseReceived?: boolean;
+}
+
+export interface ProspectChecklistToggleInput {
+  key?: string;
+  label?: string;
+  done: boolean;
+  doneBy?: string;
+}
+
+/** The stage configuration + checklist the frontend reads from the shared util. */
+export { PROSPECT_STAGE_CONFIG, PROSPECT_STAGE_ORDER } from '../utils/prospectStageConfig';
 
 export const getAllProspects = async (filters?: {
   stage?: string;
@@ -150,5 +208,24 @@ export const convertProspectToMatter = async (id: string): Promise<{
   matter: any;
 }> => {
   const response = await axios.post(`${API_BASE_URL}/prospects/${id}/convert`, {}, { headers: getAuthHeaders() });
+  return response.data;
+};
+
+/** Record a client/third-party follow-up against a prospect (workflow control). */
+export const recordProspectFollowUp = async (id: string, input: ProspectFollowUpInput): Promise<Prospect> => {
+  const response = await axios.post(`${API_BASE_URL}/prospects/${id}/follow-up`, input, {
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+  });
+  return response.data;
+};
+
+/** Toggle a single mandatory Key Action (checklist item) on the current stage. */
+export const toggleProspectChecklistItem = async (
+  id: string,
+  input: ProspectChecklistToggleInput
+): Promise<Prospect> => {
+  const response = await axios.patch(`${API_BASE_URL}/prospects/${id}/checklist`, input, {
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+  });
   return response.data;
 };

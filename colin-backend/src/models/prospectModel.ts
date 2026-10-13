@@ -70,6 +70,60 @@ export interface IProspect extends Document {
   engagementNotes?: string;
   conversionReason?: string; // For non-converted prospects
   conversionOutcome?: string;
+
+  // ── Workflow-control layer (onboarding document) ──────────────────────────
+  // The prospect's active stage carries its own status, timing, ownership and
+  // follow-up controls so it can be monitored from first enquiry through
+  // conversion/closure, mirroring the Case Workspace overview.
+  stageStatus?: 'Not Started' | 'In Progress' | 'Completed' | 'Blocked';
+  stageStartedAt?: Date;      // When the current stage began (drives the due date)
+  stageDueAt?: Date;          // Auto-calculated = stageStartedAt + stage SLA
+  stageCompletedAt?: Date;    // When the current stage was completed
+  stageCompletedBy?: string;  // Who completed the current stage
+  delayReason?: string;       // Mandatory where an SLA is missed
+  waitingOn?: 'Firm' | 'Client' | 'Third Party' | 'None';
+  outstandingRequirement?: string; // What is still needed to clear the stage-gate
+  // Per-stage mandatory checklist ticks (Key Actions) for the current stage.
+  stageChecklist?: Array<{
+    key: string;
+    label: string;
+    done: boolean;
+    doneBy?: string;
+    doneAt?: Date;
+  }>;
+  // Follow-up control (client / third-party dependent next action).
+  lastContactDate?: Date;
+  lastFollowUpDate?: Date;
+  nextFollowUpDate?: Date;
+  followUpCount?: number;
+  followUpStatus?: string;
+  escalationRequiredAt?: Date;
+  clientResponseReceived?: boolean;
+  followUpOutcome?: string;
+  // Immutable stage-history audit trail (each transition appends an entry).
+  stageHistory?: Array<{
+    stage: string;
+    status: string;
+    startedAt?: Date;
+    completedAt?: Date;
+    completedBy?: string;
+    dueAt?: Date;
+    delayReason?: string;
+    waitingOn?: string;
+    outstandingRequirement?: string;
+    recordedAt: Date;
+  }>;
+  // Legal Opinion / Diagnostic as a billable mini-matter (optional sub-service).
+  legalOpinion?: {
+    referenceNo?: string;
+    scope?: string;
+    fee?: number;
+    paymentStatus?: 'Unpaid' | 'Part Paid' | 'Paid';
+    outcome?: string;
+    openedAt?: Date;
+    completedAt?: Date;
+    closedAt?: Date;
+  };
   
   // Assignment & Management
   assignedTo: mongoose.Types.ObjectId; // User ID
@@ -239,6 +293,71 @@ const ProspectSchema = new Schema<IProspect>(
     conversionOutcome: {
       type: String,
       trim: true,
+    },
+    // ── Workflow-control layer (onboarding document) ──────────────────────────
+    stageStatus: {
+      type: String,
+      enum: ['Not Started', 'In Progress', 'Completed', 'Blocked'],
+    },
+    stageStartedAt: Date,
+    stageDueAt: Date,
+    stageCompletedAt: Date,
+    stageCompletedBy: String,
+    delayReason: String,
+    waitingOn: {
+      type: String,
+      enum: ['Firm', 'Client', 'Third Party', 'None'],
+    },
+    outstandingRequirement: String,
+    stageChecklist: {
+      type: [
+        {
+          key: { type: String, required: true, trim: true },
+          label: { type: String, required: true, trim: true },
+          done: { type: Boolean, default: false },
+          doneBy: String,
+          doneAt: Date,
+        },
+      ],
+      default: [],
+    },
+    lastContactDate: Date,
+    lastFollowUpDate: Date,
+    nextFollowUpDate: Date,
+    followUpCount: { type: Number, default: 0 },
+    followUpStatus: String,
+    escalationRequiredAt: Date,
+    clientResponseReceived: { type: Boolean, default: false },
+    followUpOutcome: String,
+    stageHistory: {
+      type: [
+        {
+          stage: { type: String, required: true, trim: true },
+          status: { type: String, trim: true },
+          startedAt: Date,
+          completedAt: Date,
+          completedBy: String,
+          dueAt: Date,
+          delayReason: String,
+          waitingOn: String,
+          outstandingRequirement: String,
+          recordedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
+    legalOpinion: {
+      referenceNo: String,
+      scope: String,
+      fee: Number,
+      paymentStatus: {
+        type: String,
+        enum: ['Unpaid', 'Part Paid', 'Paid'],
+      },
+      outcome: String,
+      openedAt: Date,
+      completedAt: Date,
+      closedAt: Date,
     },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,

@@ -8,6 +8,46 @@ import SortableHeader from '../ui/SortableHeader';
 import TableExport from '../ui/TableExport';
 import { SortDir, sortRows, toggleSortKey } from '../../utils/tableSort';
 import { ReportColumn } from '../../utils/reportExport';
+import { formatDueCountdown, getUrgencyClass } from '../../utils/workflowDeadline';
+import {
+  PROSPECT_STAGE_CONFIG,
+  computeProspectWorkflow,
+  getResponsiblePersonName,
+  getStageDueAt,
+  isTerminalStage,
+  type ProspectWaitingOn,
+  type ProspectWorkflowSummary,
+} from '../../utils/prospectStageConfig';
+
+/** Ticking clock so "Time Remaining" is a live countdown (refreshes each minute). */
+const useNow = (intervalMs = 60_000) => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+};
+
+const STAGE_STATUS_BADGE: Record<string, string> = {
+  'Not Started': 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  'In Progress': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  Completed: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+  Blocked: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+};
+
+const STAGE_GATE_BADGE: Record<string, string> = {
+  Complete: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+  'In Progress': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  Blocked: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+};
+
+const WAITING_ON_BADGE: Record<ProspectWaitingOn, string> = {
+  Firm: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
+  Client: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+  'Third Party': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+  None: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+};
 
 const ADMIN_ROLES = ['managing_director', 'managing_partner', 'senior_partner', 'partner', 'associate_partner'];
 
@@ -42,6 +82,21 @@ const prospectSortValueOf = (p: Prospect, key: string): unknown => {
       return Number(p.estimatedFeeValue || 0) || Number(p.estimatedMatterValue || 0) || 0;
     case 'stage':
       return ['Inquiry', 'Consultation', 'Conflict Check', 'Quotation', 'Quotation Preparation', 'Conversion Assessment', 'Quotation Issued', 'Awaiting Client Decision', 'Final Follow-Up', 'Engagement'].indexOf(p.stage || '');
+    case 'stageStatus':
+      return ['Blocked', 'In Progress', 'Not Started', 'Completed'].indexOf(computeProspectWorkflow(p).stageStatus);
+    case 'responsible':
+      return getResponsiblePersonName(p);
+    case 'waitingOn':
+      return computeProspectWorkflow(p).waitingOn;
+    case 'nextStage':
+      return computeProspectWorkflow(p).nextStage || '';
+    case 'stageGate':
+      return ['Blocked', 'In Progress', 'Complete'].indexOf(computeProspectWorkflow(p).stageGate);
+    case 'dueDate': {
+      // Rank by urgency (red first) then by the actual due date.
+      const due = getStageDueAt(p);
+      return due ? due.getTime() : Number.MAX_SAFE_INTEGER;
+    }
     case 'doneAt':
       return p.createdAt || p.dateReceived || p.updatedAt || '';
     case 'doneBy':
@@ -49,6 +104,17 @@ const prospectSortValueOf = (p: Prospect, key: string): unknown => {
     default:
       return p.clientName;
   }
+};
+
+/** Urgency rank so the default sort (and "Next Deadline") put red first. */
+const urgencyRankOf = (p: Prospect): number => {
+  if (isTerminalStage(p.stage)) return 4;
+  const color = computeProspectWorkflow(p).urgencyColor;
+  if (color === 'red') return 0;
+  if (color === 'yellow') return 1;
+  if (color === 'green') return 2;
+  if (color === 'blue') return 3;
+  return 5;
 };
 
 const getErrorMessage = (error: any, fallback: string) =>
@@ -65,6 +131,7 @@ export default function IntakeProspects() {
   const [showForm, setShowForm] = useState(false);
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [filterStage, setFilterStage] = useState<string | null>(null);
+  const [filterWaitingOn, setFilterWaitingOn] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortKey, setSortKey] = useState('');
@@ -82,6 +149,14 @@ export default function IntakeProspects() {
     }
   })();
   const canUseAdminActions = currentRole ? ADMIN_ROLES.includes(currentRole) : false;
+  const now = useNow();
+
+  // Live workflow summary per prospect (memoised against the ticking clock).
+  const workflowByProspect = useMemo(() => {
+    const map = new Map<string, ProspectWorkflowSummary>();
+    for (const p of prospects) map.set(p._id, computeProspectWorkflow(p, now));
+    return map;
+  }, [prospects, now]);
 
   const stageOrder = [
     'Inquiry',
@@ -138,6 +213,10 @@ export default function IntakeProspects() {
 
     return (filterStage ? prospects.filter((p) => p.stage === filterStage) : prospects)
       .filter((prospect) => {
+        if (!filterWaitingOn) return true;
+        return computeProspectWorkflow(prospect).waitingOn === filterWaitingOn;
+      })
+      .filter((prospect) => {
         if (!q) return true;
 
         const searchBits = [
@@ -169,6 +248,10 @@ export default function IntakeProspects() {
       })
       .slice()
       .sort((a, b) => {
+        // Default ordering: most urgent deadline first (red → yellow → green →
+        // blue → terminal), then by stage progress, then newest first.
+        const urgencyDiff = urgencyRankOf(a) - urgencyRankOf(b);
+        if (urgencyDiff !== 0) return urgencyDiff;
         const stageDiff = stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage);
         if (stageDiff !== 0) return stageDiff;
         return new Date(b.dateReceived || b.createdAt).getTime() - new Date(a.dateReceived || a.createdAt).getTime();
@@ -188,7 +271,7 @@ export default function IntakeProspects() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterStage, searchTerm, sortKey, sortDir]);
+  }, [filterStage, filterWaitingOn, searchTerm, sortKey, sortDir]);
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
@@ -338,6 +421,37 @@ export default function IntakeProspects() {
           </div>
         )}
 
+        {/* Workflow-control filters (search lives in the table header below) */}
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Waiting on:</span>
+          {(['Firm', 'Client', 'Third Party', 'None'] as ProspectWaitingOn[]).map((option) => {
+            const active = filterWaitingOn === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setFilterWaitingOn(active ? null : option)}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  active
+                    ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                    : 'border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
+                }`}
+              >
+                {option}
+              </button>
+            );
+          })}
+          {filterWaitingOn && (
+            <button
+              type="button"
+              onClick={() => setFilterWaitingOn(null)}
+              className="text-xs font-medium text-gray-500 underline-offset-2 hover:underline dark:text-gray-400"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
         {/* Prospects Table */}
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="flex flex-col gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-700 lg:flex-row lg:items-center lg:justify-between">
@@ -361,6 +475,12 @@ export default function IntakeProspects() {
                   { label: 'Legal Classification', value: (p: Prospect) => getLegalClassificationLabel(p) },
                   { label: 'Estimated Fee Value', value: (p: Prospect) => formatEstimatedValue(p) },
                   { label: 'Current Stage', value: (p: Prospect) => getCurrentStageLabel(p) },
+                  { label: 'Stage Status', value: (p: Prospect) => computeProspectWorkflow(p).stageStatus },
+                  { label: 'Responsible Person', value: (p: Prospect) => getResponsiblePersonName(p) },
+                  { label: 'Waiting On', value: (p: Prospect) => computeProspectWorkflow(p).waitingOn },
+                  { label: 'Next Deadline', value: (p: Prospect) => (computeProspectWorkflow(p).dueAt ? new Date(computeProspectWorkflow(p).dueAt as Date).toLocaleString() : '') },
+                  { label: 'Next Stage', value: (p: Prospect) => computeProspectWorkflow(p).nextStage || '' },
+                  { label: 'Stage-Gate', value: (p: Prospect) => computeProspectWorkflow(p).stageGate },
                   { label: 'Done At', value: (p: Prospect) => formatDoneAt(p.createdAt || p.dateReceived || p.updatedAt) },
                   { label: 'Done By', value: (p: Prospect) => getDoneByName(p) || '' },
                 ]}
@@ -417,6 +537,12 @@ export default function IntakeProspects() {
                     <SortableHeader label="Legal Classification" column="classification" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
                     <SortableHeader label="Estimated Fee Value" column="fee" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} align="right" className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
                     <SortableHeader label="Current Stage" column="stage" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Stage Status" column="stageStatus" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Responsible" column="responsible" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Waiting On" column="waitingOn" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Next Deadline" column="dueDate" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Next Stage" column="nextStage" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
+                    <SortableHeader label="Stage-Gate" column="stageGate" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
                     <SortableHeader label="Done At" column="doneAt" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
                     <SortableHeader label="Done By" column="doneBy" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300" />
                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">Actions</th>
@@ -426,6 +552,8 @@ export default function IntakeProspects() {
                   {paginatedProspects.map((prospect, index) => {
                     const doneAt = formatDoneAt(prospect.createdAt || prospect.dateReceived || prospect.updatedAt);
                     const doneByName = getDoneByName(prospect);
+                    const wf = workflowByProspect.get(prospect._id) || computeProspectWorkflow(prospect, now);
+                    const dueDate = wf.dueAt;
                     // Keep in sync with getActionButton(): terminal prospects open
                     // the converted matter, everything else opens the prospect.
                     const matterId = typeof prospect.convertedToMatters === 'string'
@@ -457,6 +585,38 @@ export default function IntakeProspects() {
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{getLegalClassificationLabel(prospect)}</td>
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{formatEstimatedValue(prospect)}</td>
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{getCurrentStageLabel(prospect)}</td>
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${STAGE_STATUS_BADGE[wf.stageStatus] || 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}>
+                          {wf.stageStatus}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{wf.responsiblePerson || '—'}</td>
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${WAITING_ON_BADGE[wf.waitingOn] || WAITING_ON_BADGE.None}`}>
+                          {wf.waitingOn}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        {dueDate ? (
+                          <>
+                            <div className="text-sm text-gray-700 dark:text-gray-300">
+                              {new Date(dueDate).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                            </div>
+                            <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${getUrgencyClass(wf.urgencyColor)}`}>
+                              {formatDueCountdown(dueDate, now)}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-sm text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{wf.nextStage || '—'}</td>
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${STAGE_GATE_BADGE[wf.stageGate] || STAGE_GATE_BADGE['In Progress']}`}>
+                          {wf.stageGate}
+                          {wf.checklistTotal > 0 ? ` ${wf.checklistDone}/${wf.checklistTotal}` : ''}
+                        </span>
+                      </td>
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{doneAt}</td>
                       <td className="px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{doneByName || '—'}</td>
                       <td className="px-5 py-4" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>{getActionButton(prospect)}</td>

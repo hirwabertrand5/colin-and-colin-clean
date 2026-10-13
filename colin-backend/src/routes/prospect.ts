@@ -7,6 +7,8 @@ import {
   deleteProspect,
   getProspectStats,
   convertProspectToMatter,
+  recordProspectFollowUp,
+  toggleProspectChecklistItem,
 } from '../controllers/prospectController.js';
 import { authenticate } from '../middleware/authMiddleware.js';
 
@@ -28,6 +30,8 @@ router.get('/', authenticate, getAllProspects);
 router.get('/:id', authenticate, getProspectById);
 router.post('/', authenticate, createProspect);
 router.put('/:id', authenticate, updateProspect);
+router.post('/:id/follow-up', authenticate, recordProspectFollowUp);
+router.patch('/:id/checklist', authenticate, toggleProspectChecklistItem);
 router.delete('/:id', authenticate, deleteProspect);
 router.post('/:id/convert', authenticate, convertProspectToMatter);
 

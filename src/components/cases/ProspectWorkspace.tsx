@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Receipt, ClipboardList, Briefcase, Circle, Trash2 } from 'lucide-react';
 import usePageTitle from '../../hooks/usePageTitle';
 import { deleteProspect, getProspectById, Prospect } from '../../services/prospectService';
@@ -13,6 +13,8 @@ import FeedbackRequestCard from './FeedbackRequestCard';
 import FeedbackStatusCard from './FeedbackStatusCard';
 import InternalAssessmentCard from './InternalAssessmentCard';
 import ProspectForm from './ProspectForm';
+import ProspectWorkflowTab from './ProspectWorkflowTab';
+import { computeProspectWorkflow } from '../../utils/prospectStageConfig';
 
 const STAGE_ORDER = [
   'Inquiry',
@@ -42,6 +44,7 @@ const normalizeCompletedStagesForStage = (stage?: Prospect['stage'], completedSt
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
+  { id: 'stages', label: 'Stages & Key Actions' },
   { id: 'billing', label: 'Billing / Triggers' },
   { id: 'feedback', label: 'Client Experience' },
 ] as const;
@@ -108,6 +111,14 @@ export default function ProspectWorkspace() {
   const [feedbackRequestSending, setFeedbackRequestSending] = useState(false);
   const [feedbackRequestSuccess, setFeedbackRequestSuccess] = useState(false);
   const [feedbackRequestMessage, setFeedbackRequestMessage] = useState('');
+
+  const currentUser = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || '{}') as { id?: string; _id?: string; name?: string; email?: string; role?: string };
+    } catch {
+      return {} as { id?: string; _id?: string; name?: string; email?: string; role?: string };
+    }
+  }, []);
 
   const loadProspect = async () => {
     if (!prospectId) return;
@@ -528,6 +539,17 @@ export default function ProspectWorkspace() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {activeTab === 'stages' && prospect && (
+                <ProspectWorkflowTab
+                  prospect={prospect}
+                  currentUser={currentUser}
+                  onChanged={async () => {
+                    const refreshed = await getProspectById(prospect._id);
+                    setProspect(refreshed);
+                  }}
+                />
               )}
 
               {activeTab === 'billing' && (

@@ -14,6 +14,14 @@ import { buildInstanceSteps } from '../utils/workflowCompute';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import { computeCompletedPercentFromInstance } from '../utils/workflowPercentages';
 import { resolveCanonicalTemplateForCase, normalizeTemplateMatchValue } from '../utils/workflowTemplateMatch';
+import {
+  PROSPECT_STAGE_CONFIG,
+  getStageConfig,
+  getStageSlaHours,
+  isTerminalStage,
+  stageChecklistKey,
+  addSlaToDate,
+} from '../utils/prospectStageConfig';
 
 const isAdminRole = (role?: string) =>
   role === 'managing_director' ||
@@ -99,6 +107,129 @@ const normalizeCompletedStagesForStage = (value: unknown, stage?: string) => {
   return ordered;
 };
 
+const normalizeDateOrUndefined = (value: unknown): Date | undefined => {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = value instanceof Date ? value : new Date(String(value));
+  return Number.isFinite(parsed.getTime()) ? parsed : undefined;
+};
+
+const toEnum = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined => {
+  const cleaned = cleanString(value);
+  return (allowed as readonly string[]).includes(cleaned) ? (cleaned as T) : undefined;
+};
+
+/** Drop keys whose value is undefined so a spread never overwrites with undefined. */
+const pruneUndefined = <T extends Record<string, unknown>>(obj: T): Partial<T> => {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as Partial<T>;
+};
+
+const STAGE_STATUSES = ['Not Started', 'In Progress', 'Completed', 'Blocked'] as const;
+const WAITING_ON = ['Firm', 'Client', 'Third Party', 'None'] as const;
+const OPINION_PAYMENT = ['Unpaid', 'Part Paid', 'Paid'] as const;
+
+/** Build the workflow-control fields for a prospect from a request body. */
+const getWorkflowControlPayload = (body: any) => {
+  const slaHours = getStageSlaHours(cleanString(body.stage));
+  const stageStartedAt =
+    normalizeDateOrUndefined(body.stageStartedAt) ||
+    normalizeDateOrUndefined(body.dateReceived) ||
+    new Date();
+  const stageDueAt =
+    normalizeDateOrUndefined(body.stageDueAt) ||
+    (slaHours > 0 ? addSlaToDate(stageStartedAt, slaHours) : undefined);
+
+  const stageChecklist = Array.isArray(body.stageChecklist)
+    ? body.stageChecklist
+        .map((item: any) => ({
+          key: cleanString(item?.key) || stageChecklistKey(cleanString(item?.label)),
+          label: cleanString(item?.label),
+          done: Boolean(item?.done),
+          ...(cleanString(item?.doneBy) ? { doneBy: cleanString(item.doneBy) } : {}),
+          ...(normalizeDateOrUndefined(item?.doneAt) ? { doneAt: normalizeDateOrUndefined(item?.doneAt) } : {}),
+        }))
+        .filter((item: any) => item.key && item.label)
+    : undefined;
+
+  const legalOpinionRaw = body.legalOpinion;
+  const legalOpinion =
+    legalOpinionRaw && typeof legalOpinionRaw === 'object'
+      ? {
+          ...(cleanString(legalOpinionRaw.referenceNo) ? { referenceNo: cleanString(legalOpinionRaw.referenceNo) } : {}),
+          ...(cleanString(legalOpinionRaw.scope) ? { scope: cleanString(legalOpinionRaw.scope) } : {}),
+          ...(Number.isFinite(Number(legalOpinionRaw.fee)) ? { fee: Number(legalOpinionRaw.fee) } : {}),
+          ...(toEnum(legalOpinionRaw.paymentStatus, OPINION_PAYMENT)
+            ? { paymentStatus: toEnum(legalOpinionRaw.paymentStatus, OPINION_PAYMENT) }
+            : {}),
+          ...(cleanString(legalOpinionRaw.outcome) ? { outcome: cleanString(legalOpinionRaw.outcome) } : {}),
+          ...(normalizeDateOrUndefined(legalOpinionRaw.openedAt) ? { openedAt: normalizeDateOrUndefined(legalOpinionRaw.openedAt) } : {}),
+          ...(normalizeDateOrUndefined(legalOpinionRaw.completedAt) ? { completedAt: normalizeDateOrUndefined(legalOpinionRaw.completedAt) } : {}),
+          ...(normalizeDateOrUndefined(legalOpinionRaw.closedAt) ? { closedAt: normalizeDateOrUndefined(legalOpinionRaw.closedAt) } : {}),
+        }
+      : undefined;
+
+  return {
+    stageStatus: toEnum(body.stageStatus, STAGE_STATUSES),
+    stageStartedAt,
+    stageDueAt,
+    stageCompletedAt: normalizeDateOrUndefined(body.stageCompletedAt),
+    ...(cleanString(body.stageCompletedBy) ? { stageCompletedBy: cleanString(body.stageCompletedBy) } : {}),
+    ...(cleanString(body.delayReason) ? { delayReason: cleanString(body.delayReason) } : {}),
+    waitingOn: toEnum(body.waitingOn, WAITING_ON),
+    ...(cleanString(body.outstandingRequirement) ? { outstandingRequirement: cleanString(body.outstandingRequirement) } : {}),
+    ...(stageChecklist ? { stageChecklist } : {}),
+    lastContactDate: normalizeDateOrUndefined(body.lastContactDate),
+    lastFollowUpDate: normalizeDateOrUndefined(body.lastFollowUpDate),
+    nextFollowUpDate: normalizeDateOrUndefined(body.nextFollowUpDate),
+    ...(Number.isFinite(Number(body.followUpCount)) ? { followUpCount: Number(body.followUpCount) } : {}),
+    ...(cleanString(body.followUpStatus) ? { followUpStatus: cleanString(body.followUpStatus) } : {}),
+    escalationRequiredAt: normalizeDateOrUndefined(body.escalationRequiredAt),
+    ...(typeof body.clientResponseReceived === 'boolean' ? { clientResponseReceived: body.clientResponseReceived } : {}),
+    ...(cleanString(body.followUpOutcome) ? { followUpOutcome: cleanString(body.followUpOutcome) } : {}),
+    ...(legalOpinion ? { legalOpinion } : {}),
+  };
+};
+
+/**
+ * When a prospect moves to a new stage, reset that stage's timing and append an
+ * audit-trail entry to stageHistory so the full journey is preserved.
+ */
+const pushStageHistory = (prospect: any, entry: Record<string, unknown>) => {
+  const history = Array.isArray(prospect.stageHistory) ? prospect.stageHistory : [];
+  prospect.stageHistory = [...history, { ...entry, recordedAt: new Date() }];
+};
+
+const applyStageTransition = (prospect: any, nextStage: string, wf: ReturnType<typeof getWorkflowControlPayload>) => {
+  const slaHours = getStageSlaHours(nextStage);
+  const startedAt = wf.stageStartedAt || new Date();
+  prospect.stage = nextStage;
+  prospect.stageStatus = wf.stageStatus || 'In Progress';
+  prospect.stageStartedAt = startedAt;
+  prospect.stageDueAt = slaHours > 0 ? addSlaToDate(startedAt, slaHours) : undefined;
+  prospect.stageCompletedAt = undefined;
+  prospect.stageCompletedBy = undefined;
+  if (wf.stageChecklist) prospect.stageChecklist = wf.stageChecklist;
+  if (wf.waitingOn) prospect.waitingOn = wf.waitingOn;
+  if (isTerminalStage(nextStage)) {
+    prospect.stageStatus = wf.stageStatus || 'Completed';
+    prospect.stageCompletedAt = prospect.stageCompletedAt || new Date();
+    prospect.waitingOn = wf.waitingOn || 'None';
+  }
+  pushStageHistory(prospect, {
+    stage: nextStage,
+    status: prospect.stageStatus,
+    startedAt,
+    dueAt: prospect.stageDueAt,
+    completedAt: prospect.stageCompletedAt,
+    waitingOn: prospect.waitingOn,
+    outstandingRequirement: wf.outstandingRequirement,
+  });
+};
+
+
 const getProspectPayload = (body: any, fallbackUserId?: string) => {
   const responsibleAssociate = cleanString(body.responsibleAssociate) || cleanString(body.assignedTo) || fallbackUserId || '';
   const responsiblePartner = cleanString(body.responsiblePartner);
@@ -149,6 +280,9 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
     conversionOutcome: conversionOutcome || undefined,
     conversionReason: cleanString(body.conversionReason) || conversionOutcome || undefined,
     assignedTo,
+    // Workflow-control layer (only the keys the caller actually sent, so a
+    // partial update never wipes timing/history it did not intend to touch).
+    ...pruneUndefined(getWorkflowControlPayload({ ...body, stage })),
   };
 };
 
@@ -514,6 +648,27 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
       isActive: true,
     });
 
+    // Seed the workflow-control layer: timing for the opening stage + its first
+    // stage-history audit entry.
+    const openingStage = prospect.stage;
+    const openingStart = prospect.stageStartedAt || new Date();
+    prospect.stageStartedAt = openingStart;
+    prospect.stageStatus = prospect.stageStatus || (terminalStages.includes(openingStage as any) ? 'Completed' : 'In Progress');
+    const openingSla = getStageSlaHours(openingStage);
+    (prospect as any).stageDueAt = prospect.stageDueAt || (openingSla > 0 ? addSlaToDate(openingStart, openingSla) : undefined);
+    if (terminalStages.includes(openingStage as any)) {
+      prospect.stageCompletedAt = prospect.stageCompletedAt || new Date();
+      prospect.waitingOn = prospect.waitingOn || 'None';
+    }
+    pushStageHistory(prospect, {
+      stage: openingStage,
+      status: prospect.stageStatus,
+      startedAt: openingStart,
+      dueAt: prospect.stageDueAt,
+      completedAt: prospect.stageCompletedAt,
+      waitingOn: prospect.waitingOn,
+    });
+
     const saved = await prospect.save();
     if (terminalStages.includes(saved.stage as any)) {
       await createMatterFromTerminalProspect(
@@ -568,10 +723,42 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
 
     const shouldSendFeedbackEmail = prospect.stage !== 'Non-Converted' && updates.stage === 'Non-Converted';
 
+    // Workflow-control layer: when the active stage actually changes, reset that
+    // stage's timing/checklist and append a fresh stage-history audit entry.
+    const stageChanged = prospect.stage !== updates.stage;
+    const wfUpdates = getWorkflowControlPayload({ ...req.body, stage: updates.stage });
+
     // Update fields
     (Object.keys(updates) as Array<keyof typeof updates>).forEach((key) => {
       (prospect as any)[key] = updates[key];
     });
+
+    if (stageChanged) {
+      applyStageTransition(prospect, updates.stage, wfUpdates);
+    } else {
+      // Same stage: merge only the workflow-control fields the caller actually
+      // sent so a plain edit never clobbers timing or history.
+      const merged = pruneUndefined(wfUpdates as Record<string, unknown>);
+      // Preserve the existing stage clock / checklist / history when the caller
+      // did not explicitly change them.
+      if (!('stageStartedAt' in req.body) && prospect.stageStartedAt) {
+        merged.stageStartedAt = prospect.stageStartedAt;
+        merged.stageDueAt =
+          prospect.stageDueAt || (getStageSlaHours(updates.stage) > 0
+            ? addSlaToDate(prospect.stageStartedAt as Date, getStageSlaHours(updates.stage))
+            : undefined);
+      }
+      if (!('stageChecklist' in req.body) && Array.isArray(prospect.stageChecklist)) {
+        merged.stageChecklist = prospect.stageChecklist;
+      }
+      if (!('stageHistory' in req.body) && Array.isArray(prospect.stageHistory)) {
+        merged.stageHistory = prospect.stageHistory;
+      }
+      if (!('stageStatus' in req.body) && prospect.stageStatus) {
+        merged.stageStatus = prospect.stageStatus;
+      }
+      Object.assign(prospect, merged);
+    }
 
     const saved = await prospect.save();
 
@@ -611,6 +798,102 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ message: error?.message || 'Failed to update prospect.' });
   }
 };
+
+/**
+ * Record a client/third-party follow-up against a prospect (workflow control).
+ * Appends an audit entry to stageHistory and advances the follow-up clock.
+ */
+export const recordProspectFollowUp = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!canManageProspects(req.user?.role)) {
+      return res.status(403).json({ message: 'You do not have permission to update prospects.' });
+    }
+    const prospectId = getRouteId(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(prospectId)) {
+      return res.status(400).json({ message: 'Invalid prospect ID.' });
+    }
+    const prospect = await Prospect.findById(prospectId);
+    if (!prospect) return res.status(404).json({ message: 'Prospect not found.' });
+
+    const now = new Date();
+    const nextFollowUpDate = normalizeDateOrUndefined(req.body?.nextFollowUpDate);
+    const outcome = cleanString(req.body?.outcome) || cleanString(req.body?.followUpOutcome);
+    const waitingOn = toEnum(req.body?.waitingOn, WAITING_ON) || 'Client';
+    const clientResponseReceived =
+      typeof req.body?.clientResponseReceived === 'boolean' ? req.body.clientResponseReceived : false;
+
+    prospect.lastFollowUpDate = now;
+    prospect.lastContactDate = now;
+    prospect.followUpCount = Number(prospect.followUpCount || 0) + 1;
+    prospect.followUpStatus = 'Awaiting Response';
+    prospect.waitingOn = waitingOn;
+    prospect.clientResponseReceived = clientResponseReceived;
+    if (nextFollowUpDate) prospect.nextFollowUpDate = nextFollowUpDate;
+    if (outcome) prospect.followUpOutcome = outcome;
+
+    pushStageHistory(prospect, {
+      stage: prospect.stage,
+      status: prospect.stageStatus || 'In Progress',
+      startedAt: prospect.stageStartedAt,
+      dueAt: prospect.stageDueAt,
+      completedAt: undefined,
+      waitingOn,
+      outstandingRequirement: prospect.outstandingRequirement,
+    });
+
+    const saved = await prospect.save();
+    return res.json(saved);
+  } catch (error: any) {
+    console.error('recordProspectFollowUp error:', error);
+    return res.status(500).json({ message: error?.message || 'Failed to record follow-up.' });
+  }
+};
+
+/**
+ * Toggle a single mandatory Key Action (checklist item) on the current stage.
+ * Records who ticked it and when for the stage-gate / audit trail.
+ */
+export const toggleProspectChecklistItem = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!canManageProspects(req.user?.role)) {
+      return res.status(403).json({ message: 'You do not have permission to update prospects.' });
+    }
+    const prospectId = getRouteId(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(prospectId)) {
+      return res.status(400).json({ message: 'Invalid prospect ID.' });
+    }
+    const prospect = await Prospect.findById(prospectId);
+    if (!prospect) return res.status(404).json({ message: 'Prospect not found.' });
+
+    const key = cleanString(req.body?.key) || stageChecklistKey(cleanString(req.body?.label));
+    const label = cleanString(req.body?.label);
+    const done = Boolean(req.body?.done);
+    const stageConfig = getStageConfig(prospect.stage);
+    const canonical = stageConfig?.checklist.find((item) => stageChecklistKey(item) === key);
+    const resolvedLabel = label || canonical || key;
+    if (!key) return res.status(400).json({ message: 'A checklist item key or label is required.' });
+
+    const existing = Array.isArray(prospect.stageChecklist) ? prospect.stageChecklist : [];
+    const idx = existing.findIndex((item) => item.key === key || stageChecklistKey(item.label) === key);
+    const nextItem = {
+      key,
+      label: resolvedLabel,
+      done,
+      ...(done ? { doneBy: req.user?.name || cleanString(req.body?.doneBy) || 'System', doneAt: new Date() } : { doneBy: undefined, doneAt: undefined }),
+    };
+    const nextChecklist = idx >= 0
+      ? existing.map((item, i) => (i === idx ? ({ ...item, ...nextItem } as any) : item))
+      : [...existing, nextItem as any];
+    prospect.stageChecklist = nextChecklist;
+
+    const saved = await prospect.save();
+    return res.json(saved);
+  } catch (error: any) {
+    console.error('toggleProspectChecklistItem error:', error);
+    return res.status(500).json({ message: error?.message || 'Failed to update checklist item.' });
+  }
+};
+
 
 export const deleteProspect = async (req: AuthRequest, res: Response) => {
   try {
