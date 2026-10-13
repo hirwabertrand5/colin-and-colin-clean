@@ -23,6 +23,7 @@ import {
   getStaffDashboardSummary,
   StaffDashboardPeriodRange,
   StaffDashboardSummaryResponse,
+  StaffDashboardMatterRow,
 } from '../../services/dashboardService';
 import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
@@ -39,6 +40,8 @@ import './AssociateDashboard.css';
 
 /** Every table on this dashboard lists 10 rows per page, like the report tables. */
 const PAGE_SIZE = 10;
+/** The My Activity Trail also lists 10 rows per page. */
+const AUDIT_PAGE_SIZE = PAGE_SIZE;
 
 type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
 type FinancialScope = 'own' | 'matter' | 'portfolio' | 'client';
@@ -70,13 +73,6 @@ type StatCard = {
   icon: React.ComponentType<any>;
   tone?: Tone;
   href?: string;
-  /**
-   * Whether the figure follows the Reporting period filter.
-   *  - 'period'  → recalculated for the selected period.
-   *  - 'current' → a live snapshot / constant that the period cannot change.
-   * Rendered as a small badge so a reader never mistakes one for the other.
-   */
-  scope?: 'period' | 'current';
 };
 
 type MatterRow = CaseData & {
@@ -210,11 +206,21 @@ const addDaysISO = (baseISO: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
+/** Normalise any date-ish string to a local YYYY-MM-DD calendar day, or ''. */
+const dayKey = (raw?: string) => {
+  if (!raw) return '';
+  const d = resolveDeadlineDateTime(raw);
+  if (!d) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 const safeNum = (value: unknown) => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
   const parsed = Number(String(value || '').replace(/[^\d.-]/g, ''));
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
 const formatRwf = (value: number) => `RWF ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const formatFees = (value: number) => `RWF ${Math.round(Number.isFinite(value) ? value : 0).toLocaleString('en-US')}`;
@@ -254,10 +260,13 @@ const getConsumedPercent = (task: TaskData, todayISO: string) => {
   return Math.round(((reference.getTime() - start.getTime()) / total) * 1000) / 10;
 };
 
-const getTimelinessBand = (task: TaskData, todayISO: string) => {
+const getTimelinessBand = (task: TaskData, asOfISO: string) => {
   const dueAt = getTaskDate(task.dueDate);
-  if (task.status !== 'Completed' && dueAt && dueAt.getTime() < Date.now()) return 'late';
-  const consumed = getConsumedPercent(task, todayISO);
+  // "Late" is measured against the reference date (today for the current view,
+  // the period end when reviewing a past window) — never against a fixed now.
+  const reference = getTaskDate(`${asOfISO}T23:59:59`);
+  if (task.status !== 'Completed' && dueAt && reference && dueAt.getTime() < reference.getTime()) return 'late';
+  const consumed = getConsumedPercent(task, asOfISO);
   if (consumed <= 25) return 'excellent';
   if (consumed <= 50) return 'good';
   if (consumed <= 75) return 'warning';
@@ -265,7 +274,7 @@ const getTimelinessBand = (task: TaskData, todayISO: string) => {
   return 'late';
 };
 
-const getTimelinessScore = (task: TaskData, todayISO: string) => Math.min(100, Math.max(0, Math.round(100 - getConsumedPercent(task, todayISO))));
+const getTimelinessScore = (task: TaskData, asOfISO: string) => Math.min(100, Math.max(0, Math.round(100 - getConsumedPercent(task, asOfISO))));
 
 const toneClasses: Record<Tone, { icon: string; text: string; chip: string; bar: string }> = {
   slate: { icon: 'bg-gray-100 text-gray-700', text: 'text-gray-900', chip: 'bg-gray-100 text-gray-700', bar: 'bg-gray-700' },
@@ -387,24 +396,8 @@ function StatCardView({ stat, loading }: { stat: StatCard; loading: boolean }) {
         <Icon className="h-5 w-5" />
       </div>
       <div className={`text-2xl font-semibold ${loading ? 'text-gray-900' : tone.text}`}>{loading ? '…' : stat.value}</div>
-      <div className="mt-1 flex items-center gap-2 text-sm text-gray-600">
+      <div className="mt-1 text-sm text-gray-600">
         <span>{stat.label}</span>
-        {stat.scope && (
-          <span
-            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-              stat.scope === 'period'
-                ? 'bg-blue-50 text-blue-700'
-                : 'bg-gray-100 text-gray-500'
-            }`}
-            title={
-              stat.scope === 'period'
-                ? 'Recalculated for the selected Reporting period'
-                : 'A live snapshot — the Reporting period does not change this figure'
-            }
-          >
-            {stat.scope === 'period' ? 'In period' : 'Current'}
-          </span>
-        )}
       </div>
       {stat.helper ? <div className="mt-2 text-xs text-gray-500">{stat.helper}</div> : null}
     </div>
@@ -486,8 +479,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const [performance, setPerformance] = useState<PerformanceSummary | null>(null);
   const [staffSummary, setStaffSummary] = useState<StaffDashboardSummaryResponse | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
-  const [auditTrail, setAuditTrail] = useState<AuditFeedItem[]>([]);
+  // Activity trail is server-paginated: `auditItems` is the current page, and
+  // `auditTotal`/`auditPages` come from the backend so a long period is never
+  // silently truncated or presented as complete.
+  const [auditItems, setAuditItems] = useState<AuditFeedItem[]>([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditPages, setAuditPages] = useState(1);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState('');
 
   // Fee breakdown by matter — sorting + pagination.
   const [feePage, setFeePage] = useState(1);
@@ -500,11 +499,22 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const [auditSortDir, setAuditSortDir] = useState<SortDir>('asc');
 
   // ---- Reporting period (same windows as Firm Reports) ----
+  // The dropdown selection and the *applied* period are tracked SEPARATELY so a
+  // half-typed or reversed custom range can never silently show all-time figures
+  // under a "Custom Range" label. Named presets apply the moment they are
+  // chosen; a custom range is applied only via the explicit Apply button once
+  // both dates are present and ordered. Until then the previously-applied period
+  // stays on screen, clearly marked, and a validation message explains why.
   const [periodRange, setPeriodRange] = useState<'all' | StaffDashboardPeriodRange>('all');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  type AppliedPeriod = {
+    key: string;
+    params?: { range?: StaffDashboardPeriodRange; from?: string; to?: string };
+  };
+  const [appliedPeriod, setAppliedPeriod] = useState<AppliedPeriod>({ key: 'all' });
+  const [customError, setCustomError] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [periodHint, setPeriodHint] = useState('');
 
   usePageTitle(profile.title);
 
@@ -527,7 +537,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           getMyPerformance(),
           getStaffDashboardSummary(),
           getAllProspects({ includeTerminal: true }),
-          getMyAuditTrail({ limit: 100 }),
+          getMyAuditTrail({ limit: AUDIT_PAGE_SIZE, page: 1 }),
         ]);
 
         if (!mounted) return;
@@ -537,7 +547,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         if (performanceResult.status === 'fulfilled') setPerformance(performanceResult.value);
         if (summaryResult.status === 'fulfilled') setStaffSummary(summaryResult.value);
         if (prospectResult.status === 'fulfilled') setProspects(prospectResult.value);
-        if (auditResult.status === 'fulfilled') setAuditTrail(auditResult.value);
+        if (auditResult.status === 'fulfilled') {
+          const page = auditResult.value;
+          setAuditItems(page.items || []);
+          setAuditTotal(page.total || 0);
+          setAuditPages(page.pages || 1);
+          setAuditPage(page.page || 1);
+        }
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message || 'Failed to load dashboard.');
@@ -552,40 +568,31 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     };
   }, [next30Days, today]);
 
-  // Resolve the selected period into request parameters (or a friendly hint).
+  // Resolve the currently-APPLIED period into request parameters.
   //
   // `params === undefined` means "no reporting-period restriction" (All Time).
-  // The effect below keys off `periodKey` — a stable string — instead of the
-  // object identity, so React never refetches for two selections that resolve
-  // to the same window.
+  // The effect below keys off `appliedPeriod.key` — a stable string — so React
+  // never refetches for two selections that resolve to the same window, and a
+  // request for one period can never overwrite the figures of a later one.
   const periodRequest = useMemo<{
     key: string;
     params: { range?: StaffDashboardPeriodRange; from?: string; to?: string } | undefined;
-    hint: string;
-  }>(() => {
-    if (periodRange === 'all') return { key: 'all', params: undefined, hint: '' };
-    if (periodRange === 'custom') {
-      if (!customFrom || !customTo) {
-        // An incomplete custom range must NOT leave the previous period's
-        // figures on screen under a "Custom Range" label. Fall back to the
-        // all-time view and tell the member why.
-        return { key: 'all', params: undefined, hint: 'Select both From and To dates to apply the custom range.' };
-      }
-      if (customFrom > customTo) {
-        return { key: 'all', params: undefined, hint: 'The From date must be before the To date.' };
-      }
-      return { key: `custom:${customFrom}:${customTo}`, params: { from: customFrom, to: customTo }, hint: '' };
-    }
-    return { key: `range:${periodRange}`, params: { range: periodRange }, hint: '' };
-  }, [periodRange, customFrom, customTo]);
+  }>(
+    () => ({
+      key: appliedPeriod.key,
+      params: appliedPeriod.params,
+    }),
+    [appliedPeriod]
+  );
 
+  // Fetch the summary for the applied period. `signal` guards against a slower
+  // older request overwriting a newer period's figures; `scope` records which
+  // period the response belongs to as a second line of defence.
   const fetchSummaryForPeriod = async (signal?: { cancelled: boolean }) => {
     try {
       setSummaryLoading(true);
       setError('');
       const summary = await getStaffDashboardSummary(periodRequest.params);
-      // A newer request may already have been issued; never let an older
-      // response overwrite the figures for the period now on screen.
       if (!signal?.cancelled) setStaffSummary(summary);
     } catch (e: any) {
       if (!signal?.cancelled) setError(e?.message || 'Failed to update the dashboard for the selected period.');
@@ -595,17 +602,31 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   };
 
   // The activity trail follows the same period as the rest of the dashboard, so
-  // it always shows the actions performed inside the window being reviewed.
-  const fetchAuditForPeriod = async (signal?: { cancelled: boolean }) => {
+  // it always shows the actions performed inside the window being reviewed. It
+  // is fetched server-paginated and resets to page 1 for a new period.
+  const fetchAuditForPeriod = async (signal?: { cancelled: boolean }, pageOverride?: number) => {
     try {
       setAuditLoading(true);
-      const rows = await getMyAuditTrail({ limit: 100, ...(periodRequest.params || {}) });
+      setAuditError('');
+      const page = await getMyAuditTrail({
+        limit: AUDIT_PAGE_SIZE,
+        // A period change always reads page 1, even if the user was deep in the
+        // previous period's pages — this avoids a flash of a stale page number.
+        page: pageOverride ?? auditPage,
+        // No explicit column = the dashboard default, newest first.
+        sortBy: auditSortKey || 'when',
+        sortDir: auditSortKey ? auditSortDir : 'desc',
+        ...(periodRequest.params || {}),
+      });
       if (!signal?.cancelled) {
-        setAuditTrail(rows);
-        setAuditPage(1);
+        setAuditItems(page.items || []);
+        setAuditTotal(page.total || 0);
+        setAuditPages(page.pages || 1);
+        setAuditPage(page.page || 1);
       }
-    } catch {
-      // Keep the rows already on screen when a refresh fails.
+    } catch (e: any) {
+      // A failed refresh must not be mistaken for an empty trail; surface it.
+      if (!signal?.cancelled) setAuditError(e?.message || 'Failed to update your activity trail.');
     } finally {
       if (!signal?.cancelled) setAuditLoading(false);
     }
@@ -618,23 +639,96 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       periodEffectMounted.current = true;
       return;
     }
-    setPeriodHint(periodRequest.hint);
-    if (periodRequest.hint) return;
     const signal = { cancelled: false };
     void fetchSummaryForPeriod(signal);
+    void fetchAuditForPeriod(signal, 1);
+    return () => {
+      signal.cancelled = true;
+    };
+    // `appliedPeriod.key` is the stable identity of the applied window; the
+    // params object is recreated on every render and must not retrigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedPeriod.key]);
+
+  // Re-fetch the trail when the user pages or sorts it, but keep the summary
+  // untouched (the period has not changed).
+  const auditViewMounted = useRef(false);
+  useEffect(() => {
+    if (!auditViewMounted.current) {
+      auditViewMounted.current = true;
+      return;
+    }
+    const signal = { cancelled: false };
     void fetchAuditForPeriod(signal);
     return () => {
       signal.cancelled = true;
     };
-    // `periodRequest.key` is the stable identity of the selected window; the
-    // params object is recreated on every render and must not retrigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodRequest.key]);
+  }, [auditPage, auditSortKey, auditSortDir]);
 
   const refreshSummary = async () => {
-    setPeriodHint(periodRequest.hint);
-    if (periodRequest.hint) return;
     await Promise.all([fetchSummaryForPeriod(), fetchAuditForPeriod()]);
+  };
+
+  // ---- Reporting-period selection handlers ---------------------------------
+  // Named presets and All Time apply immediately. A custom range is only ever
+  // applied through `applyCustomRange`, which validates both dates and their
+  // order first; an invalid selection keeps the previous figures on screen and
+  // shows why — it never silently reverts to All Time.
+  const handlePeriodChange = (value: 'all' | StaffDashboardPeriodRange) => {
+    setPeriodRange(value);
+    setCustomError('');
+    if (value === 'custom') return; // wait for the Apply button
+    setAppliedPeriod(
+      value === 'all' ? { key: 'all', params: undefined } : { key: `range:${value}`, params: { range: value } }
+    );
+  };
+
+  const applyCustomRange = () => {
+    if (!customFrom || !customTo) {
+      setCustomError('Select both a From and a To date to apply the custom range.');
+      return;
+    }
+    if (customFrom > customTo) {
+      setCustomError('The From date must be on or before the To date.');
+      return;
+    }
+    setCustomError('');
+    setAppliedPeriod({ key: `custom:${customFrom}:${customTo}`, params: { from: customFrom, to: customTo } });
+  };
+
+  // ---- Reporting-period window (drives the task list, bands and matter list) -
+  // The authoritative `period` block tells us the exact dates on screen. For a
+  // finite period we scope the "My Work" and "My Matters" lists to activity that
+  // happened inside those dates; for All Time every assigned matter/task shows.
+  // `asOfISO` is the reference date used for timeliness: the period end when a
+  // past window is selected, otherwise today — so "late" is judged at the right
+  // point in time rather than always against the present moment.
+  const periodWindow = useMemo(() => {
+    const p = staffSummary?.period;
+    if (!p || p.isAllTime || !p.from || !p.to) return null;
+    return { from: dayKey(p.from), to: dayKey(p.to) };
+  }, [staffSummary?.period]);
+
+  const asOfISO = useMemo(() => (periodWindow ? periodWindow.to : today), [periodWindow, today]);
+
+  // A task qualifies for the selected period when it was COMPLETED inside the
+  // window, or it is still open and its deadline fell inside the window. All
+  // Time (no window) includes every task. Uses the completion event, never the
+  // task's creation date, so a task finished outside the period is not counted.
+  const taskInPeriod = (task: TaskData) => {
+    if (!periodWindow) return true;
+    const completed = dayKey(task.completedAt);
+    if (task.status === 'Completed' && completed) {
+      return completed >= periodWindow.from && completed <= periodWindow.to;
+    }
+    const due = dayKey(task.dueDate);
+    if (task.status !== 'Completed') {
+      return due >= periodWindow.from && due <= periodWindow.to;
+    }
+    // Completed but no completion timestamp: fall back to its last update.
+    const updated = dayKey((task as any).updatedAt);
+    return updated >= periodWindow.from && updated <= periodWindow.to;
   };
 
   const ownTasks = useMemo(
@@ -666,38 +760,60 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     return map;
   }, [ownTasks]);
 
+  const periodTasks = useMemo(() => ownTasks.filter(taskInPeriod), [ownTasks, periodWindow]);
+
   const taskSignals = useMemo(() => {
-    const open = ownTasks.filter((task) => task.status !== 'Completed');
-    const dueSoon = open.filter((task) => task.dueDate >= today && task.dueDate <= addDaysISO(today, 7));
+    const open = periodTasks.filter((task) => task.status !== 'Completed');
+    const dueSoon = open.filter((task) => task.dueDate >= asOfISO && task.dueDate <= addDaysISO(asOfISO, 7));
     const overdue = open.filter((task) => {
       const dueAt = getTaskDate(task.dueDate);
-      return (dueAt ? dueAt.getTime() < Date.now() : task.dueDate < today) || getTimelinessBand(task, today) === 'late';
+      return (dueAt ? dueAt.getTime() < (getTaskDate(`${asOfISO}T23:59:59`)?.getTime() ?? Date.now()) : task.dueDate < asOfISO) || getTimelinessBand(task, asOfISO) === 'late';
     });
-    const awaitingReview = ownTasks.filter(
+    const awaitingReview = periodTasks.filter(
       (task) => task.workflowStage === 'Awaiting Review' || (task.requiresApproval && task.approvalStatus === 'Pending')
     );
-    const awaitingExternal = ownTasks.filter((task) => task.workflowStage === 'Awaiting External Action');
-    const bandCounts = ownTasks.reduce(
+    const awaitingExternal = periodTasks.filter((task) => task.workflowStage === 'Awaiting External Action');
+    const bandCounts = periodTasks.reduce(
       (acc, task) => {
-        acc[getTimelinessBand(task, today)] += 1;
+        acc[getTimelinessBand(task, asOfISO)] += 1;
         return acc;
       },
       { excellent: 0, good: 0, warning: 0, poor: 0, late: 0 } as Record<string, number>
     );
     return { open, dueSoon, overdue, awaitingReview, awaitingExternal, bandCounts };
-  }, [ownTasks, today]);
+  }, [periodTasks, asOfISO]);
+
+  // Matters that had qualifying activity in the selected period (or all assigned
+  // matters for All Time). Derived from the SAME task-in-period rule as the task
+  // list, plus matters created inside the window, so the "My Matters" cards agree
+  // with the "My Work" list and the headline metrics.
+  const periodMatterIds = useMemo(() => {
+    if (!periodWindow) return null; // null = no filtering (All Time)
+    const ids = new Set<string>();
+    periodTasks.forEach((task) => {
+      if (task.caseId) ids.add(String(task.caseId));
+    });
+    authorisedCases.forEach((matter) => {
+      const created = dayKey((matter as any).createdAt);
+      if (created && created >= periodWindow.from && created <= periodWindow.to) {
+        ids.add(String(matter._id || ''));
+      }
+    });
+    return ids;
+  }, [periodWindow, periodTasks, authorisedCases]);
 
   const matterRows = useMemo<MatterRow[]>(() => {
     return authorisedCases
+      .filter((matter) => !periodMatterIds || periodMatterIds.has(String(matter._id || '')))
       .map((matter) => {
-        const matterTasks = tasksByCase.get(String(matter._id || '')) || [];
+        const matterTasks = (tasksByCase.get(String(matter._id || '')) || []).filter(taskInPeriod);
         const openTasks = matterTasks.filter((task) => task.status !== 'Completed');
         const nextDeadline = openTasks.map((task) => task.dueDate).filter(Boolean).sort()[0] || matter.workflowProgress?.nextDueAt || '—';
         const progress =
           safeNum(matter.workflowProgress?.percent) ||
           (matterTasks.length ? Math.round((matterTasks.filter((task) => task.status === 'Completed').length / matterTasks.length) * 100) : 0);
-        const warningTasks = matterTasks.filter((task) => getTimelinessBand(task, today) === 'warning').length;
-        const poorTasks = matterTasks.filter((task) => ['poor', 'late'].includes(getTimelinessBand(task, today))).length;
+        const warningTasks = matterTasks.filter((task) => getTimelinessBand(task, asOfISO) === 'warning').length;
+        const poorTasks = matterTasks.filter((task) => ['poor', 'late'].includes(getTimelinessBand(task, asOfISO))).length;
 
         return {
           ...matter,
@@ -711,14 +827,18 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         };
       })
       .sort((a, b) => b.warningTasks + b.poorTasks - (a.warningTasks + a.poorTasks));
-  }, [authorisedCases, tasksByCase, today]);
+  }, [authorisedCases, tasksByCase, asOfISO, periodMatterIds, periodWindow]);
 
+  // Matter Financial Status is a CURRENT snapshot of every assigned matter —
+  // planned vs completed vs outstanding value. It is intentionally NOT scoped to
+  // the reporting period (the period has no bearing on a contract's planned
+  // value), so it is computed over all authorised matters, not the filtered list.
   const financials = useMemo(() => {
-    const contractValue = matterRows.reduce((sum, matter) => sum + matter.contractValue, 0);
-    const earnedValue = matterRows.reduce((sum, matter) => sum + matter.earnedValue, 0);
+    const contractValue = authorisedCases.reduce((sum, matter) => sum + getMatterContractValue(matter), 0);
+    const earnedValue = authorisedCases.reduce((sum, matter) => sum + getMatterEarnedValue(matter), 0);
     const outstanding = Math.max(0, contractValue - earnedValue);
     return { contractValue, earnedValue, outstanding };
-  }, [matterRows]);
+  }, [authorisedCases]);
 
   const teamRows = useMemo<TeamRow[]>(() => {
     const map = new Map<string, { assigned: number; completed: number; overdue: number; quality: number[] }>();
@@ -772,17 +892,44 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   );
 
   const summary = staffSummary;
-  /** Selected-period figures (undefined while showing all-time numbers). */
+  /** The reporting block — ALWAYS present (All Time when no window was applied). */
   const period = summary?.period;
+  // A real date window is applied (not All Time). The fee table, earnings labels
+  // and activity-trail wording all key off THIS, not off `period` existing —
+  // otherwise All Time would be treated as if a period were selected.
+  const hasWindow = Boolean(period && !period.isAllTime);
   // Per-matter rows straight from the Case Workspace → Earned Fees tables.
-  // When a period is selected, only the matters that actually had activity
-  // inside it are listed, so every row on screen belongs to the period.
+  // When a period window is selected, only the matters that actually had
+  // activity inside it are listed, so every row on screen belongs to the period.
   const allMatterFeeRows = summary?.rows || [];
   const matterFeeRows = useMemo(
-    () => (period ? allMatterFeeRows.filter((row) => row.inPeriod) : allMatterFeeRows),
-    [allMatterFeeRows, period]
+    () => (hasWindow ? allMatterFeeRows.filter((row) => row.inPeriod) : allMatterFeeRows),
+    [allMatterFeeRows, hasWindow]
   );
-  const feeScoredMatters = matterFeeRows.filter((row) => row.earnedFee != null);
+  // "Matters with Earned Fees" must describe the SAME scope as the table:
+  // in-period rows use the in-period earned fee, so a matter only counts when it
+  // actually earned a (non-pending) fee inside the selected window — never just
+  // because it has an all-time earned fee.
+  const feeScoredMatters = matterFeeRows.filter((row) =>
+    hasWindow ? row.earnedFeeInPeriod != null : row.earnedFee != null
+  );
+  // Table totals are ALWAYS recalculated from the full filtered set, never from
+  // the visible page, so they reconcile with the summary cards.
+  const feeTotals = useMemo(() => {
+    const sum = (pick: (row: StaffDashboardMatterRow) => number | null | undefined) =>
+      round2(
+        matterFeeRows.reduce((total, row) => {
+          const value = pick(row);
+          return total + (value == null ? 0 : value);
+        }, 0)
+      );
+    return {
+      collected: hasWindow ? sum((row) => row.collectedBaseInPeriod) : sum((row) => row.collectedBase),
+      // A null (pending) earned fee is not a zero — exclude it from the sum and
+      // let the "Pending" indicator speak for itself.
+      earned: hasWindow ? sum((row) => row.earnedFeeInPeriod) : sum((row) => row.earnedFee),
+    };
+  }, [matterFeeRows, hasWindow]);
   const summaryCompletionRate =
     summary && summary.mattersAssigned > 0
       ? Math.round((summary.mattersCompleted / summary.mattersAssigned) * 100)
@@ -832,33 +979,20 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     setFeePage(1);
   };
 
-  // A different reporting period reloads the rows, so start again on page 1.
+  // A different reporting period reloads the rows, so start again on page 1 —
+  // for both the fee breakdown and the activity trail. Keyed on the APPLIED
+  // period, so an unapplied (invalid) custom selection cannot reset the pages.
   useEffect(() => {
     setFeePage(1);
-  }, [period?.label]);
+    setAuditPage(1);
+  }, [appliedPeriod.key]);
 
-  // ---- My Activity Trail — sorting + pagination (10 rows per page) ----------
-  const sortedAuditTrail = useMemo(
-    () =>
-      sortRows(auditTrail, auditSortKey, auditSortDir, (entry) => {
-        switch (auditSortKey) {
-          case 'when':
-            return entry.createdAt || '';
-          case 'action':
-            return auditActionLabel(entry.action);
-          case 'activity':
-            return `${entry.message || ''} ${entry.detail || ''}`;
-          case 'record':
-            return entry.case?.caseNo || entry.case?.parties || '';
-          default:
-            return '';
-        }
-      }),
-    [auditSortDir, auditSortKey, auditTrail]
-  );
-  const auditPages = Math.max(1, Math.ceil(sortedAuditTrail.length / PAGE_SIZE));
+  // ---- My Activity Trail — server-paginated, newest first ------------------
+  // The trail is paginated and sorted on the backend, so every page reflects the
+  // same period window and no page is ever a truncated "complete" list. The
+  // current page is `auditItems`; totals come from the server response.
   const auditPageClamped = Math.min(auditPage, auditPages);
-  const auditPageRows = sortedAuditTrail.slice((auditPageClamped - 1) * PAGE_SIZE, auditPageClamped * PAGE_SIZE);
+  const auditPageRows = auditItems;
 
   const handleAuditSort = (column: string) => {
     const next = toggleSortKey(auditSortKey, auditSortDir, column);
@@ -868,41 +1002,60 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   };
 
   const headlineStats = useMemo<StatCard[]>(() => {
-    const assigned = summary?.mattersAssigned ?? 0;
-    const outstanding = summary?.mattersOutstanding ?? 0;
-    const overdue = summary?.overdueSections ?? 0;
-    const completedMatters = summary?.mattersCompleted ?? 0;
-    // When a reporting period is selected these figures describe that window;
-    // otherwise they are the all-time values the dashboard always had.
+    const summary = staffSummary;
+    // The reporting block is ALWAYS present: `period.isAllTime` is true for the
+    // All Time view (every figure is the all-time total) and false for a selected
+    // period. One uniform card set is built from it for EVERY period, so
+    // switching period never adds, removes or reorders a card.
     const period = summary?.period;
-    const periodSuffix = period ? ` in ${period.label}` : '';
-    const timeliness = period?.averageTimelinessScore ?? summary?.averageTimelinessScore ?? null;
-    const quality = period?.averageQualityScore ?? summary?.averageQualityScore ?? null;
-    const fees = period ? period.feesEarned : summary?.feesEarnedTotal ?? null;
+    const allTime = period?.isAllTime ?? true;
+    // `inPeriodSuffix` reads "in Last Month" for a period and "" for All Time,
+    // so every helper sentence describes the window actually on screen.
+    const inPeriodSuffix = period && !allTime ? ` in ${period.label}` : '';
+    const windowLabel = period && !allTime ? `${period.from} → ${period.to}` : 'all time';
+
+    // ---- Current-state figures (the period cannot change these) -------------
+    // "Overdue" describes work that is NOT yet done, so it carries no completion
+    // date a past period could filter on. It stays a current position and is
+    // never given an invented period value.
+    const overdue = summary?.overdueSections ?? 0;
+
+    // ---- Period-based figures (recalculated for the selected window) --------
+    // Every one of these comes from the authoritative `period` block, which the
+    // backend fills with in-period values (or all-time totals when isAllTime).
+    const mattersInScope = period?.mattersWithActivity ?? 0;
+    const timeliness = period?.averageTimelinessScore ?? null;
+    const quality = period?.averageQualityScore ?? null;
+    const mattersCompleted = period?.mattersCompleted ?? 0;
+    const fees = period ? period.feesEarned : null;
+    const keyActions = period?.keyActionsChecked ?? 0;
+    const sections = period?.sectionsCompleted ?? 0;
+    const tasksCompleted = period?.tasksCompleted ?? 0;
+    const mattersOpened = period?.mattersCreatedInPeriod ?? 0;
+    // Total Contract Value for the reporting scope — the sum of the contract
+    // values of the qualifying matters. Sourced from the backend so it changes
+    // with the qualifying set and never reuses an all-time frontend total.
+    const contractValue = period?.contractValue ?? 0;
+
     const stats: StatCard[] = [
-      // ---- Current-state snapshots: the period cannot change these. --------
-      // "Outstanding" and "overdue" are defined against work that is NOT yet
-      // done, so they carry no completion date a past period could filter on.
-      // They are labelled as snapshots rather than given invented period values.
       {
-        label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Active Matters',
-        value: period ? String(period.mattersWithActivity) : String(assigned),
-        helper: period
-          ? `Matters you worked on${periodSuffix} (${assigned} assigned in total)`
-          : 'Matters where you are the Initiator, Reviewer or Signer/Approver',
+        // "Assigned Matters" is period-based: matters assigned to you that were
+        // opened (entry date) inside the selected window. For All Time it is the
+        // full set of matters assigned to you.
+        label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Assigned Matters',
+        value: String(mattersOpened),
+        helper: `Matters assigned to you that were opened${inPeriodSuffix || ' (all time)'}`,
         icon: Briefcase,
         tone: 'blue',
         href: '/matters',
-        scope: period ? 'period' : 'current',
       },
       {
         label: 'Tasks Outstanding',
-        value: String(outstanding),
-        helper: 'Matters where the Key Actions are not all checked yet — current position',
+        value: String(period?.tasksOutstanding ?? 0),
+        helper: `Tasks still open as of the end of ${windowLabel}`,
         icon: CheckSquare,
-        tone: outstanding ? 'amber' : 'green',
+        tone: (period?.tasksOutstanding ?? 0) ? 'amber' : 'green',
         href: '/tasks',
-        scope: 'current',
       },
       {
         label: 'Overdue Tasks',
@@ -911,64 +1064,87 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         icon: AlertTriangle,
         tone: overdue ? 'red' : 'green',
         href: '/tasks',
-        scope: 'current',
       },
-      // ---- Period activity: recalculated for the selected window. ----------
       {
         label: 'On-Time Completion',
         value: timeliness == null ? 'Pending' : `${timeliness}%`,
-        helper: period
-          ? `Average Timeliness of your Earned Fees rows in matters worked${periodSuffix}`
-          : 'Average Timeliness of your row in each Case Workspace',
+        helper: `Average Timeliness of your Earned Fees rows in matters worked${inPeriodSuffix || ' across all time'}`,
         icon: Clock,
         tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber',
         href: '/performance',
-        scope: period ? 'period' : 'current',
       },
       {
         label: 'Quality Score',
         value: quality == null ? 'Pending' : `${quality}%`,
-        helper: period
-          ? `Average Quality Score on matters worked${periodSuffix}`
-          : 'Average Quality Score on the matters assigned to you',
+        helper: `Average Quality Score on matters worked${inPeriodSuffix || ' across all time'}`,
         icon: Award,
         tone: 'purple',
         href: '/performance',
-        scope: period ? 'period' : 'current',
       },
       {
-        label: 'Tasks Completed',
-        value: String(period ? period.tasksCompleted : completedMatters),
-        helper: period ? `Tasks completed${periodSuffix}` : 'Matters where the workflow is completed',
+        // ONE consistent meaning for every period: matters whose workflow
+        // completed inside the window (all completed matters for All Time).
+        label: 'Matters Completed',
+        value: String(mattersCompleted),
+        helper: `Your matters whose workflow completed${inPeriodSuffix || ' (all time)'}`,
         icon: TrendingUp,
         tone: 'green',
         href: '/performance',
-        scope: period ? 'period' : 'current',
       },
-      // TPA is a role constant — never period-scoped.
-      profile.financialScope === 'own'
-        ? { label: 'TPA', value: `${summary?.tpaPercent ?? profile.tpa}%`, helper: 'Your role participation share', icon: DollarSign, tone: 'green', scope: 'current' as const }
-        : { label: profile.financialScope === 'client' ? 'Portfolio Total Contract Value' : 'Matter Total Contract Value', value: formatRwf(financials.contractValue), helper: 'Total contract value of your assigned matters', icon: DollarSign, tone: 'green', scope: 'current' as const },
+      {
+        label: 'Key Actions Checked',
+        value: String(keyActions),
+        helper: `Key Actions you checked${inPeriodSuffix || ' (all time)'}`,
+        icon: CheckCircle2,
+        tone: 'blue',
+      },
+      {
+        label: 'Sections Completed',
+        value: String(sections),
+        helper: `Workflow sections completed${inPeriodSuffix || ' (all time)'}`,
+        icon: CheckSquare,
+        tone: 'green',
+      },
+      {
+        label: 'Tasks Completed',
+        value: String(tasksCompleted),
+        helper: `Tasks you completed${inPeriodSuffix || ' (all time)'}`,
+        icon: CheckSquare,
+        tone: 'green',
+      },
+      {
+        label: 'Matters Worked On',
+        value: String(mattersInScope),
+        helper: `Matters with qualifying activity${inPeriodSuffix || ' across all time'}`,
+        icon: Briefcase,
+        tone: 'blue',
+        href: '/matters',
+      },
+      // TPA is a current, role-based rate — never period-scoped.
+      {
+        label: 'TPA',
+        value: `${summary?.tpaPercent ?? profile.tpa}%`,
+        helper: 'Your current role participation share from the remuneration table',
+        icon: DollarSign,
+        tone: 'green',
+      },
+      {
+        label: profile.financialScope === 'client' ? 'Portfolio Total Contract Value' : 'Total Contract Value',
+        value: formatRwf(contractValue),
+        helper: `Sum of contract values of the ${mattersInScope} matter${mattersInScope === 1 ? '' : 's'} qualifying ${allTime ? 'across all time' : `in ${windowLabel}`} — contract value, not cash collected`,
+        icon: DollarSign,
+        tone: 'green',
+      },
       {
         label: 'Fees Earned',
         value: fees == null ? 'Pending' : formatFees(fees),
-        helper: period ? `Earned from payments received${periodSuffix}` : 'Sum of your Earned fee rows in the Case Workspace tables',
+        helper: `Earned from payments received${inPeriodSuffix || ' across all time'} (Collected Base × TPA% × Timeliness% × Quality%)`,
         icon: DollarSign,
         tone: fees && fees > 0 ? 'green' : 'amber',
-        scope: period ? 'period' : 'current',
       },
     ];
-    if (period) {
-      stats.push(
-        { label: 'Key Actions Checked', value: String(period.keyActionsChecked), helper: `Key Actions you checked${periodSuffix}`, icon: CheckCircle2, tone: 'blue', scope: 'period' },
-        { label: 'Sections Completed', value: String(period.sectionsCompleted), helper: `Workflow sections completed${periodSuffix}`, icon: CheckSquare, tone: 'green', scope: 'period' },
-        { label: 'Total Contract Value', value: formatRwf(financials.contractValue), helper: 'Total contract value of your assigned matters', icon: DollarSign, tone: 'green', scope: 'current' },
-        { label: 'Matters Completed', value: String(period.mattersCompleted), helper: `Your matters whose workflow completed${periodSuffix}`, icon: TrendingUp, tone: 'purple', scope: 'period' },
-        { label: 'Matters Opened', value: String(period.mattersCreatedInPeriod), helper: `Matters assigned to you that were created${periodSuffix} (entry date)`, icon: Briefcase, tone: 'blue', scope: 'period' },
-      );
-    }
     return stats;
-  }, [financials.contractValue, profile, summary]);
+  }, [profile, staffSummary]);
 
   return (
     <div className="staff-dashboard">
@@ -994,7 +1170,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             Reporting period
             <select
               value={periodRange}
-              onChange={(event) => setPeriodRange(event.target.value as 'all' | StaffDashboardPeriodRange)}
+              onChange={(event) => handlePeriodChange(event.target.value as 'all' | StaffDashboardPeriodRange)}
               className="mt-1 rounded border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
               <option value="all">All time</option>
@@ -1016,7 +1192,11 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                 <input
                   type="date"
                   value={customFrom}
-                  onChange={(event) => setCustomFrom(event.target.value)}
+                  max={customTo || undefined}
+                  onChange={(event) => {
+                    setCustomFrom(event.target.value);
+                    setCustomError('');
+                  }}
                   className="mt-1 rounded border border-gray-300 bg-white px-3 py-2 text-gray-900"
                 />
               </label>
@@ -1025,10 +1205,24 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                 <input
                   type="date"
                   value={customTo}
-                  onChange={(event) => setCustomTo(event.target.value)}
+                  min={customFrom || undefined}
+                  onChange={(event) => {
+                    setCustomTo(event.target.value);
+                    setCustomError('');
+                  }}
                   className="mt-1 rounded border border-gray-300 bg-white px-3 py-2 text-gray-900"
                 />
               </label>
+              {/* Custom dates only take effect on Apply — never a confusing
+                  intermediate reload while the member is still choosing dates. */}
+              <button
+                type="button"
+                onClick={applyCustomRange}
+                disabled={summaryLoading}
+                className="inline-flex items-center rounded bg-gray-800 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-60"
+              >
+                Apply range
+              </button>
             </>
           )}
 
@@ -1036,7 +1230,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             type="button"
             onClick={() => void refreshSummary()}
             disabled={summaryLoading}
-            className="inline-flex items-center rounded bg-gray-800 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-60"
+            className="inline-flex items-center rounded border border-gray-300 bg-white px-4 py-2 text-sm text-gray-800 hover:bg-gray-50 disabled:opacity-60"
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${summaryLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -1044,25 +1238,48 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         </div>
 
         <div className="text-sm text-gray-600">
-          {summaryLoading
-            ? 'Updating figures…'
-            : summary?.period
-              ? `Period: ${summary.period.from} → ${summary.period.to}`
-              : 'Showing all-time figures. Pick a period to see what you earned and completed in that window.'}
-          {periodHint && <div className="mt-1 text-xs text-amber-700">{periodHint}</div>}
+          {summaryLoading ? (
+            <span className="text-gray-500">Updating figures…</span>
+          ) : hasWindow && period ? (
+            <span>
+              <span className="font-medium text-gray-800">Applied period:</span> {period.from} → {period.to}
+            </span>
+          ) : (
+            <span className="text-gray-700">Scope: All time</span>
+          )}
+          {/* An unapplied custom selection is never hidden: if the member picked
+              Custom Range but the range is not yet validly applied, say so and
+              name the window still on screen. */}
+          {periodRange === 'custom' && appliedPeriod.key !== `custom:${customFrom}:${customTo}` && (
+            <div className="mt-1 text-xs text-amber-700">
+              Custom range not applied yet — the figures below still show{' '}
+              {hasWindow && period ? `the period ${period.from} → ${period.to}` : 'all time'}. Choose both
+              dates and select “Apply range”.
+            </div>
+          )}
+          {customError && <div className="mt-1 text-xs text-red-700">{customError}</div>}
         </div>
       </div>
 
       {error && <div className="mb-6 p-4 border border-red-200 bg-red-50 text-red-700 rounded">{error}</div>}
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        {headlineStats.map((stat) => <StatCardView key={stat.label} stat={stat} loading={loading} />)}
+        {headlineStats.map((stat) => (
+          <StatCardView key={stat.label} stat={stat} loading={loading || summaryLoading} />
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white border border-gray-200 rounded-lg">
           <div className="px-5 py-4 border-b border-gray-200">
-            <SectionHeader title={profile.labels.overview} description="Assigned work, timeliness bands, approval/review queues, and urgent actions." />
+            <SectionHeader
+              title={profile.labels.overview}
+              description={
+                hasWindow
+                  ? `Work completed or due between ${period?.from} and ${period?.to}: timeliness bands, approval/review queues, and urgent actions.`
+                  : 'Assigned work, timeliness bands, approval/review queues, and urgent actions across all time.'
+              }
+            />
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
               {[
                 ['🔵 Excellent', taskSignals.bandCounts.excellent, 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200'],
@@ -1081,8 +1298,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
           {loading ? (
             <div className="px-5 py-10 text-gray-500">Loading tasks…</div>
-          ) : tasks.length === 0 ? (
-            <div className="px-5 py-10 text-gray-500">No tasks assigned.</div>
+          ) : periodTasks.length === 0 ? (
+            <div className="px-5 py-10 text-gray-500">
+              {hasWindow
+                ? `No tasks were completed or fell due between ${period?.from} and ${period?.to}.`
+                : 'No tasks assigned.'}
+            </div>
           ) : (
             <div className="divide-y divide-gray-200">
               {[...taskSignals.overdue, ...taskSignals.dueSoon, ...taskSignals.open]
@@ -1144,7 +1365,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
         <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg">
           <div className="px-5 py-4 border-b border-gray-200">
-            <SectionHeader title={profile.labels.matters} description="Matters assigned to you with next actions, deadlines, workload pressure, and drill-down." />
+            <SectionHeader
+              title={profile.labels.matters}
+              description={
+                hasWindow
+                  ? `Matters you worked on between ${period?.from} and ${period?.to}, with next actions, deadlines, workload pressure, and drill-down.`
+                  : 'Matters assigned to you with next actions, deadlines, workload pressure, and drill-down.'
+              }
+            />
           </div>
           {loading ? (
             <div className="px-5 py-10 text-gray-500">Loading matters…</div>
@@ -1242,9 +1470,11 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         <div className="bg-white border border-gray-200 rounded-lg p-5">
           <SectionHeader
             title={profile.labels.performance}
-            description={period
-              ? `Completion, timeliness and quality for ${period.label}; the performance rating is your overall record.`
-              : 'Completion, timeliness, quality, and rating computed from your assigned matters and your performance record.'}
+            description={
+              hasWindow && period
+                ? `Completion, timeliness and quality for ${period.label}; the performance rating is your overall record.`
+                : 'Completion, timeliness, quality, and rating computed from your assigned matters and your performance record.'
+            }
           />
           <div className="space-y-4">
             {([
@@ -1313,39 +1543,72 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
           <SectionHeader
             title={profile.labels.earnings}
-            description="Your row from each assigned matter's Case Workspace Earned Fees table. Totals match the Earned fee column of those tables."
+            description={
+              hasWindow && period
+                ? `Your Earned Fees for ${period.from} → ${period.to}, computed from the payments received in that window and reconciled with Firm Reports (Payment Date).`
+                : "Your row from each assigned matter's Case Workspace Earned Fees table. Totals match the Earned fee column of those tables."
+            }
           />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
-              period
-                ? ['Fees Earned in Period', period.feesEarned == null ? 'Pending' : formatFees(period.feesEarned), `Earned from payments received in ${period.label}`]
+              hasWindow && period
+                ? ['Fees Earned in Period', period.feesEarned == null ? 'Pending' : formatFees(period.feesEarned), `Earned from payments received in ${period.from} → ${period.to}`]
                 : ['Fees Earned', summary?.feesEarnedTotal == null ? 'Pending' : formatFees(summary.feesEarnedTotal), 'Sum of your Earned fee rows across your matters'],
-              ['Total Contract Value', formatRwf(financials.contractValue), 'Total contract value of your assigned matters'],
-              ['TPA', `${summary?.tpaPercent ?? profile.tpa}%`, 'Your role participation share from the remuneration table'],
-              ['Matters with Earned Fees', String(feeScoredMatters.length), `${matterFeeRows.length} matter(s) assigned to you`],
+              // Total Contract Value for the CURRENT reporting scope — recalculated
+              // from the qualifying matter set, never earned revenue or cash.
+              ['Total Contract Value', formatRwf(period?.contractValue ?? 0), `Sum of contract values of the qualifying matters ${hasWindow && period ? `in ${period.from} → ${period.to}` : 'across all time'}`],
+              // TPA is a current, role-based rate — labelled as such.
+              ['TPA', `${summary?.tpaPercent ?? profile.tpa}%`, 'Your current role participation share from the remuneration table'],
+              ['Matters with Earned Fees', String(feeScoredMatters.length), hasWindow ? 'Matters with a calculated earned fee in the period' : `${matterFeeRows.length} matter(s) assigned to you`],
             ].map(([label, value, helper]) => (
               <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">{label}</div>
-                <div className="mt-2 text-lg font-semibold text-gray-900">{loading ? '…' : value}</div>
+                <div className="mt-2 text-lg font-semibold text-gray-900">{summaryLoading ? '…' : value}</div>
                 <div className="mt-1 text-xs text-gray-500">{helper}</div>
               </div>
             ))}
           </div>
           <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
-            {period
+            {hasWindow
               ? `For the selected period only payments received inside it are used as the collected base, so the figures line up with Firm Reports (Payment Date). Fees Earned = Collected Base × TPA% × Timeliness% × Quality%.`
               : `Fees Earned = Collected Base × TPA% × Timeliness% × Quality% for each matter, exactly as shown in that matter's Case Workspace.`}
           </div>
 
           <div className="mt-5 border-t border-gray-200 pt-3">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-sm font-medium text-gray-900">
-              <span>Fee breakdown by matter {period ? `· ${period.label}` : '(Case Workspace)'}</span>
-              {period && (
+              <span>Fee breakdown by matter {hasWindow && period ? `· ${period.from} → ${period.to}` : '(Case Workspace)'}</span>
+              {hasWindow && (
                 <span className="text-xs font-normal text-gray-500">
                   {matterFeeRows.length} of {allMatterFeeRows.length} assigned matters had activity in this period
                 </span>
               )}
             </div>
+            {/* Authoritative totals for the filtered set — recalculated from every
+                qualifying row, never from the visible page — so the summary cards,
+                the table and the reporting figures always agree. */}
+            {matterFeeRows.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 rounded-md border border-gray-200 bg-white px-4 py-2 text-sm">
+                <span className="text-gray-600">
+                  {hasWindow ? 'Collected base in period' : 'Collected base (all-time)'}:{' '}
+                  <span className="font-semibold tabular-nums text-gray-900">{formatRwf(feeTotals.collected)}</span>
+                </span>
+                <span className="text-gray-600">
+                  {hasWindow ? 'Earned fee in period' : 'Earned fee (all-time)'}:{' '}
+                  <span className="font-semibold tabular-nums text-gray-900">
+                    {hasWindow
+                      ? period?.feesEarned == null
+                        ? 'Pending'
+                        : formatFees(period.feesEarned)
+                      : summary?.feesEarnedTotal == null
+                        ? 'Pending'
+                        : formatFees(summary.feesEarnedTotal)}
+                  </span>
+                </span>
+                <span className="text-gray-500">
+                  across {matterFeeRows.length} matter{matterFeeRows.length === 1 ? '' : 's'}
+                </span>
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="min-w-[1240px] w-full text-left text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
@@ -1357,19 +1620,26 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                     <SortableHeader label="TPA" column="tpa" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Timeliness" column="timeliness" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
                     <SortableHeader label="Quality" column="quality" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
-                    <SortableHeader label="Total Contract Value" column="contract" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
-                    <SortableHeader label="Collected base" column="collected" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
-                    <SortableHeader label="Earned fee" column="earned" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
-                    {period && <SortableHeader label="Collected (period)" column="collectedPeriod" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />}
-                    {period && <SortableHeader label="Earned fee (period)" column="earnedPeriod" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />}
+                    <SortableHeader label={hasWindow ? 'Contract value (all-time)' : 'Total Contract Value'} column="contract" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                    {hasWindow ? (
+                      <>
+                        <SortableHeader label="Collected base in period" column="collectedPeriod" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                        <SortableHeader label="Earned fee in period" column="earnedPeriod" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                      </>
+                    ) : (
+                      <>
+                        <SortableHeader label="Collected base (all-time)" column="collected" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                        <SortableHeader label="Earned fee (all-time)" column="earned" sortKey={feeSortKey} sortDir={feeSortDir} onSort={handleFeeSort} align="right" />
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {matterFeeRows.length === 0 ? (
                     <tr>
-                      <td colSpan={period ? 11 : 9} className="px-4 py-8 text-center text-gray-500">
-                        {period
-                          ? `None of your ${allMatterFeeRows.length} assigned matters had activity in ${period.label}. Choose a different period, or All time to see every matter.`
+                      <td colSpan={10} className="px-4 py-8 text-center text-gray-500">
+                        {hasWindow && period
+                          ? `None of your ${allMatterFeeRows.length} assigned matters had qualifying activity in ${period.from} → ${period.to}. Choose a different period, or All time to see every matter.`
                           : 'No matters assigned yet. Earned fees appear here once a matter is assigned to you and scored in its Case Workspace.'}
                       </td>
                     </tr>
@@ -1386,10 +1656,18 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.timelinessScore == null ? '—' : `${row.timelinessScore}%`}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.qualityScore == null ? '—' : `${row.qualityScore}%`}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.contractValue ?? 0)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBase)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.earnedFee == null ? 'Pending' : formatFees(row.earnedFee)}</td>
-                        {period && <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBaseInPeriod ?? 0)}</td>}
-                        {period && <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.earnedFeeInPeriod == null ? '—' : formatFees(row.earnedFeeInPeriod)}</td>}
+                        {hasWindow ? (
+                          <>
+                            <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBaseInPeriod ?? 0)}</td>
+                            {/* A pending in-period fee is shown as Pending, never as 0. */}
+                            <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.earnedFeeInPeriod == null ? 'Pending' : formatFees(row.earnedFeeInPeriod)}</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-4 py-3 text-right tabular-nums text-gray-700">{formatRwf(row.collectedBase)}</td>
+                            <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">{row.earnedFee == null ? 'Pending' : formatFees(row.earnedFee)}</td>
+                          </>
+                        )}
                       </tr>
                     ))
                   )}
@@ -1411,15 +1689,19 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           />
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
             <span>
-              {auditLoading && auditTrail.length === 0
+              {loading || (auditLoading && auditItems.length === 0)
                 ? 'Loading your activity…'
-                : auditTrail.length
-                  ? `Showing ${auditTrail.length} recorded action${auditTrail.length === 1 ? '' : 's'}${period ? ` in ${period.label}` : ' on your account'}${auditLoading ? ' · refreshing…' : ''}.`
-                  : period
-                    ? `No activity was recorded on your account in ${period.label}.`
-                    : 'No activity has been recorded on your account yet. Actions you take on matters appear here with their exact timestamp.'}
+                : auditError
+                  ? auditError
+                  : auditTotal > 0
+                    ? `${auditTotal} recorded action${auditTotal === 1 ? '' : 's'}${hasWindow && period ? ` in ${period.label}` : ' on your account'}${auditLoading ? ' · refreshing…' : ''}.`
+                    : hasWindow && period
+                      ? `No activity was recorded on your account in ${period.label}.`
+                      : 'No activity has been recorded on your account yet. Actions you take on matters appear here with their exact timestamp.'}
             </span>
-            <span className="rounded-full bg-gray-100 px-3 py-1 font-medium text-gray-600">{period ? `Filtered: ${period.label}` : 'All time'} · newest first</span>
+            <span className="rounded-full bg-gray-100 px-3 py-1 font-medium text-gray-600">
+              {hasWindow && period ? `Filtered: ${period.from} → ${period.to}` : 'All time'} · newest first
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-[860px] w-full text-left text-sm">
@@ -1428,18 +1710,27 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                   <SortableHeader label="Date & time" column="when" sortKey={auditSortKey} sortDir={auditSortDir} onSort={handleAuditSort} />
                   <SortableHeader label="Action" column="action" sortKey={auditSortKey} sortDir={auditSortDir} onSort={handleAuditSort} />
                   <SortableHeader label="Activity" column="activity" sortKey={auditSortKey} sortDir={auditSortDir} onSort={handleAuditSort} />
-                  <SortableHeader label="Related record" column="record" sortKey={auditSortKey} sortDir={auditSortDir} onSort={handleAuditSort} />
+                  {/* Related record is attached after the query, so it is not a
+                      server-sortable field — shown as a plain header rather than a
+                      sort control that could not reorder the whole period. */}
+                  <th className="px-4 py-3">Related record</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {loading || (auditLoading && auditTrail.length === 0) ? (
+                {loading || (auditLoading && auditItems.length === 0) ? (
                   <tr>
                     <td colSpan={4} className="px-4 py-8 text-center text-gray-500">Loading your activity…</td>
                   </tr>
-                ) : auditTrail.length === 0 ? (
+                ) : auditError ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-red-600">
+                      {auditError} Your previously loaded activity is unchanged.
+                    </td>
+                  </tr>
+                ) : auditItems.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
-                      {period ? `No activity was recorded on your account in ${period.label}.` : 'No activity has been recorded on your account yet. Actions you take on matters appear here with their exact timestamp.'}
+                      {hasWindow && period ? `No activity was recorded on your account in ${period.label}.` : 'No activity has been recorded on your account yet. Actions you take on matters appear here with their exact timestamp.'}
                     </td>
                   </tr>
                 ) : (
@@ -1473,8 +1764,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               </tbody>
             </table>
           </div>
-          {!loading && sortedAuditTrail.length > 0 && (
-            <Pagination page={auditPageClamped} pages={auditPages} total={sortedAuditTrail.length} onChange={setAuditPage} />
+          {!loading && auditTotal > 0 && (
+            <Pagination page={auditPageClamped} pages={auditPages} total={auditTotal} onChange={setAuditPage} />
           )}
 
         </div>

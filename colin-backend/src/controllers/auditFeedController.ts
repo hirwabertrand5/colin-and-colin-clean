@@ -37,15 +37,21 @@ export const getRecentAuditFeed = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// GET /api/audit/mine?limit=50&range=weekly | from=YYYY-MM-DD&to=YYYY-MM-DD
+// GET /api/audit/mine?limit=50&page=1&range=weekly | from=YYYY-MM-DD&to=YYYY-MM-DD
 // The signed-in user's own activity trail — every recorded action they carried
 // out, newest first, with the related matter attached. Members are matched by
 // user id, with a name fallback for older records stored before actorUserId.
 // The optional period uses the same range rules as the staff dashboard summary,
 // so the trail always describes the exact window shown on the dashboard.
+//
+// Pagination is server-side (page + limit) so a long period can be navigated in
+// full without ever silently truncating the list — the response always reports
+// the exact `total`, so the UI can never present a partial page as the complete
+// history. Sorting is applied server-side on indexed/text fields only.
 export const getMyAuditTrail = async (req: AuthRequest, res: Response) => {
   try {
-    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const page = Math.max(Number(req.query.page) || 1, 1);
 
     const userId = String(req.user?.id || '').trim();
     const userName = String(req.user?.name || '').trim();
@@ -65,12 +71,33 @@ export const getMyAuditTrail = async (req: AuthRequest, res: Response) => {
     const query: any = { $or: identityClauses };
     if (period) query.createdAt = { $gte: period.from, $lte: period.to };
 
-    const logs = await AuditLog.find(query)
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .lean();
+    // Server-side sort restricted to real fields so a cross-page sort is always
+    // meaningful. "when" defaults to newest-first, matching the dashboard.
+    const sortDir = String(req.query.sortDir || 'desc').toLowerCase() === 'asc' ? 1 : -1;
+    const SORTABLE_FIELDS: Record<string, string> = {
+      when: 'createdAt',
+      action: 'action',
+      activity: 'message',
+    };
+    const sortField = SORTABLE_FIELDS[String(req.query.sortBy || '').trim()] || 'createdAt';
 
-    res.json(await withCaseInfo(logs));
+    const [total, logs] = await Promise.all([
+      AuditLog.countDocuments(query),
+      AuditLog.find(query)
+        .sort({ [sortField]: sortDir, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+    ]);
+
+    const pages = Math.max(1, Math.ceil(total / limit));
+    res.json({
+      items: await withCaseInfo(logs),
+      total,
+      page,
+      pages,
+      limit,
+    });
   } catch {
     res.status(500).json({ message: 'Failed to fetch your activity trail.' });
   }

@@ -385,4 +385,15 @@ const CaseSchema = new Schema<ICase>(
   { timestamps: true }
 );
 
+// The staff dashboard, Case Workspace and Case Management all look up the
+// matters a member is assigned to via an $or over assignedTo and the three
+// assignment slots. Single-field indexes let each branch of that $or use an
+// index instead of a full collection scan.
+CaseSchema.index({ assignedTo: 1 });
+CaseSchema.index({ 'caseAssignments.initiator': 1 });
+CaseSchema.index({ 'caseAssignments.reviewer': 1 });
+CaseSchema.index({ 'caseAssignments.signerApprover': 1 });
+// "Matters Opened" (entry date) and period scoping filter/sort on createdAt.
+CaseSchema.index({ createdAt: -1 });
+
 export default mongoose.model<ICase>('Case', CaseSchema);

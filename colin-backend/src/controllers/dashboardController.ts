@@ -217,13 +217,16 @@ type StaffDashboardMatterRow = {
   earnedFeeInPeriod?: number | null;
 };
 
-/** Period-scoped figures. Present only when the caller sends range/from/to. */
+/** Period-scoped figures. ALWAYS present — for All Time it carries the all-time
+ * equivalents so the dashboard can render one uniform card set for every period. */
 type StaffDashboardPeriod = {
   key: string;
   label: string;
   from: string;
   to: string;
-  /** Your earned fee from payments received inside the period. */
+  /** True when no date window was applied (All Time) — every figure is all-time. */
+  isAllTime: boolean;
+  /** Your earned fee from payments received inside the period (all-time total when All Time). */
   feesEarned: number | null;
   /** Collected value received inside the period across your matters. */
   collectedValue: number;
@@ -233,6 +236,13 @@ type StaffDashboardPeriod = {
   sectionsCompleted: number;
   /** Tasks completed inside the period where you were the assignee or a stage member. */
   tasksCompleted: number;
+  /**
+   * Tasks assigned to you that were still outstanding as of the END of the
+   * period — they existed by then and had not been completed by then. For All
+   * Time this is simply the tasks still open today. Reconstructed honestly from
+   * each task's creation and completion dates; never an invented value.
+   */
+  tasksOutstanding: number;
   /** Your matters whose workflow completed inside the period. */
   mattersCompleted: number;
   /** Your matters that had any activity inside the period. */
@@ -243,28 +253,61 @@ type StaffDashboardPeriod = {
   averageTimelinessScore: number | null;
   /** Average Quality of your Earned Fees rows in matters worked in the period. */
   averageQualityScore: number | null;
+  /**
+   * Sum of the contract values of the matters that qualify for this reporting
+   * scope — every assigned matter for All Time, only the matters with in-period
+   * activity for a selected period. This is CONTRACT VALUE, not cash collected
+   * or revenue earned, and it is never derived from payment amounts.
+   */
+  contractValue: number;
 };
 
 const buildStaffPeriod = (
   range: ResolvedReportRange | null,
-  values?: Partial<Omit<StaffDashboardPeriod, 'key' | 'label' | 'from' | 'to'>>
-): StaffDashboardPeriod | undefined => {
-  if (!range) return undefined;
+  values?: Partial<Omit<StaffDashboardPeriod, 'key' | 'label' | 'from' | 'to' | 'isAllTime'>>
+): StaffDashboardPeriod => {
+  // All Time is a first-class reporting scope: it always returns a block so the
+  // dashboard renders the SAME cards, just with all-time figures. `from`/`to`
+  // are empty strings because there is no date window to describe.
+  if (!range) {
+    return {
+      key: 'all',
+      label: 'All time',
+      from: '',
+      to: '',
+      isAllTime: true,
+      feesEarned: values?.feesEarned ?? null,
+      collectedValue: values?.collectedValue ?? 0,
+      keyActionsChecked: values?.keyActionsChecked ?? 0,
+      sectionsCompleted: values?.sectionsCompleted ?? 0,
+      tasksCompleted: values?.tasksCompleted ?? 0,
+      tasksOutstanding: values?.tasksOutstanding ?? 0,
+      mattersCompleted: values?.mattersCompleted ?? 0,
+      mattersWithActivity: values?.mattersWithActivity ?? 0,
+      mattersCreatedInPeriod: values?.mattersCreatedInPeriod ?? 0,
+      averageTimelinessScore: values?.averageTimelinessScore ?? null,
+      averageQualityScore: values?.averageQualityScore ?? null,
+      contractValue: values?.contractValue ?? 0,
+    };
+  }
   return {
     key: range.key,
     label: range.label,
     from: range.displayFrom,
     to: range.displayTo,
+    isAllTime: false,
     feesEarned: values?.feesEarned ?? null,
     collectedValue: values?.collectedValue ?? 0,
     keyActionsChecked: values?.keyActionsChecked ?? 0,
     sectionsCompleted: values?.sectionsCompleted ?? 0,
     tasksCompleted: values?.tasksCompleted ?? 0,
+    tasksOutstanding: values?.tasksOutstanding ?? 0,
     mattersCompleted: values?.mattersCompleted ?? 0,
     mattersWithActivity: values?.mattersWithActivity ?? 0,
     mattersCreatedInPeriod: values?.mattersCreatedInPeriod ?? 0,
     averageTimelinessScore: values?.averageTimelinessScore ?? null,
     averageQualityScore: values?.averageQualityScore ?? null,
+    contractValue: values?.contractValue ?? 0,
   };
 };
 
@@ -281,7 +324,9 @@ const emptyStaffSummary = (meName: string, tpaPercent: number, period?: StaffDas
   feesEarnedTotal: null as number | null,
   collectedBaseTotal: 0,
   rows: [] as StaffDashboardMatterRow[],
-  ...(period ? { period } : {}),
+  // A reporting block is ALWAYS returned (All Time when no range) so the card
+  // set never changes shape between All Time and a selected period.
+  period: period ?? buildStaffPeriod(null),
 });
 
 /**
@@ -384,7 +429,8 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
 
     // Payments received inside the requested period. The payment date is the
     // moment the invoice was marked Paid (its updatedAt), exactly like the
-    // Firm Reports "Payment Date" basis.
+    // Firm Reports "Payment Date" basis. For All Time (no period) every paid
+    // invoice qualifies, so the in-scope map is simply the all-time totals.
     const collectedInPeriodByCase = new Map<string, number>();
     if (period) {
       for (const invoice of invoiceList) {
@@ -396,6 +442,8 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
           (collectedInPeriodByCase.get(key) || 0) + Math.max(0, Number(invoice?.amount) || 0)
         );
       }
+    } else {
+      for (const [key, value] of collectedByCase) collectedInPeriodByCase.set(key, value);
     }
 
     // Resolve each assigned member's system role so the TPA column follows the
@@ -416,16 +464,23 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     let hasScoredFee = false;
     let currency = 'RWF';
 
-    // Period-scoped accumulators (only filled when a period was requested).
+    // Period-scoped accumulators. When NO period is requested these still run —
+    // `isWithinReportRange(x, null)` is true for every record — so All Time
+    // produces the exact same figures with the same code path. This is what lets
+    // the dashboard show ONE card set for every period.
     let periodFeesEarned = 0;
     let hasPeriodFee = false;
     let periodCollectedValue = 0;
     let periodKeyActionsChecked = 0;
     let periodSectionsCompleted = 0;
     let periodTasksCompleted = 0;
+    let periodTasksOutstanding = 0;
     let periodMattersCompleted = 0;
     let periodMattersWithActivity = 0;
     let periodMattersCreatedInPeriod = 0;
+    // Sum of contract values for the matters that qualify in this scope. All
+    // Time = every assigned matter; a selected period = only in-period matters.
+    let periodContractValue = 0;
     const periodTimelinessScores: number[] = [];
     const periodQualityScores: number[] = [];
 
@@ -502,87 +557,101 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       }
       collectedBaseTotal += collectedBase;
 
-      // ---- Period-scoped figures for this matter (requested periods only) ----
+      // ---- Reporting-scope figures for this matter --------------------------
+      // This block runs for EVERY request. With no period (All Time),
+      // `isWithinReportRange(x, null)` is true for every record, so All Time
+      // produces the same figures through the same code path — which is what
+      // lets the dashboard show one uniform card set for all periods.
       let collectedBaseInPeriod: number | undefined;
       let earnedFeeInPeriod: number | null | undefined;
-      // Does this matter have any work that belongs to the selected period?
+      // Does this matter have any work that belongs to the selected scope?
       // Decided BEFORE the score is averaged, so a matter only contributes its
-      // Timeliness/Quality when it genuinely had in-period activity.
+      // Timeliness/Quality when it genuinely had in-scope activity.
       let hadInPeriodWork = false;
-      if (period) {
-        const collectedInPeriod = collectedInPeriodByCase.get(caseId) || 0;
-        periodCollectedValue += collectedInPeriod;
-        // A payment landing inside the period is itself in-period activity.
-        if (collectedInPeriod > 0) hadInPeriodWork = true;
+      // All Time: every assigned matter is in scope (no date window to exclude).
+      if (!period) hadInPeriodWork = true;
 
-        // Same engine and role table as the all-time row — only the collected
-        // value is restricted to payments received inside the period.
-        const earnedInPeriod = computeCaseEarnedFees({
-          caseDoc: matter,
-          template,
-          workflowInstance: { ...(instance || {}), steps: effectiveSteps },
-          tasks: tasksByCase.get(caseId) || [],
-          collectedAmount: collectedInPeriod,
-          roleByName,
-        });
-        const myPeriodRows = earnedInPeriod.team.filter((member) => meKeys.includes(normalizeKey(member.name)));
-        const myPeriodFees = myPeriodRows
-          .map((member) => member.earnedFee)
-          .filter((value): value is number => value != null);
-        earnedFeeInPeriod = myPeriodFees.length ? round2(myPeriodFees.reduce((sum, value) => sum + value, 0)) : null;
-        collectedBaseInPeriod = myPeriodRows.reduce(
-          (max, member) => Math.max(max, Number(member.taskFeeCollected) || 0),
-          0
-        );
-        if (earnedFeeInPeriod != null) {
-          periodFeesEarned += earnedFeeInPeriod;
-          hasPeriodFee = true;
-        }
+      const collectedInPeriod = collectedInPeriodByCase.get(caseId) || 0;
+      periodCollectedValue += collectedInPeriod;
+      // A payment landing inside the scope is itself in-scope activity.
+      if (collectedInPeriod > 0) hadInPeriodWork = true;
 
-        for (const step of steps) {
-          if (
-            String((step as any)?.status || '').toLowerCase() === 'completed' &&
-            isWithinReportRange((step as any)?.completedAt, period)
-          ) {
-            periodSectionsCompleted += 1;
-            // The per-step sub-checklist is retired: "Key Actions" are the
-            // workflow steps, so a Key Action counts as checked when its step
-            // completes inside the period.
-            periodKeyActionsChecked += 1;
-            hadInPeriodWork = true;
-          }
-        }
+      // Same engine and role table as the all-time row — only the collected
+      // value is restricted to payments received inside the scope. When there is
+      // no period the collected base is identical to the all-time row, so the
+      // already-computed projection is reused instead of recomputed (no duplicate
+      // work, no risk of the two drifting apart).
+      const earnedInPeriod = period
+        ? computeCaseEarnedFees({
+            caseDoc: matter,
+            template,
+            workflowInstance: { ...(instance || {}), steps: effectiveSteps },
+            tasks: tasksByCase.get(caseId) || [],
+            collectedAmount: collectedInPeriod,
+            roleByName,
+          })
+        : earned;
+      const myPeriodRows = earnedInPeriod.team.filter((member) => meKeys.includes(normalizeKey(member.name)));
+      const myPeriodFees = myPeriodRows
+        .map((member) => member.earnedFee)
+        .filter((value): value is number => value != null);
+      earnedFeeInPeriod = myPeriodFees.length ? round2(myPeriodFees.reduce((sum, value) => sum + value, 0)) : null;
+      collectedBaseInPeriod = myPeriodRows.reduce(
+        (max, member) => Math.max(max, Number(member.taskFeeCollected) || 0),
+        0
+      );
+      if (earnedFeeInPeriod != null) {
+        periodFeesEarned += earnedFeeInPeriod;
+        hasPeriodFee = true;
+      }
 
-        if (completed) {
-          const completionAt =
-            steps.reduce<Date | null>((latest, step: any) => {
-              const at = step?.completedAt ? new Date(step.completedAt) : null;
-              if (!at || Number.isNaN(at.getTime())) return latest;
-              return !latest || at.getTime() > latest.getTime() ? at : latest;
-            }, null) || (instance?.updatedAt ? new Date(instance.updatedAt) : null);
-          if (isWithinReportRange(completionAt, period)) {
-            periodMattersCompleted += 1;
-            hadInPeriodWork = true;
-          }
+      for (const step of steps) {
+        if (
+          String((step as any)?.status || '').toLowerCase() === 'completed' &&
+          isWithinReportRange((step as any)?.completedAt, period)
+        ) {
+          periodSectionsCompleted += 1;
+          // The per-step sub-checklist is retired: "Key Actions" are the
+          // workflow steps, so a Key Action counts as checked when its step
+          // completes inside the scope.
+          periodKeyActionsChecked += 1;
+          hadInPeriodWork = true;
         }
+      }
 
-        // Period Timeliness / Quality use the SAME earned-fees rows that produce
-        // the all-time figures — only the matters are restricted to those with
-        // in-period activity. Reading only `taskStages` left these permanently
-        // null, because staged per-Key-Action task records are not populated for
-        // most matters.
-        if (hadInPeriodWork) {
-          periodMattersWithActivity += 1;
-          if (timelinessScore != null) periodTimelinessScores.push(timelinessScore);
-          if (qualityScore != null) periodQualityScores.push(qualityScore);
+      if (completed) {
+        const completionAt =
+          steps.reduce<Date | null>((latest, step: any) => {
+            const at = step?.completedAt ? new Date(step.completedAt) : null;
+            if (!at || Number.isNaN(at.getTime())) return latest;
+            return !latest || at.getTime() > latest.getTime() ? at : latest;
+          }, null) || (instance?.updatedAt ? new Date(instance.updatedAt) : null);
+        if (isWithinReportRange(completionAt, period)) {
+          periodMattersCompleted += 1;
+          hadInPeriodWork = true;
         }
+      }
 
-        // "Entry date" scope: matters assigned to you that were OPENED in the
-        // period. Assignment time is not stored, so creation is the only
-        // honest entry date available — never a fabricated one.
-        if (isWithinReportRange(matter?.createdAt, period)) {
-          periodMattersCreatedInPeriod += 1;
-        }
+      // Reporting-scope Timeliness / Quality use the SAME earned-fees rows that
+      // produce the all-time figures — only the matters are restricted to those
+      // with in-scope activity. Reading only `taskStages` left these permanently
+      // null, because staged per-Key-Action task records are not populated for
+      // most matters.
+      if (hadInPeriodWork) {
+        periodMattersWithActivity += 1;
+        // Total Contract Value for this scope: the sum of the contract values of
+        // the qualifying matters. This is CONTRACT VALUE only — never cash
+        // collected or revenue earned.
+        periodContractValue += round2(Number(earned.contractValue) || 0);
+        if (timelinessScore != null) periodTimelinessScores.push(timelinessScore);
+        if (qualityScore != null) periodQualityScores.push(qualityScore);
+      }
+
+      // "Entry date" scope: matters assigned to you that were OPENED in the
+      // scope. Assignment time is not stored, so creation is the only honest
+      // entry date available — never a fabricated one.
+      if (isWithinReportRange(matter?.createdAt, period)) {
+        periodMattersCreatedInPeriod += 1;
       }
 
       rows.push({
@@ -612,42 +681,64 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       });
     }
 
-    // ---- Period-scoped task metrics (assignee or workflow-stage member = me) ----
-    if (period) {
-      for (const task of taskList) {
-        const involvesMe =
-          meKeys.includes(normalizeKey(task?.assignee)) ||
-          (Array.isArray(task?.taskStages) &&
-            task.taskStages.some((stage: any) => meKeys.includes(normalizeKey(stage?.staffMember))));
-        if (!involvesMe) continue;
+    // ---- Reporting-scope task metrics (assignee or workflow-stage member = me) --
+    // Runs for every request; with no period (All Time) every completed task of
+    // mine counts, giving All Time the same "Tasks Completed" figure the periods
+    // show, through the same code path.
+    //
+    // "Tasks Outstanding" for the scope = tasks that were still open as of the
+    // END of the window: they existed by then (created on/before the period end,
+    // or with no creation date) and had not been completed by then. For All Time
+    // (no window) this is simply the tasks still not completed today. This is a
+    // point-in-time reconstruction from real dates, not an invented value.
+    const scopeEnd = period ? period.toExclusive.getTime() : Date.now();
+    for (const task of taskList) {
+      const involvesMe =
+        meKeys.includes(normalizeKey(task?.assignee)) ||
+        (Array.isArray(task?.taskStages) &&
+          task.taskStages.some((stage: any) => meKeys.includes(normalizeKey(stage?.staffMember))));
+      if (!involvesMe) continue;
 
-        if (
-          String(task?.status || '').toLowerCase() === 'completed' &&
-          isWithinReportRange(task?.completedAt, period)
-        ) {
-          periodTasksCompleted += 1;
-        }
+      if (
+        String(task?.status || '').toLowerCase() === 'completed' &&
+        isWithinReportRange(task?.completedAt, period)
+      ) {
+        periodTasksCompleted += 1;
+      }
 
-        for (const stage of Array.isArray(task?.taskStages) ? task.taskStages : []) {
-          if (!meKeys.includes(normalizeKey(stage?.staffMember))) continue;
-          if (!isWithinReportRange(stage?.completedAt, period)) continue;
-          if (stage?.timelinessScore != null) periodTimelinessScores.push(Number(stage.timelinessScore));
-          if (stage?.qualityScore != null) periodQualityScores.push(Number(stage.qualityScore));
-        }
+      // Outstanding as of the scope end: existed by then and not yet completed.
+      const createdAt = task?.createdAt ? new Date(task.createdAt).getTime() : NaN;
+      const completedAt = task?.completedAt ? new Date(task.completedAt).getTime() : NaN;
+      const existedByScopeEnd = Number.isNaN(createdAt) || createdAt < scopeEnd;
+      const notCompletedByScopeEnd =
+        String(task?.status || '').toLowerCase() !== 'completed' ||
+        Number.isNaN(completedAt) ||
+        completedAt >= scopeEnd;
+      if (existedByScopeEnd && notCompletedByScopeEnd) periodTasksOutstanding += 1;
+
+      for (const stage of Array.isArray(task?.taskStages) ? task.taskStages : []) {
+        if (!meKeys.includes(normalizeKey(stage?.staffMember))) continue;
+        if (!isWithinReportRange(stage?.completedAt, period)) continue;
+        if (stage?.timelinessScore != null) periodTimelinessScores.push(Number(stage.timelinessScore));
+        if (stage?.qualityScore != null) periodQualityScores.push(Number(stage.qualityScore));
       }
     }
 
+    // One reporting block is ALWAYS returned (All Time when no range) so the
+    // dashboard renders the same cards for every period.
     const periodSummary = buildStaffPeriod(period, {
       feesEarned: hasPeriodFee ? round2(periodFeesEarned) : null,
       collectedValue: round2(periodCollectedValue),
       keyActionsChecked: periodKeyActionsChecked,
       sectionsCompleted: periodSectionsCompleted,
       tasksCompleted: periodTasksCompleted,
+      tasksOutstanding: periodTasksOutstanding,
       mattersCompleted: periodMattersCompleted,
       mattersWithActivity: periodMattersWithActivity,
       mattersCreatedInPeriod: periodMattersCreatedInPeriod,
       averageTimelinessScore: averageOf(periodTimelinessScores),
       averageQualityScore: averageOf(periodQualityScores),
+      contractValue: round2(periodContractValue),
     });
 
     return res.json({
@@ -663,7 +754,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       feesEarnedTotal: hasScoredFee ? round2(feesEarnedTotal) : null,
       collectedBaseTotal: round2(collectedBaseTotal),
       rows,
-      ...(periodSummary ? { period: periodSummary } : {}),
+      period: periodSummary,
     });
   } catch (e: any) {
     return res.status(500).json({ message: e?.message || 'Failed to load staff dashboard summary.' });

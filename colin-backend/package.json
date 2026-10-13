@@ -14,6 +14,7 @@
     "verify:alignment": "tsx src/scripts/verifyMatterTypeAlignment.ts",
     "verify:auto-complete-steps": "tsx src/scripts/verifyAutoCompleteCheckedSteps.ts",
     "verify:case-permissions": "tsx src/scripts/verifyCasePermissions.ts",
+    "verify:audit-trail": "tsx src/scripts/verifyAuditTrailPagination.ts",
     "verify:progress-and-order": "tsx src/scripts/verifyProgressAndOrder.ts",
     "autocomplete:steps": "tsx src/scripts/autoCompleteCheckedSteps.ts",
     "autocomplete:steps:apply": "tsx src/scripts/autoCompleteCheckedSteps.ts --apply",

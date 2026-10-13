@@ -94,18 +94,28 @@ export type StaffDashboardPeriod = {
   label: string;
   from: string;
   to: string;
+  /** True for All Time — every figure in the block is the all-time total. */
+  isAllTime: boolean;
   feesEarned: number | null;
   collectedValue: number;
   keyActionsChecked: number;
   sectionsCompleted: number;
   tasksCompleted: number;
+  /** Tasks still outstanding as of the end of the period (all open tasks for All Time). */
+  tasksOutstanding: number;
   mattersCompleted: number;
-  /** Your matters that had any activity inside the period. */
+  /** Your matters that had any activity inside the period (all matters for All Time). */
   mattersWithActivity: number;
   /** Matters assigned to you that were created inside the period (entry date). */
   mattersCreatedInPeriod: number;
   averageTimelinessScore: number | null;
   averageQualityScore: number | null;
+  /**
+   * Sum of the contract values of the matters that qualify for this reporting
+   * scope (all assigned matters for All Time; in-period matters otherwise).
+   * Contract value only — not cash collected or revenue earned.
+   */
+  contractValue: number;
 };
 
 export type StaffDashboardSummaryResponse = {
@@ -128,8 +138,13 @@ export type StaffDashboardSummaryResponse = {
   feesEarnedTotal: number | null;
   collectedBaseTotal: number;
   rows: StaffDashboardMatterRow[];
-  /** Period-scoped figures — returned only when range/from/to were requested. */
-  period?: StaffDashboardPeriod;
+  /**
+   * The reporting block — ALWAYS present. `isAllTime` is true for the All Time
+   * view (every figure is the all-time total); otherwise it describes the
+   * selected period. The dashboard renders one uniform card set from this block
+   * regardless of which period is selected.
+   */
+  period: StaffDashboardPeriod;
 };
 
 export const getStaffDashboardSummary = async (params?: {

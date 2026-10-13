@@ -81,5 +81,10 @@ const AuditLogSchema = new Schema<IAuditLog>(
 );
 
 AuditLogSchema.index({ caseId: 1, createdAt: -1 });
+// The "My Activity Trail" query filters by actorUserId (with a createdAt range
+// for the reporting period) and sorts newest-first, so a compound index serves
+// both the filter and the sort without an in-memory sort.
+AuditLogSchema.index({ actorUserId: 1, createdAt: -1 });
+AuditLogSchema.index({ actorName: 1, createdAt: -1 });
 
 export default mongoose.model<IAuditLog>('AuditLog', AuditLogSchema);

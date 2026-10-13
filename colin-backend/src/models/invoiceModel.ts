@@ -49,5 +49,10 @@ const InvoiceSchema = new Schema<IInvoice>(
 
 InvoiceSchema.index({ year: 1, seqYear: 1 }, { unique: true });
 InvoiceSchema.index({ caseId: 1, seqCase: 1 }, { unique: true });
+// The staff dashboard and Firm Reports sum paid invoices per matter and filter
+// by the payment date (updatedAt). This compound index serves both the
+// status/case filter and the payment-date range.
+InvoiceSchema.index({ status: 1, updatedAt: -1 });
+InvoiceSchema.index({ caseId: 1, status: 1 });
 
 export default mongoose.model<IInvoice>('Invoice', InvoiceSchema);

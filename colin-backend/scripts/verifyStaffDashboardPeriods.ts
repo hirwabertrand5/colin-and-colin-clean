@@ -479,7 +479,11 @@ const lastMonth = await runFor(users[0], { range: 'monthly' });
 const thisMonthRes = await runFor(users[0], { range: 'this_month' });
 
 check('All Time returns every assigned matter (5 fixtures)', allTime.mattersAssigned, 5);
-check('All Time returns NO period block (the all-time view)', allTime.period, undefined);
+// All Time now returns a reporting block (isAllTime:true) so the dashboard can
+// render the SAME card set as a selected period — never a different shape.
+check('All Time returns an isAllTime reporting block (same cards as a period)', allTime.period?.isAllTime, true);
+check('All Time reports its key as all', allTime.period?.key, 'all');
+check('All Time carries no date window (from/to are empty)', { from: allTime.period?.from, to: allTime.period?.to }, { from: '', to: '' });
 check('All Time returns a row per matter', allTime.rows.length, 5);
 check('All Time Fees Earned is populated, not zero', (allTime.feesEarnedTotal as number) > 0, true);
 check('All Time counts every completed matter (3)', allTime.mattersCompleted, 3);
@@ -491,7 +495,7 @@ check(
   JSON.stringify(allTimeExplicit) === JSON.stringify(allTime),
   true
 );
-check('All Time is NOT the Last Month window', allTime.period === undefined && lastMonth.period !== undefined, true);
+check('All Time is NOT the Last Month window', allTime.period?.isAllTime === true && lastMonth.period?.isAllTime === false, true);
 check(
   'All Time Fees Earned exceeds Last Month Fees Earned',
   (allTime.feesEarnedTotal as number) > (lastMonth.period.feesEarned as number),
@@ -523,6 +527,39 @@ check(
   true
 );
 
+section('Staff Dashboard — Total Contract Value uses the qualifying matter set');
+
+// The reported bug: the card reused the ALL-TIME total for every period. The
+// correct value is the sum of the contract values of the matters that QUALIFY
+// for the scope — every assigned matter for All Time, only the in-period
+// matters for a selected period. Fixtures: 5 assigned matters, each with a
+// 1,000,000 contract value; only CASE-LAST-MONTH qualifies in Last Month.
+check('All Time Total Contract Value sums every qualifying matter (5,000,000)', allTime.period.contractValue, 5_000_000);
+check('Last Month Total Contract Value sums only the qualifying matter (1,000,000)', lastMonth.period.contractValue, 1_000_000);
+check(
+  'Last Month contract value is NOT the all-time total (the reported bug)',
+  lastMonth.period.contractValue === allTime.period.contractValue,
+  false
+);
+// This Month qualifies CASE-THIS-MONTH (and the two "now"-created open matters
+// have activity this month), so its contract value differs from All Time too.
+check(
+  'This Month contract value is scoped to its own qualifying matters',
+  thisMonthRes.period.contractValue > 0 && thisMonthRes.period.contractValue <= allTime.period.contractValue,
+  true
+);
+// Contract value must never be derived from payments: Last Month collected
+// 200,000 but its contract value is the matter's 1,000,000 planned value.
+check('contract value is not the collected amount', lastMonth.period.contractValue === 200_000, false);
+// The "same figures via the same code path" guarantee: for All Time the block's
+// Fees Earned equals the top-level all-time total.
+check(
+  'All Time reporting block Fees Earned equals the top-level all-time total',
+  allTime.period.feesEarned,
+  allTime.feesEarnedTotal
+);
+
+
 section('Staff Dashboard — This Month');
 
 check('This Month returns a period block', typeof thisMonthRes.period, 'object');
@@ -546,6 +583,8 @@ check(
   { collected: 0, matters: 0, tasks: 0 }
 );
 check('Last Day still lists the assigned matters', lastDay.mattersAssigned, 5);
+// A period with no qualifying matters reports a genuine zero contract value.
+check('Last Day (no activity) reports zero contract value', lastDay.period.contractValue, 0);
 
 section('Staff Dashboard — custom range and invalid periods');
 
