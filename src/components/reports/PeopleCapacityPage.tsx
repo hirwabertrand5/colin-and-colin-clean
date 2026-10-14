@@ -7,6 +7,7 @@ import { getAllCases, CaseData } from '../../services/caseService';
 import { getStaffUsers, User } from '../../services/userService';
 import { FirmReportRange, getFirmReports, FirmReportResponse } from '../../services/firmReportsService';
 import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
+import { identityMatches } from '../../utils/caseAssignments';
 import usePageTitle from '../../hooks/usePageTitle';
 import SortableHeader from '../ui/SortableHeader';
 import TableExport from '../ui/TableExport';
@@ -176,6 +177,11 @@ export default function PeopleCapacityPage({ view, userRole }: { view: PeopleCap
   // Single pass over all cases, grouped by each assignment identity. This keeps
   // the per-member lookup O(1) instead of re-filtering every case per staff
   // member (which was O(staff x cases)).
+  //
+  // Identities are keyed by their normalized RAW value, then a person's matters
+  // are gathered with the canonical `identityMatches` (so an account stored as
+  // "Badiel" and a matter that stored the full name "Badiel Rubangutsangabo"
+  // resolve to the same person). This mirrors the dashboard and the backend.
   const casesByName = useMemo(() => {
     const map = new Map<string, CaseData[]>();
     for (const c of cases) {
@@ -188,6 +194,31 @@ export default function PeopleCapacityPage({ view, userRole }: { view: PeopleCap
     return map;
   }, [cases]);
 
+  // All matters whose ANY assignment identity canonically matches this person.
+  const casesForPerson = useMemo(() => {
+    const list = [...casesByName.values()];
+    return (personName?: string | null) => {
+      const target = normalize(personName);
+      if (!target) return [] as CaseData[];
+      const seen = new Set<string>();
+      const out: CaseData[] = [];
+      for (const bucket of list) {
+        for (const c of bucket) {
+          const id = String((c as any)?._id ?? (c as any)?.id ?? '');
+          if (id && seen.has(id)) continue;
+          if (
+            [c.assignedTo, c.caseAssignments?.initiator, c.caseAssignments?.reviewer, c.caseAssignments?.signerApprover]
+              .some((value) => identityMatches(value, personName))
+          ) {
+            if (id) seen.add(id);
+            out.push(c);
+          }
+        }
+      }
+      return out;
+    };
+  }, [casesByName]);
+
   const reportByName = useMemo(() => {
     const map = new Map<string, ReportMember>();
     for (const member of report?.team || []) map.set(normalize(member.name), member);
@@ -198,7 +229,7 @@ export default function PeopleCapacityPage({ view, userRole }: { view: PeopleCap
   // matters (cases), never on the staged per-Key-Action task records.
   const rows = useMemo<StaffRow[]>(() => staff.map((person) => {
     const name = normalize(person.name);
-    const personCases = casesByName.get(name) || [];
+    const personCases = casesForPerson(person.name);
     const completed = personCases.filter(caseCompleted);
     const open = personCases.filter((c) => !caseCompleted(c) && !isClosedCase(c));
     const overdue = open.filter((c) => {

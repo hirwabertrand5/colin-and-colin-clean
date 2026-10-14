@@ -44,7 +44,7 @@ import { listInvoices, Invoice } from '../../services/invoiceService';
 import { getActivePettyCashFund, PettyCashFund } from '../../services/pettyCashService';
 import { getStaffUsers, User as StaffUser } from '../../services/userService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
-import { caseMatchesAssignee } from '../../utils/caseAssignments';
+import { caseMatchesAssigneeCanonical } from '../../utils/caseAssignments';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import './ManagingPartnerDashboard.css';
@@ -720,7 +720,7 @@ export default function ManagingPartnerDashboard() {
   // assignment slot (Initiator / Reviewer / Signer-Approver / assignedTo), the
   // same team definition used by the People & Capacity report pages.
   const staffWorkloads = useMemo(
-    () => staff.map((person) => openMatters.filter((matter) => caseMatchesAssignee(matter, person.name)).length),
+    () => staff.map((person) => openMatters.filter((matter) => caseMatchesAssigneeCanonical(matter, person.name)).length),
     [openMatters, staff]
   );
 

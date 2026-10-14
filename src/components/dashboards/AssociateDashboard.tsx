@@ -12,12 +12,11 @@ import {
   DollarSign,
   Handshake,
   RefreshCw,
-  ShieldAlert,
   TrendingUp,
 } from 'lucide-react';
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
-import { caseMatchesAssignee } from '../../utils/caseAssignments';
+import { caseMatchesAssignee, caseMatchesAssigneeCanonical } from '../../utils/caseAssignments';
 import { getAllCases, CaseData } from '../../services/caseService';
 import {
   getStaffDashboardSummary,
@@ -745,9 +744,17 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const authorisedCases = useMemo(
     () =>
       cases.filter(
-        (matter) => caseMatchesAssignee(matter, meName) || caseMatchesAssignee(matter, me?.email),
+        (matter) => caseMatchesAssigneeCanonical(matter, meName) || caseMatchesAssigneeCanonical(matter, me?.email),
       ),
     [cases, me?.email, meName],
+  );
+
+  // The ids of the matters this member is genuinely assigned to. Used to scope
+  // calendar items to the same set the intern dashboard shows, so every
+  // associate-like role reads one identical "Upcoming calendar items" figure.
+  const authorisedCaseIds = useMemo(
+    () => new Set(authorisedCases.map((matter) => String(matter._id || '')).filter(Boolean)),
+    [authorisedCases],
   );
 
   const tasksByCase = useMemo(() => {
@@ -889,8 +896,18 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   }, [meName, prospects]);
 
   const upcomingEvents = useMemo(
-    () => events.filter((event) => String(event.date) >= today).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 6),
-    [events, today]
+    () => events
+      // "Upcoming calendar items" must describe the SAME scope for every
+      // associate-like role. The events endpoint returns firm-wide events to
+      // partner-level roles, so scope to the member's own authorised matters
+      // here — exactly the set an intern already sees — so the card matches
+      // across Trainee Associate, Associate, Senior Associate and Associate
+      // Partner instead of inflating for partners.
+      .filter((event) => authorisedCaseIds.has(String(event.caseId)))
+      .filter((event) => String(event.date) >= today)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      .slice(0, 6),
+    [authorisedCaseIds, events, today]
   );
 
   const summary = staffSummary;
@@ -1053,7 +1070,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         // page reconciles to this one number.
         label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Assigned Matters',
         value: String(mattersInScope),
-        helper: `Matters where you're Initiator, Reviewer or Signer/Approver${inPeriodSuffix || ' (all time)'}`,
+        helper: `Matters assigned to you — Initiator, Reviewer, Signer/Approver or assigned lawyer${inPeriodSuffix || ' (all time)'}`,
         icon: Briefcase,
         tone: 'blue',
         href: '/matters',
@@ -1337,7 +1354,6 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             {[
               { label: 'Awaiting review / approval', value: taskSignals.awaitingReview.length, icon: CheckCircle2, tone: 'amber' as Tone },
               { label: 'Awaiting client/external info', value: taskSignals.awaitingExternal.length, icon: Clock, tone: 'blue' as Tone },
-              { label: 'Overdue or late tasks', value: taskSignals.overdue.length, icon: ShieldAlert, tone: taskSignals.overdue.length ? 'red' as Tone : 'green' as Tone },
               { label: 'Upcoming calendar items', value: upcomingEvents.length, icon: CalendarIcon, tone: 'slate' as Tone },
             ].map((item) => {
               const Icon = item.icon;

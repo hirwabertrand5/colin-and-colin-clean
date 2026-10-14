@@ -587,7 +587,16 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
     const filter: any = {};
     const andFilters: any[] = [];
 
-    // Visibility: non-MD sees own tasks and tasks they supervise
+    // Visibility: non-MD sees own tasks and tasks they supervise.
+    //
+    // This is the SAME rule for every non-MD role (intern, trainee associate,
+    // associate, senior associate, associate partner, …). An earlier version
+    // added an associate-only branch that further restricted tasks to the
+    // member's assigned matters; because every task already matched on
+    // assignee/supervisor/task-stage member, that extra filter changed nothing
+    // for the result set but could throw a CastError (HTTP 500) on a malformed
+    // id and made an associate's dashboard diverge from an intern's. Removing it
+    // keeps one identical data source for every associate-like dashboard.
     if (req.user?.role !== 'managing_director') {
       const me = String(req.user?.name || '').trim();
       if (!me) {
@@ -595,21 +604,6 @@ export const getAllTasks = async (req: AuthRequest, res: Response) => {
       }
 
       const visibility: any = { $or: [{ assignee: me }, { supervisor: me }, { 'taskStages.staffMember': me }] };
-      if (req.user?.role === 'associate') {
-        const ownedCaseIds = await Case.find({
-          $or: [
-            { assignedTo: new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
-            { 'caseAssignments.initiator': new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
-            { 'caseAssignments.reviewer': new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
-            { 'caseAssignments.signerApprover': new RegExp(me.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
-          ],
-        }).distinct('_id');
-        const caseIdsFromTasks = await Task.distinct('caseId', {
-          $or: [{ assignee: me }, { supervisor: me }, { 'taskStages.staffMember': me }],
-        });
-        const visibleCaseIds = [...new Set([...ownedCaseIds, ...caseIdsFromTasks].map(String))];
-        visibility.caseId = { $in: visibleCaseIds.map((value) => new mongoose.Types.ObjectId(value)) };
-      }
       andFilters.push(visibility);
     }
 

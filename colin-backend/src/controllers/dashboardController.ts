@@ -15,6 +15,7 @@ import WorkflowTemplate from '../models/workflowTemplateModel';
 
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
+import { identityMatches } from '../utils/caseAssignments';
 import { buildRoleByName, getTpaPercent, normalizeMemberName } from '../utils/workflowPercentages';
 import {
   isWithinReportRange,
@@ -369,9 +370,20 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
 
     const roleTpaPercent = getTpaPercent(String(req.user?.role || ''));
     const meKeys = [meName, meEmail].map(normalizeKey).filter(Boolean);
-    const identityRegexes = [meName, meEmail]
-      .filter(Boolean)
-      .map((value) => new RegExp(`^${escapeRegExp(value)}$`, 'i'));
+
+    // Identity match must be CANONICAL, not byte-exact. A member is referenced
+    // sometimes by their account name ("Badiel") and sometimes by the full name a
+    // person-picker stored ("Badiel Rubangutsangabo"). A strict `^Badiel$` match
+    // silently dropped those matters — the reported "6 instead of 10". So the
+    // NAME identity matches an optional trailing name (same first token), while
+    // the EMAIL identity stays exact (an email is never a name prefix).
+    const nameIdentityRegexes = meName
+      ? [new RegExp(`^${escapeRegExp(meName)}(\\s.+)?$`, 'i')]
+      : [];
+    const emailIdentityRegexes = meEmail
+      ? [new RegExp(`^${escapeRegExp(meEmail)}$`, 'i')]
+      : [];
+    const identityRegexes = [...nameIdentityRegexes, ...emailIdentityRegexes];
 
     const matters: any[] = identityRegexes.length
       ? await Case.find({
@@ -524,10 +536,33 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         roleByName,
       });
 
-      const myRows = earned.team.filter((member) => meKeys.includes(normalizeKey(member.name)));
-      if (!myRows.length) continue;
+      // Earned-Fees rows for me — matched canonically so a full-name stored slot
+      // ("Badiel Rubangutsangabo") still counts for the account ("Badiel").
+      const myRows = earned.team.filter((member) =>
+        [meName, meEmail].some((identity) => identity && identityMatches(member.name, identity))
+      );
 
       currency = SINGLE_CURRENCY;
+
+      // Every matter returned by the identity query above is one this member is
+      // genuinely assigned to (assignedTo / Initiator / Reviewer / Signer-Approver),
+      // across ALL statuses (active, closed, temporarily closed). It must NOT be
+      // dropped just because the member has no row in the matter's Earned Fees
+      // team: `earned.team` only builds the three caseAssignments slots (using
+      // assignedTo purely as an Initiator fallback), so a matter where this member
+      // is the assignedTo lawyer but someone else is the Initiator has no `myRows`
+      // here. The old `if (!myRows.length) continue;` skipped exactly those, so
+      // "Assigned Matters" undercounted (e.g. 6 instead of 10). Keep the matter and
+      // count it, with null scores (the honest "Pending") until it is scored.
+      const matchesMe = (value: unknown) =>
+        [meName, meEmail].some((identity) => identity && identityMatches(value, identity));
+      const directRoles: string[] = [];
+      if (matchesMe(matter?.caseAssignments?.initiator)) directRoles.push('Initiator');
+      if (matchesMe(matter?.caseAssignments?.reviewer)) directRoles.push('Reviewer');
+      if (matchesMe(matter?.caseAssignments?.signerApprover)) directRoles.push('Signer/Approver');
+      if (directRoles.length === 0 && matchesMe(matter?.assignedTo)) {
+        directRoles.push('Assigned');
+      }
 
       const myTimeliness = myRows
         .map((member) => member.timelinessScore)
@@ -547,7 +582,11 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         : null;
       const earnedFee = myFees.length ? round2(myFees.reduce((sum, value) => sum + value, 0)) : null;
       const tpaPercent = myRows.find((member) => member.tpaPercent > 0)?.tpaPercent ?? roleTpaPercent;
-      const roles = Array.from(new Set(myRows.map((member) => String(member.role || '')).filter(Boolean)));
+      const roles = Array.from(
+        new Set(
+          (myRows.length ? myRows.map((member) => String(member.role || '')) : directRoles).filter(Boolean)
+        )
+      );
 
       if (timelinessScore != null) timelinessScores.push(timelinessScore);
       if (qualityScore != null) qualityScores.push(qualityScore);
