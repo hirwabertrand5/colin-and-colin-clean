@@ -25,19 +25,26 @@ const getUrgencyColorFromRatio = (ratio: number | undefined): UrgencyColor => {
 };
 
 export const getUrgencyColorForDueDate = (dueAt?: Date | string, startAt?: Date | string, now = new Date()): UrgencyColor => {
+  // Absolute remaining-time thresholds (platform-wide business rules), matching
+  // the client's `workflowDeadline.getUrgencyColorForDueDate` so the "yellow
+  // matter" visibility rule and every displayed deadline color agree:
+  // - overdue OR <= 48 hours => red
+  // - <= 7 days              => yellow
+  // - <= 21 days             => green
+  // - > 21 days              => blue
+  //
+  // `startAt` is intentionally unused: the old start→due window ratio was
+  // anchored to elapsed time and produced sticky/incorrect colors (an amended
+  // deadline barely moved the color). Coloring purely from the remaining time
+  // is correct and consistent across the whole platform.
+  void startAt;
   if (!dueAt) return 'gray';
   const d = resolveDeadlineDateTime(dueAt);
   if (!d) return 'gray';
-  const dueMs = d.getTime();
-
-  const nowMs = now.getTime();
-  const remainingMs = dueMs - nowMs;
+  const remainingMs = d.getTime() - now.getTime();
+  if (remainingMs <= 0) return 'red';
   const hoursLeft = remainingMs / (1000 * 60 * 60);
   const daysLeft = hoursLeft / 24;
-
-  if (remainingMs <= 0) return 'red';
-  const ratioColor = getUrgencyColorFromRatio(getDueRemainingRatio(startAt, dueAt, now));
-  if (ratioColor !== 'gray') return ratioColor;
   if (hoursLeft <= 48) return 'red';
   if (daysLeft <= 7) return 'yellow';
   if (daysLeft <= 21) return 'green';

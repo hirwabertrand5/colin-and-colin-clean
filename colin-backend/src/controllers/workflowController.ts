@@ -209,6 +209,10 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
           : nextStep.stagePercentage,
       status: previous?.status || nextStep.status,
       completedAt: previous?.completedAt,
+      submittedAt: previous?.submittedAt,
+      reviewedAt: previous?.reviewedAt,
+      // Preserve the frozen "work finished" stamp across a template sync.
+      doneAt: previous?.doneAt,
       extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
       actions: [],
       outputs: nextStep.outputs,
@@ -617,10 +621,16 @@ const completeStepInternal = async (
     // Signed off by the Approver.
     step.status = 'Completed';
     step.completedAt = new Date();
+    // Keep the original "work finished" stamp if the work was ticked earlier;
+    // otherwise this approval is the first time we saw it finished.
+    if (!step.doneAt) step.doneAt = new Date();
   } else {
     // Work ticked as done by the assigned member; ready to be submitted.
     step.status = 'Done';
     step.completedAt = undefined;
+    // Freeze the deadline clock at the moment the work is first finished. Re-
+    // ticking keeps the original stamp so the clock never drifts.
+    if (!step.doneAt) step.doneAt = new Date();
   }
 
   // `currentStepKey` tracks the action still in flight through the review chain:
@@ -1294,6 +1304,8 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
     step.completedAt = undefined;
     step.submittedAt = undefined;
     step.reviewedAt = undefined;
+    // Resume the deadline clock: the work is no longer finished.
+    step.doneAt = undefined;
 
     // Update current step to this one
     inst.currentStepKey = stepKey;
@@ -1544,17 +1556,179 @@ export const revokeStepDeadlineAmendment = async (req: AuthRequest, res: Respons
 };
 
 
-// ---- Stub/placeholder handlers for admin workflow maintenance endpoints ----
-// These are intentionally minimal to avoid server startup errors when route
-// files import them. Implementations can be expanded later as needed.
+// ---- Case-specific Key Actions (added on the matter, never on the template) ----
+// A user may add a Key Action to any stage of a case's checklist from the Case
+// Workspace Overview. These "custom" Key Actions live only on the workflow
+// INSTANCE: they are never written back to the workflow template, they keep the
+// full Key Action lifecycle (tick / complete, reopen, amend deadline) and can be
+// edited (rename, move stage, reorder) or deleted. Template reconciliation keeps
+// them on the active checklist instead of archiving them (see workflowAlignment).
+
+/**
+ * Position a custom Key Action within its stage using a fractional `order`.
+ *
+ * Template steps keep their integer `order`, so a custom step slots between two
+ * of them (e.g. 2.5) without ever renumbering template steps — which is what
+ * lets it sit at ANY position and survive template reconciliation unchanged.
+ * `position` is the 0-based index within the stage (default: append to the end).
+ */
+const computeCustomStepOrder = (
+  steps: any[],
+  stageKey: string,
+  position: unknown,
+  excludeKey?: string
+): number => {
+  const list = (Array.isArray(steps) ? steps : [])
+    .filter(
+      (s: any) =>
+        String(s?.stageKey || '') === String(stageKey) &&
+        String(s?.stepKey || '') !== String(excludeKey || '')
+    )
+    .slice()
+    .sort((a: any, b: any) => Number(a?.order ?? 0) - Number(b?.order ?? 0));
+
+  if (list.length === 0) return 1;
+  const idx = Number.isInteger(Number(position)) ? Number(position) : list.length;
+  const clamped = Math.max(0, Math.min(list.length, idx));
+  if (clamped <= 0) return Number(list[0].order) - 1;
+  if (clamped >= list.length) return Number(list[list.length - 1].order) + 1;
+  const before = Number(list[clamped - 1].order);
+  const after = Number(list[clamped].order);
+  // Slot between neighbours; guard against equal neighbours by nudging forward.
+  return after > before ? (before + after) / 2 : after + 0.5;
+};
+
+/**
+ * Stage metadata (order/title/percentage) and timeliness for a custom Key
+ * Action. Order/title/percentage/stageOrder come from a sibling step in the same
+ * stage when one exists, otherwise from the template's stage definition so the
+ * step groups under the right stage heading.
+ *
+ * The stage's TIMING (`startAt`, `dueAt`, `slaMinutes`, `slaText`) is copied
+ * from a sibling step in the same stage: every Key Action in a stage shares the
+ * stage's window, so a case-specific Key Action must inherit that same deadline
+ * rather than look like it has none.
+ */
+const resolveStageMetaForCustomStep = (steps: any[], template: any, stageKey: string) => {
+  const sibling = (Array.isArray(steps) ? steps : []).find(
+    (s: any) => String(s?.stageKey || '') === String(stageKey)
+  );
+  if (sibling) {
+    return {
+      stageOrder: typeof sibling.stageOrder === 'number' ? sibling.stageOrder : undefined,
+      stageTitle: sibling.stageTitle,
+      stagePercentage:
+        typeof sibling.stagePercentage === 'number' ? sibling.stagePercentage : undefined,
+      // Inherit the stage's shared timing from a sibling Key Action.
+      startAt: sibling.startAt ? new Date(sibling.startAt) : undefined,
+      dueAt: sibling.dueAt ? new Date(sibling.dueAt) : undefined,
+      slaMinutes: typeof sibling.slaMinutes === 'number' ? sibling.slaMinutes : undefined,
+      slaText: typeof sibling.slaText === 'string' ? sibling.slaText : undefined,
+    };
+  }
+  const stages = (Array.isArray(template?.stages) ? template.stages : [])
+    .slice()
+    .sort((a: any, b: any) => Number(a?.order ?? 0) - Number(b?.order ?? 0));
+  const rank = stages.findIndex((s: any) => String(s?.key || '') === String(stageKey));
+  const stage = rank >= 0 ? stages[rank] : undefined;
+  return {
+    stageOrder: rank >= 0 ? rank : undefined,
+    stageTitle: stage ? String(stage.title || stage.name || stageKey) : stageKey,
+    stagePercentage: typeof stage?.percentage === 'number' ? stage.percentage : undefined,
+    // No sibling yet: fall back to the template stage SLA text so the Key Action
+    // still shows the stage's timeliness even before a due date is scheduled.
+    startAt: undefined,
+    dueAt: undefined,
+    slaMinutes: undefined,
+    slaText: stage?.sla?.text ? String(stage.sla.text) : undefined,
+  };
+};
+
+/** A unique stepKey for a case-specific Key Action within its instance. */
+const buildCustomStepKey = (inst: any): string => {
+  const used = new Set((inst?.steps || []).map((s: any) => String(s?.stepKey || '')));
+  let n = 1;
+  let key = `CUSTOM_${n}`;
+  while (used.has(key)) {
+    n += 1;
+    key = `CUSTOM_${n}`;
+  }
+  return key;
+};
+
+// Add a case-specific Key Action to any stage (admins, or the matter's members).
 export const addStep = async (req: AuthRequest, res: Response) => {
   try {
-    // Admin-only: add a step to a workflow instance. Not implemented yet.
-    return res.status(501).json({ message: 'Not implemented: addStep' });
+    const { caseId } = req.params as any;
+    const { title, stageKey, position } = req.body || {};
+
+    const stepTitle = String(title || '').trim();
+    if (!stepTitle) return res.status(400).json({ message: 'Key Action title is required.' });
+
+    const targetStageKey = String(stageKey || '').trim();
+    if (!targetStageKey) {
+      return res.status(400).json({ message: 'A stage is required to place the Key Action.' });
+    }
+
+    const c: any = await Case.findById(caseId);
+    if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!canManageWorkflowStepsOfCase(req, c)) {
+      return res.status(403).json({ message: 'Only the members assigned to this matter can add its Key Actions.' });
+    }
+
+    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+    if (isClosedCaseWorkflow(c, inst)) {
+      return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
+    }
+
+    const template: any = await WorkflowTemplate.findById(inst.templateId).lean();
+    const meta = resolveStageMetaForCustomStep(inst.steps, template, targetStageKey);
+    const stepKey = buildCustomStepKey(inst);
+    const order = computeCustomStepOrder(inst.steps, targetStageKey, position);
+
+    inst.steps.push({
+      stepKey,
+      title: stepTitle,
+      stageKey: targetStageKey,
+      stageOrder: meta.stageOrder,
+      stageTitle: meta.stageTitle,
+      stagePercentage: meta.stagePercentage,
+      order,
+      custom: true,
+      customOrder: order,
+      status: 'Not Started',
+      // Follow the stage's timeliness: every Key Action in a stage shares the
+      // same start/deadline, so this one inherits it instead of looking like it
+      // has no deadline.
+      startAt: meta.startAt,
+      dueAt: meta.dueAt,
+      slaMinutes: meta.slaMinutes,
+      slaText: meta.slaText,
+      actions: [],
+      outputs: [],
+    });
+
+    await inst.save();
+    await updateCaseWorkflowProgress(c, inst);
+
+    const actor = actorFromReq(req);
+    await writeAudit({
+      caseId: String(c._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'WORKFLOW_STEP_ADDED',
+      message: 'Added case Key Action',
+      detail: `${targetStageKey} • ${stepTitle}`,
+    });
+
+    return res.json(inst);
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to add step.' });
   }
 };
+
 
 export const addStepAction = async (req: AuthRequest, res: Response) => {
   try {
@@ -1604,17 +1778,140 @@ export const addStepAction = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Edit a case-specific Key Action (rename, move stage, reorder). Template Key
+// Actions are read-only here — they are owned by the workflow template.
 export const updateStep = async (req: AuthRequest, res: Response) => {
   try {
-    return res.status(501).json({ message: 'Not implemented: updateStep' });
+    const { caseId, stepKey } = req.params as any;
+    const { title, stageKey, position } = req.body || {};
+
+    const c: any = await Case.findById(caseId);
+    if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!canManageWorkflowStepsOfCase(req, c)) {
+      return res.status(403).json({ message: 'Only the members assigned to this matter can edit its Key Actions.' });
+    }
+
+    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+    if (isClosedCaseWorkflow(c, inst)) {
+      return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
+    }
+
+    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
+    if (!step) return res.status(404).json({ message: 'Key Action not found.' });
+    if (step.custom !== true) {
+      return res.status(400).json({ message: 'Only Key Actions added on this case can be edited here.' });
+    }
+    if (step.status === 'Completed') {
+      return res.status(400).json({ message: 'Reopen this Key Action before editing it.' });
+    }
+
+    const nextTitle = String(title ?? step.title).trim();
+    if (!nextTitle) return res.status(400).json({ message: 'Key Action title is required.' });
+
+    const nextStageKey = String(stageKey ?? step.stageKey).trim();
+    if (!nextStageKey) return res.status(400).json({ message: 'A stage is required.' });
+
+    const stageChanged = nextStageKey !== String(step.stageKey || '');
+    if (stageChanged) {
+      const template: any = await WorkflowTemplate.findById(inst.templateId).lean();
+      const meta = resolveStageMetaForCustomStep(inst.steps, template, nextStageKey);
+      step.stageKey = nextStageKey;
+      step.stageOrder = meta.stageOrder;
+      step.stageTitle = meta.stageTitle;
+      step.stagePercentage = meta.stagePercentage;
+      // Moving to a new stage adopts that stage's shared timeliness (every Key
+      // Action in a stage shares the same start/deadline), unless the member has
+      // pinned this Key Action with their own deadline amendment — that manual
+      // deadline is preserved.
+      const hasManualDeadline =
+        Array.isArray(step.extensionHistory) && step.extensionHistory.length > 0;
+      if (!hasManualDeadline) {
+        step.startAt = meta.startAt;
+        step.dueAt = meta.dueAt;
+        step.slaMinutes = meta.slaMinutes;
+        step.slaText = meta.slaText;
+      }
+    }
+
+    step.title = nextTitle;
+
+    // Recompute the position within its (possibly new) stage whenever a position
+    // is supplied, or whenever the stage changed (so it lands sensibly).
+    if (position !== undefined || stageChanged) {
+      step.order = computeCustomStepOrder(inst.steps, nextStageKey, position, stepKey);
+      step.customOrder = step.order;
+    }
+
+    await inst.save();
+    await updateCaseWorkflowProgress(c, inst);
+
+    const actor = actorFromReq(req);
+    await writeAudit({
+      caseId: String(c._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'WORKFLOW_STEP_UPDATED',
+      message: 'Updated case Key Action',
+      detail: `${stepKey} • ${nextTitle}`,
+    });
+
+    return res.json(inst);
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to update step.' });
   }
 };
 
+// Delete a case-specific Key Action. Template Key Actions can never be deleted
+// from a case — only the workflow template owns those.
 export const deleteStep = async (req: AuthRequest, res: Response) => {
   try {
-    return res.status(501).json({ message: 'Not implemented: deleteStep' });
+    const { caseId, stepKey } = req.params as any;
+
+    const c: any = await Case.findById(caseId);
+    if (!c) return res.status(404).json({ message: 'Case not found.' });
+
+    if (!canManageWorkflowStepsOfCase(req, c)) {
+      return res.status(403).json({ message: 'Only the members assigned to this matter can delete its Key Actions.' });
+    }
+
+    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+    if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
+    if (isClosedCaseWorkflow(c, inst)) {
+      return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
+    }
+
+    const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
+    if (!step) return res.status(404).json({ message: 'Key Action not found.' });
+    if (step.custom !== true) {
+      return res.status(400).json({ message: 'Only Key Actions added on this case can be deleted here.' });
+    }
+
+    const removedTitle = String(step.title || '');
+    inst.steps = (inst.steps || []).filter((s: any) => s.stepKey !== stepKey);
+
+    // If the removed step was the in-flight one, advance to the next open step.
+    if (inst.currentStepKey === stepKey) {
+      const nextOpen = (inst.steps || []).find((s: any) => String(s?.status || '') !== 'Completed');
+      inst.currentStepKey = nextOpen?.stepKey;
+      if (nextOpen && nextOpen.status === 'Not Started') nextOpen.status = 'In Progress';
+    }
+
+    await inst.save();
+    await updateCaseWorkflowProgress(c, inst);
+
+    const actor = actorFromReq(req);
+    await writeAudit({
+      caseId: String(c._id),
+      actorName: actor.actorName,
+      ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
+      action: 'WORKFLOW_STEP_DELETED',
+      message: 'Deleted case Key Action',
+      detail: `${stepKey} • ${removedTitle}`,
+    });
+
+    return res.json(inst);
   } catch (e: any) {
     res.status(500).json({ message: e?.message || 'Failed to delete step.' });
   }
@@ -1885,6 +2182,8 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
       step.completedAt = undefined;
       step.submittedAt = undefined;
       step.reviewedAt = undefined;
+      // Resume the deadline clock: the work is no longer finished.
+      step.doneAt = undefined;
       inst.status = 'Active';
       inst.currentStepKey = stepKey;
     }

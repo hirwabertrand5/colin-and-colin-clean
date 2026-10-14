@@ -77,7 +77,10 @@ export const hasSupersededTemplateSteps = (existingSteps: any[] | undefined, tem
   );
   if (!templateKeys.size) return false;
   return (Array.isArray(existingSteps) ? existingSteps : []).some(
-    (step: any) => !templateKeys.has(String(step?.stepKey || ''))
+    // Case-specific Key Actions are intentionally not in the template, so they
+    // must never count as "superseded template steps" (which would trigger a
+    // pointless reconciliation pass on every load).
+    (step: any) => step?.custom !== true && !templateKeys.has(String(step?.stepKey || ''))
   );
 };
 
@@ -164,6 +167,9 @@ export const alignInstanceStepsToTemplate = (
       completedAt: previous?.completedAt,
       submittedAt: previous?.submittedAt,
       reviewedAt: previous?.reviewedAt,
+      // Preserve the frozen "work finished" stamp so a reconciled Key Action
+      // keeps its stopped deadline clock.
+      doneAt: previous?.doneAt,
       extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
       actions: [],
       outputs: templateStep.outputs,
@@ -180,6 +186,17 @@ export const alignInstanceStepsToTemplate = (
   for (const step of Array.isArray(existingSteps) ? existingSteps : []) {
     const stepKey = String(step?.stepKey || '');
     if (builtKeys.has(stepKey)) continue;
+
+    // Case-specific Key Actions are deliberately NOT part of the template, so
+    // they are never "superseded": keep them on the case's active checklist
+    // (with their own ticks, deadlines and completion stamps) instead of
+    // archiving or dropping them. Their `stageOrder`/`order` still place them
+    // correctly within their stage on the Overview tab.
+    if (step?.custom === true) {
+      steps.push({ ...step });
+      continue;
+    }
+
     const label = `${stepKey} :: ${String(step?.title || '')}`.trim();
     const hasCompletedAction = (Array.isArray(step?.actions) ? step.actions : []).some((action: any) => action?.done);
     const isCompleted = String(step?.status || '') === 'Completed';

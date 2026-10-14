@@ -120,19 +120,22 @@ export const getUrgencyColorForDueDate = (
   // - <= 7 days => YELLOW
   // - <= 21 days => GREEN
   // - > 21 days => BLUE
+  //
+  // `startAt` is intentionally NOT used to derive a start→due window ratio.
+  // That ratio was anchored to elapsed time, so it produced sticky/incorrect
+  // colors: amending (extending) a deadline barely moved the color, and a Key
+  // Action kept shifting color long after it was due. Coloring purely from the
+  // remaining time to the (possibly amended) deadline is correct everywhere the
+  // pill appears (Overview, Case List, Closed Cases, matter header, prospects,
+  // Deadline Management) so they all agree.
+  void startAt;
   if (!dueAt) return 'gray';
   const d = resolveDeadlineDateTime(dueAt);
   if (!d) return 'gray';
-  const dueMs = d.getTime();
-
-  const nowMs = now.getTime();
-  const remainingMs = dueMs - nowMs;
+  const remainingMs = d.getTime() - now.getTime();
+  if (remainingMs <= 0) return 'red';
   const hoursLeft = remainingMs / (1000 * 60 * 60);
   const daysLeft = hoursLeft / 24;
-
-  if (remainingMs <= 0) return 'red';
-  const ratioColor = getUrgencyColorFromRatio(getDueRemainingRatio(startAt, dueAt, now));
-  if (ratioColor !== 'gray') return ratioColor;
   if (hoursLeft <= 48) return 'red';
   if (daysLeft <= 7) return 'yellow';
   if (daysLeft <= 21) return 'green';
@@ -145,6 +148,39 @@ export const getUrgencyClass = (color: UrgencyColor) => {
   if (color === 'yellow') return 'deadline-urgency-yellow';
   if (color === 'red') return 'deadline-urgency-red';
   return 'deadline-urgency-gray';
+};
+
+/**
+ * Urgency color from ABSOLUTE remaining time to the deadline (no window ratio).
+ *
+ * This is the platform-wide business rule set, applied on its own:
+ *   - no deadline            => gray
+ *   - overdue OR <= 48 hours => red
+ *   - <= 7 days              => yellow
+ *   - <= 21 days             => green
+ *   - > 21 days              => blue
+ *
+ * Unlike `getUrgencyColorForDueDate`, this ignores the start→due window ratio.
+ * That ratio is anchored to elapsed time, so amending (extending) a deadline
+ * barely moves the color — a Key Action extended by several days kept showing
+ * the same urgency. Key Action deadline pills use this so the color always
+ * reflects the CURRENT (possibly amended) deadline.
+ */
+export const getUrgencyColorFromRemainingTime = (
+  dueAt?: Date | string,
+  now = new Date()
+): UrgencyColor => {
+  if (!dueAt) return 'gray';
+  const d = resolveDeadlineDateTime(dueAt);
+  if (!d) return 'gray';
+  const remainingMs = d.getTime() - now.getTime();
+  if (remainingMs <= 0) return 'red';
+  const hoursLeft = remainingMs / (1000 * 60 * 60);
+  const daysLeft = hoursLeft / 24;
+  if (hoursLeft <= 48) return 'red';
+  if (daysLeft <= 7) return 'yellow';
+  if (daysLeft <= 21) return 'green';
+  return 'blue';
 };
 
 export const getPerformanceZoneFromUsedRatio = (ratio: number | undefined): DeadlineZone => {
@@ -204,4 +240,95 @@ export const formatDueCountdown = (dueAt?: Date | string, now = new Date()) => {
   const diff = ms - now.getTime();
   if (diff < 0) return `${formatDurationCountdown(diff)} overdue`;
   return `${formatDurationCountdown(diff)} left`;
+};
+
+/**
+ * The moment a Key Action's work was finished, if it has been.
+ *
+ * A Key Action freezes its deadline clock the instant its work is ticked as
+ * done (or later submitted/approved). We use the earliest available stamp so
+ * the timer stops at the true "work finished" moment and never drifts:
+ *   - `doneAt`      — set the moment the member ticked the work done;
+ *   - `submittedAt` — set when the Initiator submitted it for review;
+ *   - `reviewedAt`  — set when the Reviewer forwarded it for approval;
+ *   - `completedAt` — set when the Approver finally approved it.
+ * Older records may only carry some of these, so we take whichever exists.
+ */
+const resolveWorkFinishedAt = (step: {
+  doneAt?: Date | string;
+  submittedAt?: Date | string;
+  reviewedAt?: Date | string;
+  completedAt?: Date | string;
+}): Date | undefined => {
+  for (const value of [step.doneAt, step.submittedAt, step.reviewedAt, step.completedAt]) {
+    const resolved = resolveDeadlineDateTime(value);
+    if (resolved) return resolved;
+  }
+  return undefined;
+};
+
+export type KeyActionDeadlineClock = {
+  /** Countdown text: live ("3d 4h left" / "2d overdue") or frozen ("Done on time" / "Done 3d late"). */
+  countdown: string;
+  /** Urgency color for the pill. Frozen at the work-finished moment when done. */
+  color: UrgencyColor;
+  /** True once the work is done — the clock has stopped and will not change again. */
+  frozen: boolean;
+};
+
+/**
+ * Deadline clock for a Key Action that STOPS once its work is done.
+ *
+ * While a Key Action is still open the countdown ticks down live and the color
+ * follows the remaining time. The moment the work is ticked/submitted/approved
+ * the clock FREEZES at that instant: the countdown becomes a permanent result
+ * ("Done on time" or "Done 3d late") and the color is locked to the urgency the
+ * Key Action had at that moment — so a Key Action cleared on time stays calm and
+ * one cleared late stays red, and neither keeps counting afterwards.
+ *
+ * `now` is injectable for deterministic tests.
+ */
+export const getKeyActionDeadlineClock = (
+  step:
+    | {
+        status?: string;
+        dueAt?: Date | string;
+        doneAt?: Date | string;
+        submittedAt?: Date | string;
+        reviewedAt?: Date | string;
+        completedAt?: Date | string;
+      }
+    | null
+    | undefined,
+  now = new Date()
+): KeyActionDeadlineClock => {
+  if (!step || !step.dueAt) {
+    return { countdown: 'No deadline', color: 'gray', frozen: isStepWorkDone(step) };
+  }
+
+  const due = resolveDeadlineDateTime(step.dueAt);
+  if (!due) {
+    return { countdown: 'No deadline', color: 'gray', frozen: isStepWorkDone(step) };
+  }
+
+  // Once the work is done, freeze the clock at the moment it was finished.
+  if (isStepWorkDone(step)) {
+    const finishedAt = resolveWorkFinishedAt(step) ?? now;
+    const lateByMs = finishedAt.getTime() - due.getTime();
+    // Color is judged at the finish moment: on-time work keeps a calm color,
+    // late work is red — and it never changes again.
+    const color = getUrgencyColorForDueDate(step.dueAt, undefined, finishedAt);
+    const countdown =
+      lateByMs <= 0
+        ? 'Done on time'
+        : `Done ${formatDurationCountdown(lateByMs)} late`;
+    return { countdown, color, frozen: true };
+  }
+
+  // Still open: live countdown + live color from remaining time.
+  return {
+    countdown: formatDueCountdown(step.dueAt, now),
+    color: getUrgencyColorForDueDate(step.dueAt, undefined, now),
+    frozen: false,
+  };
 };

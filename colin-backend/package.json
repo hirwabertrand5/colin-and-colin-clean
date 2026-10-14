@@ -12,6 +12,7 @@
     "restore:template": "ts-node src/scripts/restoreTemplateFromSnapshots.ts",
     "verify:workflows": "ts-node src/scripts/verifyWorkflowFixes.ts",
     "verify:alignment": "tsx src/scripts/verifyMatterTypeAlignment.ts",
+    "verify:custom-key-actions": "tsx src/scripts/verifyCustomKeyActions.ts",
     "verify:auto-complete-steps": "tsx src/scripts/verifyAutoCompleteCheckedSteps.ts",
     "verify:case-permissions": "tsx src/scripts/verifyCasePermissions.ts",
     "verify:audit-trail": "tsx src/scripts/verifyAuditTrailPagination.ts",

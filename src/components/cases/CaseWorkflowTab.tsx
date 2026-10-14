@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarPlus } from 'lucide-react';
+import { CalendarPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { TaskData } from '../../services/taskService';
 import {
   getWorkflowForCase,
@@ -8,6 +8,9 @@ import {
   amendWorkflowStepDeadline,
   revokeWorkflowStepDeadlineAmendment,
   getCaseEarnedFees,
+  addWorkflowStep,
+  updateWorkflowStep,
+  deleteWorkflowStep,
   CaseEarnedFees,
   WorkflowInstance,
   DeadlineAmendmentMode,
@@ -15,9 +18,8 @@ import {
 import { getWorkflowTemplateById, WorkflowTemplate } from '../../services/workflowService';
 import {
   formatDeadlineDateTime,
-  formatDueCountdown,
   getUrgencyClass,
-  getUrgencyColorForDueDate,
+  getKeyActionDeadlineClock,
   isStepWorkDone,
   toDateTimeLocalValue,
 } from '../../utils/workflowDeadline';
@@ -61,6 +63,18 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const [amendReason, setAmendReason] = useState<string>('');
   const [amendMode, setAmendMode] = useState<DeadlineAmendmentMode>('standard');
   const [revokeReason, setRevokeReason] = useState<string>('');
+
+  // ---- Case-specific Key Actions (added on this matter only) ----
+  // `addOpenFor` holds the stageKey of the stage whose "Add Key Action" form is
+  // open; `editOpenFor` holds the stepKey of the custom Key Action being edited.
+  const [addOpenFor, setAddOpenFor] = useState<string>('');
+  const [addTitle, setAddTitle] = useState<string>('');
+  const [addPosition, setAddPosition] = useState<string>('');
+  const [editOpenFor, setEditOpenFor] = useState<string>('');
+  const [editTitle, setEditTitle] = useState<string>('');
+  const [editStage, setEditStage] = useState<string>('');
+  const [editPosition, setEditPosition] = useState<string>('');
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string>('');
 
   const load = async () => {
     setLoading(true);
@@ -226,6 +240,128 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setRevokeReason('');
     } catch (e: any) {
       setErr(e.message || 'Failed to revoke amendment');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  // ---- Case-specific Key Action handlers ----
+  // These add/edit/delete a Key Action on THIS matter only; the workflow
+  // template is never touched. After each mutation we re-sync the instance and
+  // earned fees so the checklist, progress and values stay consistent.
+  const resetAddForm = () => {
+    setAddOpenFor('');
+    setAddTitle('');
+    setAddPosition('');
+  };
+
+  const openAddForm = (stageKey: string) => {
+    setEditOpenFor('');
+    setConfirmDeleteKey('');
+    setAddOpenFor((current) => (current === stageKey ? '' : stageKey));
+    setAddTitle('');
+    setAddPosition('');
+  };
+
+  const onSubmitAdd = async (stageKey: string) => {
+    if (!canCompleteSteps) return;
+    const title = addTitle.trim();
+    if (!title) {
+      setErr('Enter a title for the new Key Action.');
+      return;
+    }
+    const position = addPosition.trim() === '' ? undefined : Number(addPosition);
+    if (position !== undefined && (!Number.isInteger(position) || position < 1)) {
+      setErr('Position must be a whole number of 1 or more.');
+      return;
+    }
+    try {
+      setBusyKey(`add:${stageKey}`);
+      setErr('');
+      // The API position is 0-based (0 = first in the stage); the form is 1-based.
+      const updated = await addWorkflowStep(caseId, {
+        title,
+        stageKey,
+        ...(position !== undefined ? { position: position - 1 } : {}),
+      });
+      setWf(updated);
+      notifyWorkflowChanged();
+      resetAddForm();
+    } catch (e: any) {
+      setErr(e.message || 'Failed to add Key Action.');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const openEditForm = (step: WorkflowInstance['steps'][number]) => {
+    setAddOpenFor('');
+    setConfirmDeleteKey('');
+    setEditOpenFor(step.stepKey);
+    setEditTitle(step.title || '');
+    setEditStage(String(step.stageKey || ''));
+    // Pre-fill the current 1-based position within its stage. Every step in a
+    // stage shares the same stageOrder, so ordering by `order` gives the
+    // within-stage sequence.
+    const stageKey = String(step.stageKey || '');
+    const withinStage =
+      (wf?.steps || [])
+        .filter((s) => String(s.stageKey || '') === stageKey)
+        .sort((a, b) => a.order - b.order)
+        .findIndex((s) => s.stepKey === step.stepKey) + 1;
+    setEditPosition(withinStage > 0 ? String(withinStage) : '');
+  };
+
+  const resetEditForm = () => {
+    setEditOpenFor('');
+    setEditTitle('');
+    setEditStage('');
+    setEditPosition('');
+  };
+
+  const onSubmitEdit = async (stepKey: string, originalStageKey: string) => {
+    if (!canCompleteSteps) return;
+    const title = editTitle.trim();
+    if (!title) {
+      setErr('Enter a title for this Key Action.');
+      return;
+    }
+    const position = editPosition.trim() === '' ? undefined : Number(editPosition);
+    if (position !== undefined && (!Number.isInteger(position) || position < 1)) {
+      setErr('Position must be a whole number of 1 or more.');
+      return;
+    }
+    try {
+      setBusyKey(`edit:${stepKey}`);
+      setErr('');
+      const targetStage = editStage.trim() || originalStageKey;
+      const updated = await updateWorkflowStep(caseId, stepKey, {
+        title,
+        stageKey: targetStage,
+        ...(position !== undefined ? { position: position - 1 } : {}),
+      });
+      setWf(updated);
+      notifyWorkflowChanged();
+      resetEditForm();
+    } catch (e: any) {
+      setErr(e.message || 'Failed to update Key Action.');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
+  const onConfirmDelete = async (stepKey: string) => {
+    if (!canCompleteSteps) return;
+    try {
+      setBusyKey(`delete:${stepKey}`);
+      setErr('');
+      const updated = await deleteWorkflowStep(caseId, stepKey);
+      setWf(updated);
+      notifyWorkflowChanged();
+      setConfirmDeleteKey('');
+      if (editOpenFor === stepKey) resetEditForm();
+    } catch (e: any) {
+      setErr(e.message || 'Failed to delete Key Action.');
     } finally {
       setBusyKey('');
     }
@@ -638,6 +774,17 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   {stageGroup.percentage}% of matter fee
                 </span>
               ) : null}
+              {canCompleteSteps ? (
+                <button
+                  type="button"
+                  onClick={() => openAddForm(stageGroup.key)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-700"
+                  title="Add a Key Action to this stage on this matter only (it will not change the workflow template)"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Key Action
+                </button>
+              ) : null}
               <div className="w-40">
                 <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
                   <span>
@@ -654,6 +801,66 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               </div>
             </div>
           </header>
+          {canCompleteSteps && addOpenFor === stageGroup.key ? (
+            <div className="border-b border-gray-200 bg-gray-50 px-5 py-4 dark:border-gray-700 dark:bg-gray-900/40">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                <div className="flex-1">
+                  <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                    New Key Action <span className="text-red-600 dark:text-red-400">*</span>
+                  </label>
+                  <input
+                    value={addTitle}
+                    onChange={(e) => setAddTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void onSubmitAdd(stageGroup.key);
+                      }
+                    }}
+                    required
+                    aria-required="true"
+                    placeholder="Describe the Key Action to add to this stage"
+                    className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </div>
+                <div className="md:w-40">
+                  <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                    Position in stage (optional)
+                  </label>
+                  <input
+                    value={addPosition}
+                    onChange={(e) => setAddPosition(e.target.value)}
+                    type="number"
+                    min={1}
+                    placeholder={`1–${stageGroup.steps.length + 1}`}
+                    className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={resetAddForm}
+                    className="inline-flex items-center gap-1.5 rounded border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-white dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    <X className="h-4 w-4" />
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onSubmitAdd(stageGroup.key)}
+                    disabled={busyKey === `add:${stageGroup.key}` || addTitle.trim() === ''}
+                    className="inline-flex items-center gap-1.5 rounded bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+                  >
+                    {busyKey === `add:${stageGroup.key}` ? 'Adding…' : 'Add Key Action'}
+                  </button>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Added to this matter only — the workflow template is not changed. Leave the position blank to add it
+                to the end of the stage.
+              </p>
+            </div>
+          ) : null}
           <div className="space-y-4 p-4">
               {stageGroup.steps.map((s, actionIndex) => {
         // Overview ticks are intentionally independent: any Key Action can be
@@ -662,6 +869,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         const isTicked = isStepWorkDone(s);
         const isCompleted = s.status === 'Completed';
         const isLoading = busyKey === `complete:${s.stepKey}`;
+
+        // Deadline clock: ticks down live while the Key Action is open, and
+        // FREEZES the moment its work is done — the countdown becomes a fixed
+        // "Done on time"/"Done … late" and the color locks at that moment, so a
+        // cleared Key Action never keeps counting or shifting color.
+        const deadlineClock = getKeyActionDeadlineClock(s);
 
         const extensionHistory = Array.isArray(s.extensionHistory) ? s.extensionHistory : [];
         const latestExtension = extensionHistory[extensionHistory.length - 1];
@@ -718,16 +931,24 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 >
                   {s.status}
                 </span>
+                {s.custom === true ? (
+                  <span
+                    className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                    title="Added on this matter only — not part of the workflow template"
+                  >
+                    Case-specific
+                  </span>
+                ) : null}
               </div>
               <div className="mt-1.5 font-semibold text-gray-900 dark:text-gray-100">{s.title}</div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <span
                   className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${getUrgencyClass(
-                    getUrgencyColorForDueDate(s.dueAt, s.startAt)
+                    deadlineClock.color
                   )}`}
                   title={s.dueAt ? `Due: ${formatDeadlineDateTime(s.dueAt)}` : 'No due date'}
                 >
-                  {formatDueCountdown(s.dueAt)}
+                  {deadlineClock.countdown}
                 </span>
                 {s.dueAt ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Due {formatDeadlineDateTime(s.dueAt)}</span>
@@ -757,6 +978,32 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             {/* Action zone: amendment + complete/reopen, grouped so the tick is
                 always the last thing the eye lands on. */}
             <div className="flex shrink-0 items-center gap-2">
+              {canCompleteSteps && s.custom === true ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => openEditForm(s)}
+                    disabled={isCompleted}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    title={isCompleted ? 'Reopen this Key Action before editing it' : 'Edit this Key Action on this matter'}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditOpenFor('');
+                      setConfirmDeleteKey((current) => (current === s.stepKey ? '' : s.stepKey));
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 dark:border-red-700 dark:bg-gray-800 dark:text-red-300 dark:hover:bg-red-900/30"
+                    title="Delete this Key Action from this matter"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
+                </>
+              ) : null}
               {canAmendDeadlines && !isCompleted && (
                 <button
                   type="button"
@@ -865,6 +1112,98 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   className="px-3 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60"
                 >
                   {busyKey === `amend:${s.stepKey}` ? 'Amending…' : 'Amend deadline'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {canCompleteSteps && s.custom === true && editOpenFor === s.stepKey ? (
+            <div className="px-5 py-4 border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40">
+              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Edit Key Action</div>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-1">
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+                  <input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void onSubmitEdit(s.stepKey, s.stageKey);
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Stage</label>
+                  <select
+                    value={editStage}
+                    onChange={(e) => setEditStage(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  >
+                    {(template?.stages || []).map((stage: any) => (
+                      <option key={stage.key} value={stage.key}>
+                        {stage.title || stage.name || stage.key}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Position in stage</label>
+                  <input
+                    value={editPosition}
+                    onChange={(e) => setEditPosition(e.target.value)}
+                    type="number"
+                    min={1}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </div>
+              </div>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={resetEditForm}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded text-sm"
+                >
+                  <X className="w-4 h-4" />
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onSubmitEdit(s.stepKey, s.stageKey)}
+                  disabled={busyKey === `edit:${s.stepKey}`}
+                  className="px-3 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-60 text-sm"
+                >
+                  {busyKey === `edit:${s.stepKey}` ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {canCompleteSteps && s.custom === true && confirmDeleteKey === s.stepKey ? (
+            <div className="px-5 py-4 border-b border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/40">
+              <div className="text-sm font-semibold text-red-700 dark:text-red-100">Delete this Key Action?</div>
+              <p className="mt-1 text-xs text-red-700 dark:text-red-200">
+                “{s.title}” will be removed from this matter only. The workflow template is not changed. This cannot
+                be undone.
+              </p>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteKey('')}
+                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 rounded text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onConfirmDelete(s.stepKey)}
+                  disabled={busyKey === `delete:${s.stepKey}`}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-60 text-sm"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {busyKey === `delete:${s.stepKey}` ? 'Deleting…' : 'Delete Key Action'}
                 </button>
               </div>
             </div>

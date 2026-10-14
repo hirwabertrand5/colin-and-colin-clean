@@ -69,6 +69,13 @@ export interface IInstanceStep {
   submittedAt?: Date;
   /** Case Management: when the Reviewer reviewed the work and requested approval. */
   reviewedAt?: Date;
+  /**
+   * Set the moment the assigned member ticked the work as done. This is the
+   * instant the Key Action's deadline clock freezes (see
+   * `getKeyActionDeadlineClock` on the client): the countdown stops and the
+   * urgency color locks at whatever it was when the work was finished.
+   */
+  doneAt?: Date;
   extensionHistory?: Array<{
     previousDueAt?: Date;
     newDueAt?: Date;
@@ -119,6 +126,20 @@ export interface IInstanceStep {
   stagePercentage?: number;
   /** Step-level weight (0–100) applied to this step when it is completed. */
   percentage?: number;
+
+  /**
+   * True when this Key Action was added directly on this case (from the Case
+   * Workspace Overview) rather than defined by the workflow template. Custom
+   * Key Actions are never written back to the template and are preserved on the
+   * case's active checklist across template reconciliation/alignment.
+   */
+  custom?: boolean;
+  /**
+   * Authoritative position of a custom Key Action within its own stage. Custom
+   * steps are ordered by this before the template `order`, so a case-specific
+   * Key Action can sit at any position among a stage's Key Actions.
+   */
+  customOrder?: number;
 
   outputs: IInstanceOutput[];
 }
@@ -196,6 +217,8 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     completedAt: { type: Date },
     submittedAt: { type: Date },
     reviewedAt: { type: Date },
+    // Set when the assigned member ticks the work done; freezes the deadline clock.
+    doneAt: { type: Date },
     extensionHistory: {
       type: [
         new Schema(
@@ -249,6 +272,10 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     stageOrder: { type: Number },
     stagePercentage: { type: Number, min: 0, max: 100 },
     percentage: { type: Number, min: 0, max: 100 },
+
+    // Case-specific Key Action added on the matter itself (never on the template).
+    custom: { type: Boolean, default: false },
+    customOrder: { type: Number },
 
     outputs: { type: [InstanceOutputSchema], default: [] },
   },

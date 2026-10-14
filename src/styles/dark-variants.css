@@ -150,15 +150,31 @@
   }
 }
 
-/* Login error styles (approximation; palette does not include red-900/red-400) */
+/* Danger / destructive surfaces (approximation; palette does not include
+   red-900/red-400/red-950). These back the prebuilt bundle's missing `dark:`
+   utilities so delete/danger dialogs stay clearly readable on the dark theme.
+   `dark:text-red-200`/`dark:text-red-100` map to light reds for high contrast
+   against the dark red background. */
 .dark .dark\:bg-red-900\/20 {
   background-color: color-mix(in oklab, var(--color-red-700) 20%, transparent);
+}
+.dark .dark\:bg-red-900\/30 {
+  background-color: color-mix(in oklab, var(--color-red-700) 30%, transparent);
+}
+.dark .dark\:bg-red-950\/40 {
+  background-color: color-mix(in oklab, var(--color-red-700) 40%, transparent);
 }
 .dark .dark\:border-red-800 {
   border-color: var(--color-red-700);
 }
 .dark .dark\:text-red-400 {
   color: var(--color-red-500);
+}
+.dark .dark\:text-red-200 {
+  color: color-mix(in oklab, var(--color-red-500) 55%, white);
+}
+.dark .dark\:text-red-100 {
+  color: color-mix(in oklab, var(--color-red-500) 35%, white);
 }
 
 /* Deadline urgency pills. These are explicit because the prebuilt Tailwind

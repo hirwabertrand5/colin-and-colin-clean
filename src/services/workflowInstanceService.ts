@@ -14,10 +14,24 @@ export type WorkflowInstance = {
     order: number;
     /** Authoritative stage position (absent on legacy instances — falls back to `order`). */
     stageOrder?: number;
+    /**
+     * True when this Key Action was added directly on this case (Overview tab)
+     * rather than defined by the workflow template. Custom Key Actions are the
+     * only ones that may be edited or deleted from the case.
+     */
+    custom?: boolean;
+    /** Within-stage position of a custom Key Action (mirrors `order` for custom steps). */
+    customOrder?: number;
     status: 'Not Started' | 'In Progress' | 'Done' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';
     startAt?: string;
     dueAt?: string;
     completedAt?: string;
+    /** Case Management: when the Initiator submitted the completed work for review. */
+    submittedAt?: string;
+    /** Case Management: when the Reviewer reviewed the work and requested approval. */
+    reviewedAt?: string;
+    /** Set the moment the assigned member ticked the work as done (freezes the deadline clock). */
+    doneAt?: string;
     extensionHistory?: AmendmentRecord[];
 
     actions?: Array<{

@@ -54,15 +54,18 @@ router.get('/cases/:caseId', authenticate, getWorkflowForCase);
 router.get('/cases/:caseId/earned-fees', authenticate, getCaseEarnedFees);
 router.post('/cases/:caseId/init', authenticate, authorize(ADMIN_ROLES), initWorkflowForCase);
 
-// Add a step to a workflow instance (admin only)
-router.post('/cases/:caseId/steps', authenticate, authorize(ADMIN_ROLES), addStep);
+// Add a case-specific Key Action to a workflow instance. Opened up to the
+// matter's assigned members (Initiator/Reviewer/Signer) as well as admins — the
+// controller enforces `canManageWorkflowStepsOfCase` per case, matching the
+// complete/reopen/amend endpoints below.
+router.post('/cases/:caseId/steps', authenticate, addStep);
 
 // Add a key action to a specific step (admin only)
 router.post('/cases/:caseId/steps/:stepKey/actions', authenticate, authorize(ADMIN_ROLES), addStepAction);
 
-// Update / delete a step
-router.put('/cases/:caseId/steps/:stepKey', authenticate, authorize(ADMIN_ROLES), updateStep);
-router.delete('/cases/:caseId/steps/:stepKey', authenticate, authorize(ADMIN_ROLES), deleteStep);
+// Update / delete a case-specific Key Action (per-case permission, see addStep)
+router.put('/cases/:caseId/steps/:stepKey', authenticate, updateStep);
+router.delete('/cases/:caseId/steps/:stepKey', authenticate, deleteStep);
 
 // Update / delete a key action
 router.put('/cases/:caseId/steps/:stepKey/actions/:index', authenticate, authorize(ADMIN_ROLES), updateStepAction);
