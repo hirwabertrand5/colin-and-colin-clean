@@ -829,16 +829,18 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       .sort((a, b) => b.warningTasks + b.poorTasks - (a.warningTasks + a.poorTasks));
   }, [authorisedCases, tasksByCase, asOfISO, periodMatterIds, periodWindow]);
 
-  // Matter Financial Status is a CURRENT snapshot of every assigned matter —
-  // planned vs completed vs outstanding value. It is intentionally NOT scoped to
-  // the reporting period (the period has no bearing on a contract's planned
-  // value), so it is computed over all authorised matters, not the filtered list.
+  // Matter Financial Status reflects the SAME qualifying matter set as the rest
+  // of the dashboard: all assigned matters for All Time, only the matters worked
+  // on inside the selected window otherwise. Computed from `matterRows` so it
+  // stays consistent with the My Matters cards, the headline Total Contract Value
+  // and the fee table. Planned/completed/outstanding value are properties of the
+  // matter, not period cash flows.
   const financials = useMemo(() => {
-    const contractValue = authorisedCases.reduce((sum, matter) => sum + getMatterContractValue(matter), 0);
-    const earnedValue = authorisedCases.reduce((sum, matter) => sum + getMatterEarnedValue(matter), 0);
+    const contractValue = matterRows.reduce((sum, matter) => sum + matter.contractValue, 0);
+    const earnedValue = matterRows.reduce((sum, matter) => sum + matter.earnedValue, 0);
     const outstanding = Math.max(0, contractValue - earnedValue);
     return { contractValue, earnedValue, outstanding };
-  }, [authorisedCases]);
+  }, [matterRows]);
 
   const teamRows = useMemo<TeamRow[]>(() => {
     const map = new Map<string, { assigned: number; completed: number; overdue: number; quality: number[] }>();
@@ -930,10 +932,18 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       earned: hasWindow ? sum((row) => row.earnedFeeInPeriod) : sum((row) => row.earnedFee),
     };
   }, [matterFeeRows, hasWindow]);
-  const summaryCompletionRate =
-    summary && summary.mattersAssigned > 0
+  // Matters Completion Rate follows the reporting period: for a selected window
+  // it is the matters whose workflow completed in the period over the matters
+  // worked on in that period; for All Time it is the all-time completion rate.
+  const summaryCompletionRate = useMemo(() => {
+    if (hasWindow && period) {
+      if (!period.mattersWithActivity) return null;
+      return Math.round((period.mattersCompleted / period.mattersWithActivity) * 100);
+    }
+    return summary && summary.mattersAssigned > 0
       ? Math.round((summary.mattersCompleted / summary.mattersAssigned) * 100)
       : null;
+  }, [hasWindow, period, summary]);
 
   // ---- Fee breakdown by matter — sorting + pagination (10 rows per page) ----
   const sortedMatterFeeRows = useMemo(
@@ -1012,7 +1022,6 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     // `inPeriodSuffix` reads "in Last Month" for a period and "" for All Time,
     // so every helper sentence describes the window actually on screen.
     const inPeriodSuffix = period && !allTime ? ` in ${period.label}` : '';
-    const windowLabel = period && !allTime ? `${period.from} → ${period.to}` : 'all time';
 
     // ---- Current-state figures (the period cannot change these) -------------
     // "Overdue" describes work that is NOT yet done, so it carries no completion
@@ -1030,8 +1039,6 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     const fees = period ? period.feesEarned : null;
     const keyActions = period?.keyActionsChecked ?? 0;
     const sections = period?.sectionsCompleted ?? 0;
-    const tasksCompleted = period?.tasksCompleted ?? 0;
-    const mattersOpened = period?.mattersCreatedInPeriod ?? 0;
     // Total Contract Value for the reporting scope — the sum of the contract
     // values of the qualifying matters. Sourced from the backend so it changes
     // with the qualifying set and never reuses an all-time frontend total.
@@ -1039,12 +1046,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
     const stats: StatCard[] = [
       {
-        // "Assigned Matters" is period-based: matters assigned to you that were
-        // opened (entry date) inside the selected window. For All Time it is the
-        // full set of matters assigned to you.
+        // "Assigned Matters" is THE qualifying set for the period — the matters
+        // assigned to you that had activity inside the window (all assigned
+        // matters for All Time). It is the SAME set that drives Total Contract
+        // Value, the fee table, My Matters and My Work, so every figure on the
+        // page reconciles to this one number.
         label: profile.financialScope === 'client' ? 'Assigned Clients / Matters' : 'Assigned Matters',
-        value: String(mattersOpened),
-        helper: `Matters assigned to you that were opened${inPeriodSuffix || ' (all time)'}`,
+        value: String(mattersInScope),
+        helper: `Matters where you're Initiator, Reviewer or Signer/Approver${inPeriodSuffix || ' (all time)'}`,
         icon: Briefcase,
         tone: 'blue',
         href: '/matters',
@@ -1052,7 +1061,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       {
         label: 'Tasks Outstanding',
         value: String(period?.tasksOutstanding ?? 0),
-        helper: `Tasks still open as of the end of ${windowLabel}`,
+        helper: !allTime ? `Key actions pending to be checked${inPeriodSuffix}` : 'Key actions pending to be checked',
         icon: CheckSquare,
         tone: (period?.tasksOutstanding ?? 0) ? 'amber' : 'green',
         href: '/tasks',
@@ -1060,7 +1069,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       {
         label: 'Overdue Tasks',
         value: String(overdue),
-        helper: 'Workflow sections past their deadline in your open matters — current position',
+        helper: 'Workflow sections past deadline in your open matters (as of today)',
         icon: AlertTriangle,
         tone: overdue ? 'red' : 'green',
         href: '/tasks',
@@ -1068,7 +1077,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       {
         label: 'On-Time Completion',
         value: timeliness == null ? 'Pending' : `${timeliness}%`,
-        helper: `Average Timeliness of your Earned Fees rows in matters worked${inPeriodSuffix || ' across all time'}`,
+        helper: `Average Timeliness from your Earned Fees rows${inPeriodSuffix || ' (all time)'}`,
         icon: Clock,
         tone: (timeliness ?? 0) >= 80 ? 'green' : 'amber',
         href: '/performance',
@@ -1076,7 +1085,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       {
         label: 'Quality Score',
         value: quality == null ? 'Pending' : `${quality}%`,
-        helper: `Average Quality Score on matters worked${inPeriodSuffix || ' across all time'}`,
+        helper: `Average Quality from your Earned Fees rows${inPeriodSuffix || ' (all time)'}`,
         icon: Award,
         tone: 'purple',
         href: '/performance',
@@ -1086,7 +1095,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         // completed inside the window (all completed matters for All Time).
         label: 'Matters Completed',
         value: String(mattersCompleted),
-        helper: `Your matters whose workflow completed${inPeriodSuffix || ' (all time)'}`,
+        helper: `Matters whose workflow status is Completed${inPeriodSuffix || ' (all time)'}`,
         icon: TrendingUp,
         tone: 'green',
         href: '/performance',
@@ -1094,51 +1103,34 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       {
         label: 'Key Actions Checked',
         value: String(keyActions),
-        helper: `Key Actions you checked${inPeriodSuffix || ' (all time)'}`,
+        helper: `Key Actions (workflow steps) completed${inPeriodSuffix || ' (all time)'}`,
         icon: CheckCircle2,
         tone: 'blue',
       },
       {
         label: 'Sections Completed',
         value: String(sections),
-        helper: `Workflow sections completed${inPeriodSuffix || ' (all time)'}`,
+        helper: `Workflow Sections fully completed${inPeriodSuffix || ' (all time)'}`,
         icon: CheckSquare,
         tone: 'green',
-      },
-      {
-        label: 'Tasks Completed',
-        value: String(tasksCompleted),
-        helper: `Tasks you completed${inPeriodSuffix || ' (all time)'}`,
-        icon: CheckSquare,
-        tone: 'green',
-      },
-      {
-        label: 'Matters Worked On',
-        value: String(mattersInScope),
-        helper: `Matters with qualifying activity${inPeriodSuffix || ' across all time'}`,
-        icon: Briefcase,
-        tone: 'blue',
-        href: '/matters',
       },
       // TPA is a current, role-based rate — never period-scoped.
       {
         label: 'TPA',
         value: `${summary?.tpaPercent ?? profile.tpa}%`,
-        helper: 'Your current role participation share from the remuneration table',
+        helper: 'Your role participation share from the remuneration table',
         icon: DollarSign,
         tone: 'green',
       },
       {
         label: profile.financialScope === 'client' ? 'Portfolio Total Contract Value' : 'Total Contract Value',
         value: formatRwf(contractValue),
-        helper: `Sum of contract values of the ${mattersInScope} matter${mattersInScope === 1 ? '' : 's'} qualifying ${allTime ? 'across all time' : `in ${windowLabel}`} — contract value, not cash collected`,
         icon: DollarSign,
         tone: 'green',
       },
       {
         label: 'Fees Earned',
         value: fees == null ? 'Pending' : formatFees(fees),
-        helper: `Earned from payments received${inPeriodSuffix || ' across all time'} (Collected Base × TPA% × Timeliness% × Quality%)`,
         icon: DollarSign,
         tone: fees && fees > 0 ? 'green' : 'amber',
       },
@@ -1423,7 +1415,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
         {profile.visible.matterFinancials && (
           <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
-            <SectionHeader title="Matter Financial Status" description="Planned, completed, and outstanding value of the matters assigned to you." />
+            <SectionHeader
+              title="Matter Financial Status"
+              description={
+                hasWindow
+                  ? `Planned, completed, and outstanding value of the ${matterRows.length} matter${matterRows.length === 1 ? '' : 's'} you worked on in ${period?.from} → ${period?.to}.`
+                  : 'Planned, completed, and outstanding value of the matters assigned to you.'
+              }
+            />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
                 ['Total Contract Value', formatRwf(financials.contractValue), 'slate' as Tone],
@@ -1478,7 +1477,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           />
           <div className="space-y-4">
             {([
-              ['Matters Completion Rate', summaryCompletionRate == null ? 'Pending' : `${summaryCompletionRate}%`, CheckSquare, (summaryCompletionRate ?? 0) >= 80 ? 'green' : 'amber'],
+              [
+                hasWindow ? 'Matters Completion Rate (in period)' : 'Matters Completion Rate',
+                summaryCompletionRate == null ? 'Pending' : `${summaryCompletionRate}%`,
+                CheckSquare,
+                (summaryCompletionRate ?? 0) >= 80 ? 'green' : 'amber',
+              ],
               [
                 'Average Timeliness',
                 (period?.averageTimelinessScore ?? summary?.averageTimelinessScore) == null

@@ -254,7 +254,10 @@ const makeCase = (id: mongoose.Types.ObjectId, no: string, status: string, creat
   billingSettings: { currency: 'RWF' },
 });
 
-// Two steps per matter; the step `completedAt` attributes the work to a period.
+// Two sections. Section A ("stageA") has TWO Key Actions (steps) so the test can
+// prove Key Actions Checked (individual steps) and Sections Completed (fully
+// finished stages) are DIFFERENT counts — the reported bug forced them equal.
+// The step `completedAt` attributes the work to a period.
 const makeSteps = (completedAt: Date | null) => [
   {
     stepKey: 's1',
@@ -266,8 +269,22 @@ const makeSteps = (completedAt: Date | null) => [
     startAt: new Date((completedAt || new Date()).getTime() - 5 * 86_400_000),
     dueAt: new Date((completedAt || new Date()).getTime() + 5 * 86_400_000),
     completedAt,
-    percentage: 50,
-    stagePercentage: 50,
+    percentage: 30,
+    stagePercentage: 60,
+    actions: [],
+  },
+  {
+    stepKey: 's1b',
+    title: 'Step 1b',
+    stageKey: 'stageA',
+    stageTitle: 'Stage A',
+    order: 2,
+    status: 'Completed',
+    startAt: new Date((completedAt || new Date()).getTime() - 5 * 86_400_000),
+    dueAt: new Date((completedAt || new Date()).getTime() + 5 * 86_400_000),
+    completedAt,
+    percentage: 30,
+    stagePercentage: 60,
     actions: [],
   },
   {
@@ -275,13 +292,13 @@ const makeSteps = (completedAt: Date | null) => [
     title: 'Step 2',
     stageKey: 'stageB',
     stageTitle: 'Stage B',
-    order: 2,
+    order: 3,
     status: completedAt ? 'Completed' : 'In Progress',
     startAt: new Date(),
     dueAt: new Date(Date.now() + 10 * 86_400_000),
     completedAt,
-    percentage: 50,
-    stagePercentage: 50,
+    percentage: 40,
+    stagePercentage: 40,
     actions: [],
   },
 ];
@@ -512,10 +529,15 @@ check('Last Month label names the previous calendar month', lastMonth.period.lab
 check('Last Month counted the previous-month matter as completed', lastMonth.period.mattersCompleted, 1);
 check('Last Month counted the previous-month task', lastMonth.period.tasksCompleted, 1);
 check('Last Month completed 2 sections', lastMonth.period.sectionsCompleted, 2);
+// The reported bug forced Key Actions Checked === Sections Completed. Key Actions
+// are INDIVIDUAL workflow steps; Sections are GROUPS of steps that only count
+// when every Key Action inside them is done. Section A has two Key Actions here,
+// so Last Month checks 3 Key Actions but completes only 2 Sections.
+check('Last Month checked 3 Key Actions (individual steps)', lastMonth.period.keyActionsChecked, 3);
 check(
-  'Last Month Key Actions Checked equals Sections Completed',
-  lastMonth.period.keyActionsChecked,
-  lastMonth.period.sectionsCompleted
+  'Key Actions Checked EXCEEDS Sections Completed (Key Actions sit inside Sections)',
+  (lastMonth.period.keyActionsChecked as number) > (lastMonth.period.sectionsCompleted as number),
+  true
 );
 check('Last Month collected only the previous-month payment (200k)', lastMonth.period.collectedValue, 200_000);
 check('Last Month Timeliness is populated (was permanently null)', typeof lastMonth.period.averageTimelinessScore, 'number');

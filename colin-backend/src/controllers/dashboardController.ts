@@ -605,16 +605,59 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         hasPeriodFee = true;
       }
 
+      // ---- Key Actions checked & Sections completed in the scope ------------
+      // A "Key Action" is ONE individual workflow STEP. A "Section" (stage) is a
+      // GROUP of steps that share a stageKey and is only "completed" when EVERY
+      // one of its Key Actions is done — exactly how the Case Workspace groups
+      // them (computeStageBreakdownFromInstance). So Key Actions Checked is
+      // normally >= Sections Completed and the two are genuinely different
+      // counts. (The previous code incremented BOTH by 1 per completed step,
+      // which forced them equal and hid the section → key-action hierarchy.)
+      const stepsByStage = new Map<
+        string,
+        { total: number; completed: number; lastCompletedAt: Date | null }
+      >();
       for (const step of steps) {
-        if (
-          String((step as any)?.status || '').toLowerCase() === 'completed' &&
-          isWithinReportRange((step as any)?.completedAt, period)
-        ) {
-          periodSectionsCompleted += 1;
-          // The per-step sub-checklist is retired: "Key Actions" are the
-          // workflow steps, so a Key Action counts as checked when its step
-          // completes inside the scope.
+        const stepCompleted = String((step as any)?.status || '').toLowerCase() === 'completed';
+
+        // Key Action checked = an individual step completed inside the scope.
+        if (stepCompleted && isWithinReportRange((step as any)?.completedAt, period)) {
           periodKeyActionsChecked += 1;
+          hadInPeriodWork = true;
+        }
+
+        // Accumulate per-section (stage) completion so a Section is only counted
+        // when ALL of its Key Actions are done. Steps with no stageKey fall back
+        // to their own stepKey, so an ungrouped step is its own section.
+        const stageKey =
+          String((step as any)?.stageKey || '').trim() || `__step_${String((step as any)?.stepKey || '')}`;
+        const bucket = stepsByStage.get(stageKey) || { total: 0, completed: 0, lastCompletedAt: null };
+        bucket.total += 1;
+        if (stepCompleted) {
+          bucket.completed += 1;
+          const at = (step as any)?.completedAt ? new Date((step as any).completedAt) : null;
+          if (
+            at &&
+            !Number.isNaN(at.getTime()) &&
+            (!bucket.lastCompletedAt || at.getTime() > bucket.lastCompletedAt.getTime())
+          ) {
+            bucket.lastCompletedAt = at;
+          }
+        }
+        stepsByStage.set(stageKey, bucket);
+      }
+
+      // A Section is completed in the scope when every one of its Key Actions is
+      // done AND the section finished (its LAST Key Action completed) inside it.
+      // For All Time there is no window, so a fully-complete section counts
+      // regardless of when it finished.
+      for (const bucket of stepsByStage.values()) {
+        if (bucket.total <= 0 || bucket.completed < bucket.total) continue;
+        const completedInScope = period
+          ? Boolean(bucket.lastCompletedAt && isWithinReportRange(bucket.lastCompletedAt, period))
+          : true;
+        if (completedInScope) {
+          periodSectionsCompleted += 1;
           hadInPeriodWork = true;
         }
       }
