@@ -205,6 +205,7 @@ const buildCollectedKeyActionRows = ({
   instancesByCaseId,
   tasksByCaseId,
   paidInvoicesByCaseId,
+  historicalCollectedByCaseId,
   roleByName,
   fromDate,
   toDate,
@@ -221,22 +222,31 @@ const buildCollectedKeyActionRows = ({
     // Legacy instances store no step percentages; normalise them from the
     // template first so both engines see the same effective workflow.
     const effectiveSteps = normalizeEffectiveWorkflowSteps(instance, template);
+    // COMPLETION-DATE FIRST: the row's Collected Key Action Base is the TRUE
+    // HISTORICAL base for this matter (all-time Paid collections, never gated
+    // by the selected period), so an action completed inside the window keeps
+    // its RWF 28,481.82 base under Yesterday, Last 7 Days, or any other
+    // period. Period scoping applies ONLY to row visibility (completion date
+    // inside the window, below) — never to the base value itself.
+    const historicalCollected = historicalCollectedByCaseId?.get(caseId);
+    const collectedAmount = historicalCollected != null ? historicalCollected : paidInvoicesByCaseId.get(caseId) || 0;
     const earnings = calculateCollectedKeyActionEarnings({
       matter,
       template,
       workflowInstance: instance,
       tasks: caseTasks,
-      collectedAmount: paidInvoicesByCaseId.get(caseId) || 0,
+      collectedAmount,
     });
 
     // The dashboard engine: one authoritative earned fee per assigned member,
-    // computed from the same collected base, TPA table, timeliness and quality.
+    // computed from the same HISTORICAL collected base, TPA table, timeliness
+    // and quality — so the row's earned fee is its true historical value.
     const matterFees = computeCaseEarnedFees({
       caseDoc: matter,
       template,
       workflowInstance: { ...(instance || {}), steps: effectiveSteps },
       tasks: caseTasks,
-      collectedAmount: paidInvoicesByCaseId.get(caseId) || 0,
+      collectedAmount,
       roleByName,
     });
     const memberFeeByKey = new Map(
@@ -251,19 +261,14 @@ const buildCollectedKeyActionRows = ({
       { assignmentRole: 'Approver', name: String(assignments.signerApprover || '').trim() },
     ].filter((member) => member.name);
 
-    // Every completed Key Action of the matter is listed. Rows are scoped to
-    // the selected period by the action's own completion date (falling back
-    // to the linked task's completion/update date when the step carries no
-    // date, so undated completions still show rather than vanish). The
-    // collected/earned VALUES stay payment-scoped via paidInvoicesByCaseId —
-    // exactly the basis the staff dashboards use — so the rows re-add to the
-    // same member earned fee their dashboard shows for that period. A fee
-    // earned today therefore appears under Today AND under every broader
-    // window containing today (Last 7 days, This month, Year to date).
+    // COMPLETION-DATE FIRST — the core user requirement. Every completed Key
+    // Action whose completion date lands inside the selected window MUST be
+    // visible, with its TRUE HISTORICAL base and earned values intact. Never
+    // drop a row or zero its base because of a payment-date window.
     const completedActions = earnings.completedActions;
-    const inPeriod = (date: Date | null | undefined) => {
+    const inSelectedWindow = (date: Date | null | undefined) => {
       if (!fromDate || !toDate) return true;
-      if (!date || Number.isNaN(date.getTime())) return true;
+      if (!date || Number.isNaN(date.getTime())) return false;
       const t = date.getTime();
       return t >= fromDate.getTime() && t <= toDate.getTime();
     };
@@ -279,7 +284,7 @@ const buildCollectedKeyActionRows = ({
         ? template.stages.find((stage: any) => String(stage?.key || '') === String(templateStep?.stageKey || ''))
         : null;
       return { action, completedAt, templateStep, workflowStage, value: actionValueByKey.get(action.key) || 0 };
-    }).filter((item: any) => inPeriod(item.completedAt));
+    }).filter((item: any) => inSelectedWindow(item.completedAt));
 
     for (const member of team) {
       const memberKey = baseNameFromLabel(member.name);
@@ -581,6 +586,21 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       if (!caseId) continue;
       paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
     }
+    // COMPLETION-DATE FIRST base sourcing: TRUE HISTORICAL Paid collections
+    // per matter (all-time, never windowed), tied to the matter ID at the
+    // time each action completed. In-window rows keep their real base
+    // (RWF 28,481.82) under every period instead of falling back to 0.
+    const historicalCollectedByCaseId = new Map<string, number>();
+    for (const matter of selectedMatters as any[]) {
+      historicalCollectedByCaseId.set(String(matter._id), 0);
+    }
+    const historicalPaidTotals = await Invoice.aggregate([
+      { $match: { status: 'Paid', caseId: { $in: selectedMatters.map((matter: any) => matter._id) } } },
+      { $group: { _id: '$caseId', total: { $sum: '$amount' } } },
+    ]);
+    for (const row of historicalPaidTotals as any[]) {
+      historicalCollectedByCaseId.set(String(row._id), Number(row.total) || 0);
+    }
     const selectedMatterIdsForEarnings = selectedMatters.map((matter: any) => matter._id);
     const workflowInstances = selectedMatterIdsForEarnings.length
       ? await WorkflowInstance.find({ caseId: { $in: selectedMatterIdsForEarnings } })
@@ -602,6 +622,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       instancesByCaseId,
       tasksByCaseId,
       paidInvoicesByCaseId,
+      historicalCollectedByCaseId,
       roleByName,
       fromDate,
       toDate,
@@ -1228,12 +1249,28 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       const caseId = String(invoice?.caseId || '');
       if (caseId) memberPaidInvoicesByCaseId.set(caseId, (memberPaidInvoicesByCaseId.get(caseId) || 0) + (Number(invoice.amount) || 0));
     }
+    // COMPLETION-DATE FIRST: historical (all-time) Paid collections per
+    // matter, so in-window completions keep their true base values.
+    const memberHistoricalCollectedByCaseId = new Map<string, number>();
+    for (const matter of memberMatters as any[]) {
+      memberHistoricalCollectedByCaseId.set(String(matter._id), 0);
+    }
+    if (memberMatterIds.length) {
+      const memberHistoricalPaidTotals = await Invoice.aggregate([
+        { $match: { status: 'Paid', caseId: { $in: memberMatterIds } } },
+        { $group: { _id: '$caseId', total: { $sum: '$amount' } } },
+      ]);
+      for (const row of memberHistoricalPaidTotals as any[]) {
+        memberHistoricalCollectedByCaseId.set(String(row._id), Number(row.total) || 0);
+      }
+    }
     const rows = buildCollectedKeyActionRows({
       matters: memberMatters,
       templatesById: new Map((memberTemplates as any[]).map((template) => [String(template._id), template])),
       instancesByCaseId: new Map((memberWorkflowInstances as any[]).map((instance) => [String(instance.caseId), instance])),
       tasksByCaseId: memberTasksByCaseId,
       paidInvoicesByCaseId: memberPaidInvoicesByCaseId,
+      historicalCollectedByCaseId: memberHistoricalCollectedByCaseId,
       roleByName: buildRoleByName([{ name: displayName, role }]),
       fromDate,
       toDate,
