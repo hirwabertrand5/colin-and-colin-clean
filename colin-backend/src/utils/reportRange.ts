@@ -4,19 +4,22 @@
  * Earnings report and the activity trail all resolve their window here so a
  * period always means the exact same dates everywhere.
  *
- * Period semantics (local server calendar, inclusive start / exclusive end):
+ * Period semantics (local server calendar, inclusive start / inclusive end):
  *   - `all`     → NO date restriction at all. All eligible historical records.
  *                 Never a substituted window, never an invented date.
- *   - `daily`   → the previous complete calendar day.
- *   - `weekly`  → the rolling seven-day window ending today.
- *   - `monthly` → the complete previous calendar month.
+ *   - `daily`   → today (start of today through the end of today).
+ *   - `weekly`  → the rolling last 7 days including today.
+ *   - `monthly` → the current calendar month to date (1st → end of today).
  *   - `quarterly` → the complete previous calendar quarter.
  *   - `yearly`  → the complete previous calendar year.
  *   - `ytd`     → 1 January of the current year through the end of today.
  *   - `this_month` → the first of the current month through the end of today.
  *   - `custom`  → the explicit from/to whole days the user selected.
  *
- * Boundaries are inclusive-start / EXCLUSIVE-end (`>= from`, `< to`) so a
+ * Broader windows always contain narrower ones (today ⊆ last 7 days ⊆ this
+ * month ⊆ year to date), so a fee earned today appears in every period that
+ * contains today. Boundaries are inclusive-start / EXCLUSIVE-end (`>= from`,
+ * `< to`) so a
  * record can never be counted in two adjacent periods. Every window is built
  * from calendar arithmetic (never "minus N days"), so month lengths, leap
  * years and month-end days are handled correctly.
@@ -26,11 +29,11 @@ export type ReportDateBasis = 'invoiceDate' | 'paymentDate' | 'taskDate';
 
 export const REPORT_RANGE_LABELS: Record<string, string> = {
   all: 'All time',
-  daily: 'Last day',
-  weekly: 'Last week',
-  monthly: 'Last month',
-  quarterly: 'Last quarter',
-  yearly: 'Last year',
+  daily: 'Today',
+  weekly: 'Last 7 days',
+  monthly: 'This month',
+  quarterly: 'This quarter to date',
+  yearly: 'This year to date',
   ytd: 'Year to date',
   this_month: 'This month',
   custom: 'Custom range',
@@ -96,16 +99,14 @@ export function computeRange(range?: string) {
   }
 
   if (r === 'daily') {
-    // The previous complete calendar day.
-    from.setDate(from.getDate() - 1);
-    to.setDate(to.getDate() - 1);
-    to.setHours(23, 59, 59, 999);
-    from.setHours(0, 0, 0, 0);
+    // Today: start of today through the end of today, so a fee earned today
+    // shows under Today AND under every broader window containing today
+    // (last 7 days, this month, year to date).
     return { from, to };
   }
 
   if (r === 'weekly') {
-    // Rolling seven days ending today (today included).
+    // Rolling last 7 days INCLUDING today (6 days back + today).
     from.setDate(from.getDate() - 6);
     return { from, to };
   }
@@ -117,11 +118,10 @@ export function computeRange(range?: string) {
   }
 
   if (r === 'monthly') {
-    // The complete previous calendar month.
-    const firstOfThisMonth = startOfMonthOffset(now, 0);
-    to.setTime(endOfMonthOffset(now, -1).getTime());
-    from.setTime(firstOfThisMonth.getTime());
-    from.setMonth(from.getMonth() - 1);
+    // Current calendar month to date (1st → end of today), so today's work
+    // appears here as well as under Today / Last 7 Days.
+    from.setDate(1);
+    from.setHours(0, 0, 0, 0);
     return { from, to };
   }
 

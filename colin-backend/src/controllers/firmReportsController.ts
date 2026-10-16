@@ -251,11 +251,22 @@ const buildCollectedKeyActionRows = ({
       { assignmentRole: 'Approver', name: String(assignments.signerApprover || '').trim() },
     ].filter((member) => member.name);
 
-    // Every completed Key Action of the matter is listed. The report period is
-    // scoped by the payments received inside it (paidInvoicesByCaseId) — exactly
-    // the basis the staff dashboards use — so the rows below always re-add to
-    // the same member earned fee their dashboard shows for that period.
+    // Every completed Key Action of the matter is listed. Rows are scoped to
+    // the selected period by the action's own completion date (falling back
+    // to the linked task's completion/update date when the step carries no
+    // date, so undated completions still show rather than vanish). The
+    // collected/earned VALUES stay payment-scoped via paidInvoicesByCaseId —
+    // exactly the basis the staff dashboards use — so the rows re-add to the
+    // same member earned fee their dashboard shows for that period. A fee
+    // earned today therefore appears under Today AND under every broader
+    // window containing today (Last 7 days, This month, Year to date).
     const completedActions = earnings.completedActions;
+    const inPeriod = (date: Date | null | undefined) => {
+      if (!fromDate || !toDate) return true;
+      if (!date || Number.isNaN(date.getTime())) return true;
+      const t = date.getTime();
+      return t >= fromDate.getTime() && t <= toDate.getTime();
+    };
     const actionMeta = completedActions.map((action: any) => {
       const actionTasks = caseTasks.filter((task: any) => taskMatchesKeyAction(task, action));
       const completedAt =
@@ -268,7 +279,7 @@ const buildCollectedKeyActionRows = ({
         ? template.stages.find((stage: any) => String(stage?.key || '') === String(templateStep?.stageKey || ''))
         : null;
       return { action, completedAt, templateStep, workflowStage, value: actionValueByKey.get(action.key) || 0 };
-    });
+    }).filter((item: any) => inPeriod(item.completedAt));
 
     for (const member of team) {
       const memberKey = baseNameFromLabel(member.name);
@@ -606,6 +617,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     for (const t of tasksCompleted as any[]) {
       const name = baseNameFromLabel(t.assignee);
       if (selectedMemberNameNormalized && baseNameFromLabel(name) !== selectedMemberNameNormalized) continue;
+      // Period scoping: the range query above already limits completedAt to the
+      // window, so every count below is period-truthful (today ⊆ last 7 days
+      // ⊆ this month ⊆ year to date).
       completedTasksByName.set(name, (completedTasksByName.get(name) || 0) + 1);
       const due = resolveDeadlineDateTime(t.dueDate);
       const completed = t.completedAt ? new Date(t.completedAt) : undefined;

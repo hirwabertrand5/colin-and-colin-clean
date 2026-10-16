@@ -251,8 +251,9 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   const supervisorOptions = useMemo(
     () =>
       users
+        // Supervisor may be any active team member except interns.
+        .filter((user) => String(user.role || '').toLowerCase() !== 'intern')
         .slice()
-        .filter((user) => ['associate', 'executive_assistant', 'managing_partner'].includes(String(user.role || '').toLowerCase()))
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
         .map((user) => ({
           value: user.name || '',

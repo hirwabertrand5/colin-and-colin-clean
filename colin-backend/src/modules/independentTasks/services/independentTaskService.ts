@@ -341,6 +341,12 @@ export const independentTaskService = {
     const title = requireString(payload.title, 'Title is required.');
     const assignee = requireString(payload.assignee, 'Assignee is required.');
     const supervisor = requireString(payload.supervisor, 'Supervisor is required.');
+    // Supervisors may be any team member except interns — enforced server-side
+    // so direct API calls cannot bypass the dropdown rule.
+    const supervisorUser = await findUserByAssigneeString(supervisor);
+    if (supervisorUser && String((supervisorUser as any).role || '').toLowerCase() === 'intern') {
+      throw new Error('Interns cannot supervise independent tasks.');
+    }
     const dueDate = requireDateString(payload.dueDate, 'Due date is required.');
     const startDate = requireDateString(payload.startDate || todayISO(), 'Start date is required.');
     assertValidDates(startDate, dueDate);
@@ -551,7 +557,14 @@ export const independentTaskService = {
     if (payload.description !== undefined) updates.description = cleanString(payload.description) || undefined;
     if (payload.priority !== undefined) updates.priority = requireString(payload.priority, 'Priority is required.') as IndependentTaskPriority;
     if (payload.assignee !== undefined) updates.assignee = requireString(payload.assignee, 'Assignee is required.');
-    if (payload.supervisor !== undefined) updates.supervisor = requireString(payload.supervisor, 'Supervisor is required.');
+    if (payload.supervisor !== undefined) {
+      const nextSupervisor = requireString(payload.supervisor, 'Supervisor is required.');
+      const supervisorUser = await findUserByAssigneeString(nextSupervisor);
+      if (supervisorUser && String((supervisorUser as any).role || '').toLowerCase() === 'intern') {
+        throw new Error('Interns cannot supervise independent tasks.');
+      }
+      updates.supervisor = nextSupervisor;
+    }
     if (payload.relatedClient !== undefined) updates.relatedClient = cleanString(payload.relatedClient) || undefined;
     if (payload.relatedMatterId !== undefined) {
       const matterId = cleanString(payload.relatedMatterId);

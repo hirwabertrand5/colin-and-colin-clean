@@ -73,6 +73,9 @@ export type FirmCalendarEvent = CaseEvent & {
     caseNo: string;
     parties: string;
   } | null;
+  source?: 'events' | 'matters' | 'prospects' | 'independent';
+  prospectId?: string | null;
+  taskId?: string | null;
 };
 
 export const getFirmEvents = async (params: {
@@ -80,6 +83,7 @@ export const getFirmEvents = async (params: {
   to: string;
   type?: string;
   q?: string;
+  source?: 'all' | 'events' | 'matters' | 'intake' | 'prospects' | 'independent';
 }): Promise<FirmCalendarEvent[]> => {
   const qs = new URLSearchParams();
 
@@ -88,6 +92,7 @@ export const getFirmEvents = async (params: {
 
   if (params.type) qs.set('type', params.type);
   if (params.q) qs.set('q', params.q);
+  if (params.source && params.source !== 'all') qs.set('source', params.source);
 
   const res = await fetch(`${API_URL}/calendar/events?${qs.toString()}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
@@ -118,6 +123,8 @@ export const getCalendarTasks = async (params: {
   from: string;
   to: string;
   q?: string;
+  type?: string;
+  source?: 'all' | 'events' | 'matters' | 'intake' | 'prospects' | 'independent';
 }): Promise<CalendarTask[]> => {
   const qs = new URLSearchParams();
 
@@ -125,6 +132,8 @@ export const getCalendarTasks = async (params: {
   qs.set('to', params.to);
 
   if (params.q) qs.set('q', params.q);
+  if (params.type) qs.set('type', params.type);
+  if (params.source && params.source !== 'all') qs.set('source', params.source);
 
   const res = await fetch(`${API_URL}/calendar/tasks?${qs.toString()}`, {
     headers: { Authorization: `Bearer ${getToken()}` },

@@ -65,6 +65,10 @@ const resolveTaskKeyActionKey = (templateSteps: any[], task: any) => {
  * Resolve completed actions without ever manufacturing a missing percentage.
  * This keeps missing configuration visible and prevents an unallocated action
  * from adding value or staff earnings.
+ *
+ * Custom Key Actions added on the case carry their own percentage on the
+ * instance step, so they are read from the instance first and only fall back
+ * to the template percentage when the instance carries none.
  */
 export const resolveCompletedKeyActions = (template: any, workflowInstance?: any, tasks: any[] = []): CompletedKeyAction[] => {
   const templateSteps = Array.isArray(template?.steps) ? template.steps : [];
@@ -86,10 +90,14 @@ export const resolveCompletedKeyActions = (template: any, workflowInstance?: any
     const instanceStep = instanceByKey.get(key);
     const task = completedByTask.get(key);
     if (!isWorkflowStepComplete(instanceStep) && !task) continue;
+    // Prefer the live instance percentage (covers edits + custom actions that
+    // mirror a template key), fall back to the template definition.
+    const instancePercentage = literalPercentage(instanceStep?.percentage);
+    const templatePercentage = literalPercentage(templateStep?.percentage);
     result.push({
       key,
-      title: String(templateStep?.title || instanceStep?.title || key),
-      percentage: clampPercent(literalPercentage(templateStep?.percentage)),
+      title: String(instanceStep?.title || templateStep?.title || key),
+      percentage: clampPercent(instancePercentage ?? templatePercentage ?? 0),
       completedAt: instanceStep?.completedAt || task?.completedAt || task?.updatedAt,
       source: isWorkflowStepComplete(instanceStep) ? 'workflow' : 'task',
     });
@@ -107,12 +115,20 @@ const resolveKeyActionProgress = (template: any, workflowInstance: any, complete
   const instanceSteps = Array.isArray(workflowInstance?.steps) ? workflowInstance.steps : [];
   const completeKeys = new Set(completed.map((action) => action.key));
   const seen = new Set<string>();
-  const sourceSteps = templateSteps.length ? templateSteps : instanceSteps.map((step: any) => ({ key: step?.stepKey, title: step?.title, percentage: step?.percentage }));
+  // Merge template + instance so case-specific Key Actions (which exist only
+  // on the instance) follow the same lifecycle: progress, covered value,
+  // completed value, fees earned and contract value.
+  const instanceFallback = instanceSteps.map((step: any) => ({ key: step?.stepKey, title: step?.title, percentage: step?.percentage }));
+  const sourceSteps = [...templateSteps, ...instanceFallback];
+  if (!sourceSteps.length) return [];
+  const instanceByKey = new Map<string, any>(instanceSteps.map((step: any) => [String(step?.stepKey || ''), step]));
   return sourceSteps.flatMap((step: any) => {
     const key = String(step?.key || '').trim();
     if (!key || seen.has(key)) return [];
     seen.add(key);
-    const percentage = literalPercentage(step?.percentage);
+    // Prefer the live instance percentage so edits and custom actions win.
+    const instancePercentage = literalPercentage(instanceByKey.get(key)?.percentage);
+    const percentage = instancePercentage ?? literalPercentage(step?.percentage);
     const resolvedPercentage = percentage ?? 0;
     const progressValue = roundMoney(contractValue * (resolvedPercentage / 100));
     const isCompleted = completeKeys.has(key);

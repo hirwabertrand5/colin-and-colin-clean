@@ -60,6 +60,7 @@ export default function Calendar({ userRole }: CalendarProps) {
   const [events, setEvents] = useState<FirmCalendarEvent[]>([]);
   const [tasks, setTasks] = useState<CalendarTask[]>([]);
   const [cases, setCases] = useState<CaseData[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'matters' | 'intake' | 'prospects' | 'independent' | 'events'>('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   usePageTitle('Calendar');
@@ -111,9 +112,11 @@ export default function Calendar({ userRole }: CalendarProps) {
     setLoading(true);
     setError('');
     try {
+      // Single feed: stored events + active-matter deadlines + prospect/intake
+      // deadlines + independent-task deadlines, all source-filterable.
       const [evts, tsks, allCases] = await Promise.all([
-        getFirmEvents({ from: range.from, to: range.to, type: typeFilter, q: search }),
-        getCalendarTasks({ from: range.from, to: range.to, q: search }),
+        getFirmEvents({ from: range.from, to: range.to, type: typeFilter, q: search, source: sourceFilter }),
+        getCalendarTasks({ from: range.from, to: range.to, q: search, type: typeFilter, source: sourceFilter }),
         getAllCases(),
       ]);
       setEvents(evts);
@@ -126,7 +129,7 @@ export default function Calendar({ userRole }: CalendarProps) {
     }
   };
 
-  useEffect(() => { loadCalendar(); /* eslint-disable-next-line */ }, [range.from, range.to, typeFilter, currentView]);
+  useEffect(() => { loadCalendar(); /* eslint-disable-next-line */ }, [range.from, range.to, typeFilter, sourceFilter, currentView]);
   useEffect(() => {
     const t = setTimeout(() => loadCalendar(), 350);
     return () => clearTimeout(t);
@@ -237,24 +240,56 @@ export default function Calendar({ userRole }: CalendarProps) {
   // Month view helpers
   const daysInMonth = endOfMonth(selectedDate).getDate();
   const firstDayOfMonth = startOfMonth(selectedDate).getDay();
+  // Every calendar row resolves to a source: stored firm events have no source
+  // tag, while matter / prospect / independent deadlines carry one. Filtering
+  // is strict — choosing a source shows ONLY that source's rows.
+  const eventSourceOf = (e: FirmCalendarEvent): string => {
+    if (e.source) return e.source;
+    // Back-compat: rows generated before `source` was tagged.
+    if (e.automated && String(e._id || '').startsWith('workflow-')) return 'matters';
+    if (String(e._id || '').startsWith('prospect-')) return 'prospects';
+    if (String(e._id || '').startsWith('independent-')) return 'independent';
+    return 'events';
+  };
+  const eventMatchesSource = (e: FirmCalendarEvent): boolean => {
+    if (sourceFilter === 'all') return true;
+    const src = eventSourceOf(e);
+    // Intake and prospects share one pipeline source (same prospect deadlines).
+    if (sourceFilter === 'intake' || sourceFilter === 'prospects') return src === 'prospects';
+    return src === sourceFilter;
+  };
   const getEventsForDay = (day: number) => {
     const dateStr = `${selectedDate.getFullYear()}-${pad2(selectedDate.getMonth() + 1)}-${pad2(day)}`;
-    return events.filter((e) => e.date === dateStr);
+    return events.filter((e) => e.date === dateStr && eventMatchesSource(e));
   };
   const getTasksForDay = (day: number) => {
     const dateStr = `${selectedDate.getFullYear()}-${pad2(selectedDate.getMonth() + 1)}-${pad2(day)}`;
+    // The second feed is the legacy matter-task due overlay. It has no source
+    // tag, so it belongs ONLY to unfiltered / matter / firm-event views: it
+    // must never leak rows into intake, prospect, or independent views, and it
+    // must not duplicate the independent deadlines already inside `events`.
+    // It is also hidden under a non-deadline type filter (Court/Meeting/...),
+    // because the task feed only carries due-date rows.
+    if (sourceFilter === 'intake' || sourceFilter === 'prospects' || sourceFilter === 'independent') return [];
+    if (typeFilter !== 'all' && typeFilter !== 'Deadline') return [];
     return tasks.filter((t) => t.dueDate === dateStr);
   };
 
   const upcoming = useMemo(() => {
+    // Same strict source rule as the grid: a filtered view shows ONLY rows
+    // from that source. The legacy task feed joins only matter/event views
+    // and only under an all/Deadline type filter (it carries due-date rows).
+    const includeTasks =
+      (sourceFilter === 'all' || sourceFilter === 'matters' || sourceFilter === 'events') &&
+      (typeFilter === 'all' || typeFilter === 'Deadline');
     const mix = [
-      ...events.map((e) => ({ kind: 'event' as const, date: e.date, time: e.time, title: e.title, data: e })),
-      ...tasks.map((t) => ({ kind: 'task' as const, date: t.dueDate, time: '12:00', title: t.title, data: t })),
+      ...events.filter(eventMatchesSource).map((e) => ({ kind: 'event' as const, date: e.date, time: e.time, title: e.title, data: e })),
+      ...(includeTasks ? tasks.map((t) => ({ kind: 'task' as const, date: t.dueDate, time: '12:00', title: t.title, data: t })) : []),
     ];
     return mix
       .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
       .slice(0, 10);
-  }, [events, tasks]);
+  }, [events, tasks, sourceFilter, typeFilter]);
 
   return (
     <div>
@@ -314,6 +349,20 @@ export default function Calendar({ userRole }: CalendarProps) {
               <option value="Meeting">Meeting</option>
               <option value="Deposition">Deposition</option>
               <option value="Other">Other</option>
+            </select>
+
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as typeof sourceFilter)}
+              title="Filter by active matters, intake, prospects, or independent tasks"
+              className="px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            >
+              <option value="all">All Sources</option>
+              <option value="matters">Active Matters</option>
+              <option value="intake">Intake</option>
+              <option value="prospects">Prospects</option>
+              <option value="independent">Independent Tasks</option>
+              <option value="events">Firm Events</option>
             </select>
 
             <div className="flex gap-2">
@@ -417,10 +466,19 @@ export default function Calendar({ userRole }: CalendarProps) {
             <div className="py-12 text-center text-gray-500">Loading...</div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {[...events.map(e => ({ kind: 'event' as const, date: e.date, time: e.time, data: e })),
-                ...tasks.map(t => ({ kind: 'task' as const, date: t.dueDate, time: '12:00', data: t }))]
-                .sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time))
-                .map((row, i) => (
+              {(() => {
+                // Strict source isolation, same as month grid + upcoming list.
+                const includeTasks =
+                  (sourceFilter === 'all' || sourceFilter === 'matters' || sourceFilter === 'events') &&
+                  (typeFilter === 'all' || typeFilter === 'Deadline');
+                const rows = [
+                  ...events.filter(eventMatchesSource).map(e => ({ kind: 'event' as const, date: e.date, time: e.time, data: e })),
+                  ...(includeTasks ? tasks.map(t => ({ kind: 'task' as const, date: t.dueDate, time: '12:00', data: t })) : []),
+                ].sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
+                if (rows.length === 0) {
+                  return <div className="py-12 text-center text-gray-500">No items this week.</div>;
+                }
+                return rows.map((row, i) => (
                   <button
                     key={i}
                     type="button"
@@ -456,10 +514,8 @@ export default function Calendar({ userRole }: CalendarProps) {
                       <span className="text-xs text-gray-600">Open →</span>
                     </div>
                   </button>
-                ))}
-              {events.length === 0 && tasks.length === 0 && (
-                <div className="py-12 text-center text-gray-500">No items this week.</div>
-              )}
+                ));
+              })()}
             </div>
           )}
         </div>

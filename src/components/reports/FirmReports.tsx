@@ -146,6 +146,11 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
     };
   }, [userRole, dateRange, dateBasis, selectedMemberId, customFrom, customTo, refreshToken]);
 
+  // New period/report/member/data → back to page 1 of the metrics table.
+  useEffect(() => {
+    setProductivityPage(1);
+  }, [dateRange, dateBasis, selectedMemberId, customFrom, customTo, selectedReport, data?.productivityRows?.length]);
+
   useEffect(() => {
     const onTaskReportUpdated = () => {
       setRefreshToken((n) => n + 1);
@@ -318,6 +323,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
 
   const [productivitySortKey, setProductivitySortKey] = useState('');
   const [productivitySortDir, setProductivitySortDir] = useState<SortDir>('asc');
+  const [productivityPage, setProductivityPage] = useState(1);
+  const PRODUCTIVITY_PAGE_SIZE = 10;
   const handleProductivitySort = (column: string) => {
     if (productivitySortKey === column) {
       setProductivitySortDir(productivitySortDir === 'asc' ? 'desc' : 'asc');
@@ -325,6 +332,7 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
       setProductivitySortKey(column);
       setProductivitySortDir('asc');
     }
+    setProductivityPage(1);
   };
   const productivityRows = data?.productivityRows || [];
   const sortedProductivityRows = useMemo(
@@ -353,6 +361,13 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
       }
     }),
     [productivityRows, productivitySortKey, productivitySortDir],
+  );
+  // 10 rows per page. Page resets on period/report/member changes below.
+  const productivityTotalPages = Math.max(1, Math.ceil(sortedProductivityRows.length / PRODUCTIVITY_PAGE_SIZE));
+  const safeProductivityPage = Math.min(Math.max(1, productivityPage), productivityTotalPages);
+  const pagedProductivityRows = sortedProductivityRows.slice(
+    (safeProductivityPage - 1) * PRODUCTIVITY_PAGE_SIZE,
+    safeProductivityPage * PRODUCTIVITY_PAGE_SIZE
   );
 
   const [caseSortKey, setCaseSortKey] = useState('');
@@ -793,9 +808,9 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               onChange={(e) => setDateRange(e.target.value as FirmReportRange)}
               className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
-              <option value="daily">Last Day</option>
-              <option value="weekly">Last Week</option>
-              <option value="monthly">Last Month</option>
+              <option value="daily">Today</option>
+              <option value="weekly">Last 7 Days</option>
+              <option value="monthly">This Month</option>
               <option value="quarterly">Last Quarter</option>
               <option value="yearly">Last Year</option>
               <option value="ytd">Year to Date</option>
@@ -1176,9 +1191,9 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {sortedProductivityRows.map((row, index) => (
+                    {pagedProductivityRows.map((row, index) => (
                       <tr key={row.id || `${row.staff}-${row.completedAt}-${index}`} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm text-gray-500">{index + 1}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{(safeProductivityPage - 1) * PRODUCTIVITY_PAGE_SIZE + index + 1}</td>
                         <td className="px-4 py-3 text-sm text-gray-700">{fmtDateTime(row.completedAt)}</td>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.staff}</td>
                         <td className="px-4 py-3 text-sm text-gray-700">{row.matter}</td>
@@ -1200,6 +1215,31 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {(data?.productivityRows || []).length > PRODUCTIVITY_PAGE_SIZE && (
+              <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
+                <span>
+                  Page {safeProductivityPage} of {productivityTotalPages} • {sortedProductivityRows.length} Key Actions
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setProductivityPage((p) => Math.max(1, p - 1))}
+                    disabled={safeProductivityPage <= 1}
+                    className="rounded border border-gray-300 px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProductivityPage((p) => Math.min(productivityTotalPages, p + 1))}
+                    disabled={safeProductivityPage >= productivityTotalPages}
+                    className="rounded border border-gray-300 px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -1660,7 +1660,7 @@ const buildCustomStepKey = (inst: any): string => {
 export const addStep = async (req: AuthRequest, res: Response) => {
   try {
     const { caseId } = req.params as any;
-    const { title, stageKey, position } = req.body || {};
+    const { title, stageKey, position, percentage } = req.body || {};
 
     const stepTitle = String(title || '').trim();
     if (!stepTitle) return res.status(400).json({ message: 'Key Action title is required.' });
@@ -1668,6 +1668,13 @@ export const addStep = async (req: AuthRequest, res: Response) => {
     const targetStageKey = String(stageKey || '').trim();
     if (!targetStageKey) {
       return res.status(400).json({ message: 'A stage is required to place the Key Action.' });
+    }
+
+    // Percentage is mandatory for case-specific Key Actions so they behave
+    // exactly like template Key Actions in progress, fees earned and contract value.
+    const stepPercentage = literalPercentage(percentage);
+    if (stepPercentage === undefined || stepPercentage <= 0) {
+      return res.status(400).json({ message: 'A Key Action percentage above 0% is required.' });
     }
 
     const c: any = await Case.findById(caseId);
@@ -1695,6 +1702,7 @@ export const addStep = async (req: AuthRequest, res: Response) => {
       stageOrder: meta.stageOrder,
       stageTitle: meta.stageTitle,
       stagePercentage: meta.stagePercentage,
+      percentage: stepPercentage,
       order,
       custom: true,
       customOrder: order,
@@ -1783,7 +1791,7 @@ export const addStepAction = async (req: AuthRequest, res: Response) => {
 export const updateStep = async (req: AuthRequest, res: Response) => {
   try {
     const { caseId, stepKey } = req.params as any;
-    const { title, stageKey, position } = req.body || {};
+    const { title, stageKey, position, percentage } = req.body || {};
 
     const c: any = await Case.findById(caseId);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
@@ -1809,6 +1817,14 @@ export const updateStep = async (req: AuthRequest, res: Response) => {
 
     const nextTitle = String(title ?? step.title).trim();
     if (!nextTitle) return res.status(400).json({ message: 'Key Action title is required.' });
+
+    // Percentage stays mandatory on edit so the lifecycle (progress, fees
+    // earned, contract value) never loses a custom Key Action's weight.
+    const currentPercentage = literalPercentage(step.percentage);
+    const nextPercentage = percentage !== undefined ? literalPercentage(percentage) : currentPercentage;
+    if (nextPercentage === undefined || nextPercentage <= 0) {
+      return res.status(400).json({ message: 'A Key Action percentage above 0% is required.' });
+    }
 
     const nextStageKey = String(stageKey ?? step.stageKey).trim();
     if (!nextStageKey) return res.status(400).json({ message: 'A stage is required.' });
@@ -1836,6 +1852,7 @@ export const updateStep = async (req: AuthRequest, res: Response) => {
     }
 
     step.title = nextTitle;
+    step.percentage = nextPercentage;
 
     // Recompute the position within its (possibly new) stage whenever a position
     // is supplied, or whenever the stage changed (so it lands sensibly).

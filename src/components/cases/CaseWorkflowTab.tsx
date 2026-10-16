@@ -70,10 +70,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const [addOpenFor, setAddOpenFor] = useState<string>('');
   const [addTitle, setAddTitle] = useState<string>('');
   const [addPosition, setAddPosition] = useState<string>('');
+  const [addPercentage, setAddPercentage] = useState<string>('');
   const [editOpenFor, setEditOpenFor] = useState<string>('');
   const [editTitle, setEditTitle] = useState<string>('');
   const [editStage, setEditStage] = useState<string>('');
   const [editPosition, setEditPosition] = useState<string>('');
+  const [editPercentage, setEditPercentage] = useState<string>('');
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string>('');
 
   const load = async () => {
@@ -253,6 +255,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     setAddOpenFor('');
     setAddTitle('');
     setAddPosition('');
+    setAddPercentage('');
   };
 
   const openAddForm = (stageKey: string) => {
@@ -261,6 +264,14 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     setAddOpenFor((current) => (current === stageKey ? '' : stageKey));
     setAddTitle('');
     setAddPosition('');
+    setAddPercentage('');
+  };
+
+  const parsePercentageInput = (raw: string): number | undefined => {
+    const cleaned = raw.trim().replace(/%$/, '').trim();
+    if (!/^\d+(\.\d+)?$/.test(cleaned)) return undefined;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : undefined;
   };
 
   const onSubmitAdd = async (stageKey: string) => {
@@ -268,6 +279,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     const title = addTitle.trim();
     if (!title) {
       setErr('Enter a title for the new Key Action.');
+      return;
+    }
+    // Percentage is mandatory: it drives progress, fees earned and contract value.
+    const percentage = parsePercentageInput(addPercentage);
+    if (percentage === undefined || percentage <= 0 || percentage > 100) {
+      setErr('Enter a Key Action percentage above 0% (max 100%). It is mandatory.');
       return;
     }
     const position = addPosition.trim() === '' ? undefined : Number(addPosition);
@@ -282,6 +299,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       const updated = await addWorkflowStep(caseId, {
         title,
         stageKey,
+        percentage,
         ...(position !== undefined ? { position: position - 1 } : {}),
       });
       setWf(updated);
@@ -300,6 +318,9 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     setEditOpenFor(step.stepKey);
     setEditTitle(step.title || '');
     setEditStage(String(step.stageKey || ''));
+    setEditPercentage(
+      typeof step.percentage === 'number' && Number.isFinite(step.percentage) ? String(step.percentage) : ''
+    );
     // Pre-fill the current 1-based position within its stage. Every step in a
     // stage shares the same stageOrder, so ordering by `order` gives the
     // within-stage sequence.
@@ -317,6 +338,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     setEditTitle('');
     setEditStage('');
     setEditPosition('');
+    setEditPercentage('');
   };
 
   const onSubmitEdit = async (stepKey: string, originalStageKey: string) => {
@@ -324,6 +346,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     const title = editTitle.trim();
     if (!title) {
       setErr('Enter a title for this Key Action.');
+      return;
+    }
+    // Percentage stays mandatory so the lifecycle never loses this action's weight.
+    const percentage = parsePercentageInput(editPercentage);
+    if (percentage === undefined || percentage <= 0 || percentage > 100) {
+      setErr('Enter a Key Action percentage above 0% (max 100%). It is mandatory.');
       return;
     }
     const position = editPosition.trim() === '' ? undefined : Number(editPosition);
@@ -338,6 +366,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       const updated = await updateWorkflowStep(caseId, stepKey, {
         title,
         stageKey: targetStage,
+        percentage,
         ...(position !== undefined ? { position: position - 1 } : {}),
       });
       setWf(updated);
@@ -825,6 +854,23 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 </div>
                 <div className="md:w-40">
                   <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                    Percentage <span className="text-red-600 dark:text-red-400">*</span>
+                  </label>
+                  <input
+                    value={addPercentage}
+                    onChange={(e) => setAddPercentage(e.target.value)}
+                    type="number"
+                    min={0.01}
+                    max={100}
+                    step="any"
+                    required
+                    aria-required="true"
+                    placeholder="e.g. 10"
+                    className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </div>
+                <div className="md:w-40">
+                  <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
                     Position in stage (optional)
                   </label>
                   <input
@@ -848,7 +894,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   <button
                     type="button"
                     onClick={() => void onSubmitAdd(stageGroup.key)}
-                    disabled={busyKey === `add:${stageGroup.key}` || addTitle.trim() === ''}
+                    disabled={busyKey === `add:${stageGroup.key}` || addTitle.trim() === '' || addPercentage.trim() === ''}
                     className="inline-flex items-center gap-1.5 rounded bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
                   >
                     {busyKey === `add:${stageGroup.key}` ? 'Adding…' : 'Add Key Action'}
@@ -856,8 +902,9 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                 </div>
               </div>
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Added to this matter only — the workflow template is not changed. Leave the position blank to add it
-                to the end of the stage.
+                Added to this matter only — the workflow template is not changed. Percentage is mandatory: it drives
+                progress, fees earned and contract value like every other Key Action. Leave the position blank to add
+                it to the end of the stage.
               </p>
             </div>
           ) : null}
@@ -937,6 +984,14 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     title="Added on this matter only — not part of the workflow template"
                   >
                     Case-specific
+                  </span>
+                ) : null}
+                {typeof s.percentage === 'number' && Number.isFinite(s.percentage) ? (
+                  <span
+                    className="inline-flex items-center rounded-full border border-gray-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300"
+                    title={`Worth ${s.percentage}% of the matter contract value`}
+                  >
+                    {s.percentage}% of fee
                   </span>
                 ) : null}
               </div>
@@ -1120,7 +1175,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           {canCompleteSteps && s.custom === true && editOpenFor === s.stepKey ? (
             <div className="px-5 py-4 border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40">
               <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Edit Key Action</div>
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div className="md:col-span-1">
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
                   <input
@@ -1132,6 +1187,23 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                         void onSubmitEdit(s.stepKey, s.stageKey);
                       }
                     }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Percentage <span className="text-red-600 dark:text-red-400">*</span>
+                  </label>
+                  <input
+                    value={editPercentage}
+                    onChange={(e) => setEditPercentage(e.target.value)}
+                    type="number"
+                    min={0.01}
+                    max={100}
+                    step="any"
+                    required
+                    aria-required="true"
+                    placeholder="e.g. 10"
                     className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   />
                 </div>
