@@ -16,10 +16,16 @@ export type WorkflowInstance = {
     stageOrder?: number;
     /**
      * True when this Key Action was added directly on this case (Overview tab)
-     * rather than defined by the workflow template. Custom Key Actions are the
-     * only ones that may be edited or deleted from the case.
+     * rather than defined by the workflow template. Custom Key Actions live
+     * only on the case, never on the template.
      */
     custom?: boolean;
+    /**
+     * True when a template-defined Key Action was edited on this case only
+     * (title / stage / position / percentage). The template is never touched;
+     * the override follows the normal Key Action lifecycle.
+     */
+    overridden?: boolean;
     /** Within-stage position of a custom Key Action (mirrors `order` for custom steps). */
     customOrder?: number;
     status: 'Not Started' | 'In Progress' | 'Done' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';

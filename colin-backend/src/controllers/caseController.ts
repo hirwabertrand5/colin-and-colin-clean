@@ -1064,7 +1064,8 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
           } else {
             // Merge instead of replacing: the case keeps its key actions, ticks
             // and percentages even when the template (or start date) changed.
-            steps = buildUpdatedInstanceSteps(inst.steps, template, wfStart);
+            // Case-only edits/deletes survive via `overridden` / `deletedStepKeys`.
+            steps = buildUpdatedInstanceSteps(inst.steps, template, wfStart, inst.deletedStepKeys);
             inst.templateId = template._id;
             inst.currentStepKey =
               steps.find((step: any) => step.stepKey === inst.currentStepKey)?.stepKey || steps[0]?.stepKey;

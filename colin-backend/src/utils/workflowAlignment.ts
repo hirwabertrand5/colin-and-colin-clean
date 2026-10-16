@@ -8,6 +8,9 @@
  * destroyed:
  *
  * - a step keeps its own deadline, status, completion stamp and extensions;
+ * - a Key Action edited on the case only keeps its case title / stage /
+ *   position / percentage (the template is never touched);
+ * - a Key Action deleted on the case only stays deleted and is never restored;
  * - the per-step sub-checklist is retired: every stored checklist item leaves
  *   the active checklist; when it was ticked, its record (text, tick and
  *   timestamp) is returned so the caller archives it on the instance instead of
@@ -70,17 +73,28 @@ export type WorkflowAlignmentResult = {
  * True when the case carries a step the template no longer defines. A matter can
  * drift like this while still being linked to the canonical template (an earlier
  * alignment kept the old steps), so this is what lets the repair run again.
+ * Case-only deletions (`deletedStepKeys`) are intentional and never drift.
  */
-export const hasSupersededTemplateSteps = (existingSteps: any[] | undefined, template: any): boolean => {
+export const hasSupersededTemplateSteps = (
+  existingSteps: any[] | undefined,
+  template: any,
+  deletedStepKeys?: unknown
+): boolean => {
   const templateKeys = new Set(
     (Array.isArray(template?.steps) ? template.steps : []).map((step: any) => String(step?.key || ''))
   );
   if (!templateKeys.size) return false;
+  const deletedKeys = new Set(
+    (Array.isArray(deletedStepKeys) ? deletedStepKeys : []).map((key: any) => String(key || '').trim()).filter(Boolean)
+  );
   return (Array.isArray(existingSteps) ? existingSteps : []).some(
     // Case-specific Key Actions are intentionally not in the template, so they
     // must never count as "superseded template steps" (which would trigger a
     // pointless reconciliation pass on every load).
-    (step: any) => step?.custom !== true && !templateKeys.has(String(step?.stepKey || ''))
+    (step: any) =>
+      step?.custom !== true &&
+      !templateKeys.has(String(step?.stepKey || '')) &&
+      !deletedKeys.has(String(step?.stepKey || ''))
   );
 };
 
@@ -89,9 +103,14 @@ export const alignInstanceStepsToTemplate = (
   existingSteps: any[] | undefined,
   template: any,
   startDate: Date,
-  options: { keepLegacyProgress?: boolean } = {}
+  options: { keepLegacyProgress?: boolean; deletedStepKeys?: unknown } = {}
 ): WorkflowAlignmentResult => {
   const keepLegacyProgress = options.keepLegacyProgress !== false;
+  const deletedKeys = new Set(
+    (Array.isArray(options.deletedStepKeys) ? options.deletedStepKeys : [])
+      .map((key: any) => String(key || '').trim())
+      .filter(Boolean)
+  );
   const builtSteps = buildInstanceSteps(template, startDate);
   const previousByKey = new Map<string, any>(
     (Array.isArray(existingSteps) ? existingSteps : []).map((step: any) => [String(step?.stepKey || ''), step])
@@ -116,7 +135,13 @@ export const alignInstanceStepsToTemplate = (
 
   const archivedActions: ArchivedActionRecord[] = [];
 
-  const steps: any[] = builtSteps.map((templateStep: any) => {
+  // A Key Action deleted on the case only never returns via alignment, even
+  // when the template still defines it.
+  const activeBuiltSteps = builtSteps.filter(
+    (templateStep: any) => !deletedKeys.has(String(templateStep?.stepKey || ''))
+  );
+
+  const steps: any[] = activeBuiltSteps.map((templateStep: any) => {
     const previous: any = previousByKey.get(String(templateStep.stepKey));
     if (previous) summary.matchedSteps += 1;
     else summary.addedTemplateSteps += 1;
@@ -144,25 +169,55 @@ export const alignInstanceStepsToTemplate = (
     const templateStepPercentage = parsePercentage(templateStepByKey.get(String(templateStep.stepKey))?.percentage);
     const templateStagePercentage = parsePercentage(templateStageByKey.get(String(templateStep.stageKey))?.percentage);
 
+    // A Key Action edited on the case only keeps its case title / stage /
+    // position / percentage. Lifecycle fields (deadlines, status, stamps,
+    // history) always follow the case.
+    const isOverridden = previous?.overridden === true;
+    const overriddenTitle =
+      typeof previous?.title === 'string' && previous.title.trim() ? previous.title : templateStep.title;
     return {
       ...templateStep,
+      ...(isOverridden
+        ? {
+            title: overriddenTitle,
+            stageKey: String(previous?.stageKey || templateStep.stageKey),
+            stageTitle: previous?.stageTitle ?? templateStep.stageTitle,
+            stageOrder:
+              typeof previous?.stageOrder === 'number' ? previous.stageOrder : templateStep.stageOrder,
+            stagePercentage:
+              typeof previous?.stagePercentage === 'number'
+                ? previous.stagePercentage
+                : templateStep.stagePercentage,
+            percentage:
+              typeof previous?.percentage === 'number' ? previous.percentage : templateStep.percentage,
+            order: typeof previous?.order === 'number' ? previous.order : templateStep.order,
+            ...(typeof previous?.customOrder === 'number' ? { customOrder: previous.customOrder } : {}),
+            overridden: true,
+          }
+        : {}),
       // A live step keeps its own deadline; only brand-new steps get fresh ones.
       startAt: previous?.startAt ? new Date(previous.startAt) : templateStep.startAt,
       dueAt: previous?.dueAt ? new Date(previous.dueAt) : templateStep.dueAt,
       stageOrder:
-        typeof templateStep?.stageOrder === 'number'
-          ? templateStep.stageOrder
-          : typeof previous?.stageOrder === 'number'
-            ? previous.stageOrder
-            : undefined,
+        isOverridden && typeof previous?.stageOrder === 'number'
+          ? previous.stageOrder
+          : typeof templateStep?.stageOrder === 'number'
+            ? templateStep.stageOrder
+            : typeof previous?.stageOrder === 'number'
+              ? previous.stageOrder
+              : undefined,
       percentage:
-        templateStepPercentage === undefined && Number(previous?.percentage) > 0
-          ? Number(previous.percentage)
-          : templateStep.percentage,
+        isOverridden && typeof previous?.percentage === 'number'
+          ? previous.percentage
+          : templateStepPercentage === undefined && Number(previous?.percentage) > 0
+            ? Number(previous.percentage)
+            : templateStep.percentage,
       stagePercentage:
-        templateStagePercentage === undefined && Number(previous?.stagePercentage) > 0
-          ? Number(previous.stagePercentage)
-          : templateStep.stagePercentage,
+        isOverridden && typeof previous?.stagePercentage === 'number'
+          ? previous.stagePercentage
+          : templateStagePercentage === undefined && Number(previous?.stagePercentage) > 0
+            ? Number(previous.stagePercentage)
+            : templateStep.stagePercentage,
       status: previous?.status || templateStep.status,
       completedAt: previous?.completedAt,
       submittedAt: previous?.submittedAt,
@@ -173,6 +228,8 @@ export const alignInstanceStepsToTemplate = (
       extensionHistory: Array.isArray(previous?.extensionHistory) ? previous.extensionHistory : [],
       actions: [],
       outputs: templateStep.outputs,
+      // Retired sub-checklist records keep the case-edited title.
+      ...(isOverridden ? { stepTitle: overriddenTitle } : {}),
     };
   });
 
@@ -181,11 +238,14 @@ export const alignInstanceStepsToTemplate = (
   // decides whether superseded work that carries progress is archived (the
   // default) or dropped outright (opt-in pruning) — either way it never stays on
   // the checklist.
-  const builtKeys = new Set(builtSteps.map((step: any) => String(step?.stepKey || '')));
+  const builtKeys = new Set(activeBuiltSteps.map((step: any) => String(step?.stepKey || '')));
   const archivedSteps: any[] = [];
   for (const step of Array.isArray(existingSteps) ? existingSteps : []) {
     const stepKey = String(step?.stepKey || '');
     if (builtKeys.has(stepKey)) continue;
+    // A Key Action deleted on the case only is already gone from `steps`; it
+    // must never be archived back or counted as drift.
+    if (deletedKeys.has(stepKey)) continue;
 
     // Case-specific Key Actions are deliberately NOT part of the template, so
     // they are never "superseded": keep them on the case's active checklist

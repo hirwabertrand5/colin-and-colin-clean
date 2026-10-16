@@ -135,6 +135,12 @@ export interface IInstanceStep {
    */
   custom?: boolean;
   /**
+   * True when a template-defined Key Action was edited on this case only
+   * (title / stage / position / percentage). The template is never touched;
+   * the override lives on the instance step and follows the normal lifecycle.
+   */
+  overridden?: boolean;
+  /**
    * Authoritative position of a custom Key Action within its own stage. Custom
    * steps are ordered by this before the template `order`, so a case-specific
    * Key Action can sit at any position among a stage's Key Actions.
@@ -163,6 +169,13 @@ export interface IWorkflowInstance extends Document {
   currentStepKey?: string;
 
   steps: IInstanceStep[];
+
+  /**
+   * Template-defined Key Actions removed on this case only. The template is
+   * never touched; the case keeps this list so template sync / reconciliation
+   * never restores a Key Action the matter's members deleted.
+   */
+  deletedStepKeys?: string[];
 
   /**
    * Steps that belonged to a superseded workflow template. They are removed from
@@ -275,6 +288,9 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
 
     // Case-specific Key Action added on the matter itself (never on the template).
     custom: { type: Boolean, default: false },
+    // Template Key Action edited on this case only (title/stage/position/percentage).
+    // Never written back to the template; follows the normal lifecycle.
+    overridden: { type: Boolean, default: false },
     customOrder: { type: Number },
 
     outputs: { type: [InstanceOutputSchema], default: [] },
@@ -304,6 +320,9 @@ const WorkflowInstanceSchema = new Schema<IWorkflowInstance>(
     currentStepKey: { type: String },
 
     steps: { type: [InstanceStepSchema], default: [] },
+
+    // Template Key Actions deleted on this case only (template untouched).
+    deletedStepKeys: { type: [String], default: [] },
 
     archivedSteps: { type: [InstanceStepSchema], default: [] },
 

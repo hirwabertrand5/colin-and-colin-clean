@@ -64,9 +64,10 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const [amendMode, setAmendMode] = useState<DeadlineAmendmentMode>('standard');
   const [revokeReason, setRevokeReason] = useState<string>('');
 
-  // ---- Case-specific Key Actions (added on this matter only) ----
+  // ---- Case Key Actions (edited on this matter only) ----
   // `addOpenFor` holds the stageKey of the stage whose "Add Key Action" form is
-  // open; `editOpenFor` holds the stepKey of the custom Key Action being edited.
+  // open; `editOpenFor` holds the stepKey of the Key Action being edited.
+  // Edits and deletes apply to THIS case only and never touch the template.
   const [addOpenFor, setAddOpenFor] = useState<string>('');
   const [addTitle, setAddTitle] = useState<string>('');
   const [addPosition, setAddPosition] = useState<string>('');
@@ -247,10 +248,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     }
   };
 
-  // ---- Case-specific Key Action handlers ----
+  // ---- Case Key Action handlers ----
   // These add/edit/delete a Key Action on THIS matter only; the workflow
   // template is never touched. After each mutation we re-sync the instance and
   // earned fees so the checklist, progress and values stay consistent.
+  // An edited Key Action keeps the normal lifecycle (tick / complete, reopen,
+  // amend deadline) exactly like any other Key Action.
   const resetAddForm = () => {
     setAddOpenFor('');
     setAddTitle('');
@@ -985,6 +988,13 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   >
                     Case-specific
                   </span>
+                ) : s.overridden === true ? (
+                  <span
+                    className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                    title="Edited on this matter only — the workflow template is unchanged"
+                  >
+                    Edited for this case
+                  </span>
                 ) : null}
                 {typeof s.percentage === 'number' && Number.isFinite(s.percentage) ? (
                   <span
@@ -1033,14 +1043,13 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             {/* Action zone: amendment + complete/reopen, grouped so the tick is
                 always the last thing the eye lands on. */}
             <div className="flex shrink-0 items-center gap-2">
-              {canCompleteSteps && s.custom === true ? (
+              {canCompleteSteps ? (
                 <>
                   <button
                     type="button"
                     onClick={() => openEditForm(s)}
-                    disabled={isCompleted}
-                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                    title={isCompleted ? 'Reopen this Key Action before editing it' : 'Edit this Key Action on this matter'}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    title="Edit this Key Action on this matter only (template unchanged). Works even when ticked or completed — status and ticks are kept."
                   >
                     <Pencil className="h-3.5 w-3.5" />
                     Edit
@@ -1052,7 +1061,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                       setConfirmDeleteKey((current) => (current === s.stepKey ? '' : s.stepKey));
                     }}
                     className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 dark:border-red-700 dark:bg-gray-800 dark:text-red-300 dark:hover:bg-red-900/30"
-                    title="Delete this Key Action from this matter"
+                    title="Delete this Key Action from this matter only (template unchanged)"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                     Delete
@@ -1172,9 +1181,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             </div>
           ) : null}
 
-          {canCompleteSteps && s.custom === true && editOpenFor === s.stepKey ? (
+          {canCompleteSteps && editOpenFor === s.stepKey ? (
             <div className="px-5 py-4 border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40">
               <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Edit Key Action</div>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Changes apply to this matter only. The workflow template is not changed.
+              </p>
               <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div className="md:col-span-1">
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
@@ -1253,7 +1265,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             </div>
           ) : null}
 
-          {canCompleteSteps && s.custom === true && confirmDeleteKey === s.stepKey ? (
+          {canCompleteSteps && confirmDeleteKey === s.stepKey ? (
             <div className="px-5 py-4 border-b border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/40">
               <div className="text-sm font-semibold text-red-700 dark:text-red-100">Delete this Key Action?</div>
               <p className="mt-1 text-xs text-red-700 dark:text-red-200">

@@ -74,6 +74,14 @@ export const resolveCompletedKeyActions = (template: any, workflowInstance?: any
   const templateSteps = Array.isArray(template?.steps) ? template.steps : [];
   const instanceSteps = Array.isArray(workflowInstance?.steps) ? workflowInstance.steps : [];
   const instanceByKey = new Map<string, any>(instanceSteps.map((step: any) => [String(step?.stepKey || ''), step]));
+  // A template Key Action deleted on the case only never earns, even though the
+  // template still defines it. It is gone from the instance steps, but tasks
+  // linked by key must not resurrect it either.
+  const deletedKeys = new Set(
+    (Array.isArray((workflowInstance as any)?.deletedStepKeys) ? (workflowInstance as any).deletedStepKeys : [])
+      .map((key: any) => String(key || '').trim())
+      .filter(Boolean)
+  );
   const completedByTask = new Map<string, any>();
   for (const task of Array.isArray(tasks) ? tasks : []) {
     if (!isTaskChecklistComplete(task)) continue;
@@ -85,7 +93,7 @@ export const resolveCompletedKeyActions = (template: any, workflowInstance?: any
   const knownKeys = new Set<string>();
   for (const templateStep of templateSteps) {
     const key = String(templateStep?.key || '').trim();
-    if (!key) continue;
+    if (!key || deletedKeys.has(key)) continue;
     knownKeys.add(key);
     const instanceStep = instanceByKey.get(key);
     const task = completedByTask.get(key);
@@ -113,18 +121,24 @@ export const resolveCompletedKeyActions = (template: any, workflowInstance?: any
 const resolveKeyActionProgress = (template: any, workflowInstance: any, completed: CompletedKeyAction[], contractValue: number): KeyActionProgress[] => {
   const templateSteps = Array.isArray(template?.steps) ? template.steps : [];
   const instanceSteps = Array.isArray(workflowInstance?.steps) ? workflowInstance.steps : [];
+  const deletedKeys = new Set(
+    (Array.isArray(workflowInstance?.deletedStepKeys) ? workflowInstance.deletedStepKeys : [])
+      .map((key: any) => String(key || '').trim())
+      .filter(Boolean)
+  );
   const completeKeys = new Set(completed.map((action) => action.key));
   const seen = new Set<string>();
   // Merge template + instance so case-specific Key Actions (which exist only
   // on the instance) follow the same lifecycle: progress, covered value,
-  // completed value, fees earned and contract value.
+  // completed value, fees earned and contract value. Case-only deletes are
+  // excluded even though the template still defines them.
   const instanceFallback = instanceSteps.map((step: any) => ({ key: step?.stepKey, title: step?.title, percentage: step?.percentage }));
   const sourceSteps = [...templateSteps, ...instanceFallback];
   if (!sourceSteps.length) return [];
   const instanceByKey = new Map<string, any>(instanceSteps.map((step: any) => [String(step?.stepKey || ''), step]));
   return sourceSteps.flatMap((step: any) => {
     const key = String(step?.key || '').trim();
-    if (!key || seen.has(key)) return [];
+    if (!key || seen.has(key) || deletedKeys.has(key)) return [];
     seen.add(key);
     // Prefer the live instance percentage so edits and custom actions win.
     const instancePercentage = literalPercentage(instanceByKey.get(key)?.percentage);

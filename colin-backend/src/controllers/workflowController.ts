@@ -164,14 +164,21 @@ const isClosedCaseWorkflow = (caseDoc: any, inst?: any) =>
  * - key actions (checklists) are matched by TEXT, never by position, so a
  *   reorder in the template can never move a case's ticks to another action;
  * - key actions added on the case itself are kept;
+ * - Key Actions edited on the case only (overridden title / stage / position /
+ *   percentage) keep their case values — the template is never touched;
+ * - Key Actions deleted on the case only stay deleted (see `deletedStepKeys`)
+ *   and are never restored by a template sync;
  * - case steps that the template no longer defines are kept instead of being
  *   silently deleted;
  * - a percentage that is genuinely absent from the template never zeroes the
  *   value the case already stored (an intentional 0% is still honoured).
  */
-export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: any, startDate: Date) => {
+export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: any, startDate: Date, existingDeletedStepKeys?: unknown) => {
   const builtSteps = buildInstanceSteps(template, startDate);
   const existingByKey = new Map((existingSteps || []).map((step: any) => [String(step.stepKey), step]));
+  const deletedKeys = new Set(
+    (Array.isArray(existingDeletedStepKeys) ? existingDeletedStepKeys : []).map((key: any) => String(key || '').trim()).filter(Boolean)
+  );
   const templateStepByKey = new Map<string, any>(
     (Array.isArray(template?.steps) ? template.steps : []).map((step: any) => [String(step?.key || ''), step] as [string, any])
   );
@@ -179,7 +186,9 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
     (Array.isArray(template?.stages) ? template.stages : []).map((stage: any) => [String(stage?.key || ''), stage] as [string, any])
   );
 
-  const mergedSteps = builtSteps.map((nextStep: any) => {
+  const mergedSteps = builtSteps
+    .filter((nextStep: any) => !deletedKeys.has(String(nextStep?.stepKey || '')))
+    .map((nextStep: any) => {
     const previous = existingByKey.get(String(nextStep.stepKey));
 
     const templateStep = templateStepByKey.get(String(nextStep.stepKey));
@@ -194,19 +203,55 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
     // Only a step with no recorded history takes the planned schedule.
     const hasManualDeadline = Array.isArray(previous?.extensionHistory) && previous.extensionHistory.length > 0;
     const pinnedFixed = hasActiveFixedAmendment(previous) && previous?.dueAt ? new Date(previous.dueAt) : undefined;
+    // A Key Action edited on the case only keeps its case values across a
+    // template sync (title / stage / position / percentage). Status stamps,
+    // deadlines and history always follow the case, never the template.
+    const isOverridden = previous?.overridden === true || previous?.custom === true;
+    const overriddenPercentage =
+      typeof previous?.percentage === 'number' && Number.isFinite(previous.percentage)
+        ? previous.percentage
+        : undefined;
+    const overriddenStagePercentage =
+      typeof previous?.stagePercentage === 'number' && Number.isFinite(previous.stagePercentage)
+        ? previous.stagePercentage
+        : undefined;
     return {
       ...nextStep,
+      ...(isOverridden
+        ? {
+            title: typeof previous?.title === 'string' && previous.title.trim() ? previous.title : nextStep.title,
+            stageKey: String(previous?.stageKey || nextStep.stageKey),
+            stageTitle: previous?.stageTitle ?? nextStep.stageTitle,
+            stageOrder: typeof previous?.stageOrder === 'number' ? previous.stageOrder : nextStep.stageOrder,
+            stagePercentage:
+              typeof previous?.stagePercentage === 'number' ? previous.stagePercentage : nextStep.stagePercentage,
+            percentage:
+              typeof previous?.percentage === 'number' ? previous.percentage : nextStep.percentage,
+            order: typeof previous?.order === 'number' ? previous.order : nextStep.order,
+            ...(typeof previous?.customOrder === 'number' ? { customOrder: previous.customOrder } : {}),
+            overridden: previous?.custom === true ? undefined : true,
+          }
+        : {}),
       startAt: previous?.startAt ? new Date(previous.startAt) : nextStep.startAt,
       dueAt: pinnedFixed || (hasManualDeadline && previous?.dueAt ? new Date(previous.dueAt) : nextStep.dueAt),
-      stageOrder: typeof nextStep?.stageOrder === 'number' ? nextStep.stageOrder : previous?.stageOrder,
+      stageOrder:
+        isOverridden && typeof previous?.stageOrder === 'number'
+          ? previous.stageOrder
+          : typeof nextStep?.stageOrder === 'number'
+            ? nextStep.stageOrder
+            : previous?.stageOrder,
       percentage:
-        templateStepPercentage === undefined && Number(previous?.percentage) > 0
-          ? Number(previous.percentage)
-          : nextStep.percentage,
+        isOverridden && overriddenPercentage !== undefined
+          ? overriddenPercentage
+          : templateStepPercentage === undefined && Number(previous?.percentage) > 0
+            ? Number(previous.percentage)
+            : nextStep.percentage,
       stagePercentage:
-        templateStagePercentage === undefined && Number(previous?.stagePercentage) > 0
-          ? Number(previous.stagePercentage)
-          : nextStep.stagePercentage,
+        isOverridden && overriddenStagePercentage !== undefined
+          ? overriddenStagePercentage
+          : templateStagePercentage === undefined && Number(previous?.stagePercentage) > 0
+            ? Number(previous.stagePercentage)
+            : nextStep.stagePercentage,
       status: previous?.status || nextStep.status,
       completedAt: previous?.completedAt,
       submittedAt: previous?.submittedAt,
@@ -220,12 +265,13 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
   });
 
   // Steps the template no longer defines stay on the case with their progress.
+  // A Key Action deleted on the case only is never restored here.
   // Ordering is authoritative stage order first (`stageOrder`, backfilled
   // from the legacy `order` so old instances sort identically), then action
   // order — never raw action order alone.
   const builtKeys = new Set(builtSteps.map((step: any) => String(step?.stepKey)));
   const removedFromTemplate = (existingSteps || [])
-    .filter((step: any) => !builtKeys.has(String(step?.stepKey)))
+    .filter((step: any) => !builtKeys.has(String(step?.stepKey)) && !deletedKeys.has(String(step?.stepKey || '')))
     .map((step: any) => ({ ...step }));
 
   const stageRankOf = (step: any) =>
@@ -245,7 +291,7 @@ const syncCaseWorkflowInstanceFromTemplate = async (caseId: string, template: an
   // shared template must never append work to it or make it active again.
   if (isWorkflowInstanceCompleted(inst)) return inst;
 
-  const nextSteps = buildUpdatedInstanceSteps(inst.steps, template, wfStart);
+  const nextSteps = buildUpdatedInstanceSteps(inst.steps, template, wfStart, inst.deletedStepKeys);
   const currentStep = inst.currentStepKey ? nextSteps.find((step: any) => step.stepKey === inst.currentStepKey) : null;
 
   inst.templateId = template._id;
@@ -342,7 +388,7 @@ export const reconcileInstanceTemplateWithCanonical = async (
     // longer defines. A matter drifts exactly like this when an earlier alignment
     // kept the old template's steps; without this check the stale entries stay on
     // the checklist forever.
-    if (targetId === linkedId && !options.force && !hasSupersededTemplateSteps(inst.steps, linked)) {
+    if (targetId === linkedId && !options.force && !hasSupersededTemplateSteps(inst.steps, linked, inst.deletedStepKeys)) {
       return null;
     }
   } else {
@@ -367,6 +413,7 @@ export const reconcileInstanceTemplateWithCanonical = async (
     resolveDeadlineDateTime(caseDoc.workflowStartDate || caseDoc.createdAt || new Date()) || new Date();
   const { steps, archivedSteps, archivedActions, summary } = alignInstanceStepsToTemplate(inst.steps, template, wfStart, {
     keepLegacyProgress: !options.pruneLegacy,
+    deletedStepKeys: inst.deletedStepKeys,
   });
 
   // Preserve any previously archived work and merge the newly superseded steps,
@@ -1565,14 +1612,15 @@ export const revokeStepDeadlineAmendment = async (req: AuthRequest, res: Respons
 // them on the active checklist instead of archiving them (see workflowAlignment).
 
 /**
- * Position a custom Key Action within its stage using a fractional `order`.
+ * Position a case Key Action within its stage using a fractional `order`.
  *
- * Template steps keep their integer `order`, so a custom step slots between two
- * of them (e.g. 2.5) without ever renumbering template steps — which is what
- * lets it sit at ANY position and survive template reconciliation unchanged.
+ * Template steps keep their integer `order`, so an edited or added step slots
+ * between two of them (e.g. 2.5) without ever renumbering template steps —
+ * which is what lets it sit at ANY position and survive template
+ * reconciliation unchanged.
  * `position` is the 0-based index within the stage (default: append to the end).
  */
-const computeCustomStepOrder = (
+const computeCaseStepOrder = (
   steps: any[],
   stageKey: string,
   position: unknown,
@@ -1693,7 +1741,7 @@ export const addStep = async (req: AuthRequest, res: Response) => {
     const template: any = await WorkflowTemplate.findById(inst.templateId).lean();
     const meta = resolveStageMetaForCustomStep(inst.steps, template, targetStageKey);
     const stepKey = buildCustomStepKey(inst);
-    const order = computeCustomStepOrder(inst.steps, targetStageKey, position);
+    const order = computeCaseStepOrder(inst.steps, targetStageKey, position);
 
     inst.steps.push({
       stepKey,
@@ -1786,8 +1834,15 @@ export const addStepAction = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Edit a case-specific Key Action (rename, move stage, reorder). Template Key
-// Actions are read-only here — they are owned by the workflow template.
+// Edit a Key Action on THIS case only (rename, move stage, reorder, percentage).
+// The workflow template is never touched: template-defined steps get a
+// case-only override (`overridden: true`) that keeps the normal Key Action
+// lifecycle (tick / complete, reopen, amend deadline), while case-added
+// (custom) steps keep their existing behaviour. Editing is allowed at ANY
+// lifecycle status — Not Started, ticked/Done, awaiting review/approval, or
+// Completed — and never changes the status itself: ticks, completion stamps
+// and review-chain state are preserved, so a finished Key Action stays
+// finished under its updated name/percentage/position.
 export const updateStep = async (req: AuthRequest, res: Response) => {
   try {
     const { caseId, stepKey } = req.params as any;
@@ -1808,18 +1863,18 @@ export const updateStep = async (req: AuthRequest, res: Response) => {
 
     const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
     if (!step) return res.status(404).json({ message: 'Key Action not found.' });
-    if (step.custom !== true) {
-      return res.status(400).json({ message: 'Only Key Actions added on this case can be edited here.' });
-    }
-    if (step.status === 'Completed') {
-      return res.status(400).json({ message: 'Reopen this Key Action before editing it.' });
-    }
+
+    // Editing never changes lifecycle state: a ticked/Done or Completed Key
+    // Action keeps its status, ticks, completion stamps and review-chain state.
+    // (The closed-matter guard above still protects finished matters.)
+    const isCustom = step.custom === true;
 
     const nextTitle = String(title ?? step.title).trim();
     if (!nextTitle) return res.status(400).json({ message: 'Key Action title is required.' });
 
     // Percentage stays mandatory on edit so the lifecycle (progress, fees
-    // earned, contract value) never loses a custom Key Action's weight.
+    // earned, contract value) never loses a Key Action's weight. A template
+    // step edited here keeps its case percentage; the template keeps its own.
     const currentPercentage = literalPercentage(step.percentage);
     const nextPercentage = percentage !== undefined ? literalPercentage(percentage) : currentPercentage;
     if (nextPercentage === undefined || nextPercentage <= 0) {
@@ -1853,11 +1908,15 @@ export const updateStep = async (req: AuthRequest, res: Response) => {
 
     step.title = nextTitle;
     step.percentage = nextPercentage;
+    // A template-defined step edited on the case is marked as a case-only
+    // override so template sync / reconciliation keeps the case values and
+    // never writes back to the template.
+    if (!isCustom) step.overridden = true;
 
     // Recompute the position within its (possibly new) stage whenever a position
     // is supplied, or whenever the stage changed (so it lands sensibly).
     if (position !== undefined || stageChanged) {
-      step.order = computeCustomStepOrder(inst.steps, nextStageKey, position, stepKey);
+      step.order = computeCaseStepOrder(inst.steps, nextStageKey, position, stepKey);
       step.customOrder = step.order;
     }
 
@@ -1880,8 +1939,11 @@ export const updateStep = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Delete a case-specific Key Action. Template Key Actions can never be deleted
-// from a case — only the workflow template owns those.
+// Delete a Key Action on THIS case only. The workflow template is never
+// touched: a case-added (custom) step is removed outright, while a
+// template-defined step is hidden for this case via `deletedStepKeys` so sync /
+// reconciliation never restores it. The removed step keeps its normal lifecycle
+// handling (current-step advance, progress refresh, audit).
 export const deleteStep = async (req: AuthRequest, res: Response) => {
   try {
     const { caseId, stepKey } = req.params as any;
@@ -1901,12 +1963,19 @@ export const deleteStep = async (req: AuthRequest, res: Response) => {
 
     const step: any = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
     if (!step) return res.status(404).json({ message: 'Key Action not found.' });
-    if (step.custom !== true) {
-      return res.status(400).json({ message: 'Only Key Actions added on this case can be deleted here.' });
-    }
 
     const removedTitle = String(step.title || '');
+    const isCustom = step.custom === true;
     inst.steps = (inst.steps || []).filter((s: any) => s.stepKey !== stepKey);
+    if (!isCustom) {
+      const deleted = new Set(
+        (Array.isArray(inst.deletedStepKeys) ? inst.deletedStepKeys : [])
+          .map((key: any) => String(key || '').trim())
+          .filter(Boolean)
+      );
+      deleted.add(String(stepKey));
+      inst.deletedStepKeys = Array.from(deleted);
+    }
 
     // If the removed step was the in-flight one, advance to the next open step.
     if (inst.currentStepKey === stepKey) {
