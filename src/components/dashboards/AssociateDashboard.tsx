@@ -27,10 +27,19 @@ import {
 import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
 import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
 import { getAllProspects, Prospect } from '../../services/prospectService';
+import { listIndependentTasks, IndependentTask } from '../../services/independentTaskService';
+import { getCaseManagement, CaseManagementState } from '../../services/caseManagementService';
+import { getStageDueAt, getStageUrgencyColor } from '../../utils/prospectStageConfig';
+import { identityMatches } from '../../utils/caseAssignments';
 import { getAllTasks, TaskData } from '../../services/taskService';
 import { getMyAuditTrail, AuditFeedItem } from '../../services/auditService';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
-import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
+import {
+  formatDeadlineDateTime,
+  getUrgencyColorForDueDate,
+  resolveDeadlineDateTime,
+  type UrgencyColor,
+} from '../../utils/workflowDeadline';
 import { baseNameFromLabel } from '../../utils/productivity';
 import { sortRows, toggleSortKey } from '../../utils/tableSort';
 import type { SortDir } from '../../utils/tableSort';
@@ -82,6 +91,40 @@ type MatterRow = CaseData & {
   openTasks: number;
   warningTasks: number;
   poorTasks: number;
+};
+
+/**
+ * One countable unit of assigned work for the staff dashboard.
+ *
+ * The whole matter is the PARENT task; every open Key Action inside a matter
+ * the member is assigned to is a SUB-TASK. Legacy matter tasks, independent
+ * (standalone) tasks and intake/prospect stages are sibling work items, so
+ * every card below counts from this single list — never from ad-hoc filters.
+ */
+type WorkItemKind = 'key-action' | 'matter-task' | 'independent-task' | 'prospect';
+
+type UnifiedWorkItem = {
+  id: string;
+  kind: WorkItemKind;
+  title: string;
+  status: string;
+  priority: string;
+  dueAt?: Date;
+  dueLabel: string;
+  urgency: UrgencyColor;
+  overdue: boolean;
+  /** Review queue the item is parked in (review vs approval vs external). */
+  queue: 'review' | 'approval' | 'external' | 'none';
+  /** Kanban column the item belongs to. */
+  column: 'Not Started' | 'In Progress' | 'Completed' | 'Awaiting Review' | 'Awaiting External Action';
+  /** Deep link — key actions open their Case Management section. */
+  href: string;
+  matterId?: string;
+  matterNo?: string;
+  matterParties?: string;
+  roleLabel: string;
+  /** True when the approval queue is caused by client / third-party wait. */
+  waitingOnClient: boolean;
 };
 
 type TeamRow = {
@@ -245,36 +288,6 @@ const getTaskDate = (raw?: string) => {
   return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
 };
 
-const getConsumedPercent = (task: TaskData, todayISO: string) => {
-  const start = getTaskDate(task.startDate || task.createdAt) || getTaskDate(task.dueDate);
-  const due = getTaskDate(task.dueDate);
-  const reference =
-    task.status === 'Completed'
-      ? getTaskDate(task.completedAt || task.updatedAt) || due
-      : getTaskDate(`${todayISO}T23:59:59`);
-
-  if (!start || !due || !reference) return 0;
-  const total = due.getTime() - start.getTime();
-  if (!Number.isFinite(total) || total <= 0) return reference.getTime() <= due.getTime() ? 50 : 101;
-  return Math.round(((reference.getTime() - start.getTime()) / total) * 1000) / 10;
-};
-
-const getTimelinessBand = (task: TaskData, asOfISO: string) => {
-  const dueAt = getTaskDate(task.dueDate);
-  // "Late" is measured against the reference date (today for the current view,
-  // the period end when reviewing a past window) — never against a fixed now.
-  const reference = getTaskDate(`${asOfISO}T23:59:59`);
-  if (task.status !== 'Completed' && dueAt && reference && dueAt.getTime() < reference.getTime()) return 'late';
-  const consumed = getConsumedPercent(task, asOfISO);
-  if (consumed <= 25) return 'excellent';
-  if (consumed <= 50) return 'good';
-  if (consumed <= 75) return 'warning';
-  if (consumed <= 100) return 'poor';
-  return 'late';
-};
-
-const getTimelinessScore = (task: TaskData, asOfISO: string) => Math.min(100, Math.max(0, Math.round(100 - getConsumedPercent(task, asOfISO))));
-
 const toneClasses: Record<Tone, { icon: string; text: string; chip: string; bar: string }> = {
   slate: { icon: 'bg-gray-100 text-gray-700', text: 'text-gray-900', chip: 'bg-gray-100 text-gray-700', bar: 'bg-gray-700' },
   green: { icon: 'bg-green-100 text-green-700', text: 'text-green-700', chip: 'bg-green-100 text-green-700', bar: 'bg-green-600' },
@@ -289,6 +302,15 @@ const priorityChip = (priority: string) => {
   if (priority === 'Medium') return 'bg-yellow-400 text-black';
   if (priority === 'Low') return 'bg-green-100 text-green-700';
   return 'bg-gray-100 text-gray-700';
+};
+
+/** Platform deadline-urgency pill shared by every card on this dashboard. */
+const urgencyChip = (urgency?: string) => {
+  if (urgency === 'red') return 'bg-rose-100 text-rose-700';
+  if (urgency === 'yellow') return 'bg-amber-100 text-amber-700';
+  if (urgency === 'green') return 'bg-emerald-100 text-emerald-700';
+  if (urgency === 'blue') return 'bg-blue-100 text-blue-700';
+  return 'bg-gray-100 text-gray-600';
 };
 
 // ---- Activity trail (audit) helpers ---------------------------------------
@@ -478,6 +500,15 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const [performance, setPerformance] = useState<PerformanceSummary | null>(null);
   const [staffSummary, setStaffSummary] = useState<StaffDashboardSummaryResponse | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [independentTasks, setIndependentTasks] = useState<IndependentTask[]>([]);
+  /**
+   * Per-matter Case Management state (Key Actions = sub-tasks).
+   *
+   * Fetched for the member's authorised matters only, after the matters load.
+   * Each matter is the PARENT task; its open Key Actions are the counted
+   * sub-tasks, coloured by the same platform urgency as every other surface.
+   */
+  const [caseManagementByMatter, setCaseManagementByMatter] = useState<Record<string, CaseManagementState>>({});
   // Activity trail is server-paginated: `auditItems` is the current page, and
   // `auditTotal`/`auditPages` come from the backend so a long period is never
   // silently truncated or presented as complete.
@@ -529,13 +560,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         setLoading(true);
         setError('');
 
-        const [taskResult, caseResult, eventResult, performanceResult, summaryResult, prospectResult, auditResult] = await Promise.allSettled([
+        const [taskResult, caseResult, eventResult, performanceResult, summaryResult, prospectResult, independentResult, auditResult] = await Promise.allSettled([
           getAllTasks(),
           getAllCases(),
           getFirmEvents({ from: today, to: next30Days, type: 'all' }),
           getMyPerformance(),
           getStaffDashboardSummary(),
           getAllProspects({ includeTerminal: true }),
+          listIndependentTasks({ limit: 200 }),
           getMyAuditTrail({ limit: AUDIT_PAGE_SIZE, page: 1 }),
         ]);
 
@@ -546,6 +578,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         if (performanceResult.status === 'fulfilled') setPerformance(performanceResult.value);
         if (summaryResult.status === 'fulfilled') setStaffSummary(summaryResult.value);
         if (prospectResult.status === 'fulfilled') setProspects(prospectResult.value);
+        if (independentResult.status === 'fulfilled') setIndependentTasks(independentResult.value?.items || []);
         if (auditResult.status === 'fulfilled') {
           const page = auditResult.value;
           setAuditItems(page.items || []);
@@ -757,6 +790,50 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     [authorisedCases],
   );
 
+  /**
+   * Per-matter Key Actions (sub-tasks) for the unified My Work list.
+   *
+   * One batched fetch per authorised matter runs after the matters load — not
+   * inside any render loop — and failures resolve to an empty map so the cards
+   * still render from the other sources (legacy tasks, independent tasks,
+   * prospects, calendar).
+   */
+  const authorisedCaseKey = useMemo(
+    () => authorisedCases.map((matter) => String(matter._id || '')).filter(Boolean).sort().join('|'),
+    [authorisedCases],
+  );
+  useEffect(() => {
+    let mounted = true;
+    const ids = authorisedCaseKey ? authorisedCaseKey.split('|') : [];
+    if (!ids.length) {
+      setCaseManagementByMatter({});
+      return () => {
+        mounted = false;
+      };
+    }
+    (async () => {
+      const entries = await Promise.all(
+        ids.slice(0, 60).map(async (id) => {
+          try {
+            const state = await getCaseManagement(id);
+            return [id, state] as const;
+          } catch {
+            return null;
+          }
+        })
+      );
+      if (!mounted) return;
+      const next: Record<string, CaseManagementState> = {};
+      entries.forEach((entry) => {
+        if (entry) next[entry[0]] = entry[1];
+      });
+      setCaseManagementByMatter(next);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [authorisedCaseKey]);
+
   const tasksByCase = useMemo(() => {
     const map = new Map<string, TaskData[]>();
     ownTasks.forEach((task) => {
@@ -769,36 +846,209 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
   const periodTasks = useMemo(() => ownTasks.filter(taskInPeriod), [ownTasks, periodWindow]);
 
-  const taskSignals = useMemo(() => {
-    const open = periodTasks.filter((task) => task.status !== 'Completed');
-    const dueSoon = open.filter((task) => task.dueDate >= asOfISO && task.dueDate <= addDaysISO(asOfISO, 7));
-    const overdue = open.filter((task) => {
-      const dueAt = getTaskDate(task.dueDate);
-      return (dueAt ? dueAt.getTime() < (getTaskDate(`${asOfISO}T23:59:59`)?.getTime() ?? Date.now()) : task.dueDate < asOfISO) || getTimelinessBand(task, asOfISO) === 'late';
+  // Unified workload (chunk 1/4): helper + Key-Action sub-tasks.
+  // The whole matter is the PARENT task; every open Key Action is a SUB-TASK
+  // coloured by its own deadline with the platform urgency rule (red = overdue
+  // or ≤48h left, yellow = ≤7d, green = ≤21d, blue = beyond). Later chunks add
+  // legacy tasks, independent tasks and prospects to the same list.
+  const myWorkItems = useMemo<UnifiedWorkItem[]>(() => {
+    const items: UnifiedWorkItem[] = [];
+    const asOf = resolveDeadlineDateTime(asOfISO) || new Date();
+    const caseById = new Map(authorisedCases.map((matter) => [String(matter._id || ''), matter]));
+
+    Object.values(caseManagementByMatter).forEach((state) => {
+      const matter = caseById.get(String(state.caseId || ''));
+      (state.steps || []).forEach((step) => {
+        if (String(step.status || '') === 'Completed') return;
+        const dueAt = resolveDeadlineDateTime(step.dueAt);
+        const startAt = resolveDeadlineDateTime(step.startAt);
+        const urgency = getUrgencyColorForDueDate(step.dueAt, step.startAt, asOf);
+        const overdue = dueAt ? dueAt.getTime() < asOf.getTime() : false;
+        const queue = step.status === 'Awaiting Approval' ? 'approval' : step.status === 'Awaiting Review' ? 'review' : 'none';
+        const column = step.status === 'Awaiting Review' ? 'Awaiting Review' : step.status === 'In Progress' ? 'In Progress' : 'Not Started';
+        items.push({
+          id: `key-action:${state.caseId}:${step.stepKey}`,
+          kind: 'key-action',
+          title: step.title,
+          status: step.status,
+          priority: overdue || urgency === 'red' ? 'High' : urgency === 'yellow' ? 'Medium' : 'Low',
+          dueAt: dueAt || undefined,
+          dueLabel: step.dueAt ? formatDeadlineDateTime(step.dueAt) : 'No deadline',
+          urgency,
+          overdue,
+          queue,
+          column,
+          href: buildCaseManagementLink(state.caseId, step.stepKey),
+          matterId: String(state.caseId || ''),
+          matterNo: state.caseNo || matter?.caseNo,
+          matterParties: state.parties || matter?.parties,
+          roleLabel: state.myRole && state.myRole !== 'none' ? state.myRole : 'Assigned',
+          waitingOnClient: false,
+        });
+      });
     });
-    const awaitingReview = periodTasks.filter(
-      (task) => task.workflowStage === 'Awaiting Review' || (task.requiresApproval && task.approvalStatus === 'Pending')
-    );
-    const awaitingExternal = periodTasks.filter((task) => task.workflowStage === 'Awaiting External Action');
-    const bandCounts = periodTasks.reduce(
-      (acc, task) => {
-        acc[getTimelinessBand(task, asOfISO)] += 1;
-        return acc;
-      },
-      { excellent: 0, good: 0, warning: 0, poor: 0, late: 0 } as Record<string, number>
-    );
-    return { open, dueSoon, overdue, awaitingReview, awaitingExternal, bandCounts };
-  }, [periodTasks, asOfISO]);
+
+    // Unified workload (chunk 2/4): legacy matter tasks assigned to me.
+    // Same urgency rule as every other surface; review/external queues feed
+    // the Notifications card from this same list.
+    periodTasks.forEach((task) => {
+      if (String(task.status || '') === 'Completed' || String(task.workflowStage || '') === 'Closed') return;
+      const dueAt = resolveDeadlineDateTime(task.dueDate);
+      const urgency = getUrgencyColorForDueDate(task.dueDate, task.startDate, asOf);
+      const overdue = dueAt ? dueAt.getTime() < asOf.getTime() : false;
+      const queue =
+        task.workflowStage === 'Awaiting External Action'
+          ? 'external'
+          : task.workflowStage === 'Awaiting Review' || (task.requiresApproval && task.approvalStatus === 'Pending')
+            ? 'review'
+            : 'none';
+      const column =
+        task.workflowStage === 'Awaiting Review'
+          ? 'Awaiting Review'
+          : task.workflowStage === 'Awaiting External Action'
+            ? 'Awaiting External Action'
+            : task.status === 'In Progress' || task.workflowStage === 'In Progress'
+              ? 'In Progress'
+              : 'Not Started';
+      const matter = caseById.get(String(task.caseId || ''));
+      items.push({
+        id: `matter-task:${task._id}`,
+        kind: 'matter-task',
+        title: task.title,
+        status: String(task.workflowStage && task.workflowStage !== 'Assigned' ? task.workflowStage : task.status),
+        priority: task.priority,
+        dueAt: dueAt || undefined,
+        dueLabel: formatDeadlineDateTime(task.dueDate),
+        urgency,
+        overdue,
+        queue,
+        column,
+        href: buildCaseManagementLink(task.caseId, task.workflowStepKey),
+        matterId: String(task.caseId || ''),
+        matterNo: matter?.caseNo,
+        matterParties: matter?.parties || task.relatedClient,
+        roleLabel: task.supervisor ? `Supervisor: ${task.supervisor}` : 'Assigned',
+        waitingOnClient: queue === 'external',
+      });
+    });
+
+    // Unified workload (chunk 3/4): standalone tasks + intake stages I own.
+    independentTasks
+      .filter((task) => {
+        if (String(task.status || '') === 'Completed' || String(task.status || '') === 'Closed') return false;
+        if (!meName && !me?.email) return true;
+        return identityMatches(task.assignee, meName) || identityMatches(task.assignee, me?.email || '');
+      })
+      .forEach((task) => {
+        const dueAt = resolveDeadlineDateTime(task.dueDate);
+        const urgency = getUrgencyColorForDueDate(task.dueDate, task.startDate, asOf);
+        const overdue = dueAt ? dueAt.getTime() < asOf.getTime() : false;
+        const queue = task.status === 'Awaiting External Action' ? 'external' : task.status === 'Awaiting Review' ? 'review' : 'none';
+        const column =
+          task.status === 'Awaiting Review'
+            ? 'Awaiting Review'
+            : task.status === 'Awaiting External Action'
+              ? 'Awaiting External Action'
+              : task.status === 'In Progress'
+                ? 'In Progress'
+                : 'Not Started';
+        items.push({
+          id: `independent:${task._id}`,
+          kind: 'independent-task',
+          title: task.title,
+          status: task.status,
+          priority: task.priority,
+          dueAt: dueAt || undefined,
+          dueLabel: formatDeadlineDateTime(task.dueDate),
+          urgency,
+          overdue,
+          queue,
+          column,
+          href: `/matters/independent-tasks/${task._id}`,
+          matterId: task.relatedMatterId || undefined,
+          matterNo: task.relatedMatter?.caseNo,
+          matterParties: task.relatedMatter?.parties || task.relatedClient,
+          roleLabel: task.supervisor ? `Supervisor: ${task.supervisor}` : 'Assigned',
+          waitingOnClient: queue === 'external',
+        });
+      });
+
+    prospects
+      .filter((prospect) => {
+        if (['Converted', 'Non-Converted'].includes(String(prospect.stage || ''))) return false;
+        const responsible = [prospect.responsibleAssociate, prospect.responsiblePartner, prospect.assignedTo]
+          .map((value) => (typeof value === 'string' ? value : (value as any)?.name || ''))
+          .filter(Boolean);
+        if (!responsible.length) return false;
+        if (!meName && !me?.email) return true;
+        return responsible.some((name) => identityMatches(name, meName) || identityMatches(name, me?.email || ''));
+      })
+      .forEach((prospect) => {
+        const dueAt = getStageDueAt(prospect as any);
+        const urgency = getStageUrgencyColor(prospect as any, asOf);
+        const overdue = dueAt ? dueAt.getTime() < asOf.getTime() : false;
+        const waitingOn = String((prospect as any).waitingOn || 'Firm');
+        const waitingOnClient = waitingOn === 'Client' || waitingOn === 'Third Party';
+        items.push({
+          id: `prospect:${prospect._id}`,
+          kind: 'prospect',
+          title: `${prospect.clientName || prospect.parties || 'Prospect'} — ${prospect.stage}`,
+          status: String((prospect as any).stageStatus || prospect.stage || 'In Progress'),
+          priority: overdue || urgency === 'red' ? 'High' : urgency === 'yellow' ? 'Medium' : 'Low',
+          dueAt: dueAt || undefined,
+          dueLabel: dueAt ? formatDeadlineDateTime(dueAt) : 'No deadline',
+          urgency,
+          overdue,
+          queue: waitingOnClient ? 'external' : 'none',
+          column: waitingOnClient ? 'Awaiting External Action' : 'In Progress',
+          href: `/matters/intake-prospects/${prospect._id}`,
+          roleLabel: 'Intake owner',
+          waitingOnClient,
+        });
+      });
+
+    // Unified workload (chunk 4/4): period scoping. All Time counts everything
+    // open; a reporting window counts open items whose deadline falls inside
+    // it plus items completed inside it. Key Actions carry no completion stamp
+    // here — they are always open, so only their deadline decides.
+    if (periodWindow) {
+      return items.filter((item) => {
+        if (!item.dueAt) return true;
+        const key = dayKey(item.dueAt.toISOString());
+        return key >= periodWindow.from && key <= periodWindow.to;
+      });
+    }
+    return items;
+  }, [authorisedCases, caseManagementByMatter, periodTasks, periodWindow, independentTasks, prospects, asOfISO, meName, me?.email]);
+
+  // My Work signals derived from THE SAME unified list as every card below:
+  // platform urgency bands (red/yellow/green/blue), review/external queues,
+  // and urgent actions. Counts always reconcile with My Matters because both
+  // read myWorkItems — never ad-hoc task filters.
+  const workSignals = useMemo(() => {
+    const bandCounts = { blue: 0, green: 0, yellow: 0, red: 0, overdue: 0, untracked: 0 };
+    myWorkItems.forEach((item) => {
+      if (item.urgency === 'gray') bandCounts.untracked += 1;
+      else bandCounts[item.urgency] += 1;
+      if (item.overdue) bandCounts.overdue += 1;
+    });
+    const awaitingReview = myWorkItems.filter((item) => item.queue === 'review');
+    const awaitingApproval = myWorkItems.filter((item) => item.queue === 'approval');
+    const awaitingExternal = myWorkItems.filter((item) => item.queue === 'external');
+    const urgent = myWorkItems
+      .filter((item) => item.overdue || item.urgency === 'red')
+      .sort((a, b) => (a.dueAt?.getTime() || 0) - (b.dueAt?.getTime() || 0));
+    return { bandCounts, awaitingReview, awaitingApproval, awaitingExternal, urgent };
+  }, [myWorkItems]);
 
   // Matters that had qualifying activity in the selected period (or all assigned
-  // matters for All Time). Derived from the SAME task-in-period rule as the task
-  // list, plus matters created inside the window, so the "My Matters" cards agree
-  // with the "My Work" list and the headline metrics.
+  // matters for All Time). Derived from THE SAME unified work list as My Work,
+  // plus matters created inside the window, so the cards always agree.
   const periodMatterIds = useMemo(() => {
     if (!periodWindow) return null; // null = no filtering (All Time)
     const ids = new Set<string>();
-    periodTasks.forEach((task) => {
-      if (task.caseId) ids.add(String(task.caseId));
+    myWorkItems.forEach((item) => {
+      if (item.matterId) ids.add(String(item.matterId));
     });
     authorisedCases.forEach((matter) => {
       const created = dayKey((matter as any).createdAt);
@@ -807,20 +1057,38 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       }
     });
     return ids;
-  }, [periodWindow, periodTasks, authorisedCases]);
+  }, [periodWindow, myWorkItems, authorisedCases]);
+
+  // My Matters rows derived from THE SAME unified list: open work per matter
+  // (Key-Action sub-tasks + legacy tasks + standalone + intake), so the per-
+  // matter "Open tasks" and urgency pressure always sum to the My Work bands.
+  const workByMatter = useMemo(() => {
+    const map = new Map<string, UnifiedWorkItem[]>();
+    myWorkItems.forEach((item) => {
+      if (!item.matterId) return;
+      map.set(item.matterId, [...(map.get(item.matterId) || []), item]);
+    });
+    return map;
+  }, [myWorkItems]);
 
   const matterRows = useMemo<MatterRow[]>(() => {
     return authorisedCases
       .filter((matter) => !periodMatterIds || periodMatterIds.has(String(matter._id || '')))
       .map((matter) => {
+        const unified = workByMatter.get(String(matter._id || '')) || [];
         const matterTasks = (tasksByCase.get(String(matter._id || '')) || []).filter(taskInPeriod);
-        const openTasks = matterTasks.filter((task) => task.status !== 'Completed');
-        const nextDeadline = openTasks.map((task) => task.dueDate).filter(Boolean).sort()[0] || matter.workflowProgress?.nextDueAt || '—';
+        const openTasks = unified.length;
+        const earliestDueMs =
+          unified
+            .map((item) => item.dueAt?.getTime() || 0)
+            .filter(Boolean)
+            .sort((a, b) => a - b)[0] || 0;
+        const nextDeadline = earliestDueMs ? new Date(earliestDueMs).toISOString() : matter.workflowProgress?.nextDueAt || '—';
         const progress =
           safeNum(matter.workflowProgress?.percent) ||
           (matterTasks.length ? Math.round((matterTasks.filter((task) => task.status === 'Completed').length / matterTasks.length) * 100) : 0);
-        const warningTasks = matterTasks.filter((task) => getTimelinessBand(task, asOfISO) === 'warning').length;
-        const poorTasks = matterTasks.filter((task) => ['poor', 'late'].includes(getTimelinessBand(task, asOfISO))).length;
+        const warningTasks = unified.filter((item) => item.urgency === 'yellow').length;
+        const poorTasks = unified.filter((item) => item.urgency === 'red' || item.overdue).length;
 
         return {
           ...matter,
@@ -828,13 +1096,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           contractValue: getMatterContractValue(matter),
           earnedValue: getMatterEarnedValue(matter),
           nextDeadline,
-          openTasks: openTasks.length,
+          openTasks,
           warningTasks,
           poorTasks,
         };
       })
       .sort((a, b) => b.warningTasks + b.poorTasks - (a.warningTasks + a.poorTasks));
-  }, [authorisedCases, tasksByCase, asOfISO, periodMatterIds, periodWindow]);
+  }, [authorisedCases, workByMatter, tasksByCase, periodMatterIds, periodWindow]);
 
   // Matter Financial Status reflects the SAME qualifying matter set as the rest
   // of the dashboard: all assigned matters for All Time, only the matters worked
@@ -911,6 +1179,16 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   );
 
   const summary = staffSummary;
+  // My Performance — completion + timeliness rooted in THE SAME unified list.
+  // On-time = green/blue urgency; at-risk = yellow; late = red/overdue.
+  const workPerformance = useMemo(() => {
+    const total = myWorkItems.length;
+    const onTime = myWorkItems.filter((item) => !item.overdue && (item.urgency === 'blue' || item.urgency === 'green')).length;
+    const atRisk = myWorkItems.filter((item) => !item.overdue && item.urgency === 'yellow').length;
+    const late = myWorkItems.filter((item) => item.overdue || item.urgency === 'red').length;
+    const completionPct = total ? Math.round((onTime / total) * 100) : null;
+    return { total, onTime, atRisk, late, completionPct };
+  }, [myWorkItems]);
   /** The reporting block — ALWAYS present (All Time when no window was applied). */
   const period = summary?.period;
   // A real date window is applied (not All Time). The fee table, earnings labels
@@ -1289,13 +1567,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                   : 'Assigned work, timeliness bands, approval/review queues, and urgent actions across all time.'
               }
             />
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
               {[
-                ['🔵 Excellent', taskSignals.bandCounts.excellent, 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200'],
-                ['🟢 Good', taskSignals.bandCounts.good, 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'],
-                ['🟡 Warning', taskSignals.bandCounts.warning, 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'],
-                ['🔴 Poor', taskSignals.bandCounts.poor, 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'],
-                ['Late', taskSignals.bandCounts.late, 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200'],
+                ['🔵 On Track', workSignals.bandCounts.blue, 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200'],
+                ['🟢 Comfortable', workSignals.bandCounts.green, 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'],
+                ['🟡 Due Soon', workSignals.bandCounts.yellow, 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200'],
+                ['🔴 Urgent', workSignals.bandCounts.red, 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'],
+                ['Late', workSignals.bandCounts.overdue, 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200'],
+                ['No Deadline', workSignals.bandCounts.untracked, 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'],
               ].map(([label, value, classes]) => (
                 <div key={String(label)} className={`rounded-lg border px-3 py-2 text-sm ${classes}`}>
                   <div className="font-semibold">{loading ? '…' : value}</div>
@@ -1307,36 +1586,42 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
           {loading ? (
             <div className="px-5 py-10 text-gray-500">Loading tasks…</div>
-          ) : periodTasks.length === 0 ? (
+          ) : myWorkItems.length === 0 ? (
             <div className="px-5 py-10 text-gray-500">
               {hasWindow
-                ? `No tasks were completed or fell due between ${period?.from} and ${period?.to}.`
-                : 'No tasks assigned.'}
+                ? `No work was due between ${period?.from} and ${period?.to}.`
+                : 'No work assigned.'}
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {[...taskSignals.overdue, ...taskSignals.dueSoon, ...taskSignals.open]
-                .filter((task, index, list) => list.findIndex((item) => item._id === task._id) === index)
+              {workSignals.urgent
+                .concat(myWorkItems.filter((item) => !item.overdue && item.urgency !== 'red').sort((a, b) => (a.dueAt?.getTime() || 0) - (b.dueAt?.getTime() || 0)))
+                .filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index)
                 .slice(0, 8)
-                .map((task) => (
-                  <div key={String(task._id)} className="px-5 py-4 hover:bg-gray-50">
+                .map((item) => (
+                  <div key={String(item.id)} className="px-5 py-4 hover:bg-gray-50">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="mb-2 flex flex-wrap items-center gap-2">
-                          <span className={`px-2 py-0.5 text-xs rounded ${priorityChip(task.priority)}`}>{task.priority}</span>
-                          <span className="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-700">{task.status}</span>
-                          {task.workflowStage ? <span className="px-2 py-0.5 text-xs rounded bg-blue-50 text-blue-700">{task.workflowStage}</span> : null}
+                          <span className={`px-2 py-0.5 text-xs rounded ${priorityChip(item.priority)}`}>{item.priority}</span>
+                          <span className="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-700">{item.status}</span>
+                          <span className="px-2 py-0.5 text-xs rounded bg-blue-50 text-blue-700">
+                            {item.kind === 'key-action' ? 'Key Action' : item.kind === 'matter-task' ? 'Matter Task' : item.kind === 'independent-task' ? 'Standalone' : 'Intake'}
+                          </span>
+                          <span className={`px-2 py-0.5 text-xs rounded ${urgencyChip(item.urgency)}`} title="Platform deadline urgency">
+                            {item.urgency === 'red' ? '🔴 Urgent' : item.urgency === 'yellow' ? '🟡 Due Soon' : item.urgency === 'green' ? '🟢 Comfortable' : item.urgency === 'blue' ? '🔵 On Track' : 'No deadline'}
+                          </span>
                         </div>
-                        <p className="text-sm font-medium text-gray-900">{task.title}</p>
+                        <p className="text-sm font-medium text-gray-900">{item.title}</p>
                         <p className="mt-1 text-xs text-gray-500">
-                          Due {formatDeadlineDateTime(task.dueDate)} · Supervisor {task.supervisor || '—'} · Timeliness {getTimelinessScore(task, today)}%
+                          Due {item.dueLabel}{item.matterNo ? ` · ${item.matterNo}` : ''}{item.matterParties ? ` · ${item.matterParties}` : ''} · {item.roleLabel}
                         </p>
                       </div>
                       <Link
-                        to={buildCaseManagementLink(task.caseId, task.workflowStepKey)}
+                        to={item.href}
                         className="shrink-0 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
                       >
-                        Open Case Management
+                        {item.kind === 'independent-task' ? 'Open Task' : item.kind === 'prospect' ? 'Open Intake' : 'Open Case Management'}
                       </Link>
                     </div>
                   </div>
@@ -1352,9 +1637,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           <SectionHeader title={profile.labels.risk} description="System-generated alerts from task status, deadlines, approvals, and calendar records." />
           <div className="space-y-3">
             {[
-              { label: 'Awaiting review / approval', value: taskSignals.awaitingReview.length, icon: CheckCircle2, tone: 'amber' as Tone },
-              { label: 'Awaiting client/external info', value: taskSignals.awaitingExternal.length, icon: Clock, tone: 'blue' as Tone },
-              { label: 'Upcoming calendar items', value: upcomingEvents.length, icon: CalendarIcon, tone: 'slate' as Tone },
+              { label: 'Awaiting review', value: workSignals.awaitingReview.length, icon: CheckCircle2, tone: 'amber' as Tone, hint: 'Key Actions + tasks parked for supervisor review' },
+              { label: 'Awaiting approval', value: workSignals.awaitingApproval.length, icon: CheckCircle2, tone: 'purple' as Tone, hint: 'Reviewed work waiting for final sign-off' },
+              { label: 'Awaiting client/external info', value: workSignals.awaitingExternal.length, icon: Clock, tone: 'blue' as Tone, hint: 'Blocked on client or third party' },
+              { label: 'Upcoming calendar items', value: upcomingEvents.length, icon: CalendarIcon, tone: 'slate' as Tone, hint: 'Your authorised matters, next 30 days' },
             ].map((item) => {
               const Icon = item.icon;
               const tone = toneClasses[item.tone];
@@ -1362,7 +1648,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                 <div key={item.label} className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
                   <div className="flex items-center gap-3">
                     <div className={`h-9 w-9 rounded-lg flex items-center justify-center ${tone.icon}`}><Icon className="h-4 w-4" /></div>
-                    <div className="text-sm text-gray-700">{item.label}</div>
+                    <div>
+                      <div className="text-sm text-gray-700">{item.label}</div>
+                      <div className="text-xs text-gray-500">{item.hint}</div>
+                    </div>
                   </div>
                   <div className={`font-semibold ${tone.text}`}>{loading ? '…' : item.value}</div>
                 </div>
@@ -1494,10 +1783,28 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           <div className="space-y-4">
             {([
               [
-                hasWindow ? 'Matters Completion Rate (in period)' : 'Matters Completion Rate',
-                summaryCompletionRate == null ? 'Pending' : `${summaryCompletionRate}%`,
+                hasWindow ? 'Work Completion Rate (in period)' : 'Work Completion Rate',
+                workPerformance.completionPct == null ? 'Pending' : `${workPerformance.completionPct}%`,
                 CheckSquare,
-                (summaryCompletionRate ?? 0) >= 80 ? 'green' : 'amber',
+                (workPerformance.completionPct ?? 0) >= 80 ? 'green' : 'amber',
+              ],
+              [
+                'On-Time Work',
+                `${workPerformance.onTime}/${workPerformance.total}`,
+                Clock,
+                workPerformance.late > 0 ? 'amber' : 'green',
+              ],
+              [
+                'At Risk (Due Soon)',
+                String(workPerformance.atRisk),
+                Clock,
+                workPerformance.atRisk > 0 ? 'amber' : 'green',
+              ],
+              [
+                'Late / Urgent',
+                String(workPerformance.late),
+                Clock,
+                workPerformance.late > 0 ? 'red' : 'green',
               ],
               [
                 'Average Timeliness',
