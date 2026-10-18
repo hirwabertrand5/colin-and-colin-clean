@@ -13,6 +13,7 @@ import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { computeRange, normalizeReportBasis } from '../utils/reportRange';
 import { buildRoleByName, TASK_TPA_SHARES } from '../utils/workflowPercentages';
+import { caseMatchesAssigneeCanonical } from '../utils/caseAssignments';
 import {
   allocateCollectedValueAcrossKeyActions,
   calculateCollectedKeyActionEarnings,
@@ -534,9 +535,30 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     );
 
     // -----------------------------
-    // Team table (best-effort based on name strings)
+    // Team table — same member sources as the staff dashboards.
+    // Assignment uses Initiator / Reviewer / Signer-Approver / assignedTo with
+    // the dashboard's canonical matcher, so "Badiel" and
+    // "Badiel Rubangutsangabo" resolve to one person. Task counts below read
+    // the member performance engine (completed Task docs in-period with the
+    // Early/On-Time/Late and overdue bands); contribution reads the shared
+    // earned-fee engine behind the dashboard Fees Earned card. Column names
+    // are unchanged — only the member sources were aligned.
     // -----------------------------
+    const canonicalMemberKey = (value: unknown) => {
+      const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      if (!normalized) return '';
+      return normalized.split(' ')[0] || '';
+    };
+    const caseMatchesMemberBucket = (caseDoc: any, memberName: unknown): boolean => {
+      if (caseMatchesAssigneeCanonical(caseDoc, memberName)) return true;
+      const wanted = canonicalMemberKey(memberName);
+      if (!wanted) return false;
+      return [caseDoc?.assignedTo, caseDoc?.caseAssignments?.initiator, caseDoc?.caseAssignments?.reviewer, caseDoc?.caseAssignments?.signerApprover]
+        .map((value) => canonicalMemberKey(value))
+        .some((slot) => slot === wanted);
+    };
     const activeCaseIdsByName = new Map<string, Set<string>>();
+    const activeCaseIdsByShortKey = new Map<string, Set<string>>();
     const allOpenCaseIds = new Set<string>();
     for (const c of allCases as any[]) {
       if (!isOpenCase(c)) continue;

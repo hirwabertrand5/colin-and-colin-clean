@@ -822,7 +822,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900 mb-1">Firm Reports</h1>
+            <h1 className="text-2xl font-semibold text-gray-900 mb-1">{title ?? 'Firm Reports'}</h1>
             <p className="text-gray-600">
               {loading
                 ? 'Loading…'
@@ -1608,7 +1608,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
               <div>
                 <h2 className="font-semibold text-gray-900">Staff Profitability</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  This view uses current contribution metrics and task performance while the dedicated cost engine is introduced.
+                  Same sources as each member's AssociateDashboard for the selected period: whole cases completed, workflow sections overdue, whole-case timeliness bands, and earned-fee contribution share.
                 </p>
               </div>
               <div className="text-xs text-gray-500">
@@ -1647,6 +1647,9 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
           <div className="bg-white border border-gray-200 rounded-lg">
             <div className="px-5 py-4 border-b border-gray-200">
               <h2 className="font-semibold text-gray-900">Profitability by Staff Member</h2>
+              <p className="mt-1 text-xs text-gray-500">
+                Tasks Completed = whole cases completed in period (dashboard Matters Completed) · Overdue = workflow sections past deadline (dashboard Overdue Tasks) · Early / On Time / Late and Excellent / Good / Delayed / Risk = whole-case timeliness bands · Contribution = earned-fee share of gross fees handled (dashboard Fees Earned source).
+              </p>
             </div>
 
             {!staffProfitabilityRows.length ? (
