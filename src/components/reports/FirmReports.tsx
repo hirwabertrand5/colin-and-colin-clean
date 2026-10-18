@@ -8,11 +8,46 @@ import { downloadWorkbook } from '../../utils/excelExport';
 import SortableHeader from '../ui/SortableHeader';
 import { sortRows, SortDir } from '../../utils/tableSort';
 
+type FirmReportTab =
+  | 'overview'
+  | 'financial'
+  | 'productivity'
+  | 'cases'
+  | 'clientProfitability'
+  | 'staffRevenue'
+  | 'staffProfitability';
+
+const REPORT_TABS: readonly {
+  readonly id: FirmReportTab;
+  label: string;
+  icon: any;
+}[] = [
+  { id: 'overview', label: 'Firm Overview', icon: BarChart3 },
+  { id: 'financial', label: 'Financial Summary', icon: TrendingUp },
+  { id: 'productivity', label: 'Productivity Report', icon: Users },
+  { id: 'cases', label: 'Case Analytics', icon: FileText },
+  { id: 'clientProfitability', label: 'Client Profitability', icon: TrendingUp },
+  { id: 'staffRevenue', label: 'Staff Revenue Attribution', icon: Users },
+  { id: 'staffProfitability', label: 'Staff Profitability', icon: TrendingUp },
+];
+
+const ALL_REPORT_TABS: readonly FirmReportTab[] = REPORT_TABS.map((t) => t.id);
+
 interface FirmReportsProps {
   userRole: UserRole;
+  /** Page title shown in the browser tab (defaults to 'Firm Reports'). */
+  title?: string;
+  /** Restrict which report tabs are rendered (defaults to every tab). */
+  tabs?: readonly FirmReportTab[];
+  /** Tab selected on mount; falls back to the first allowed tab. */
+  defaultTab?: FirmReportTab;
 }
 
-const canAccess = (role: UserRole) => role === 'managing_director' || role === 'executive_assistant';
+const canAccess = (role: UserRole) =>
+  role === 'managing_director' ||
+  role === 'executive_assistant' ||
+  role === 'managing_partner' ||
+  role === 'executive_managing_partner';
 
 const fmtMoney = (n: number) =>
   `RWF ${Math.round((Number(n) || 0) * 100) / 100}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -57,10 +92,13 @@ type ClientProfitabilitySort =
 
 
 
-export default function FirmReports({ userRole }: FirmReportsProps) {
-  const [selectedReport, setSelectedReport] = useState<
-    'overview' | 'financial' | 'productivity' | 'cases' | 'clientProfitability' | 'staffRevenue' | 'staffProfitability'
-  >('overview');
+export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmReportsProps) {
+  const allowedTabs: readonly FirmReportTab[] = tabs?.length
+    ? (tabs as readonly FirmReportTab[])
+    : ALL_REPORT_TABS;
+  const initialTab: FirmReportTab =
+    defaultTab && allowedTabs.includes(defaultTab) ? defaultTab : allowedTabs[0];
+  const [selectedReport, setSelectedReport] = useState<FirmReportTab>(initialTab);
   const [dateRange, setDateRange] = useState<FirmReportRange>('ytd');
   const [dateBasis, setDateBasis] = useState<FirmReportDateBasis>('invoiceDate');
   const [teamMembers, setTeamMembers] = useState<User[]>([]);
@@ -74,20 +112,12 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [refreshToken, setRefreshToken] = useState(0);
-  usePageTitle('Firm Reports');
+  usePageTitle(title ?? 'Firm Reports');
   const [data, setData] = useState<FirmReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const reportTypes = [
-    { id: 'overview', label: 'Firm Overview', icon: BarChart3 },
-    { id: 'financial', label: 'Financial Summary', icon: TrendingUp },
-    { id: 'productivity', label: 'Productivity Report', icon: Users },
-    { id: 'cases', label: 'Case Analytics', icon: FileText },
-    { id: 'clientProfitability', label: 'Client Profitability', icon: TrendingUp },
-    { id: 'staffRevenue', label: 'Staff Revenue Attribution', icon: Users },
-    { id: 'staffProfitability', label: 'Staff Profitability', icon: TrendingUp },
-  ] as const;
+  const reportTypes = REPORT_TABS.filter((type) => allowedTabs.includes(type.id));
 
   useEffect(() => {
     if (!canAccess(userRole)) return;

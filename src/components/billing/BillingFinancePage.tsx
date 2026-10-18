@@ -31,6 +31,7 @@ import {
 } from "../../constants/legalServicesTree";
 import TableExport from "../ui/TableExport";
 import StaffEarningsReport from "./StaffEarningsReport";
+import FirmReports from "../reports/FirmReports";
 
 export type BillingFinanceView =
   | "financial-dashboard"
@@ -902,6 +903,20 @@ export default function BillingFinancePage({
         { label: "Total Collected", value: money(collected) },
         { label: "Outstanding", value: money(outstanding) },
       ];
+  // Profitability overview: Firm Reports page content, limited to the
+  // profitability tabs (Client Profitability, Staff Revenue Attribution,
+  // Staff Profitability), rendered exactly as on the Firm Reports page.
+  if (view === 'profitability') {
+    return (
+      <FirmReports
+        userRole={userRole}
+        title="Profitability"
+        tabs={['clientProfitability', 'staffRevenue', 'staffProfitability'] as const}
+        defaultTab="clientProfitability"
+      />
+    );
+  }
+
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
