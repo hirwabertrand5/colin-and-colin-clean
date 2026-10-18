@@ -280,6 +280,75 @@ const buildMatterTaskStages = (caseRecord: any, dueDate: string, assignedAt = ne
 };
 
 /**
+ * Propagate a case-level Initiator/Reviewer/Signer-Approver change across the
+ * whole workflow. The staff dashboards and the Firm Reports earnings
+ * attribution read the staged task stages, so a re-assignment on the Edit
+ * Case form must reach them too. Completed stages keep the member who
+ * actually did the work so historical earnings are never rewritten.
+ */
+const propagateCaseAssignmentsToTasks = async (
+  caseId: any,
+  assignments: { initiator?: string; reviewer?: string; signerApprover?: string }
+) => {
+  const initiator = normalizeCaseAssignee(assignments.initiator);
+  const reviewer = normalizeCaseAssignee(assignments.reviewer);
+  const signer = normalizeCaseAssignee(assignments.signerApprover);
+
+  const staffByRole: Record<string, string> = {
+    Initiator: initiator,
+    Reviewer: reviewer,
+    'Signer/Approver': signer,
+  };
+  const supervisorByRole: Record<string, string> = {
+    Initiator: reviewer || signer,
+    Reviewer: signer || initiator,
+    'Signer/Approver': reviewer || initiator,
+  };
+
+  const tasks = await Task.find({ caseId }).select('title status taskStages assignee supervisor');
+  for (const task of tasks as any[]) {
+    let dirty = false;
+
+    if (Array.isArray(task.taskStages)) {
+      for (const stage of task.taskStages) {
+        const roleKey = String(stage?.role || '').trim();
+        const stageOpen = String(stage?.status || '').trim().toLowerCase() !== 'completed';
+        if (!roleKey || !stageOpen) continue;
+
+        const nextStaff = staffByRole[roleKey];
+        if (nextStaff && normalizeCaseAssignee(stage.staffMember) !== nextStaff) {
+          stage.staffMember = nextStaff;
+          dirty = true;
+        }
+        const nextSupervisor = supervisorByRole[roleKey];
+        if (nextSupervisor && normalizeCaseAssignee(stage.supervisorReviewer) !== nextSupervisor) {
+          stage.supervisorReviewer = nextSupervisor;
+          dirty = true;
+        }
+      }
+    }
+
+    // The auto-created "Matter Assignment" task mirrors the case slots on its
+    // top-level assignee/supervisor; completed/closed tasks keep their history.
+    const taskOpen = !['completed', 'closed'].includes(String(task.status || '').trim().toLowerCase());
+    const isMatterAssignmentTask = String(task.title || '').trim().startsWith('Matter Assignment');
+    if (taskOpen && isMatterAssignmentTask) {
+      if (initiator && task.assignee !== initiator) {
+        task.assignee = initiator;
+        dirty = true;
+      }
+      const taskSupervisor = reviewer || signer;
+      if (taskSupervisor && task.supervisor !== taskSupervisor) {
+        task.supervisor = taskSupervisor;
+        dirty = true;
+      }
+    }
+
+    if (dirty) await task.save();
+  }
+};
+
+/**
  * The cases list only renders identity, assignment, workflow-progress and
  * deadline information. Free-text blobs (description, client-report draft
  * fields) are never shown there but were being hydrated and shipped on every
@@ -983,6 +1052,15 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     const beforeTemplateId = before.workflowTemplateId ? String(before.workflowTemplateId) : '';
     const nextTemplateId = (req.body as any)?.workflowTemplateId ? String((req.body as any).workflowTemplateId) : '';
     const didChangeTemplate = Boolean(nextTemplateId && nextTemplateId !== beforeTemplateId);
+    // The Workflow Template is LOCKED once the matter has one. Swapping it
+    // later would rebuild the Key Action set mid-flight and silently restate
+    // every percentage/earning tied to the original workflow. Only matters
+    // that never had a template (e.g. historical imports) may still adopt one.
+    if (beforeTemplateId && nextTemplateId && nextTemplateId !== beforeTemplateId) {
+      return res.status(400).json({
+        message: 'The workflow template is locked after matter creation and cannot be changed.',
+      });
+    }
     const beforeStart = before.workflowStartDate ? new Date(before.workflowStartDate).toISOString().slice(0, 10) : '';
     const nextStart = (req.body as any)?.workflowStartDate
       ? new Date((req.body as any).workflowStartDate).toISOString().slice(0, 10)
@@ -1038,6 +1116,14 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     const updated: any = await Case.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
 
     if (!updated) return res.status(404).json({ message: 'Case not found.' });
+
+    // A role change on the Edit Case form must reach the whole workflow: the
+    // staged task stages (which drive dashboards, Case Management and the
+    // Firm Reports earnings attribution) are re-pointed at the new members,
+    // except stages already completed (those keep their historical author).
+    if (nextAssignments) {
+      await propagateCaseAssignmentsToTasks(updated._id, nextAssignments);
+    }
 
     // If workflow template was changed, merge the workflow instance and keep
     // its recorded progress instead of rebuilding it from scratch.
@@ -1125,7 +1211,18 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
         changes.push(`Priority: ${before.priority} → ${req.body.priority}`);
       if (req.body.assignedTo && req.body.assignedTo !== before.assignedTo)
         changes.push(`Assigned: ${before.assignedTo || '-'} → ${req.body.assignedTo}`);
-      if (nextAssignments) changes.push('Case assignees updated');
+      if (nextAssignments) {
+        const beforeSlots = before.caseAssignments || {};
+        const slotLabels: Array<[keyof typeof nextAssignments, string]> = [
+          ['initiator', 'Initiator'],
+          ['reviewer', 'Reviewer'],
+          ['signerApprover', 'Signer/Approver'],
+        ];
+        const changedSlots = slotLabels
+          .filter(([key]) => normalizeCaseAssignee(beforeSlots[key]) !== normalizeCaseAssignee(nextAssignments[key]))
+          .map(([key, label]) => `${label}: ${normalizeCaseAssignee(beforeSlots[key]) || '-'} → ${normalizeCaseAssignee(nextAssignments[key]) || '-'}`);
+        changes.push(changedSlots.length ? `Case assignees updated (${changedSlots.join('; ')})` : 'Case assignees updated');
+      }
       if (req.body.budget && String(req.body.budget) !== String(before.budget))
         changes.push(`Budget: ${before.budget || '-'} → ${req.body.budget}`);
       if (req.body.caseNo && req.body.caseNo !== before.caseNo) changes.push(`Case No changed`);

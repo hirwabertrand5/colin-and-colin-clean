@@ -1503,7 +1503,8 @@ export default function FirmReports({ userRole }: FirmReportsProps) {
               <div>
                 <h2 className="font-semibold text-gray-900">Staff Revenue Attribution</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  Revenue is attributed from the existing team and productivity data while the staged task engine is rolled out.
+                  Revenue is attributed per completed Key Action using the same earnings calculation as the staff
+                  dashboards: each action earns its role-based share of the matter's collected fees.
                 </p>
               </div>
               <div className="text-xs text-gray-500">

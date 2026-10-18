@@ -3731,7 +3731,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 <div>
                   <div className="text-sm font-semibold text-gray-900">Workflow template</div>
                   <p className="text-xs text-gray-500 mt-1">
-                    Changing the template or start date will re-initialize the workflow steps for this case.
+                    {editCaseData.workflowTemplateId
+                      ? 'The workflow template is locked after the matter is created. Changing the start date will re-schedule the existing workflow steps.'
+                      : 'Select a workflow template for this matter.'}
                   </p>
                 </div>
 
@@ -3771,8 +3773,13 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                             : c
                         );
                       }}
-                      disabled={workflowTemplatesLoading}
-                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
+                      disabled={workflowTemplatesLoading || Boolean(editCaseData.workflowTemplateId)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white disabled:bg-gray-100 disabled:text-gray-500"
+                      title={
+                        editCaseData.workflowTemplateId
+                          ? 'The workflow template is locked after the matter is created.'
+                          : undefined
+                      }
                     >
                       <option value="">
                         {workflowTemplatesLoading ? 'Loading templates...' : 'Select workflow template'}
