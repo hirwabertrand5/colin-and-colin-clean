@@ -65,6 +65,14 @@ export interface ICase extends Document {
     reviewer?: string;
     signerApprover?: string;
   };
+  /** Immutable role handovers. Current slots own open work; this preserves completed-work attribution. */
+  assignmentHandoverHistory?: Array<{
+    role: 'Initiator' | 'Reviewer' | 'Signer/Approver';
+    previousAssignee?: string;
+    nextAssignee?: string;
+    changedAt: Date;
+    changedBy?: string;
+  }>;
 
   description?: string;
   legalServicePath?: ILegalServicePathItem[];
@@ -228,6 +236,18 @@ const CaseSchema = new Schema<ICase>(
         signerApprover: { type: String, trim: true },
       },
       default: {},
+    },
+    assignmentHandoverHistory: {
+      type: [
+        {
+          role: { type: String, enum: ['Initiator', 'Reviewer', 'Signer/Approver'], required: true },
+          previousAssignee: { type: String, trim: true },
+          nextAssignee: { type: String, trim: true },
+          changedAt: { type: Date, required: true, default: Date.now },
+          changedBy: { type: String, trim: true },
+        },
+      ],
+      default: [],
     },
 
     description: { type: String },

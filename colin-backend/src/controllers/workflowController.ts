@@ -29,7 +29,7 @@ import {
   parsePercentage,
 } from '../utils/workflowPercentages';
 import { getCaseUrgencyColor, isPublicYellowCase } from '../utils/caseVisibility';
-import { caseMatchesAssignee } from '../utils/caseAssignments';
+import { caseMatchesAssigneeCanonical, identityMatches } from '../utils/caseAssignments';
 import {
   canManageWorkflowStepsOfCase as canManageWorkflowStepsOfCaseFor,
   resolveAssignedSlot,
@@ -70,6 +70,14 @@ const actorFromReq = (req: AuthRequest) => ({
 });
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
+
+/** Retained handover participants can read a matter's audit/earnings history. */
+const caseHasAssignmentHandoverFor = (caseDoc: any, ...identities: Array<string | undefined>) =>
+  (Array.isArray(caseDoc?.assignmentHandoverHistory) ? caseDoc.assignmentHandoverHistory : []).some((entry: any) =>
+    [entry?.previousAssignee, entry?.nextAssignee].some((assignee) =>
+      identities.some((identity) => identity && identityMatches(assignee, identity))
+    )
+  );
 
 const literalPercentage = (value: unknown): number | undefined => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
@@ -787,6 +795,31 @@ const completeStepInternal = async (
 };
 
 /**
+ * The Overview checklist is a delivery sequence: a later Key Action cannot be
+ * ticked until the work on every earlier Key Action has been recorded.  We use
+ * `isStepWorkDone` rather than `status === Completed` so review and approval
+ * can continue in parallel after the Initiator has finished the work.
+ *
+ * This is deliberately a forward-looking guard.  It never rewrites or rejects
+ * historical out-of-order work that is already ticked/completed; it only
+ * protects a new attempt to tick an outstanding action.
+ */
+const findEarlierPendingWorkStep = (inst: any, targetStepKey: string) => {
+  const stageRankOf = (step: any) =>
+    typeof step?.stageOrder === 'number' && Number.isFinite(step.stageOrder)
+      ? Number(step.stageOrder)
+      : Number(step?.order ?? 0);
+  const ordered = (Array.isArray(inst?.steps) ? inst.steps : [])
+    .slice()
+    .sort((left: any, right: any) =>
+      stageRankOf(left) - stageRankOf(right) || Number(left?.order ?? 0) - Number(right?.order ?? 0)
+    );
+  const targetIndex = ordered.findIndex((step: any) => String(step?.stepKey || '') === String(targetStepKey || ''));
+  if (targetIndex <= 0) return null;
+  return ordered.slice(0, targetIndex).find((step: any) => !isStepWorkDone(step)) || null;
+};
+
+/**
  * Completes, in workflow order, every section whose checklist is fully ticked.
  *
  * This is the automatic version of the big completion checkbox on the Case
@@ -841,7 +874,7 @@ const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   const meEmail = normalizeIdentity(req.user?.email);
   if (!meName && !meEmail) return false;
 
-  if (caseMatchesAssignee(foundCase, meName) || caseMatchesAssignee(foundCase, meEmail)) return true;
+  if (caseMatchesAssigneeCanonical(foundCase, meName) || caseMatchesAssigneeCanonical(foundCase, meEmail)) return true;
 
   const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor taskStages').lean();
   return tasks.some((task: any) => {
@@ -1057,7 +1090,9 @@ export const getWorkflowForCase = async (req: AuthRequest, res: Response) => {
 
     if (!isAdmin(req.user?.role)) {
       if (!isPublicYellowCase(c)) {
-        const allowed = await canAssociateLikeAccessCase(req, c);
+        const allowed =
+          (await canAssociateLikeAccessCase(req, c)) ||
+          caseHasAssignmentHandoverFor(c, req.user?.name, req.user?.email);
         if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
           return res.status(403).json({ message: 'Forbidden.' });
         }
@@ -1091,7 +1126,9 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
 
     if (!isAdmin(req.user?.role)) {
       if (!isPublicYellowCase(c)) {
-        const allowed = await canAssociateLikeAccessCase(req, c);
+        const allowed =
+          (await canAssociateLikeAccessCase(req, c)) ||
+          caseHasAssignmentHandoverFor(c, req.user?.name, req.user?.email);
         if (!allowed && !(await canTaskContributorAccessCase(req, c))) {
           return res.status(403).json({ message: 'Forbidden.' });
         }
@@ -1309,9 +1346,17 @@ export const completeStep = async (req: AuthRequest, res: Response) => {
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
 
-    // The Overview controls the visible, stage-by-stage sequence. Completion
-    // here deliberately does not impose a second order guard: a tick must not
-    // be rejected merely because a template stores interleaved step orders.
+    // The Overview is now sequential for new work.  Already-recorded legacy
+    // work stays untouched; only an attempt to tick a later outstanding action
+    // is stopped until its earlier action is done.
+    const earlierPending = findEarlierPendingWorkStep(inst, stepKey);
+    if (earlierPending) {
+      const error: any = new Error(
+        `Complete the previous Key Action, "${String(earlierPending.title || earlierPending.stepKey)}", before marking this one done.`
+      );
+      error.statusCode = 409;
+      throw error;
+    }
     const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
     res.json(updated);
   } catch (e: any) {

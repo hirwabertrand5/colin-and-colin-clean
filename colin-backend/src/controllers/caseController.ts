@@ -28,10 +28,12 @@ import { isPublicYellowCase } from '../utils/caseVisibility';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import {
   buildCaseAssignedToDisplay,
-  caseMatchesAssignee,
+  caseMatchesAssigneeCanonical,
+  identityMatches,
   normalizeCaseAssignmentsPayload,
   normalizeCaseAssignee,
 } from '../utils/caseAssignments';
+import { buildCaseAssignmentHandovers } from '../utils/caseAssignmentContinuity';
 
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
@@ -90,6 +92,14 @@ const canTakeRequestAccess = (c: any) => isPublicYellowCase(c) && !isTakeRequest
 
 const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
 
+/** A former owner may view their retained earnings/work history, never act on new work. */
+const caseHasAssignmentHandoverFor = (caseDoc: any, ...identities: Array<string | undefined>) =>
+  (Array.isArray(caseDoc?.assignmentHandoverHistory) ? caseDoc.assignmentHandoverHistory : []).some((entry: any) =>
+    [entry?.previousAssignee, entry?.nextAssignee].some((assignee) =>
+      identities.some((identity) => identity && identityMatches(assignee, identity))
+    )
+  );
+
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
@@ -101,7 +111,8 @@ const canAssociateLikeAccessCase = async (req: AuthRequest, foundCase: any) => {
   const meEmail = normalizeIdentity(req.user?.email);
   if (!meName && !meEmail) return false;
 
-  if (caseMatchesAssignee(foundCase, meName) || caseMatchesAssignee(foundCase, meEmail)) return true;
+  if (caseMatchesAssigneeCanonical(foundCase, meName) || caseMatchesAssigneeCanonical(foundCase, meEmail)) return true;
+  if (caseHasAssignmentHandoverFor(foundCase, req.user?.name, req.user?.email)) return true;
 
   const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor taskStages').lean();
   return tasks.some((task: any) => {
@@ -120,9 +131,10 @@ const canTaskContributorAccessCase = async (req: AuthRequest, foundCase: any) =>
   const meEmail = normalizeIdentity(req.user?.email);
   if (!meName && !meEmail) return false;
 
-  if (caseMatchesAssignee(foundCase, meName) || caseMatchesAssignee(foundCase, meEmail)) {
+  if (caseMatchesAssigneeCanonical(foundCase, meName) || caseMatchesAssigneeCanonical(foundCase, meEmail)) {
     return true;
   }
+  if (caseHasAssignmentHandoverFor(foundCase, req.user?.name, req.user?.email)) return true;
 
   const tasks = await Task.find({ caseId: foundCase._id }).select('assignee supervisor taskStages').lean();
   return tasks.some((task: any) => {
@@ -288,7 +300,8 @@ const buildMatterTaskStages = (caseRecord: any, dueDate: string, assignedAt = ne
  */
 const propagateCaseAssignmentsToTasks = async (
   caseId: any,
-  assignments: { initiator?: string; reviewer?: string; signerApprover?: string }
+  assignments: { initiator?: string; reviewer?: string; signerApprover?: string },
+  options: { reassignedBy?: string; reassignedAt?: Date } = {}
 ) => {
   const initiator = normalizeCaseAssignee(assignments.initiator);
   const reviewer = normalizeCaseAssignee(assignments.reviewer);
@@ -317,6 +330,18 @@ const propagateCaseAssignmentsToTasks = async (
 
         const nextStaff = staffByRole[roleKey];
         if (nextStaff && normalizeCaseAssignee(stage.staffMember) !== nextStaff) {
+          // Do not erase who owned the work before the handover. The stage
+          // status, notes, evidence and completed timestamp stay untouched;
+          // only its open owner changes.
+          stage.assignmentHistory = [
+            ...(Array.isArray(stage.assignmentHistory) ? stage.assignmentHistory : []),
+            {
+              ...(normalizeCaseAssignee(stage.staffMember) ? { previousStaffMember: normalizeCaseAssignee(stage.staffMember) } : {}),
+              nextStaffMember: nextStaff,
+              reassignedAt: options.reassignedAt || new Date(),
+              ...(String(options.reassignedBy || '').trim() ? { reassignedBy: String(options.reassignedBy).trim() } : {}),
+            },
+          ];
           stage.staffMember = nextStaff;
           dirty = true;
         }
@@ -334,11 +359,31 @@ const propagateCaseAssignmentsToTasks = async (
     const isMatterAssignmentTask = String(task.title || '').trim().startsWith('Matter Assignment');
     if (taskOpen && isMatterAssignmentTask) {
       if (initiator && task.assignee !== initiator) {
+        task.assignmentHistory = [
+          ...(Array.isArray(task.assignmentHistory) ? task.assignmentHistory : []),
+          {
+            role: 'Assignee',
+            ...(normalizeCaseAssignee(task.assignee) ? { previousAssignee: normalizeCaseAssignee(task.assignee) } : {}),
+            nextAssignee: initiator,
+            reassignedAt: options.reassignedAt || new Date(),
+            ...(String(options.reassignedBy || '').trim() ? { reassignedBy: String(options.reassignedBy).trim() } : {}),
+          },
+        ];
         task.assignee = initiator;
         dirty = true;
       }
       const taskSupervisor = reviewer || signer;
       if (taskSupervisor && task.supervisor !== taskSupervisor) {
+        task.assignmentHistory = [
+          ...(Array.isArray(task.assignmentHistory) ? task.assignmentHistory : []),
+          {
+            role: 'Supervisor',
+            ...(normalizeCaseAssignee(task.supervisor) ? { previousAssignee: normalizeCaseAssignee(task.supervisor) } : {}),
+            nextAssignee: taskSupervisor,
+            reassignedAt: options.reassignedAt || new Date(),
+            ...(String(options.reassignedBy || '').trim() ? { reassignedBy: String(options.reassignedBy).trim() } : {}),
+          },
+        ];
         task.supervisor = taskSupervisor;
         dirty = true;
       }
@@ -389,6 +434,8 @@ export const getAllCases = async (req: AuthRequest, res: Response) => {
             { 'caseAssignments.initiator': meRegex },
             { 'caseAssignments.reviewer': meRegex },
             { 'caseAssignments.signerApprover': meRegex },
+            { 'assignmentHandoverHistory.previousAssignee': meRegex },
+            { 'assignmentHandoverHistory.nextAssignee': meRegex },
           ],
         }
       : null;
@@ -1098,6 +1145,9 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     delete updatePayload.__v;
     delete updatePayload.workflowInstanceId;
     delete updatePayload.takeRequestState;
+    // Handover history is server-authored. An edit client may read it but may
+    // never replace or forge a contributor record.
+    delete updatePayload.assignmentHandoverHistory;
     if (updatePayload?.billingSettings && typeof updatePayload.billingSettings === 'object') {
       updatePayload.billingSettings = { ...updatePayload.billingSettings, currency: SINGLE_CURRENCY };
     }
@@ -1112,6 +1162,23 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
         caseAssignments: nextAssignments,
         assignedTo: (req.body as any)?.assignedTo || before?.assignedTo,
       });
+      // Older matters may only have `assignedTo`. Treat it as their original
+      // Initiator so the first edit that introduces the three-role model still
+      // preserves the predecessor's completed work and earned fee.
+      const beforeAssignments = {
+        ...(before.caseAssignments || {}),
+        initiator: before.caseAssignments?.initiator || before.assignedTo || '',
+      };
+      const handovers = buildCaseAssignmentHandovers(beforeAssignments, nextAssignments, {
+        changedAt: new Date(),
+        changedBy: req.user?.name || 'System',
+      });
+      if (handovers.length) {
+        updatePayload.assignmentHandoverHistory = [
+          ...(Array.isArray(before.assignmentHandoverHistory) ? before.assignmentHandoverHistory : []),
+          ...handovers,
+        ];
+      }
     }
     const updated: any = await Case.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
 
@@ -1122,7 +1189,9 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     // Firm Reports earnings attribution) are re-pointed at the new members,
     // except stages already completed (those keep their historical author).
     if (nextAssignments) {
-      await propagateCaseAssignmentsToTasks(updated._id, nextAssignments);
+      await propagateCaseAssignmentsToTasks(updated._id, nextAssignments, {
+        reassignedBy: req.user?.name || 'System',
+      });
     }
 
     // If workflow template was changed, merge the workflow instance and keep

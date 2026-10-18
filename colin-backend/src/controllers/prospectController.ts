@@ -721,6 +721,47 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: validationMessage });
     }
 
+    // A prospect/intake handover changes only the person accountable for the
+    // live stage. Its checklist ticks, SLA clock, follow-ups and stage history
+    // remain on the same record, while this trail keeps the previous owner
+    // visible to the incoming person and to future reporting/audits.
+    const assignmentSpecs = [
+      { field: 'assignedTo', role: 'Assigned To' },
+      { field: 'responsibleAssociate', role: 'Responsible Associate' },
+      { field: 'responsiblePartner', role: 'Responsible Partner' },
+    ] as const;
+    const changedAssignments = assignmentSpecs
+      .map(({ field, role }) => ({
+        role,
+        previousId: String((prospect as any)[field] || ''),
+        nextId: String((updates as any)[field] || ''),
+      }))
+      .filter(({ previousId, nextId }) => previousId !== nextId);
+    if (changedAssignments.length) {
+      const ids = Array.from(
+        new Set(
+          changedAssignments
+            .flatMap(({ previousId, nextId }) => [previousId, nextId])
+            .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        )
+      );
+      const people = ids.length ? await User.find({ _id: { $in: ids } }).select('name').lean() : [];
+      const namesById = new Map((people as any[]).map((person) => [String(person._id), String(person.name || '').trim()]));
+      const reassignedAt = new Date();
+      (prospect as any).assignmentHistory = [
+        ...(Array.isArray((prospect as any).assignmentHistory) ? (prospect as any).assignmentHistory : []),
+        ...changedAssignments.map(({ role, previousId, nextId }) => ({
+          role,
+          ...(mongoose.Types.ObjectId.isValid(previousId) ? { previousAssigneeId: new mongoose.Types.ObjectId(previousId) } : {}),
+          ...(namesById.get(previousId) ? { previousAssigneeName: namesById.get(previousId) } : {}),
+          ...(mongoose.Types.ObjectId.isValid(nextId) ? { nextAssigneeId: new mongoose.Types.ObjectId(nextId) } : {}),
+          ...(namesById.get(nextId) ? { nextAssigneeName: namesById.get(nextId) } : {}),
+          reassignedAt,
+          reassignedBy: req.user?.name || 'System',
+        })),
+      ];
+    }
+
     const shouldSendFeedbackEmail = prospect.stage !== 'Non-Converted' && updates.stage === 'Non-Converted';
 
     // Workflow-control layer: when the active stage actually changes, reset that

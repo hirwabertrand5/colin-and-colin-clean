@@ -10,6 +10,8 @@
  * the API accepts the request) and mirrored by the Case Workspace frontend, so
  * the UI never offers an action the server would reject.
  */
+import { identityMatches } from './caseAssignments';
+
 export const normalizeAssignmentIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
 
 /** The signed-in user's identity, as far as the assignment rules care. */
@@ -30,14 +32,13 @@ export const resolveAssignedSlot = (
   foundCase: any,
   user: { name?: string | null; email?: string | null }
 ): 'initiator' | 'reviewer' | 'approver' | 'none' => {
-  const identities = [user?.name, user?.email]
-    .map(normalizeAssignmentIdentity)
-    .filter(Boolean);
+  const identities = [user?.name, user?.email].map((value) => String(value || '').trim()).filter(Boolean);
   if (!identities.length) return 'none';
   const slots = readCaseAssignmentSlots(foundCase);
-  if (identities.includes(normalizeAssignmentIdentity(slots.initiator))) return 'initiator';
-  if (identities.includes(normalizeAssignmentIdentity(slots.reviewer))) return 'reviewer';
-  if (identities.includes(normalizeAssignmentIdentity(slots.approver))) return 'approver';
+  const matches = (assignment: string) => identities.some((identity) => identityMatches(assignment, identity));
+  if (matches(slots.initiator)) return 'initiator';
+  if (matches(slots.reviewer)) return 'reviewer';
+  if (matches(slots.approver)) return 'approver';
   return 'none';
 };
 

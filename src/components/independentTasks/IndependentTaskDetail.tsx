@@ -481,6 +481,11 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
                           <dt className="text-gray-500">Supervisor</dt>
                           <dd className="font-medium text-gray-900 text-right">{task.supervisor}</dd>
                         </div>
+                        {task.assignmentHistory?.length ? (
+                          <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                            <span className="font-semibold">Continuity protected.</span> {task.assignmentHistory.length} handover{task.assignmentHistory.length === 1 ? '' : 's'} recorded; progress, dates and evidence were retained for the current owner.
+                          </div>
+                        ) : null}
                         <div className="flex justify-between gap-4">
                           <dt className="text-gray-500">Start Date</dt>
                           <dd className="text-right text-gray-700">{formatDate(task.startDate)}</dd>

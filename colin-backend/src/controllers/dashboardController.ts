@@ -181,7 +181,6 @@ export const getExecutiveAssistantDashboard = async (req: AuthRequest, res: Resp
 // Staff member dashboard summary
 // ---------------------------------------------------------------------------
 
-const normalizeKey = (value: unknown) => String(value || '').trim().toLowerCase();
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const round1 = (value: number) => Math.round((Number(value) || 0) * 10) / 10;
 const round2 = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
@@ -202,6 +201,8 @@ type StaffDashboardMatterRow = {
   contractValue: number;
   collectedBase: number;
   earnedFee: number | null;
+  /** False when this is a retained handover/earnings record, not live work. */
+  isCurrentAssignment: boolean;
   completed: boolean;
   outstanding: boolean;
   overdueSections: number;
@@ -369,7 +370,11 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     const period = periodResolution || null;
 
     const roleTpaPercent = getTpaPercent(String(req.user?.role || ''));
-    const meKeys = [meName, meEmail].map(normalizeKey).filter(Boolean);
+    // Names may be stored as an account first name or the full picker label;
+    // use the platform's canonical comparison everywhere a dashboard decides
+    // whether a value belongs to the signed-in member.
+    const matchesCurrentUser = (value: unknown) =>
+      [meName, meEmail].some((identity) => identity && identityMatches(value, identity));
 
     // Identity match must be CANONICAL, not byte-exact. A member is referenced
     // sometimes by their account name ("Badiel") and sometimes by the full name a
@@ -392,6 +397,10 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
             { 'caseAssignments.initiator': identity },
             { 'caseAssignments.reviewer': identity },
             { 'caseAssignments.signerApprover': identity },
+            // Former owners keep dashboard/report visibility for the work they
+            // completed before a handover.
+            { 'assignmentHandoverHistory.previousAssignee': identity },
+            { 'assignmentHandoverHistory.nextAssignee': identity },
           ]),
         })
           .sort({ updatedAt: -1 })
@@ -471,6 +480,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     let mattersCompleted = 0;
     let mattersOutstanding = 0;
     let overdueSections = 0;
+    let currentMattersAssigned = 0;
     let collectedBaseTotal = 0;
     let feesEarnedTotal = 0;
     let hasScoredFee = false;
@@ -522,10 +532,6 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
             return dueAt ? dueAt.getTime() < Date.now() : false;
           }).length;
 
-      if (completed) mattersCompleted += 1;
-      if (outstanding) mattersOutstanding += 1;
-      overdueSections += matterOverdueSections;
-
       // Same engine as the Case Workspace / Case Management Earned Fees table.
       const earned = computeCaseEarnedFees({
         caseDoc: matter,
@@ -538,9 +544,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
 
       // Earned-Fees rows for me — matched canonically so a full-name stored slot
       // ("Badiel Rubangutsangabo") still counts for the account ("Badiel").
-      const myRows = earned.team.filter((member) =>
-        [meName, meEmail].some((identity) => identity && identityMatches(member.name, identity))
-      );
+      const myRows = earned.team.filter((member) => matchesCurrentUser(member.name));
 
       currency = SINGLE_CURRENCY;
 
@@ -554,14 +558,24 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       // here. The old `if (!myRows.length) continue;` skipped exactly those, so
       // "Assigned Matters" undercounted (e.g. 6 instead of 10). Keep the matter and
       // count it, with null scores (the honest "Pending") until it is scored.
-      const matchesMe = (value: unknown) =>
-        [meName, meEmail].some((identity) => identity && identityMatches(value, identity));
+      const matchesMe = matchesCurrentUser;
       const directRoles: string[] = [];
       if (matchesMe(matter?.caseAssignments?.initiator)) directRoles.push('Initiator');
       if (matchesMe(matter?.caseAssignments?.reviewer)) directRoles.push('Reviewer');
       if (matchesMe(matter?.caseAssignments?.signerApprover)) directRoles.push('Signer/Approver');
       if (directRoles.length === 0 && matchesMe(matter?.assignedTo)) {
         directRoles.push('Assigned');
+      }
+      // A handover keeps the former owner's fee row and report visibility, but
+      // must never make that person look responsible for the case's remaining
+      // work.  Live portfolio/task counters are therefore based only on a
+      // current assignment slot; earnings still include historical rows below.
+      const isCurrentAssignment = directRoles.length > 0;
+      if (isCurrentAssignment) {
+        currentMattersAssigned += 1;
+        if (completed) mattersCompleted += 1;
+        if (outstanding) mattersOutstanding += 1;
+        overdueSections += matterOverdueSections;
       }
 
       const myTimeliness = myRows
@@ -607,13 +621,11 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       // Decided BEFORE the score is averaged, so a matter only contributes its
       // Timeliness/Quality when it genuinely had in-scope activity.
       let hadInPeriodWork = false;
-      // All Time: every assigned matter is in scope (no date window to exclude).
-      if (!period) hadInPeriodWork = true;
+      // All Time: every CURRENT assignment is in scope. A former owner remains
+      // visible in fee history but is not counted as an active assigned matter.
+      if (!period && isCurrentAssignment) hadInPeriodWork = true;
 
       const collectedInPeriod = collectedInPeriodByCase.get(caseId) || 0;
-      periodCollectedValue += collectedInPeriod;
-      // A payment landing inside the scope is itself in-scope activity.
-      if (collectedInPeriod > 0) hadInPeriodWork = true;
 
       // Same engine and role table as the all-time row — only the collected
       // value is restricted to payments received inside the scope. When there is
@@ -630,7 +642,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
             roleByName,
           })
         : earned;
-      const myPeriodRows = earnedInPeriod.team.filter((member) => meKeys.includes(normalizeKey(member.name)));
+      const myPeriodRows = earnedInPeriod.team.filter((member) => matchesCurrentUser(member.name));
       const myPeriodFees = myPeriodRows
         .map((member) => member.earnedFee)
         .filter((value): value is number => value != null);
@@ -639,6 +651,13 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         (max, member) => Math.max(max, Number(member.taskFeeCollected) || 0),
         0
       );
+      // This dashboard is personal: never show a matter's entire payment as a
+      // member's collected base.  Use the same action base attached to that
+      // member's earned-fee rows (the max avoids counting the same Key Action
+      // once per delivery role when one person holds multiple roles).
+      periodCollectedValue += collectedBaseInPeriod;
+      // A payment counts as live portfolio activity only for the current owner.
+      if (isCurrentAssignment && collectedBaseInPeriod > 0) hadInPeriodWork = true;
       if (earnedFeeInPeriod != null) {
         periodFeesEarned += earnedFeeInPeriod;
         hasPeriodFee = true;
@@ -660,7 +679,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         const stepCompleted = String((step as any)?.status || '').toLowerCase() === 'completed';
 
         // Key Action checked = an individual step completed inside the scope.
-        if (stepCompleted && isWithinReportRange((step as any)?.completedAt, period)) {
+        if (isCurrentAssignment && stepCompleted && isWithinReportRange((step as any)?.completedAt, period)) {
           periodKeyActionsChecked += 1;
           hadInPeriodWork = true;
         }
@@ -695,13 +714,13 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         const completedInScope = period
           ? Boolean(bucket.lastCompletedAt && isWithinReportRange(bucket.lastCompletedAt, period))
           : true;
-        if (completedInScope) {
+        if (isCurrentAssignment && completedInScope) {
           periodSectionsCompleted += 1;
           hadInPeriodWork = true;
         }
       }
 
-      if (completed) {
+      if (isCurrentAssignment && completed) {
         const completionAt =
           steps.reduce<Date | null>((latest, step: any) => {
             const at = step?.completedAt ? new Date(step.completedAt) : null;
@@ -732,7 +751,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       // "Entry date" scope: matters assigned to you that were OPENED in the
       // scope. Assignment time is not stored, so creation is the only honest
       // entry date available — never a fabricated one.
-      if (isWithinReportRange(matter?.createdAt, period)) {
+      if (isCurrentAssignment && isWithinReportRange(matter?.createdAt, period)) {
         periodMattersCreatedInPeriod += 1;
       }
 
@@ -750,9 +769,10 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         contractValue: round2(Number(earned.contractValue) || 0),
         collectedBase: round2(collectedBase),
         earnedFee,
+        isCurrentAssignment,
         completed,
-        outstanding,
-        overdueSections: matterOverdueSections,
+        outstanding: isCurrentAssignment && outstanding,
+        overdueSections: isCurrentAssignment ? matterOverdueSections : 0,
         ...(period
           ? {
               inPeriod: hadInPeriodWork,
@@ -775,11 +795,16 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     // point-in-time reconstruction from real dates, not an invented value.
     const scopeEnd = period ? period.toExclusive.getTime() : Date.now();
     for (const task of taskList) {
-      const involvesMe =
-        meKeys.includes(normalizeKey(task?.assignee)) ||
-        (Array.isArray(task?.taskStages) &&
-          task.taskStages.some((stage: any) => meKeys.includes(normalizeKey(stage?.staffMember))));
-      if (!involvesMe) continue;
+      const stages = Array.isArray(task?.taskStages) ? task.taskStages : [];
+      const currentlyOwnsTask =
+        matchesCurrentUser(task?.assignee) ||
+        matchesCurrentUser(task?.supervisor) ||
+        stages.some(
+          (stage: any) =>
+            matchesCurrentUser(stage?.staffMember) &&
+            String(stage?.status || '').toLowerCase() !== 'completed'
+        );
+      if (!currentlyOwnsTask) continue;
 
       if (
         String(task?.status || '').toLowerCase() === 'completed' &&
@@ -798,8 +823,8 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         completedAt >= scopeEnd;
       if (existedByScopeEnd && notCompletedByScopeEnd) periodTasksOutstanding += 1;
 
-      for (const stage of Array.isArray(task?.taskStages) ? task.taskStages : []) {
-        if (!meKeys.includes(normalizeKey(stage?.staffMember))) continue;
+      for (const stage of stages) {
+        if (!matchesCurrentUser(stage?.staffMember)) continue;
         if (!isWithinReportRange(stage?.completedAt, period)) continue;
         if (stage?.timelinessScore != null) periodTimelinessScores.push(Number(stage.timelinessScore));
         if (stage?.qualityScore != null) periodQualityScores.push(Number(stage.qualityScore));
@@ -827,7 +852,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       user: { name: meName },
       tpaPercent: roleTpaPercent,
       currency,
-      mattersAssigned: matters.length,
+      mattersAssigned: currentMattersAssigned,
       mattersOutstanding,
       mattersCompleted,
       overdueSections,

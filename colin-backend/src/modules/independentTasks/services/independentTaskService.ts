@@ -594,10 +594,39 @@ export const independentTaskService = {
         const beforeDue = task.dueDate;
         const beforeAssignee = task.assignee;
         const beforeSupervisor = task.supervisor;
+        const reassignedAt = new Date();
+        const handovers: Array<{
+          role: 'Assignee' | 'Supervisor';
+          previousAssignee?: string;
+          nextAssignee?: string;
+          reassignedAt: Date;
+          reassignedBy?: string;
+        }> = [];
+        if (updates.assignee && cleanString(updates.assignee) !== cleanString(beforeAssignee)) {
+          handovers.push({
+            role: 'Assignee',
+            ...(cleanString(beforeAssignee) ? { previousAssignee: cleanString(beforeAssignee) } : {}),
+            nextAssignee: cleanString(updates.assignee),
+            reassignedAt,
+            reassignedBy: req.user?.name || 'System',
+          });
+        }
+        if (updates.supervisor && cleanString(updates.supervisor) !== cleanString(beforeSupervisor)) {
+          handovers.push({
+            role: 'Supervisor',
+            ...(cleanString(beforeSupervisor) ? { previousAssignee: cleanString(beforeSupervisor) } : {}),
+            nextAssignee: cleanString(updates.supervisor),
+            reassignedAt,
+            reassignedBy: req.user?.name || 'System',
+          });
+        }
         Object.assign(task, updates, {
           lastActionBy: req.user?.name || 'System',
           ...(req.user?.id ? { lastActionByUserId: new mongoose.Types.ObjectId(req.user.id) } : {}),
         });
+        if (handovers.length) {
+          task.assignmentHistory = [...(Array.isArray(task.assignmentHistory) ? task.assignmentHistory : []), ...handovers];
+        }
         await task.save({ session });
 
         if (updates.priority && updates.priority !== beforePriority) {
@@ -607,11 +636,15 @@ export const independentTaskService = {
           await buildHistory(String(task._id), 'TASK_DUE_DATE_CHANGED', 'Due date changed', req, `${beforeDue} → ${updates.dueDate}`);
         }
         if (updates.assignee && updates.assignee !== beforeAssignee) {
-          await buildHistory(String(task._id), 'TASK_ASSIGNED', 'Assignee changed', req, `${beforeAssignee} → ${updates.assignee}`);
+          await buildHistory(String(task._id), 'TASK_REASSIGNED', 'Assignee reassigned — progress preserved', req, `${beforeAssignee} → ${updates.assignee}`, {
+            role: 'Assignee', previousAssignee: beforeAssignee, nextAssignee: updates.assignee,
+          });
           await notifyAssigned(task, req);
         }
         if (updates.supervisor && updates.supervisor !== beforeSupervisor) {
-          await buildHistory(String(task._id), 'TASK_EDITED', 'Supervisor changed', req, `${beforeSupervisor} → ${updates.supervisor}`);
+          await buildHistory(String(task._id), 'TASK_REASSIGNED', 'Supervisor reassigned — progress preserved', req, `${beforeSupervisor} → ${updates.supervisor}`, {
+            role: 'Supervisor', previousAssignee: beforeSupervisor, nextAssignee: updates.supervisor,
+          });
         }
       });
       await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_UPDATED', 'Independent task updated', task.title));

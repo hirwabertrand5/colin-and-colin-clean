@@ -71,6 +71,13 @@ export interface CaseData {
     reviewer?: string;
     signerApprover?: string;
   };
+  assignmentHandoverHistory?: Array<{
+    role: 'Initiator' | 'Reviewer' | 'Signer/Approver';
+    previousAssignee?: string;
+    nextAssignee?: string;
+    changedAt: string;
+    changedBy?: string;
+  }>;
   description?: string;
   legalServicePath?: LegalServicePathItem[];
 

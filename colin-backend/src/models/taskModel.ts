@@ -47,6 +47,21 @@ export interface ITaskStage {
   potentialAllocation?: number | null;
   earnedRevenue?: number | null;
   notes?: string;
+  /** Each reassignment of this stage, without rewriting the contributor who completed it. */
+  assignmentHistory?: Array<{
+    previousStaffMember?: string;
+    nextStaffMember?: string;
+    reassignedAt: Date;
+    reassignedBy?: string;
+  }>;
+}
+
+export interface ITaskAssignmentHistory {
+  role: 'Assignee' | 'Supervisor';
+  previousAssignee?: string;
+  nextAssignee?: string;
+  reassignedAt: Date;
+  reassignedBy?: string;
 }
 
 export interface ITask extends Document {
@@ -69,6 +84,8 @@ export interface ITask extends Document {
   workflowStageKey?: string;
   workflowStepKey?: string;
   taskStages?: ITaskStage[];
+  /** Handover record for top-level/legacy task ownership. */
+  assignmentHistory?: ITaskAssignmentHistory[];
 
   requiresApproval: boolean;
   approvalStatus: TaskApprovalStatus;
@@ -129,6 +146,17 @@ const TaskStageSchema = new Schema<ITaskStage>(
     potentialAllocation: { type: Number, min: 0, default: null },
     earnedRevenue: { type: Number, min: 0, default: null },
     notes: { type: String, trim: true, default: '' },
+    assignmentHistory: {
+      type: [
+        {
+          previousStaffMember: { type: String, trim: true },
+          nextStaffMember: { type: String, trim: true },
+          reassignedAt: { type: Date, required: true, default: Date.now },
+          reassignedBy: { type: String, trim: true },
+        },
+      ],
+      default: [],
+    },
   },
   { _id: true }
 );
@@ -179,6 +207,18 @@ const TaskSchema = new Schema<ITask>(
     workflowStageKey: { type: String, trim: true, index: true },
     workflowStepKey: { type: String, trim: true, index: true },
     taskStages: { type: [TaskStageSchema], default: [] },
+    assignmentHistory: {
+      type: [
+        {
+          role: { type: String, enum: ['Assignee', 'Supervisor'], required: true },
+          previousAssignee: { type: String, trim: true },
+          nextAssignee: { type: String, trim: true },
+          reassignedAt: { type: Date, required: true, default: Date.now },
+          reassignedBy: { type: String, trim: true },
+        },
+      ],
+      default: [],
+    },
 
     requiresApproval: { type: Boolean, default: false },
     approvalStatus: {

@@ -50,6 +50,13 @@ export interface Prospect {
   contact: ProspectContact;
   responsiblePartner?: string | { _id: string; name: string; email?: string; role?: string };
   responsibleAssociate?: string | { _id: string; name: string; email?: string; role?: string };
+  assignmentHistory?: Array<{
+    role: 'Assigned To' | 'Responsible Associate' | 'Responsible Partner';
+    previousAssigneeName?: string;
+    nextAssigneeName?: string;
+    reassignedAt: Date | string;
+    reassignedBy?: string;
+  }>;
   legalServicePath?: { id: string; label: string }[];
   inquiryDescription: string;
   dateReceived: Date;

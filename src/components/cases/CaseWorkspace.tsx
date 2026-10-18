@@ -88,7 +88,12 @@ import {
   CaseWorkspaceTabName,
   normalizeCaseWorkspaceTab,
 } from '../../utils/caseWorkspaceLinks';
-import { caseMatchesAssignee, formatCaseAssignedTo, getCaseAssignments, normalizeCaseAssignee, setCaseAssignmentSlot } from '../../utils/caseAssignments';
+import {
+  caseMatchesAssigneeCanonical,
+  formatCaseAssignedTo,
+  getCaseAssignments,
+  setCaseAssignmentSlot,
+} from '../../utils/caseAssignments';
 import {
   formatDeadlineDateTime,
   resolveDeadlineDateTime,
@@ -288,7 +293,14 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   // arrives while the Case Workspace is already open on another tab.
   useEffect(() => {
     const requested = normalizeCaseWorkspaceTab(searchParams.get('tab'));
-    if (requested) setActiveTab((prev) => (prev === requested ? prev : requested));
+    if (requested) {
+      setActiveTab((prev) => (prev === requested ? prev : requested));
+    } else if (['tasks', 'team-stages', 'teamstages'].includes(String(searchParams.get('tab') || '').trim().toLowerCase())) {
+      // Legacy links remain useful, but matter work now has one source of
+      // truth: Case Management.
+      setActiveTab('caseManagement');
+      writeTabToUrl('caseManagement');
+    }
     const step = String(searchParams.get('step') || '').trim();
     if (step) setCmFocusStep(step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -346,16 +358,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const canWorkOnWorkflowSteps = useMemo(() => {
     if (!caseData?._id) return false;
     if (isAdminRole) return true;
-    const meName = normalizeIdentity(currentUser?.name);
-    const meEmail = normalizeIdentity(currentUser?.email);
-    if (!meName && !meEmail) return false;
-    const identities = [meName, meEmail].filter(Boolean);
-    const slots = getCaseAssignments(caseData);
-    return [slots.initiator, slots.reviewer, slots.signerApprover, normalizeCaseAssignee(caseData?.assignedTo)].some(
-      (value) => {
-        const normalized = normalizeIdentity(value);
-        return Boolean(normalized) && identities.includes(normalized);
-      }
+    return (
+      caseMatchesAssigneeCanonical(caseData, currentUser?.name) ||
+      caseMatchesAssigneeCanonical(caseData, currentUser?.email)
     );
   }, [caseData, currentUser?.email, currentUser?.name, isAdminRole]);
 
@@ -1170,7 +1175,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const nowMs = Date.now();
 
   const isYellowMatter = currentMatterColor === 'yellow';
-  const isCurrentAssignee = caseMatchesAssignee(caseData, currentUser.name) || caseMatchesAssignee(caseData, currentUser.email);
+  const isCurrentAssignee =
+    caseMatchesAssigneeCanonical(caseData, currentUser.name) ||
+    caseMatchesAssigneeCanonical(caseData, currentUser.email);
   const takeRequestState = caseData?.takeRequestState;
   const isPendingTakeRequest =
     String(takeRequestState?.status || '').toLowerCase() === 'pending' &&
@@ -1565,13 +1572,19 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       </div>
 
       {/* Tabs */}
+      {caseData?.assignmentHandoverHistory?.length ? (
+        <div className="mb-5 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3 text-sm text-blue-950">
+          <div className="font-semibold">Continuity protected</div>
+          <div className="mt-1 text-xs text-blue-800">
+            This matter has {caseData.assignmentHandoverHistory.length} recorded handover{caseData.assignmentHandoverHistory.length === 1 ? '' : 's'}. Completed work and earned fees remain with the contributor who performed them.
+          </div>
+        </div>
+      ) : null}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex space-x-6 overflow-x-auto">
           {[
             { id: 'overview', label: 'Overview', icon: FileText },
             { id: 'caseManagement', label: 'Case Management', icon: ListChecks },
-            { id: 'teamStages', label: 'Team & Stages', icon: FolderTree },
-            { id: 'tasks', label: 'Tasks', icon: CheckSquare },
             { id: 'calendar', label: 'Calendar', icon: CalendarIcon },
             { id: 'documents', label: 'Documents', icon: Upload },
             // ✅ Billing hidden for associates
@@ -1725,7 +1738,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 canCompleteSteps={canWorkOnWorkflowSteps}
                 canToggleActions={canWorkOnWorkflowSteps}
                 canUpload={true}
-                tasks={tasks}
                 currentUserName={currentUser?.name}
                 currentUserEmail={currentUser?.email}
                 onOpenCaseManagement={openCaseManagementFromKeyAction}
@@ -1810,7 +1822,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         </div>
       )}
 
-      {activeTab === 'teamStages' && (
+      {/* Retired: team/stage execution is now represented in Case Management. */}
+      {false && activeTab === 'teamStages' && (
         <div className="space-y-6">
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -1931,8 +1944,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* Tasks */}
-      {activeTab === 'tasks' && (
+      {/* Retired: case task work now lives in Overview and Case Management. */}
+      {false && activeTab === 'tasks' && (
         <div className="bg-white border border-gray-200 rounded-lg">
           <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900">Case Tasks</h2>

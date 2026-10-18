@@ -2,7 +2,7 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import Case from '../models/caseModel';
-import WorkflowInstance from '../models/workflowInstanceModel';
+import WorkflowInstance, { isStepWorkDone } from '../models/workflowInstanceModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import Task from '../models/taskModel';
 import Invoice from '../models/invoiceModel';
@@ -19,6 +19,7 @@ import {
 import { buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages';
 import { canEnterQualityScore, isAllowedQualityScoreRole } from '../utils/caseAssignmentPermissions';
 import { completeStepForCase, reconcileInstanceTemplateWithCanonical } from './workflowController';
+import { identityMatches } from '../utils/caseAssignments';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -62,8 +63,7 @@ const resolveMyCaseRole = (caseDoc: any, req: AuthRequest) => {
   const meName = normalizeIdentity(req.user?.name);
   const meEmail = normalizeIdentity(req.user?.email);
   const match = (value: string) => {
-    const normalized = normalizeIdentity(value);
-    return Boolean(normalized) && (normalized === meName || normalized === meEmail);
+    return Boolean(value) && (identityMatches(value, meName) || identityMatches(value, meEmail));
   };
   const assignments = getCaseAssignments(caseDoc);
   if (match(assignments.initiator)) return 'initiator';
@@ -84,8 +84,7 @@ const isCaseInitiator = (caseDoc: any, req: AuthRequest) => {
   const meEmail = normalizeIdentity(req.user?.email);
   if (!meName && !meEmail) return false;
   const match = (value: string) => {
-    const normalized = normalizeIdentity(value);
-    return Boolean(normalized) && (normalized === meName || normalized === meEmail);
+    return Boolean(value) && (identityMatches(value, meName) || identityMatches(value, meEmail));
   };
   const assignments = getCaseAssignments(caseDoc);
   return Boolean(assignments.initiator && match(assignments.initiator));
@@ -260,6 +259,9 @@ export const requestReview = async (req: AuthRequest, res: Response) => {
     if (!step) return res.status(404).json({ message: 'Key Action not found.' });
     if (String(step.status || '').toLowerCase() === 'completed') {
       return res.status(400).json({ message: 'This Key Action is already completed.' });
+    }
+    if (!isStepWorkDone(step) || String(step.status || '') !== 'Done') {
+      return res.status(400).json({ message: 'Tick this Key Action as done in the Overview before sending it for review.' });
     }
 
     step.status = 'Awaiting Review';

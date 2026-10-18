@@ -44,6 +44,16 @@ export interface IProspect extends Document {
   contact: IProspectContact;
   responsiblePartner?: mongoose.Types.ObjectId;
   responsibleAssociate?: mongoose.Types.ObjectId;
+  /** Ownership changes are retained so the active intake/prospect stage never loses its context. */
+  assignmentHistory?: Array<{
+    role: 'Assigned To' | 'Responsible Associate' | 'Responsible Partner';
+    previousAssigneeId?: mongoose.Types.ObjectId;
+    previousAssigneeName?: string;
+    nextAssigneeId?: mongoose.Types.ObjectId;
+    nextAssigneeName?: string;
+    reassignedAt: Date;
+    reassignedBy?: string;
+  }>;
   
   // Legal Service Category
   legalServicePath?: {
@@ -242,6 +252,20 @@ const ProspectSchema = new Schema<IProspect>(
       ref: 'User',
       default: null,
       index: true,
+    },
+    assignmentHistory: {
+      type: [
+        {
+          role: { type: String, enum: ['Assigned To', 'Responsible Associate', 'Responsible Partner'], required: true },
+          previousAssigneeId: { type: Schema.Types.ObjectId, ref: 'User' },
+          previousAssigneeName: { type: String, trim: true },
+          nextAssigneeId: { type: Schema.Types.ObjectId, ref: 'User' },
+          nextAssigneeName: { type: String, trim: true },
+          reassignedAt: { type: Date, required: true, default: Date.now },
+          reassignedBy: { type: String, trim: true },
+        },
+      ],
+      default: [],
     },
     legalServicePath: [
       {

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { TaskData } from '../../services/taskService';
 import {
   getWorkflowForCase,
   completeWorkflowStep,
@@ -30,7 +29,6 @@ type Props = {
   canToggleActions: boolean;
   canUpload: boolean;
   onWorkflowChanged?: () => void | Promise<void>;
-  tasks?: TaskData[];
   currentUserName?: string;
   currentUserEmail?: string;
   /** Kept for backwards-compatible callers; ticking stays in the Overview. */
@@ -46,7 +44,7 @@ const formatMoney = (amount: number | null | undefined, currency?: string) => {
   }).format(Number(amount));
 };
 
-export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged, tasks, currentUserName, currentUserEmail, onOpenCaseManagement }: Props) {
+export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleActions, canUpload, onWorkflowChanged, currentUserName, currentUserEmail, onOpenCaseManagement }: Props) {
   void canUpload;
   void canToggleActions;
   void onOpenCaseManagement;
@@ -420,6 +418,16 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       ? Number((s as { stageOrder?: number }).stageOrder)
       : Number(s.order ?? 0);
   const steps = [...wf.steps].sort((a, b) => stageRankOf(a) - stageRankOf(b) || a.order - b.order);
+  // The API is authoritative, but calculate the same sequential gate locally
+  // so the next permitted Key Action is obvious before a user clicks it.
+  // Existing completed/out-of-order records remain readable; only an unticked
+  // action with unfinished work before it is locked.
+  const earlierPendingByStepKey = new Map<string, WorkflowInstance['steps'][number]>();
+  let earlierPending: WorkflowInstance['steps'][number] | null = null;
+  for (const step of steps) {
+    if (!isStepWorkDone(step) && earlierPending) earlierPendingByStepKey.set(step.stepKey, earlierPending);
+    if (!isStepWorkDone(step) && !earlierPending) earlierPending = step;
+  }
 
   /**
    * The workflow template is authoritative for the shape of the checklist: its
@@ -606,7 +614,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   return (
                     <tr key={member.key} className="bg-white dark:bg-gray-800">
                       <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{member.role}</td>
-                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{member.name}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>{member.name}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${member.isCurrentAssignment === false ? 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
+                            {member.isCurrentAssignment === false ? 'Handover record' : 'Current owner'}
+                          </span>
+                        </div>
+                        {member.isCurrentAssignment === false && <div className="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">Completed work and earned fee retained.</div>}
+                      </td>
                       <td
                         className="px-3 py-2 text-right text-gray-600 dark:text-gray-300"
                         title={
@@ -913,12 +929,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
           ) : null}
           <div className="space-y-4 p-4">
               {stageGroup.steps.map((s, actionIndex) => {
-        // Overview ticks are intentionally independent: any Key Action can be
-        // recorded as done here, while review and approval happen separately in
-        // Case Management when the team is ready.
+        // Work is ticked in workflow order. Review and approval remain separate
+        // in Case Management once the Initiator has recorded the work.
         const isTicked = isStepWorkDone(s);
         const isCompleted = s.status === 'Completed';
         const isLoading = busyKey === `complete:${s.stepKey}`;
+        const blockedBy = !isTicked ? earlierPendingByStepKey.get(s.stepKey) : undefined;
 
         // Deadline clock: ticks down live while the Key Action is open, and
         // FREEZES the moment its work is done — the countdown becomes a fixed
@@ -929,7 +945,11 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         const extensionHistory = Array.isArray(s.extensionHistory) ? s.extensionHistory : [];
         const latestExtension = extensionHistory[extensionHistory.length - 1];
 
-        const tooltipMessage = isTicked ? 'Click to reopen Key Action' : 'Click to mark Key Action as done';
+        const tooltipMessage = isTicked
+          ? 'Click to reopen Key Action'
+          : blockedBy
+            ? `Complete "${blockedBy.title}" first`
+            : 'Click to mark Key Action as done';
 
         const keyActionValue = keyActionValueOf(s.stepKey);
 
@@ -1090,7 +1110,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
               {canCompleteSteps && (
                 <button
-                  disabled={isLoading}
+                  disabled={isLoading || Boolean(blockedBy)}
                   onClick={() => {
                     // Clicking a ticked Key Action reopens it; clicking an
                     // unticked one records the work as done. The tick state is
@@ -1117,6 +1137,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
               )}
             </div>
           </div>
+
+          {blockedBy ? (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+              Locked until <span className="font-semibold">{blockedBy.title}</span> is marked done.
+            </div>
+          ) : null}
 
           {amendOpenFor === s.stepKey && canAmendDeadlines ? (
                 <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">

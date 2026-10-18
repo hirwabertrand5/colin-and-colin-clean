@@ -1,4 +1,4 @@
-import { calculateCollectedKeyActionEarnings } from './keyActionEarnings';
+import { allocateCollectedValueAcrossKeyActions, calculateCollectedKeyActionEarnings } from './keyActionEarnings';
 import {
   computeEarnedFee,
   getTpaPercent,
@@ -9,6 +9,12 @@ import {
 } from './workflowPercentages';
 import { resolveDeadlineDateTime } from './deadlineUtils';
 import { SINGLE_CURRENCY } from './currency';
+import {
+  CASE_ASSIGNMENT_ROLE_CONFIG,
+  CaseAssignmentRole,
+  getCaseAssignmentContributors,
+  resolveCaseAssignmentOwnerAt,
+} from './caseAssignmentContinuity';
 
 /**
  * Central earned-fee engine for a single matter — the single source of truth
@@ -120,6 +126,13 @@ export const resolveStepWorkTimeWithSource = (step: any): StepWorkTime => {
     }
   }
 
+  // The Overview's large Key Action tick records its completion directly on
+  // the workflow step (rather than on nested checklist items). Honour that
+  // timestamp too, otherwise a later approval after a handover would appear to
+  // be the moment the previous contributor's work was performed.
+  const stepDoneAt = resolveDeadlineDateTime(step?.doneAt);
+  if (stepDoneAt) return { at: stepDoneAt, source: 'lastActionTicked' };
+
   const completedAt = resolveDeadlineDateTime(step?.completedAt);
   if (completedAt) return { at: completedAt, source: 'completed' };
 
@@ -146,7 +159,8 @@ export const getMatterQualityScore = (caseDoc: any): { qualityScore: number | nu
   };
 };
 export type CaseTeamEarnedFee = {
-  key: 'initiator' | 'reviewer' | 'approver';
+  /** Role + person, stable across an owner handover. */
+  key: string;
   role: string;
   name: string;
   userRole: string | null;
@@ -157,6 +171,12 @@ export type CaseTeamEarnedFee = {
   qualityScore: number | null;
   taskFeeCollected: number;
   earnedFee: number | null;
+  /** Current owners remain visible even before they complete their first action. */
+  isCurrentAssignment: boolean;
+  assignmentStartedAt: Date | null;
+  /** Completed Key Actions attributable to this person in this role. */
+  keyActionKeys: string[];
+  completedKeyActions: number;
 };
 
 /**
@@ -170,24 +190,100 @@ export const computeCaseTeamEarnedFees = ({
   tasks = [],
   roleByName,
   matterQualityScore = null,
-  baseValue = 0,
+  completedActions = [],
+  actionCollectedBaseByKey = new Map<string, number>(),
 }: {
   caseDoc: any;
   workflowInstance?: any;
   tasks?: any[];
   roleByName: Map<string, string>;
   matterQualityScore?: number | null;
-  baseValue?: number;
+  completedActions?: Array<{ key: string; completedAt?: Date | string }>;
+  actionCollectedBaseByKey?: Map<string, number>;
 }): CaseTeamEarnedFee[] => {
-  const assignments: any = caseDoc?.caseAssignments || {};
-  const teamSpecs = [
-    { key: 'initiator', label: 'Initiator', name: String(assignments.initiator || caseDoc?.assignedTo || '').trim() },
-    { key: 'reviewer', label: 'Reviewer', name: String(assignments.reviewer || '').trim() },
-    { key: 'approver', label: 'Signer/Approver', name: String(assignments.signerApprover || '').trim() },
-  ].filter((spec) => spec.name);
+  const actionKeysByRoleAndMember = new Map<string, Set<string>>();
+  const collectedBaseByRoleAndMember = new Map<string, number>();
+  const contributionKey = (role: CaseAssignmentRole, name: string) => `${role}:${normalizeName(name)}`;
+  const assignmentContributors = getCaseAssignmentContributors(caseDoc);
+  const steps: any[] = Array.isArray(workflowInstance?.steps) ? workflowInstance.steps : [];
+  const initiatorOwnershipTime = (step: any, fallback?: Date | string) => {
+    // The Initiator earns against the time they recorded the work as done. A
+    // later submit/review/approval performed after a handover must not move
+    // that completed work to the incoming assignee.
+    const actionTicks = (Array.isArray(step?.actions) ? step.actions : [])
+      .map((action: any) => resolveDeadlineDateTime(action?.doneAt))
+      .filter((date: Date | undefined): date is Date => Boolean(date));
+    if (actionTicks.length) return new Date(Math.max(...actionTicks.map((date: Date) => date.getTime())));
+    return resolveDeadlineDateTime(step?.doneAt) || resolveDeadlineDateTime(step?.submittedAt) || fallback;
+  };
+
+  const ownershipTimeForRole = (role: CaseAssignmentRole, step: any, fallback?: Date | string) => {
+    // Each delivery role has a distinct, durable lifecycle event. This is what
+    // lets a replacement take only the remaining work and lets the predecessor
+    // retain the fee for work they already performed.
+    if (role === 'Initiator') return initiatorOwnershipTime(step, fallback);
+    if (role === 'Reviewer') {
+      const reviewedAt = resolveDeadlineDateTime(step?.reviewedAt);
+      // Workflow-backed work must actually be reviewed before the Reviewer has
+      // an earned-fee contribution. A task-only legacy record has no separate
+      // review event, so retain its historical completion fallback.
+      return reviewedAt || (step ? undefined : fallback);
+    }
+    const approvedAt = resolveDeadlineDateTime(step?.completedAt);
+    // Similarly, the Signer/Approver earns at final sign-off. Do not credit a
+    // current approver merely because an Initiator checked a nested checklist.
+    return approvedAt || (step ? undefined : fallback);
+  };
+  const contributorByKey = new Map(
+    assignmentContributors.map((contributor) => [contributionKey(contributor.role, contributor.name), contributor])
+  );
+
+  // A completed Key Action can have three contributors. Attribute the
+  // Initiator, Reviewer and Signer/Approver portions using their own recorded
+  // lifecycle event, not whoever happens to be assigned at final approval.
+  // This is critical for a handover: a replacement sees and completes only the
+  // next action, while every predecessor retains their already-earned fee.
+  for (const action of completedActions || []) {
+    const actionKey = String(action?.key || '').trim();
+    if (!actionKey) continue;
+    const workflowStep = steps.find((step: any) => String(step?.stepKey || '') === actionKey);
+    for (const { role } of CASE_ASSIGNMENT_ROLE_CONFIG) {
+      const ownershipAt = ownershipTimeForRole(role, workflowStep, action.completedAt);
+      // A current workflow record without a role-specific event means that
+      // part of the Key Action has not been completed yet. Do not invent an
+      // owner or earned fee for it. Task-only legacy records keep the existing
+      // completion-time fallback above.
+      if (workflowStep && !ownershipAt) continue;
+      const owner = resolveCaseAssignmentOwnerAt(caseDoc, role, ownershipAt);
+      if (!owner) continue;
+      const key = contributionKey(role, owner);
+      const keys = actionKeysByRoleAndMember.get(key) || new Set<string>();
+      keys.add(actionKey);
+      actionKeysByRoleAndMember.set(key, keys);
+      collectedBaseByRoleAndMember.set(
+        key,
+        roundMoney((collectedBaseByRoleAndMember.get(key) || 0) + (Number(actionCollectedBaseByKey.get(actionKey)) || 0))
+      );
+      if (!contributorByKey.has(key)) {
+        contributorByKey.set(key, { role, name: owner, isCurrentAssignment: false, assignmentStartedAt: null });
+      }
+    }
+  }
+
+  const teamSpecs = Array.from(contributorByKey.values()).map((contributor) => {
+    const key = contributionKey(contributor.role, contributor.name);
+    return {
+      key,
+      label: contributor.role,
+      name: contributor.name,
+      isCurrentAssignment: contributor.isCurrentAssignment,
+      assignmentStartedAt: contributor.assignmentStartedAt,
+      keyActionKeys: actionKeysByRoleAndMember.get(key) || new Set<string>(),
+      taskFeeCollected: collectedBaseByRoleAndMember.get(key) || 0,
+    };
+  });
 
   const allTasks = Array.isArray(tasks) ? tasks : [];
-  const steps: any[] = Array.isArray(workflowInstance?.steps) ? workflowInstance.steps : [];
 
   const averageScore = (values: Array<number | null>) => {
     const scores = values.filter((value): value is number => value !== null && Number.isFinite(value));
@@ -214,6 +310,12 @@ export const computeCaseTeamEarnedFees = ({
       return assignee === me || supervisor === me || stageMembers.includes(me);
     });
     const completedMine = mine.filter((task: any) => String(task?.status || '').toLowerCase() === 'completed');
+    const ownedActionScores = Array.from(spec.keyActionKeys)
+      .map((key) => {
+        const step = steps.find((item: any) => String(item?.stepKey || '') === key);
+        return computeStepWorkTimelinessScore(step);
+      })
+      .filter((value): value is number => value !== null);
 
     // Timeliness: average of the member's completed-task stage scores / task
     // scores; falls back to the completed Key Action step timeliness (the
@@ -245,7 +347,9 @@ export const computeCaseTeamEarnedFees = ({
     // section scores on its own deadline (late = 0, on time = its value), so a
     // late section only lowers the average instead of zeroing the whole matter.
     // The member's own task scores apply to task-only matters with no section.
-    const sampleScores = sectionTimelinessScores.length ? sectionTimelinessScores : timelinessScores;
+    // A predecessor is scored only against Key Actions completed while they
+    // owned the role. Task-only work still uses its recorded stage score.
+    const sampleScores = ownedActionScores.length ? ownedActionScores : timelinessScores;
     const timelinessScore = averageScore(sampleScores);
 
     // Quality: the matter-level Case Management Quality Score when entered;
@@ -265,10 +369,10 @@ export const computeCaseTeamEarnedFees = ({
     const tpa = resolveMemberTpa(spec.name, roleByName);
     const userRole = tpa.role || String(roleByName.get(me) || '').trim() || null;
     const tpaPercent = tpa.tpaPercent;
-    const earnedFee = computeEarnedFee(baseValue, tpaPercent, timelinessScore, qualityScore);
+    const earnedFee = computeEarnedFee(spec.taskFeeCollected, tpaPercent, timelinessScore, qualityScore);
 
     return {
-      key: spec.key as 'initiator' | 'reviewer' | 'approver',
+      key: spec.key,
       role: spec.label,
       name: spec.name,
       userRole,
@@ -276,8 +380,12 @@ export const computeCaseTeamEarnedFees = ({
       tpaSource: tpa.source,
       timelinessScore,
       qualityScore,
-      taskFeeCollected: baseValue,
+      taskFeeCollected: spec.taskFeeCollected,
       earnedFee,
+      isCurrentAssignment: spec.isCurrentAssignment,
+      assignmentStartedAt: spec.assignmentStartedAt,
+      keyActionKeys: Array.from(spec.keyActionKeys),
+      completedKeyActions: spec.keyActionKeys.size,
     };
   });
 };
@@ -340,7 +448,8 @@ export const computeCaseEarnedFees = ({
     tasks,
     roleByName,
     matterQualityScore: qualityScore,
-    baseValue: earnedValue,
+    completedActions: earnings.completedActions,
+    actionCollectedBaseByKey: allocateCollectedValueAcrossKeyActions(earnings),
   });
 
   const knownEarned = team.map((member: CaseTeamEarnedFee) => member.earnedFee).filter((value) => value !== null) as number[];

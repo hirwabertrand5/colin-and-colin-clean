@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export type IndependentTaskHistoryAction =
   | 'TASK_CREATED'
   | 'TASK_ASSIGNED'
+  | 'TASK_REASSIGNED'
   | 'TASK_STATUS_CHANGED'
   | 'TASK_COMMENTED'
   | 'TASK_ATTACHMENT_UPLOADED'

@@ -101,9 +101,83 @@ const normalizeTaskStagesPayload = (value: unknown, fallback: any[] = []) => {
             ? null
             : Number(stage.earnedRevenue),
         notes: String(stage?.notes || '').trim(),
+        // The server restores and extends the persisted trail below. Never
+        // trust a client to author handover entries.
+        assignmentHistory: Array.isArray(stage?.assignmentHistory) ? stage.assignmentHistory : [],
       };
     })
     .filter(Boolean);
+};
+
+const stageIdentity = (stage: any) => String(stage?._id || `${stage?.role || ''}:${stage?.sequence || ''}`);
+const isCompletedTaskStage = (stage: any) => String(stage?.status || '').trim().toLowerCase() === 'completed';
+
+/**
+ * Preserve the existing owner and completed work when a staged task is edited.
+ * An incoming owner receives the live stage exactly where it is; the prior
+ * owner remains on the immutable handover trail for activity and fee audit.
+ */
+const preserveTaskStageAssignmentHistory = (beforeStages: any[], nextStages: any[], req: AuthRequest) => {
+  const beforeByIdentity = new Map((beforeStages || []).map((stage: any) => [stageIdentity(stage), stage]));
+  const now = new Date();
+  return (nextStages || []).map((nextStage: any) => {
+    const previous = beforeByIdentity.get(stageIdentity(nextStage));
+    if (!previous) return nextStage;
+
+    const previousStaff = String(previous?.staffMember || '').trim();
+    const nextStaff = String(nextStage?.staffMember || '').trim();
+    const persistedHistory = Array.isArray(previous?.assignmentHistory) ? previous.assignmentHistory : [];
+
+    // A finished stage is historical evidence, not an open assignment. Keep
+    // it intact even if an old edit form submits another person for that role.
+    if (isCompletedTaskStage(previous)) {
+      return {
+        ...nextStage,
+        staffMember: previousStaff,
+        assignmentHistory: persistedHistory,
+      };
+    }
+
+    if (normalizeIdentity(previousStaff) !== normalizeIdentity(nextStaff)) {
+      return {
+        ...nextStage,
+        assignmentHistory: [
+          ...persistedHistory,
+          {
+            ...(previousStaff ? { previousStaffMember: previousStaff } : {}),
+            ...(nextStaff ? { nextStaffMember: nextStaff } : {}),
+            reassignedAt: now,
+            reassignedBy: req.user?.name || 'System',
+          },
+        ],
+      };
+    }
+
+    return { ...nextStage, assignmentHistory: persistedHistory };
+  });
+};
+
+const appendTopLevelTaskHandovers = (before: any, updates: any, req: AuthRequest) => {
+  const history = Array.isArray(before?.assignmentHistory) ? [...before.assignmentHistory] : [];
+  const now = new Date();
+  const fields: Array<{ field: 'assignee' | 'supervisor'; role: 'Assignee' | 'Supervisor' }> = [
+    { field: 'assignee', role: 'Assignee' },
+    { field: 'supervisor', role: 'Supervisor' },
+  ];
+  for (const { field, role } of fields) {
+    if (!Object.prototype.hasOwnProperty.call(updates, field)) continue;
+    const previousAssignee = String(before?.[field] || '').trim();
+    const nextAssignee = String(updates?.[field] || '').trim();
+    if (normalizeIdentity(previousAssignee) === normalizeIdentity(nextAssignee)) continue;
+    history.push({
+      role,
+      ...(previousAssignee ? { previousAssignee } : {}),
+      ...(nextAssignee ? { nextAssignee } : {}),
+      reassignedAt: now,
+      reassignedBy: req.user?.name || 'System',
+    });
+  }
+  if (history.length) updates.assignmentHistory = history;
 };
 
 const buildDefaultTaskStagesFromCase = (caseRecord: any, dueDate: string, assignedAt = new Date()): any[] => {
@@ -764,6 +838,14 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
         updates.workflowMode = 'STAGED';
       }
     }
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'taskStages')) {
+      updates.taskStages = preserveTaskStageAssignmentHistory(before.taskStages || [], updates.taskStages || [], req);
+    }
+    // This field is always authored from the persisted task and the requested
+    // owner change. Ignore any assignmentHistory sent by an edit client.
+    delete updates.assignmentHistory;
+    appendTopLevelTaskHandovers(before, updates, req);
     if (Object.prototype.hasOwnProperty.call(updates, 'workflowMode') && updates.workflowMode === 'STAGED') {
       if (!Object.prototype.hasOwnProperty.call(updates, 'taskStages') || !updates.taskStages.length) {
         updates.taskStages = normalizeTaskStagesPayload(

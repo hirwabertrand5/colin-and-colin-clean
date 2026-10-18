@@ -395,16 +395,9 @@ export const buildStaffEarningsRows = (input: BuildStaffEarningsInput): StaffEar
     const totalEligible = round2(
       Array.from(actionValueByKey.values()).reduce((sum, value) => sum + (Number(value) || 0), 0)
     );
-    const memberByKey = new Map(
-      matterFees.team.map((member: any) => [baseMemberName(member.name), member])
-    );
-
-    const assignments = matter?.caseAssignments || {};
-    const team = [
-      { assignmentRole: 'Initiator', name: String(assignments.initiator || matter?.assignedTo || '').trim() },
-      { assignmentRole: 'Reviewer', name: String(assignments.reviewer || '').trim() },
-      { assignmentRole: 'Signer/Approver', name: String(assignments.signerApprover || '').trim() },
-    ].filter((member) => member.name);
+    // Includes retained former contributors after a role handover. Each member
+    // owns only the Key Actions completed during their assignment window.
+    const team = matterFees.team;
 
     const currency = matterFees.currency || 'RWF';
     const paymentStamps: StaffEarningsRow['paymentTimestamps'] = payments.map((payment) => ({
@@ -445,20 +438,20 @@ export const buildStaffEarningsRows = (input: BuildStaffEarningsInput): StaffEar
       const grossActionValue = round2(earnings.contractValue * ((keyActionPercent ?? 0) / 100));
 
       for (const member of team) {
+        if (!(member.keyActionKeys || []).includes(action.key)) continue;
         const staffKey = baseMemberName(member.name);
-        const memberFee = memberByKey.get(staffKey);
-        const systemRole = String(memberFee?.userRole || roleByName.get(staffKey) || '').trim() || null;
+        const systemRole = String(member.userRole || roleByName.get(staffKey) || '').trim() || null;
         if (staffKeyFilter && staffKey !== staffKeyFilter) continue;
         if (roleFilter && systemRole !== roleFilter) continue;
 
         // The member's own TPA / timeliness / quality plus their authoritative
         // earned fee, spread across this matter's actions in proportion to the
         // eligible base — so rows always re-add to the dashboard total.
-        const tpaPercent = Number(memberFee?.tpaPercent) || 0;
-        const timelinessScore = memberFee?.timelinessScore ?? null;
-        const qualityScore = memberFee?.qualityScore ?? null;
-        const share = totalEligible > 0 ? eligibleCollectedBase / totalEligible : 0;
-        const memberEarned = memberFee?.earnedFee ?? null;
+        const tpaPercent = Number(member.tpaPercent) || 0;
+        const timelinessScore = member.timelinessScore ?? null;
+        const qualityScore = member.qualityScore ?? null;
+        const share = Number(member.taskFeeCollected) > 0 ? eligibleCollectedBase / Number(member.taskFeeCollected) : 0;
+        const memberEarned = member.earnedFee ?? null;
         const earnedFee = memberEarned == null ? null : round2(memberEarned * share);
 
         rows.push(
@@ -466,8 +459,8 @@ export const buildStaffEarningsRows = (input: BuildStaffEarningsInput): StaffEar
             matter,
             caseId,
             action,
-            member,
-            memberFee,
+            member: { assignmentRole: member.role, name: member.name },
+            memberFee: member,
             staffKey,
             systemRole,
             stageKey,

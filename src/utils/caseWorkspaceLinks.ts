@@ -11,8 +11,6 @@
 export const CASE_WORKSPACE_TABS = [
   'overview',
   'caseManagement',
-  'teamStages',
-  'tasks',
   'calendar',
   'documents',
   'billing',
@@ -26,8 +24,6 @@ export type CaseWorkspaceTabName = (typeof CASE_WORKSPACE_TABS)[number];
 export const CASE_WORKSPACE_TAB_SLUG: Record<CaseWorkspaceTabName, string> = {
   overview: 'overview',
   caseManagement: 'case-management',
-  teamStages: 'team-stages',
-  tasks: 'tasks',
   calendar: 'calendar',
   documents: 'documents',
   billing: 'billing',

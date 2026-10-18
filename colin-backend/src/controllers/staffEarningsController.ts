@@ -116,14 +116,22 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
       const pattern = new RegExp(`^${escapeRegExp(staffFilter)}`, 'i');
       const base = staffFilter.split(' ')[0] || staffFilter;
       const basePattern = new RegExp(`^${escapeRegExp(base)}`, 'i');
-      const slots = ['assignedTo', 'caseAssignments.initiator', 'caseAssignments.reviewer', 'caseAssignments.signerApprover'];
+      const slots = [
+        'assignedTo',
+        'caseAssignments.initiator',
+        'caseAssignments.reviewer',
+        'caseAssignments.signerApprover',
+        // Former owners remain eligible for their immutable earnings rows.
+        'assignmentHandoverHistory.previousAssignee',
+        'assignmentHandoverHistory.nextAssignee',
+      ];
       matterQuery.$or = slots.flatMap((field) => [{ [field]: pattern }, { [field]: basePattern }]);
     }
 
     const [matters, users] = await Promise.all([
       Case.find(matterQuery)
         .select(
-          '_id caseNo parties matterType workflow workflowTemplateId assignedTo caseAssignments workflowProgress billingSettings caseManagement'
+          '_id caseNo parties matterType workflow workflowTemplateId assignedTo caseAssignments assignmentHandoverHistory workflowProgress billingSettings caseManagement'
         )
         .lean(),
       User.find({ isActive: { $ne: false } }).select('_id name role isActive').lean(),

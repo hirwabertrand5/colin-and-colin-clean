@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
-import { caseMatchesAssignee, caseMatchesAssigneeCanonical } from '../../utils/caseAssignments';
+import { caseMatchesAssigneeCanonical } from '../../utils/caseAssignments';
 import { getAllCases, CaseData } from '../../services/caseService';
 import {
   getStaffDashboardSummary,
@@ -765,10 +765,26 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
   const ownTasks = useMemo(
     () =>
-      meName
-        ? tasks.filter((task) => baseNameFromLabel(task.assignee) === meName)
-        : tasks,
-    [meName, tasks],
+      tasks.filter((task) => {
+        if (!meName && !me?.email) return true;
+        const matchesMe = (value?: string) =>
+          identityMatches(value, meName) || identityMatches(value, me?.email || '');
+        // The API rightly returns work where the member is the assignee,
+        // supervisor or active staged contributor. Keep all three on the
+        // dashboard too; the prior assignee of a completed stage is excluded
+        // from open work after a handover.
+        return (
+          matchesMe(task.assignee) ||
+          matchesMe(task.supervisor) ||
+          (Array.isArray(task.taskStages) &&
+            task.taskStages.some(
+              (stage) =>
+                matchesMe(stage.staffMember) &&
+                String(stage.status || '').toLowerCase() !== 'completed'
+            ))
+        );
+      }),
+    [me?.email, meName, tasks],
   );
 
   // Only matters where the signed-in user is an assignee (Initiator, Reviewer,
@@ -789,6 +805,16 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     () => new Set(authorisedCases.map((matter) => String(matter._id || '')).filter(Boolean)),
     [authorisedCases],
   );
+
+  const currentRolesForMatter = (matter?: CaseData) => {
+    const matchesMe = (value?: string) => identityMatches(value, meName) || identityMatches(value, me?.email || '');
+    const assignments = matter?.caseAssignments || {};
+    return {
+      initiator: matchesMe(assignments.initiator || matter?.assignedTo),
+      reviewer: matchesMe(assignments.reviewer),
+      approver: matchesMe(assignments.signerApprover),
+    };
+  };
 
   /**
    * Per-matter Key Actions (sub-tasks) for the unified My Work list.
@@ -858,19 +884,32 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
     Object.values(caseManagementByMatter).forEach((state) => {
       const matter = caseById.get(String(state.caseId || ''));
+      if (!matter) return;
+      const myRoles = currentRolesForMatter(matter);
       (state.steps || []).forEach((step) => {
-        if (String(step.status || '') === 'Completed') return;
+        const stepStatus = String(step.status || '');
+        if (stepStatus === 'Completed') return;
+        // A handover has a clear next action: the Initiator owns work that is
+        // not yet submitted, the Reviewer owns the review queue, and the
+        // Signer/Approver owns approval. This prevents a former owner (or a
+        // reviewer waiting for a submission) from being shown someone else's
+        // unfinished delivery work as their task.
+        const roleLabel =
+          (stepStatus === 'Awaiting Review' && myRoles.reviewer && 'Reviewer') ||
+          (stepStatus === 'Awaiting Approval' && myRoles.approver && 'Signer/Approver') ||
+          (!['Awaiting Review', 'Awaiting Approval'].includes(stepStatus) && myRoles.initiator && 'Initiator');
+        if (!roleLabel) return;
         const dueAt = resolveDeadlineDateTime(step.dueAt);
         const startAt = resolveDeadlineDateTime(step.startAt);
         const urgency = getUrgencyColorForDueDate(step.dueAt, step.startAt, asOf);
         const overdue = dueAt ? dueAt.getTime() < asOf.getTime() : false;
-        const queue = step.status === 'Awaiting Approval' ? 'approval' : step.status === 'Awaiting Review' ? 'review' : 'none';
-        const column = step.status === 'Awaiting Review' ? 'Awaiting Review' : step.status === 'In Progress' ? 'In Progress' : 'Not Started';
+        const queue = stepStatus === 'Awaiting Approval' ? 'approval' : stepStatus === 'Awaiting Review' ? 'review' : 'none';
+        const column = stepStatus === 'Awaiting Review' ? 'Awaiting Review' : stepStatus === 'In Progress' || stepStatus === 'Done' ? 'In Progress' : 'Not Started';
         items.push({
           id: `key-action:${state.caseId}:${step.stepKey}`,
           kind: 'key-action',
           title: step.title,
-          status: step.status,
+          status: stepStatus,
           priority: overdue || urgency === 'red' ? 'High' : urgency === 'yellow' ? 'Medium' : 'Low',
           dueAt: dueAt || undefined,
           dueLabel: step.dueAt ? formatDeadlineDateTime(step.dueAt) : 'No deadline',
@@ -882,7 +921,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           matterId: String(state.caseId || ''),
           matterNo: state.caseNo || matter?.caseNo,
           matterParties: state.parties || matter?.parties,
-          roleLabel: state.myRole && state.myRole !== 'none' ? state.myRole : 'Assigned',
+          roleLabel,
           waitingOnClient: false,
         });
       });
@@ -892,6 +931,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     // Same urgency rule as every other surface; review/external queues feed
     // the Notifications card from this same list.
     periodTasks.forEach((task) => {
+      // Workflow-linked task rows are an implementation/audit record. Their
+      // live Key Action is already represented above from Case Management, so
+      // showing both would duplicate one piece of work on the dashboard.
+      if (task.workflowStepKey) return;
       if (String(task.status || '') === 'Completed' || String(task.workflowStage || '') === 'Closed') return;
       const dueAt = resolveDeadlineDateTime(task.dueDate);
       const urgency = getUrgencyColorForDueDate(task.dueDate, task.startDate, asOf);
@@ -937,7 +980,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       .filter((task) => {
         if (String(task.status || '') === 'Completed' || String(task.status || '') === 'Closed') return false;
         if (!meName && !me?.email) return true;
-        return identityMatches(task.assignee, meName) || identityMatches(task.assignee, me?.email || '');
+        return (
+          identityMatches(task.assignee, meName) ||
+          identityMatches(task.assignee, me?.email || '') ||
+          identityMatches(task.supervisor, meName) ||
+          identityMatches(task.supervisor, me?.email || '')
+        );
       })
       .forEach((task) => {
         const dueAt = resolveDeadlineDateTime(task.dueDate);
@@ -968,7 +1016,10 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           matterId: task.relatedMatterId || undefined,
           matterNo: task.relatedMatter?.caseNo,
           matterParties: task.relatedMatter?.parties || task.relatedClient,
-          roleLabel: task.supervisor ? `Supervisor: ${task.supervisor}` : 'Assigned',
+          roleLabel:
+            identityMatches(task.supervisor, meName) || identityMatches(task.supervisor, me?.email || '')
+              ? 'Supervisor'
+              : 'Assigned',
           waitingOnClient: queue === 'external',
         });
       });
@@ -1886,7 +1937,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               ['Total Contract Value', formatRwf(period?.contractValue ?? 0), `Sum of contract values of the qualifying matters ${hasWindow && period ? `in ${period.from} → ${period.to}` : 'across all time'}`],
               // TPA is a current, role-based rate — labelled as such.
               ['TPA', `${summary?.tpaPercent ?? profile.tpa}%`, 'Your current role participation share from the remuneration table'],
-              ['Matters with Earned Fees', String(feeScoredMatters.length), hasWindow ? 'Matters with a calculated earned fee in the period' : `${matterFeeRows.length} matter(s) assigned to you`],
+              [
+                'Matters with Earned Fees',
+                String(feeScoredMatters.length),
+                hasWindow
+                  ? 'Matters with a calculated earned fee in the period'
+                  : `${matterFeeRows.length} matter(s) with your earned-fee record`,
+              ],
             ].map(([label, value, helper]) => (
               <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div className="text-xs uppercase tracking-[0.2em] text-gray-500">{label}</div>
@@ -1978,7 +2035,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                           <Link to={`/matters/${row.caseId}`} className="hover:text-gray-900">{row.caseNo || row.parties || '—'}</Link>
                         </td>
                         <td className="px-4 py-3 text-gray-700">{row.parties || '—'}</td>
-                        <td className="px-4 py-3 text-gray-700">{row.role || '—'}</td>
+                        <td className="px-4 py-3 text-gray-700">
+                          <div>{row.role || '—'}</div>
+                          {!row.isCurrentAssignment ? (
+                            <div className="mt-1 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800">
+                              Retained after handover
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.tpaPercent > 0 ? `${row.tpaPercent}%` : '—'}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.timelinessScore == null ? '—' : `${row.timelinessScore}%`}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.qualityScore == null ? '—' : `${row.qualityScore}%`}</td>

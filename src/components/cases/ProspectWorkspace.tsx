@@ -460,6 +460,11 @@ export default function ProspectWorkspace() {
                             <span className="font-medium text-gray-500 dark:text-gray-400">Responsible associate</span>
                             <span className="text-right font-semibold text-gray-900 dark:text-gray-100">{getDisplayName(prospect.responsibleAssociate || prospect.assignedTo)}</span>
                           </div>
+                          {prospect.assignmentHistory?.length ? (
+                            <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-200">
+                              <span className="font-semibold">Continuity protected.</span> {prospect.assignmentHistory.length} handover{prospect.assignmentHistory.length === 1 ? '' : 's'} recorded; the active stage, checklist and follow-ups continue without reset.
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 

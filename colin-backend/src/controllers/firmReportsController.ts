@@ -250,17 +250,12 @@ const buildCollectedKeyActionRows = ({
       collectedAmount,
       roleByName,
     });
-    const memberFeeByKey = new Map(
-      matterFees.team.map((member: any) => [baseNameFromLabel(member.name), member])
-    );
-
     const actionValueByKey = allocateCollectedValueAcrossKeyActions(earnings);
-    const assignments = matter?.caseAssignments || {};
-    const team = [
-      { assignmentRole: 'Initiator', name: String(assignments.initiator || matter?.assignedTo || '').trim() },
-      { assignmentRole: 'Reviewer', name: String(assignments.reviewer || '').trim() },
-      { assignmentRole: 'Approver', name: String(assignments.signerApprover || '').trim() },
-    ].filter((member) => member.name);
+    // `team` includes former owners where a handover occurred. The shared
+    // engine gives each person only the Key Actions completed during their
+    // tenure, so firm reporting never transfers historical earnings to a new
+    // assignee.
+    const team = matterFees.team;
 
     // COMPLETION-DATE FIRST — the core user requirement. Every completed Key
     // Action whose completion date lands inside the selected window MUST be
@@ -291,21 +286,21 @@ const buildCollectedKeyActionRows = ({
       const memberKey = baseNameFromLabel(member.name);
       if (selectedMember && memberKey !== selectedMember) continue;
 
-      const memberFee = memberFeeByKey.get(memberKey);
       // Timeliness, Quality and TPA are the member's own figures from the shared
       // engine, so this row reads exactly like the member's dashboard row.
-      const tpaPercent = Number(memberFee?.tpaPercent) || 0;
-      const role = String(memberFee?.userRole || '').trim();
-      const timelinessScore = memberFee?.timelinessScore ?? null;
-      const qualityScore = memberFee?.qualityScore ?? null;
-      const memberEarned = memberFee?.earnedFee ?? null;
+      const tpaPercent = Number(member.tpaPercent) || 0;
+      const role = String(member.userRole || '').trim();
+      const timelinessScore = member.timelinessScore ?? null;
+      const qualityScore = member.qualityScore ?? null;
+      const memberEarned = member.earnedFee ?? null;
 
-      // Spread the member's single authoritative earned fee across this matter's
-      // completed Key Actions in proportion to each action's collected value, so
-      // the rows sum to the dashboard total instead of re-deriving it.
-      const actionValueTotal = actionMeta.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+      // A member's fee is distributed only across the actions they owned at
+      // completion. This is the report-side counterpart to the Case Workspace
+      // handover timeline.
+      const ownedActions = actionMeta.filter((item: any) => (member.keyActionKeys || []).includes(item.action.key));
+      const actionValueTotal = Number(member.taskFeeCollected) || 0;
 
-      for (const item of actionMeta) {
+      for (const item of ownedActions) {
         const taskFeeCollected = item.value;
         const share = actionValueTotal > 0 ? taskFeeCollected / actionValueTotal : 0;
         const feeEarned = memberEarned == null ? null : roundMoney(memberEarned * share);
@@ -321,12 +316,12 @@ const buildCollectedKeyActionRows = ({
                 : 'Late';
 
         rows.push({
-          id: `${caseId}:${item.action.key}:${member.assignmentRole.toLowerCase()}`,
+          id: `${caseId}:${item.action.key}:${member.key}`,
           caseId,
           caseCompleted: isWholeCaseCompleted(instance),
           completedAt: item.completedAt ? item.completedAt.toISOString() : null,
           staff: member.name,
-          assignmentRole: member.assignmentRole,
+          assignmentRole: member.role,
           role,
           matter: String(matter?.caseNo || matter?.parties || matter?.matterType || matter?.workflow || 'N/A'),
           task: item.action.title,
@@ -438,7 +433,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .lean();
 
     const allCases = await Case.find()
-      .select('_id assignedTo caseAssignments status caseNo parties budget workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties budget workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
       .lean();
     const caseById = new Map((allCases as any[]).map((c) => [String(c._id), c]));
     const workflowTemplateIds = Array.from(new Set((allCases as any[])
@@ -454,7 +449,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const linkedCaseIdsByName = new Map<string, Set<string>>();
     for (const c of allCases as any[]) {
       const assignments = c.caseAssignments || {};
-      const names = [c.assignedTo, assignments.initiator, assignments.reviewer, assignments.signerApprover]
+      const historicalAssignees = (Array.isArray(c.assignmentHandoverHistory) ? c.assignmentHandoverHistory : [])
+        .flatMap((entry: any) => [entry?.previousAssignee, entry?.nextAssignee]);
+      const names = [c.assignedTo, assignments.initiator, assignments.reviewer, assignments.signerApprover, ...historicalAssignees]
         .map(normalizeName)
         .filter(Boolean);
       for (const name of names) {
@@ -479,7 +476,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         ? { _id: { $in: Array.from(linkedCaseIdsByName.get(selectedMemberNameNormalized) || []) } }
         : {}
     )
-      .select('_id assignedTo caseAssignments status caseNo parties budget updatedAt workflowProgress billingSettings caseManagement legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties budget updatedAt workflowProgress billingSettings caseManagement legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
       .lean();
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
@@ -1240,9 +1237,11 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         { 'caseAssignments.initiator': displayName },
         { 'caseAssignments.reviewer': displayName },
         { 'caseAssignments.signerApprover': displayName },
+        { 'assignmentHandoverHistory.previousAssignee': displayName },
+        { 'assignmentHandoverHistory.nextAssignee': displayName },
       ],
     })
-      .select('_id assignedTo caseAssignments caseNo parties budget workflowProgress billingSettings caseManagement matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments assignmentHandoverHistory caseNo parties budget workflowProgress billingSettings caseManagement matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
       .lean();
     const memberMatterIds = (memberMatters as any[]).map((matter) => matter._id);
     const [memberWorkflowInstances, memberTasks, paidMemberInvoices] = await Promise.all([

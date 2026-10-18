@@ -64,6 +64,8 @@ export type StaffDashboardMatterRow = {
   contractValue: number;
   collectedBase: number;
   earnedFee: number | null;
+  /** False when the matter is shown solely because this user earned fees before a handover. */
+  isCurrentAssignment: boolean;
   completed: boolean;
   outstanding: boolean;
   overdueSections: number;

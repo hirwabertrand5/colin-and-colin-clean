@@ -83,7 +83,7 @@ export type CaseStagePercent = {
 };
 
 export type CaseTeamEarnedFee = {
-  key: 'initiator' | 'reviewer' | 'approver';
+  key: string;
   role: string;
   name: string;
   userRole: string | null;
@@ -94,6 +94,10 @@ export type CaseTeamEarnedFee = {
   qualityScore: number | null;
   taskFeeCollected: number;
   earnedFee: number | null;
+  isCurrentAssignment?: boolean;
+  assignmentStartedAt?: string | null;
+  keyActionKeys?: string[];
+  completedKeyActions?: number;
 };
 
 export type CaseEarnedFees = {

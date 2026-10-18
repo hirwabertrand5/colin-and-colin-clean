@@ -74,6 +74,13 @@ export interface IndependentTask {
   createdBy?: string;
   assignedBy?: string;
   lastActionBy?: string;
+  assignmentHistory?: Array<{
+    role: 'Assignee' | 'Supervisor';
+    previousAssignee?: string;
+    nextAssignee?: string;
+    reassignedAt: string;
+    reassignedBy?: string;
+  }>;
   createdAt?: string;
   updatedAt?: string;
 }

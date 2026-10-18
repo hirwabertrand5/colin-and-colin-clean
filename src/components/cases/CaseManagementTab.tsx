@@ -164,9 +164,7 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
   // already finished.
   const canRequestReview = (step: CaseManagementStep) =>
     (myRole === 'initiator' || myRole === 'admin') &&
-    step.status !== 'Completed' &&
-    step.status !== 'Awaiting Review' &&
-    step.status !== 'Awaiting Approval';
+    step.status === 'Done';
 
   // The Reviewer forwards reviewed work to the Signer/Approver.
   const canRequestApproval = (step: CaseManagementStep) =>
@@ -864,7 +862,15 @@ function EarnedFeesSection({ state }: { state: CaseManagementState }) {
               {earned.team.map((member) => (
                 <tr key={member.key} className="bg-white dark:bg-gray-800">
                   <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{member.role}</td>
-                  <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{member.name}</td>
+                  <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{member.name}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${member.isCurrentAssignment === false ? 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
+                        {member.isCurrentAssignment === false ? 'Handover record' : 'Current owner'}
+                      </span>
+                    </div>
+                    {member.isCurrentAssignment === false && <div className="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">Completed work and earned fee retained.</div>}
+                  </td>
                   <td
                     className="px-3 py-2 text-right text-gray-600 dark:text-gray-300"
                     title={

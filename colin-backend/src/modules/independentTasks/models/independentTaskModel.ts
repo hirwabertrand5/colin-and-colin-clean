@@ -35,6 +35,14 @@ export interface IIndependentTask extends Document {
   assignedByUserId?: mongoose.Types.ObjectId;
   lastActionBy?: string;
   lastActionByUserId?: mongoose.Types.ObjectId;
+  /** Ownership handovers retain the completed work context for the incoming owner. */
+  assignmentHistory?: Array<{
+    role: 'Assignee' | 'Supervisor';
+    previousAssignee?: string;
+    nextAssignee?: string;
+    reassignedAt: Date;
+    reassignedBy?: string;
+  }>;
 
   createdAt: Date;
   updatedAt: Date;
@@ -84,6 +92,18 @@ const IndependentTaskSchema = new Schema<IIndependentTask>(
     assignedByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
     lastActionBy: { type: String, trim: true },
     lastActionByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
+    assignmentHistory: {
+      type: [
+        {
+          role: { type: String, enum: ['Assignee', 'Supervisor'], required: true },
+          previousAssignee: { type: String, trim: true },
+          nextAssignee: { type: String, trim: true },
+          reassignedAt: { type: Date, required: true, default: Date.now },
+          reassignedBy: { type: String, trim: true },
+        },
+      ],
+      default: [],
+    },
   },
   { timestamps: true, collection: 'independent_tasks' }
 );
