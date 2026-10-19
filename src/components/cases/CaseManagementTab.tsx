@@ -240,13 +240,6 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
       setQualitySaving(false);
     }
   };
-const earned = state?.earnedFees;
-  const memberByKey = useMemo(() => {
-    const map = new Map<string, any>();
-    for (const member of earned?.team || []) map.set(member.key, member);
-    return map;
-  }, [earned]);
-
   if (loading && !state) return <div className="py-8 text-sm text-gray-500 dark:text-gray-400">Loading Case Management…</div>;
   if (!state) {
     return (
@@ -268,7 +261,7 @@ const earned = state?.earnedFees;
 
       <CaseLifecycleBanner state={state} />
 
-      <AssignedMembersCard state={state} memberByKey={memberByKey} />
+      <AssignedMembersCard state={state} />
 
       <QualityScorePanel state={state} qualityDraft={qualityDraft} onDraft={setQualityDraft} onSave={doSaveQualityScore} saving={qualitySaving} />
 
@@ -372,7 +365,12 @@ function CaseLifecycleBanner({ state }: { state: CaseManagementState }) {
   );
 }
 
-function AssignedMembersCard({ state, memberByKey }: { state: CaseManagementState; memberByKey: Map<string, any> }) {
+function AssignedMembersCard({ state }: { state: CaseManagementState }) {
+  // This is the same live fee/assignment source used on Overview.  It retains
+  // historical handovers alongside current assignees, rather than showing only
+  // the current `state.members` assignments.
+  const members = state.earnedFees.team;
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800">
       <div className="mb-3 flex items-center gap-2">
@@ -392,14 +390,18 @@ function AssignedMembersCard({ state, memberByKey }: { state: CaseManagementStat
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-            {state.members.map((member) => {
-              const row = memberByKey.get(member.key);
-              return (
-                <tr key={member.key} className="bg-white dark:bg-gray-800">
+            {members.map((member) => (
+              <tr key={member.key} className="bg-white dark:bg-gray-800">
                   <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{member.role}</td>
                   <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
-                    {member.name || DASH}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{member.name || DASH}</span>
+                      {member.isCurrentAssignment === false ? (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">Handover record</span>
+                      ) : null}
+                    </div>
                     {member.userRole ? <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">({member.userRole})</span> : null}
+                    {member.isCurrentAssignment === false ? <div className="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">Completed work and earned fee retained.</div> : null}
                   </td>
                   <td
                     className="px-3 py-2 text-right text-gray-600 dark:text-gray-300"
@@ -411,14 +413,13 @@ function AssignedMembersCard({ state, memberByKey }: { state: CaseManagementStat
                   >
                     {member.tpaPercent > 0 ? `${member.tpaPercent}%` : DASH}
                   </td>
-                  <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{row && row.timelinessScore != null ? `${row.timelinessScore}%` : DASH}</td>
-                  <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{row && row.qualityScore != null ? `${row.qualityScore}%` : DASH}</td>
+                  <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{member.timelinessScore != null ? `${member.timelinessScore}%` : DASH}</td>
+                  <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-300">{member.qualityScore != null ? `${member.qualityScore}%` : DASH}</td>
                   <td className="px-3 py-2 text-right font-semibold text-gray-900 dark:text-gray-100">
-                    {row && row.earnedFee != null ? formatMoney(row.earnedFee, state.earnedFees.currency) : DASH}
+                    {member.earnedFee != null ? formatMoney(member.earnedFee, state.earnedFees.currency) : DASH}
                   </td>
-                </tr>
-              );
-            })}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -865,9 +866,9 @@ function EarnedFeesSection({ state }: { state: CaseManagementState }) {
                   <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
                     <div className="flex flex-wrap items-center gap-2">
                       <span>{member.name}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${member.isCurrentAssignment === false ? 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
-                        {member.isCurrentAssignment === false ? 'Handover record' : 'Current owner'}
-                      </span>
+                      {member.isCurrentAssignment === false ? (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">Handover record</span>
+                      ) : null}
                     </div>
                     {member.isCurrentAssignment === false && <div className="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">Completed work and earned fee retained.</div>}
                   </td>
