@@ -49,13 +49,11 @@ import {
 } from '../../services/taskAttachmentService';
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
+import { uploadedFileUrl } from '../../services/apiConfig';
 
 interface TaskDetailProps {
   userRole: UserRole;
 }
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-const BACKEND_URL = API_URL.replace(/\/api\/?$/, '');
 
 const inferWorkflowStageFromStatus = (status?: string): TaskWorkflowStage => {
   if (status === 'Completed') return 'Completed';
@@ -1030,7 +1028,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <a
-                        href={BACKEND_URL + att.url}
+                        href={uploadedFileUrl(att.url)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
@@ -1041,7 +1039,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                       </a>
 
                       <a
-                        href={BACKEND_URL + att.url}
+                        href={uploadedFileUrl(att.url)}
                         download
                         className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
                         title="Download"
@@ -1274,7 +1272,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                       </p>
                     </div>
                     <a
-                      href={BACKEND_URL + doc.url}
+                      href={uploadedFileUrl(doc.url)}
                       className="text-xs text-gray-600 hover:text-gray-900"
                       target="_blank"
                       rel="noopener noreferrer"

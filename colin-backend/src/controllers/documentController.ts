@@ -1,26 +1,14 @@
-import multer, { StorageEngine } from 'multer';
-import path from 'path';
-import fs from 'fs';
 import mongoose from 'mongoose';
 import { Response } from 'express';
 
 import Document from '../models/documentModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { writeAudit } from '../services/auditService';
+import { storeUploadedFile, upload } from '../services/fileStorageService';
 
-const storage: StorageEngine = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(process.cwd(), 'uploads');
-    fs.mkdirSync(uploadDir, { recursive: true });
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
-});
-
-export const upload = multer({ storage });
+// Exported for all upload routes (documents, invoices, task attachments and
+// petty-cash receipts), ensuring they all use persistent GridFS storage.
+export { upload };
 
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
@@ -52,6 +40,7 @@ export const addDocumentToCase = async (req: AuthRequest, res: Response) => {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
     const userName = req.user?.name || 'Unknown';
+    const url = await storeUploadedFile(req.file);
 
     const newDoc = new Document({
       caseId: new mongoose.Types.ObjectId(caseId),
@@ -66,7 +55,7 @@ export const addDocumentToCase = async (req: AuthRequest, res: Response) => {
       uploadedBy: userName,
       uploadedDate: new Date().toISOString().slice(0, 10),
       size: (req.file.size / 1024 / 1024).toFixed(2) + ' MB',
-      url: `/uploads/${req.file.filename}`,
+      url,
     });
 
     // Versioning: if there's an existing document for same case + step/output + name, increment version

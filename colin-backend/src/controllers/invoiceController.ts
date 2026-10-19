@@ -3,8 +3,8 @@ import mongoose from 'mongoose';
 import Invoice from '../models/invoiceModel';
 import Counter from '../models/counterModel';
 import { writeAudit } from '../services/auditService';
+import { storeUploadedFile } from '../services/fileStorageService';
 
-const invoiceFilePath = (file?: Express.Multer.File) => (file ? `/uploads/${file.filename}` : undefined);
 const paramValue = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
 
 // Get all invoices for a case
@@ -41,6 +41,7 @@ export const addInvoiceToCase = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'date and a valid amount are required' });
     }
 
+    const invoiceFileUrl = req.file ? await storeUploadedFile(req.file) : undefined;
     const year = new Date().getFullYear();
 
     // Atomic global yearly sequence
@@ -70,7 +71,7 @@ export const addInvoiceToCase = async (req: Request, res: Response) => {
       amount: invoiceAmount,
       status: 'Pending',
       notes,
-      invoiceFileUrl: invoiceFilePath(req.file),
+      ...(invoiceFileUrl ? { invoiceFileUrl } : {}),
     });
 
     await invoice.save();
@@ -109,10 +110,11 @@ export const uploadProof = async (req: Request, res: Response) => {
     // First get invoice (to know caseId + invoiceNo for audit)
     const existing = await Invoice.findById(invoiceId);
     if (!existing) return res.status(404).json({ message: 'Invoice not found.' });
+    const proofUrl = await storeUploadedFile(req.file);
 
     const invoice = await Invoice.findByIdAndUpdate(
       invoiceId,
-      { status: 'Paid', proofUrl: invoiceFilePath(req.file) },
+      { status: 'Paid', proofUrl },
       { new: true }
     );
 
@@ -148,10 +150,11 @@ export const uploadInvoiceFile = async (req: Request, res: Response) => {
 
     const existing = await Invoice.findById(invoiceId);
     if (!existing) return res.status(404).json({ message: 'Invoice not found.' });
+    const invoiceFileUrl = await storeUploadedFile(req.file);
 
     const updated = await Invoice.findByIdAndUpdate(
       invoiceId,
-      { invoiceFileUrl: invoiceFilePath(req.file) },
+      { invoiceFileUrl },
       { new: true }
     );
 

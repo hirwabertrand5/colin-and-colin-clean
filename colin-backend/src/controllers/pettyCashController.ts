@@ -7,6 +7,7 @@ import User from '../models/userModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { notifyRoles } from '../services/notifyService';
 import { SINGLE_CURRENCY } from '../utils/currency';
+import { storeUploadedFile } from '../services/fileStorageService';
 
 const ALLOWED_ROLES = ['managing_director', 'executive_assistant'];
 
@@ -227,6 +228,8 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'date, title, amount (>0) are required.' });
     }
 
+    const uploadedFiles = Array.isArray((req as any).files) ? (req as any).files as Express.Multer.File[] : [];
+    const receiptUrls = await Promise.all(uploadedFiles.map((file) => storeUploadedFile(file)));
     let didTriggerLowBalance = false;
 
     await session.withTransaction(async () => {
@@ -237,16 +240,6 @@ export const createExpense = async (req: AuthRequest, res: Response) => {
       if (amt > fund.remainingAmount) throw new Error('INSUFFICIENT_FUNDS');
 
       const actor = actorFromReq(req);
-
-      // Handle multiple receipt files
-      const receiptUrls: string[] = [];
-      if ((req as any).files && Array.isArray((req as any).files)) {
-        (req as any).files.forEach((file: any) => {
-          if (file.filename) {
-            receiptUrls.push(`/uploads/${file.filename}`);
-          }
-        });
-      }
 
       const normalizedChargeType: 'internal' | 'client' =
         String(chargeType || 'internal') === 'client' ? 'client' : 'internal';

@@ -99,9 +99,8 @@ import {
   resolveDeadlineDateTime,
   getUrgencyColorForDueDate,
 } from '../../utils/workflowDeadline';
+import { uploadedFileUrl } from '../../services/apiConfig';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-const BACKEND_URL = API_URL.replace(/\/api\/?$/, '');
 const getToken = () => localStorage.getItem('token');
 
 type StaffUser = { _id: string; name: string; email: string; role: string };
@@ -3010,7 +3009,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
           ) : (
             <div className="divide-y divide-gray-100">
               {documents.map((doc, index) => {
-                const fileUrl = BACKEND_URL + doc.url;
+                const fileUrl = uploadedFileUrl(doc.url);
 
                 return (
                   <div key={doc._id} className="px-6 py-5 flex items-center justify-between gap-4">
@@ -3206,7 +3205,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                           {inv.invoiceFileUrl ? (
                             <>
                               <a
-                                href={BACKEND_URL + inv.invoiceFileUrl}
+                                href={uploadedFileUrl(inv.invoiceFileUrl)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-blue-600 underline font-medium"
@@ -3214,7 +3213,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                                 View Invoice File
                               </a>
                               <a
-                                href={BACKEND_URL + inv.invoiceFileUrl}
+                                href={uploadedFileUrl(inv.invoiceFileUrl)}
                                 download
                                 className="text-blue-600 underline font-medium"
                               >
@@ -3243,7 +3242,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                         inv.proofUrl ? (
                           <div className="flex items-center gap-3">
                             <a
-                              href={BACKEND_URL + inv.proofUrl}
+                              href={uploadedFileUrl(inv.proofUrl)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-600 underline text-xs font-medium"
@@ -3251,7 +3250,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                               View Receipt
                             </a>
                             <a
-                              href={BACKEND_URL + inv.proofUrl}
+                              href={uploadedFileUrl(inv.proofUrl)}
                               download
                               className="text-blue-600 underline text-xs font-medium"
                             >

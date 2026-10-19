@@ -38,8 +38,7 @@ import {
   transitionIndependentTask,
   uploadIndependentTaskAttachment,
 } from '../../services/independentTaskService';
-
-const BACKEND_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
+import { uploadedFileUrl } from '../../services/apiConfig';
 
 const WORKFLOW_STATUSES: IndependentTaskStatus[] = [
   'Created',
@@ -696,7 +695,7 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
                             </div>
                             <div className="flex gap-2">
                               <a
-                                href={`${BACKEND_URL}${attachment.url}`}
+                                href={uploadedFileUrl(attachment.url)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"

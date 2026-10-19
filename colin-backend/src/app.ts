@@ -1,7 +1,6 @@
 import cors from 'cors';
 import express from 'express';
 import cookieParser from 'cookie-parser';
-import path from 'path';
 import firmReportsRoutes from './routes/firmReports';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/user.js';
@@ -27,6 +26,7 @@ import caseManagementRoutes from './routes/caseManagement';
 import prospectRoutes from './routes/prospect';
 import clientExperienceRoutes from './routes/clientExperience';
 import independentTaskRoutes from './routes/independentTasks';
+import { getLegacyUploadsDirectory, serveStoredUpload } from './services/fileStorageService';
 const app = express();
 
 // ✅ Allow multiple dev origins + configurable CLIENT_URL
@@ -91,8 +91,11 @@ app.use('/api/workflows', workflowRoutes);
 app.use('/api/case-management', caseManagementRoutes);
 app.use('/api/client-experience', clientExperienceRoutes);
 app.use('/api', independentTaskRoutes);
-// uploads
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+// Keep the legacy directory first for old URLs, then serve all new uploads
+// from MongoDB GridFS so deploys and restarts cannot erase them.
+app.use('/uploads', express.static(getLegacyUploadsDirectory()));
+app.get('/uploads/:fileKey', serveStoredUpload);
 
 // health
 app.get('/api/health', (req, res) => {

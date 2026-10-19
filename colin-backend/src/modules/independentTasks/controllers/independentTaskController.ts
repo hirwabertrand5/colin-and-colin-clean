@@ -1,23 +1,9 @@
 import { Response } from 'express';
-import multer, { StorageEngine } from 'multer';
-import path from 'path';
-import fs from 'fs';
 import { AuthRequest } from '../../../middleware/authMiddleware';
 import { independentTaskService } from '../services/independentTaskService';
+import { upload } from '../../../services/fileStorageService';
 
-const storage: StorageEngine = multer.diskStorage({
-  destination: function (_req, _file, cb) {
-    const uploadDir = path.join(process.cwd(), 'uploads');
-    fs.mkdirSync(uploadDir, { recursive: true });
-    cb(null, uploadDir);
-  },
-  filename: function (_req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
-});
-
-export const upload = multer({ storage });
+export { upload };
 
 const getParam = (value: any) => (Array.isArray(value) ? value[0] : value);
 

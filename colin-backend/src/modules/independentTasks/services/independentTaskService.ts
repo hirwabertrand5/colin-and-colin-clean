@@ -1,5 +1,3 @@
-import fs from 'fs/promises';
-import path from 'path';
 import mongoose from 'mongoose';
 import Case from '../../../models/caseModel';
 import { AuthRequest } from '../../../middleware/authMiddleware';
@@ -16,6 +14,7 @@ import IndependentTaskHistory, {
   IndependentTaskHistoryAction,
 } from '../models/independentTaskHistoryModel';
 import { caseMatchesAssignee } from '../../../utils/caseAssignments';
+import { storeUploadedFile } from '../../../services/fileStorageService';
 
 export type IndependentTaskListQuery = {
   q?: string;
@@ -759,6 +758,7 @@ export const independentTaskService = {
     await assertCanView(req, task);
     if (task.status === 'Closed') throw new Error('Closed tasks cannot be edited.');
     if (!file) throw new Error('No file uploaded.');
+    const url = await storeUploadedFile(file);
 
     const attachmentDoc: any = {
       taskId: task._id,
@@ -767,7 +767,7 @@ export const independentTaskService = {
       fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
       uploadedBy: req.user?.name || 'System',
       uploadedDate: todayISO(),
-      url: `/uploads/${file.filename}`,
+      url,
     };
     const note = cleanString(payload.note);
     if (note) attachmentDoc.note = note;
@@ -786,8 +786,6 @@ export const independentTaskService = {
     const task = await assertTaskExists(String(attachment.taskId));
     await assertCanEdit(req, task);
 
-    const filePath = path.join(process.cwd(), attachment.url.replace(/^\/+/, ''));
-    await fs.unlink(filePath).catch(() => {});
     await IndependentTaskAttachment.findByIdAndDelete(attachmentId);
 
     await buildHistory(String(task._id), 'TASK_ATTACHMENT_DELETED', 'Attachment deleted', req, attachment.fileName);

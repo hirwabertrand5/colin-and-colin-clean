@@ -31,9 +31,7 @@ import {
 import { CaseData, getAllCases } from '../../services/caseService';
 import { getAllUsers, User } from '../../services/userService';
 import { downloadWorkbook } from '../../utils/excelExport';
-
-const API_URL = import.meta.env.VITE_API_URL;
-const BACKEND_URL = API_URL ? API_URL.replace(/\/api\/?$/, '') : '';
+import { uploadedFileUrl } from '../../services/apiConfig';
 
 const formatRwf = (n: number) => `RWF ${Math.round(n).toLocaleString('en-US')}`;
 
@@ -626,7 +624,7 @@ export default function PettyCashDashboard() {
                           <td className="px-3 py-3">{expense.matterId || expense.caseNoSnapshot || '—'}</td>
                           <td className="px-3 py-3">
                             {expense.receiptUrls?.length || expense.receiptUrl ? (
-                              <a href={BACKEND_URL + (expense.receiptUrls?.[0] || expense.receiptUrl || '')} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">View receipt</a>
+                              <a href={uploadedFileUrl(expense.receiptUrls?.[0] || expense.receiptUrl)} target="_blank" rel="noreferrer" className="font-medium text-blue-600 underline">View receipt</a>
                             ) : (
                               <span className="text-slate-400">No receipt</span>
                             )}
@@ -861,7 +859,7 @@ export default function PettyCashDashboard() {
                             ex.receiptUrls.map((url, idx) => (
                               <div key={idx}>
                                 <a
-                                  href={BACKEND_URL + url}
+                                  href={uploadedFileUrl(url)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-blue-600 underline font-medium"
@@ -872,7 +870,7 @@ export default function PettyCashDashboard() {
                             ))
                           ) : ex.receiptUrl ? (
                             <a
-                              href={BACKEND_URL + ex.receiptUrl}
+                              href={uploadedFileUrl(ex.receiptUrl)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-600 underline font-medium"

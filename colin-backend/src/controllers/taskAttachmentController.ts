@@ -5,6 +5,7 @@ import TaskAttachment from '../models/taskAttachmentModel';
 import Document from '../models/documentModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { writeAudit } from '../services/auditService';
+import { storeUploadedFile } from '../services/fileStorageService';
 
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
@@ -50,7 +51,7 @@ export const uploadAttachmentToTask = async (req: AuthRequest, res: Response) =>
     const actor = actorFromReq(req);
 
     const displayName = String(name || req.file.originalname).trim();
-    const url = `/uploads/${req.file.filename}`;
+    const url = await storeUploadedFile(req.file);
 
     // 1) Save TaskAttachment
     const attachmentPayload: any = {
