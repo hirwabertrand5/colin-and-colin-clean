@@ -132,6 +132,15 @@ export interface CaseData {
     accruedUnbilled?: number;
   };
 
+  billingArrangement?: 'standard' | 'retainer';
+  retainerId?: string;
+  retainerSnapshot?: {
+    retainerNo: string;
+    name: string;
+    clientName: string;
+    billingModel: 'prepaid' | 'monthly' | 'hybrid';
+  };
+
   caseManagement?: {
     qualityScore?: number;
     qualityScoredBy?: string;

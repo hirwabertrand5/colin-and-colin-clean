@@ -150,6 +150,18 @@ export interface ICase extends Document {
     accruedUnbilled?: number;
   };
 
+  /** A normal matter can optionally be covered by a client-level retainer. */
+  billingArrangement?: 'standard' | 'retainer';
+  retainerId?: mongoose.Types.ObjectId;
+  /** @deprecated Retainers are shared subscriptions; no amount is reserved per case. */
+  retainerAllocation?: number;
+  retainerSnapshot?: {
+    retainerNo: string;
+    name: string;
+    clientName: string;
+    billingModel: 'prepaid' | 'monthly' | 'hybrid';
+  };
+
   caseManagement?: {
     qualityScore?: number;
     qualityScoredBy?: string;
@@ -373,6 +385,20 @@ const CaseSchema = new Schema<ICase>(
       default: {},
     },
 
+    billingArrangement: { type: String, enum: ['standard', 'retainer'], default: 'standard', index: true },
+    retainerId: { type: Schema.Types.ObjectId, ref: 'Retainer', index: true },
+    // Legacy records retain this field at zero; new retainer links never use it.
+    retainerAllocation: { type: Number, min: 0, default: 0 },
+    retainerSnapshot: {
+      type: {
+        retainerNo: { type: String, trim: true },
+        name: { type: String, trim: true },
+        clientName: { type: String, trim: true },
+        billingModel: { type: String, enum: ['prepaid', 'monthly', 'hybrid'] },
+      },
+      default: undefined,
+    },
+
     /********************************
      * Case Management
      * Quality Score is entered through the Case Management tab by the Reviewer
@@ -415,5 +441,6 @@ CaseSchema.index({ 'caseAssignments.reviewer': 1 });
 CaseSchema.index({ 'caseAssignments.signerApprover': 1 });
 // "Matters Opened" (entry date) and period scoping filter/sort on createdAt.
 CaseSchema.index({ createdAt: -1 });
+CaseSchema.index({ retainerId: 1, status: 1 });
 
 export default mongoose.model<ICase>('Case', CaseSchema);

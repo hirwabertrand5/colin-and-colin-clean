@@ -24,6 +24,7 @@
     "align:workflows:apply": "tsx src/scripts/alignCaseWorkflowsWithTemplates.ts --apply",
     "audit:case-checklist": "tsx src/scripts/auditCaseChecklist.ts",
     "audit:workflow-integrity": "tsx src/scripts/auditWorkflowIntegrity.ts",
+    "audit:uploads": "tsx src/scripts/auditUploadRecovery.ts",
     "inspect:closed-matters": "tsx src/scripts/inspectClosedMatters.ts",
     "inspect:archived-ticks": "tsx src/scripts/inspectArchivedTicks.ts",
     "inspect:step-order": "tsx src/scripts/inspectStepOrder.ts",

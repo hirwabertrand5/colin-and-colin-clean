@@ -9,6 +9,7 @@ import { getRoleSuggestions } from '../../constants/partyRoles';
 import { formatCaseAssignedTo, setCaseAssignmentSlot } from '../../utils/caseAssignments';
 import { formatDeadlineDateTime, resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import { buildWorkflowSchedule } from '../../utils/workflowSchedule';
+import { listActiveRetainers, Retainer } from '../../services/retainerService';
 
 type StaffUser = {
   _id: string;
@@ -78,6 +79,8 @@ export default function CreateCase({
 
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [activeRetainers, setActiveRetainers] = useState<Retainer[]>([]);
+  const [retainersLoading, setRetainersLoading] = useState(false);
 
   const [servicePath, setServicePath] = useState<string[]>([]);
 
@@ -114,6 +117,8 @@ export default function CreateCase({
       prepaidRemaining: 0,
       accruedUnbilled: 0,
     },
+    billingArrangement: 'standard',
+    retainerId: '',
     workflowProgress: {
       plannedValue: { amount: undefined, currency: 'RWF' },
       percent: 0,
@@ -164,6 +169,22 @@ export default function CreateCase({
       // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const fetchRetainers = async () => {
+      setRetainersLoading(true);
+      try {
+        setActiveRetainers(await listActiveRetainers());
+      } catch {
+        // A retainer is optional. Keep the normal case flow available if the
+        // user does not have access to retainer data.
+        setActiveRetainers([]);
+      } finally {
+        setRetainersLoading(false);
+      }
+    };
+    void fetchRetainers();
   }, []);
 
   const saveDraft = () => {
@@ -381,6 +402,9 @@ export default function CreateCase({
       if (plannedValueAmount <= 0) {
         throw new Error('Enter the contract value before creating the case.');
       }
+      if (formData.billingArrangement === 'retainer' && !formData.retainerId) {
+        throw new Error('Select an active retainer or change the billing arrangement to standard case billing.');
+      }
 
       const finalParties = partiesStructured ? partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') : formData.parties;
 
@@ -428,7 +452,8 @@ export default function CreateCase({
       const caseNoOk = hideCaseNo ? true : Boolean(formData.caseNo && String(formData.caseNo).trim());
       const assignments = formData.caseAssignments || {};
       const assigneeOk = Boolean(assignments.initiator && assignments.reviewer && assignments.signerApprover);
-      return Boolean(caseNoOk && partiesOk && assigneeOk && formData.assignedTo && isServiceSelectionValid() && formData.workflowTemplateId);
+      const retainerOk = formData.billingArrangement !== 'retainer' || Boolean(formData.retainerId);
+      return Boolean(caseNoOk && partiesOk && assigneeOk && formData.assignedTo && isServiceSelectionValid() && formData.workflowTemplateId && retainerOk);
     }
     if (step === 2) {
       return Boolean(formData.workflowTemplateId && formData.workflowStartDate && plannedValueAmount > 0);
@@ -444,6 +469,10 @@ export default function CreateCase({
   const plannedValueAmount = parseMoneyInput(formData.workflowProgress?.plannedValue?.amount);
   // Single-currency policy: the whole system operates in RWF only.
   const plannedValueCurrency = 'RWF' as const;
+  const selectedRetainer = useMemo(
+    () => activeRetainers.find((retainer) => retainer._id === formData.retainerId),
+    [activeRetainers, formData.retainerId]
+  );
 
   const selectedWorkflowTemplate = useMemo(
     () => templates.find((t) => t._id === formData.workflowTemplateId),
@@ -880,6 +909,48 @@ export default function CreateCase({
               </div>
             </div>
 
+            <div className="case-retainer-billing rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950/40">
+              <div className="text-sm font-semibold text-blue-950 dark:text-blue-100">Billing arrangement</div>
+              <p className="mt-1 text-xs text-blue-800 dark:text-blue-200">This stays a normal case and follows the usual workflow. Optionally link it to an active client retainer.</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="rounded-md border border-blue-200 bg-white p-3 text-sm text-gray-800 dark:border-blue-800 dark:bg-gray-900 dark:text-gray-100">
+                  <span className="flex items-center gap-2 font-medium"><input type="radio" checked={(formData.billingArrangement || 'standard') === 'standard'} onChange={() => setFormData((prev) => ({ ...prev, billingArrangement: 'standard', retainerId: '' }))} /> Standard case billing</span>
+                  <span className="mt-1 block text-xs text-gray-500 dark:text-gray-300">Invoices and fees are handled independently.</span>
+                </label>
+                <label className="rounded-md border border-blue-200 bg-white p-3 text-sm text-gray-800 dark:border-blue-800 dark:bg-gray-900 dark:text-gray-100">
+                  <span className="flex items-center gap-2 font-medium"><input type="radio" checked={formData.billingArrangement === 'retainer'} onChange={() => setFormData((prev) => ({ ...prev, billingArrangement: 'retainer' }))} /> Under a retainer</span>
+                  <span className="mt-1 block text-xs text-gray-500 dark:text-gray-300">The case is linked to an active client subscription and follows the normal lifecycle.</span>
+                </label>
+              </div>
+              {formData.billingArrangement === 'retainer' && (
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-blue-950 dark:text-blue-100">Active retainer *</label>
+                  <select
+                    value={formData.retainerId || ''}
+                    onChange={(event) => setFormData((prev) => ({ ...prev, retainerId: event.target.value }))}
+                    className="mt-1 w-full rounded border border-blue-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-blue-700 dark:bg-gray-900 dark:text-gray-100"
+                  >
+                    <option value="">{retainersLoading ? 'Loading retainers…' : 'Select the client retainer…'}</option>
+                    {activeRetainers.map((retainer) => (
+                      <option key={retainer._id} value={retainer._id}>
+                        {retainer.clientName} — {retainer.name} ({retainer.retainerNo})
+                      </option>
+                    ))}
+                  </select>
+                  {selectedRetainer && (
+                    <div className="mt-3 rounded-md border border-blue-200 bg-white px-3 py-2 text-xs text-blue-900 dark:border-blue-800 dark:bg-slate-950 dark:text-blue-100">
+                      <span className="font-semibold">Available subscription value:</span>{' '}
+                      {selectedRetainer.billingModel === 'monthly' ? 'Monthly service agreement' : formatCurrency(selectedRetainer.contractValue || selectedRetainer.availableBalance, 'RWF')}.{' '}
+                      <span className="text-blue-700 dark:text-blue-200">It is shared across linked cases and is not reserved or deducted. Enter this case’s own contract value in the next step.</span>
+                    </div>
+                  )}
+                  {!retainersLoading && activeRetainers.length === 0 && (
+                    <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">No active retainers are available. Create and activate one in Matters → Retainers.</p>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="text-sm font-semibold text-gray-900">Assigned To *</div>
               <p className="text-xs text-gray-500 mt-1">Choose the initiator, reviewer, and signer/approver for this matter.</p>
@@ -996,7 +1067,7 @@ export default function CreateCase({
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Contract Value *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Case Contract Value *</label>
                   <input
                     value={formData.workflowProgress?.plannedValue?.amount ?? ''}
                     onChange={(e) => {
@@ -1029,6 +1100,7 @@ export default function CreateCase({
                     placeholder="e.g., 790000"
                     inputMode="numeric"
                   />
+                  {formData.billingArrangement === 'retainer' && selectedRetainer && <p className="mt-2 text-xs text-gray-500">This case contract value is tracked independently. It does not reduce the shared retainer subscription contract value.</p>}
                   <p className="text-xs text-gray-500 mt-2">
                     This is the contract value. Progress value is calculated from checked key actions.
                   </p>
@@ -1155,6 +1227,7 @@ export default function CreateCase({
                   ['Next expected deadline', workflowSummary?.nextDueAt ? formatDeadlineDateTime(workflowSummary.nextDueAt) : 'TBD'],
                   ['Estimated completion', workflowSummary?.completionDate ? formatDeadlineDateTime(workflowSummary.completionDate) : 'TBD'],
                   ['Contract value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
+                  ['Billing arrangement', formData.billingArrangement === 'retainer' ? `${selectedRetainer?.name || 'Selected retainer'} (retainer subscription)` : 'Standard case billing'],
                 ].map(([k, v]) => (
                   <div key={k} className="grid grid-cols-3 gap-4 py-3 border-b border-gray-200">
                     <span className="text-sm text-gray-600">{k}:</span>

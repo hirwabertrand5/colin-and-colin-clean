@@ -1526,6 +1526,14 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
             <p className="text-base text-gray-500">
               {caseData.caseNo} &bull; {caseData.caseType}
             </p>
+            {caseData.billingArrangement === 'retainer' && caseData.retainerSnapshot && (
+              <div className="case-retainer-summary mt-3 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-100">
+                <span className="font-semibold">Retainer subscription</span>
+                <span>{caseData.retainerSnapshot.name}</span>
+                <span className="text-indigo-500 dark:text-indigo-300">&bull;</span>
+                <span>{caseData.retainerSnapshot.retainerNo}</span>
+              </div>
+            )}
           </div>
 
           {/* ✅ Edit Case hidden for associates */}

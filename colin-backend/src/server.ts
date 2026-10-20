@@ -8,6 +8,7 @@ import connectDB from './config/db.js';
 import { seedAllWorkflowTemplates } from './seed';
 import { reconcileTerminalProspects } from './controllers/prospectController';
 import { migrateLegacyUploadsToGridFs } from './services/fileStorageService';
+import { migrateLegacyRetainerSubscriptions } from './services/retainerService';
 
 const PORT = process.env.PORT || 5000;
 
@@ -23,6 +24,16 @@ connectDB().then(async () => {
     console.error('[uploads] legacy-file migration failed', error);
   }
   // ✅ seed workflow templates
+  try {
+    const retainerMigration = await migrateLegacyRetainerSubscriptions();
+    if (retainerMigration.migratedRetainers > 0 || retainerMigration.releasedCaseAllocations > 0) {
+      console.log(`[retainers] migrated ${retainerMigration.migratedRetainers} subscription(s) and released ${retainerMigration.releasedCaseAllocations} legacy case allocation(s)`);
+    }
+  } catch (error) {
+    // New retainer links remain safe even if one malformed legacy record
+    // cannot be migrated during startup.
+    console.error('[retainers] subscription migration failed', error);
+  }
   await seedAllWorkflowTemplates();
   const reconciledCount = await reconcileTerminalProspects();
   if (reconciledCount > 0) {

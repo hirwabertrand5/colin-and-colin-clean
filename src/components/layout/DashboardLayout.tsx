@@ -148,6 +148,7 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
         managementItem('Temporarily Closed Matters', '/matters/temporarily-closed', Clock3),
         managementItem('Closed Matters', '/matters/closed', FolderTree),
         managementItem('Independent Tasks', '/matters/independent-tasks', CheckSquare),
+        managementItem('Retainers', '/matters/retainers', HandCoins),
         managementItem('Matter Financial Status', matterFinancialView('financial-status'), Calculator),
         managementItem('Contract Value', matterFinancialView('contract-value'), HandCoins),
         managementItem('Amount Billed', matterFinancialView('amount-billed'), ReceiptText),

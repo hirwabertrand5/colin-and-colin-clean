@@ -34,6 +34,7 @@ import {
   normalizeCaseAssignee,
 } from '../utils/caseAssignments';
 import { buildCaseAssignmentHandovers } from '../utils/caseAssignmentContinuity';
+import { linkCaseToRetainer } from '../services/retainerService';
 
 const actorFromReq = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
@@ -499,8 +500,17 @@ export const createCase = async (req: AuthRequest, res: Response) => {
     const workflowAutomation = (req.body as any)?.workflowAutomation !== false && (req.body as any)?.matterTiming !== 'historical';
     const caseAssignments = normalizeCaseAssignmentsPayload(req.body);
     const caseNo = String((req.body as any)?.caseNo || '').trim() || (await generateCaseNo());
+    const requestedRetainerId = String((req.body as any)?.retainerId || '').trim();
+    const casePayload: any = { ...(req.body as any) };
+    // Retainer membership is applied by the dedicated service after the new
+    // case exists. A retainer is a shared subscription, so case creation can
+    // never reserve or deduct an amount from it.
+    delete casePayload.retainerId;
+    delete casePayload.retainerAllocation;
+    delete casePayload.retainerSnapshot;
+    delete casePayload.billingArrangement;
     const newCase = new Case({
-      ...req.body,
+      ...casePayload,
       caseNo,
       ...(caseAssignments ? { caseAssignments, assignedTo: buildCaseAssignedToDisplay({ caseAssignments, assignedTo: (req.body as any)?.assignedTo }) } : {}),
       matterTiming: workflowAutomation ? 'new' : 'historical',
@@ -553,6 +563,22 @@ export const createCase = async (req: AuthRequest, res: Response) => {
     newCase.workflowStartDate = normalizedWorkflowStartDate;
 
     await newCase.save();
+
+    if (requestedRetainerId) {
+      try {
+        const linkedCase: any = await linkCaseToRetainer({
+          caseId: String(newCase._id),
+          retainerId: requestedRetainerId,
+          actor: { name: req.user?.name || 'System', userId: req.user?.id },
+        });
+        newCase.set(linkedCase.toObject ? linkedCase.toObject() : linkedCase);
+      } catch (error) {
+        // At this point no workflow, task, invoice or document exists yet, so
+        // rolling the case back avoids creating a half-linked matter.
+        await Case.findByIdAndDelete(newCase._id);
+        throw error;
+      }
+    }
 
     // ✅ Initialize workflow instance if workflowTemplateId provided
     const workflowTemplateId = (req.body as any)?.workflowTemplateId;
@@ -1144,6 +1170,13 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     delete updatePayload.updatedAt;
     delete updatePayload.__v;
     delete updatePayload.workflowInstanceId;
+    // Retainer linkage is changed only by /retainers/cases/:caseId/link so a
+    // stale Edit Case form can never bypass balance validation or overwrite a
+    // retainer snapshot.
+    delete updatePayload.retainerId;
+    delete updatePayload.retainerAllocation;
+    delete updatePayload.retainerSnapshot;
+    delete updatePayload.billingArrangement;
     delete updatePayload.takeRequestState;
     // Handover history is server-authored. An edit client may read it but may
     // never replace or forge a contributor record.
@@ -1330,6 +1363,13 @@ export const deleteCase = async (req: AuthRequest, res: Response) => {
 
     const deleted = await Case.findById(req.params.id).lean();
     if (!deleted) return res.status(404).json({ message: 'Case not found.' });
+
+    if ((deleted as any).retainerId) {
+      await linkCaseToRetainer({
+        caseId: String((deleted as any)._id),
+        actor: { name: req.user?.name || 'System', userId: req.user?.id },
+      });
+    }
 
     const caseObjectId = new mongoose.Types.ObjectId(String(deleted._id));
     const caseFilter = { caseId: caseObjectId };

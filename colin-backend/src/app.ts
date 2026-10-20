@@ -26,6 +26,7 @@ import caseManagementRoutes from './routes/caseManagement';
 import prospectRoutes from './routes/prospect';
 import clientExperienceRoutes from './routes/clientExperience';
 import independentTaskRoutes from './routes/independentTasks';
+import retainerRoutes from './routes/retainer';
 import { getLegacyUploadsDirectory, serveStoredUpload } from './services/fileStorageService';
 const app = express();
 
@@ -91,6 +92,7 @@ app.use('/api/workflows', workflowRoutes);
 app.use('/api/case-management', caseManagementRoutes);
 app.use('/api/client-experience', clientExperienceRoutes);
 app.use('/api', independentTaskRoutes);
+app.use('/api/retainers', retainerRoutes);
 
 // Keep the legacy directory first for old URLs, then serve all new uploads
 // from MongoDB GridFS so deploys and restarts cannot erase them.
