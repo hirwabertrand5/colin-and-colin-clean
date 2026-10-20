@@ -24,6 +24,7 @@ import BillingDashboard from './components/billing/BillingDashboard';
 import InvoiceManagement from './components/billing/InvoiceManagement';
 import BillingFinancePage from './components/billing/BillingFinancePage';
 import RetainerManagement from './components/billing/RetainerManagement';
+import RetainerDetail from './components/billing/RetainerDetail';
 import PerformanceDashboard from './components/reports/PerformanceDashboard';
 import FirmReports from './components/reports/FirmReports';
 import MatterFinancialStatusPage from './components/reports/MatterFinancialStatusPage';
@@ -308,6 +309,7 @@ function App() {
                   <Route path="/billing/invoices" element={<InvoiceManagement userRole={user.role} />} />
                   {isManagementDashboardRole && (
                     <>
+                      <Route path="/matters/retainers/:retainerId" element={<RetainerDetail />} />
                       <Route path="/matters/retainers" element={<RetainerManagement />} />
                       <Route path="/billing/retainers" element={<Navigate to="/matters/retainers" replace />} />
                       <Route path="/billing/finance/financial-dashboard" element={<BillingFinancePage view="financial-dashboard" userRole={user.role} />} />

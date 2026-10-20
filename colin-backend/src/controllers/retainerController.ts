@@ -205,9 +205,9 @@ export const updateRetainer = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Deletion is deliberately narrow: a draft that has never covered a case can
- * be removed. Every live or historical agreement remains auditable by being
- * closed through the edit flow instead.
+ * A retainer can be deleted while it has never covered a case. Once cases are
+ * linked, deletion is blocked so their subscription history cannot be
+ * orphaned; unlink the cases first if the agreement was created in error.
  */
 export const deleteRetainer = async (req: AuthRequest, res: Response) => {
   try {
@@ -217,12 +217,9 @@ export const deleteRetainer = async (req: AuthRequest, res: Response) => {
 
     const retainer = await Retainer.findById(retainerId);
     if (!retainer) return res.status(404).json({ message: 'Retainer not found.' });
-    if (retainer.status !== 'Draft') {
-      return res.status(409).json({ message: 'Only draft retainers can be deleted. Close an active or historical agreement instead.' });
-    }
     const linkedCases = await Case.countDocuments({ retainerId: retainer._id });
     if (linkedCases > 0) {
-      return res.status(409).json({ message: 'Unlink all cases before deleting this draft retainer.' });
+      return res.status(409).json({ message: 'Unlink all cases before deleting this retainer.' });
     }
 
     await RetainerActivity.deleteMany({ retainerId: retainer._id });

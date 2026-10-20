@@ -77,6 +77,12 @@ export const listActiveRetainers = async (): Promise<Retainer[]> => {
   return res.json();
 };
 
+export const getRetainer = async (retainerId: string): Promise<Retainer> => {
+  const res = await fetch(`${API_URL}/retainers/${retainerId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await readError(res, 'Failed to fetch retainer.'));
+  return res.json();
+};
+
 export const createRetainer = async (payload: RetainerPayload): Promise<Retainer> => {
   const res = await fetch(`${API_URL}/retainers`, {
     method: 'POST',
