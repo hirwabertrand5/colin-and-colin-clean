@@ -4615,15 +4615,15 @@ html {
 }
 .profitability-table-header > div:first-child { min-width: 0; }
 .profitability-search-control { flex: 0 1 18rem; min-width: min(100%, 16rem); }
-.profitability-matter-card { min-height: 0; }
-.profitability-matter-table-toolbar {
+.profitability-financial-card { min-height: 0; }
+.profitability-financial-table-toolbar {
   align-content: start;
   height: auto;
   min-height: 0;
   justify-content: flex-start;
   padding-bottom: 1rem;
 }
-.profitability-matter-table-toolbar .profitability-search-control {
+.profitability-financial-table-toolbar .profitability-search-control {
   flex: 0 0 auto;
   width: 100%;
   max-width: 18rem;
@@ -4768,14 +4768,14 @@ html {
 }
 
 @media (min-width: 1024px) {
-  .profitability-matter-table-toolbar {
+  .profitability-financial-table-toolbar {
     flex-direction: column;
     align-items: stretch;
   }
 }
 
 @media (max-width: 640px) {
-  .profitability-matter-table-toolbar .profitability-search-control { max-width: none; }
+  .profitability-financial-table-toolbar .profitability-search-control { max-width: none; }
 }
 
 @media (max-width: 1280px) {

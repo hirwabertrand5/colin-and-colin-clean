@@ -212,8 +212,8 @@ function FinancialTable({
   useEffect(() => setPage(1), [query, rows]);
 
   return (
-    <section className={`profitability-card profitability-data-card overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 ${kind === 'matter' ? 'profitability-matter-card' : ''}`}>
-      <div className={`profitability-table-header flex flex-col gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700 lg:flex-row lg:items-end lg:justify-between ${kind === 'matter' ? 'profitability-matter-table-toolbar' : ''}`}>
+    <section className="profitability-card profitability-data-card profitability-financial-card overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div className="profitability-table-header profitability-financial-table-toolbar flex flex-col gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">{title}</h2>
         </div>
