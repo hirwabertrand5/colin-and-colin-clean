@@ -537,8 +537,8 @@ const taskMatterLabel = (task: IndependentTask) =>
             )}
           </div>
 
-          <div className="independent-tasks-filter-bar mt-4 grid gap-3 lg:grid-cols-5">
-            <div className="relative lg:col-span-2">
+          <div className="independent-tasks-filter-bar mt-4">
+            <div className="independent-tasks-search-field relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
                 value={search}
@@ -546,8 +546,8 @@ const taskMatterLabel = (task: IndependentTask) =>
                   setPage(1);
                   setSearch(e.target.value);
                 }}
-                placeholder="Search task number, title, owner..."
-                className="w-full rounded-xl border border-gray-300 py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+                placeholder="Search task number, title, assignee or creator..."
+                className="independent-tasks-filter-control w-full rounded-xl border border-gray-300 py-2 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
               />
             </div>
 
@@ -557,7 +557,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                 setPage(1);
                 setStatusFilter(e.target.value as any);
               }}
-              className="rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+              className="independent-tasks-filter-control rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
               <option value="all">All Statuses</option>
               {TASK_STATUSES.map((status) => (
@@ -573,7 +573,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                 setPage(1);
                 setAssigneeFilter(e.target.value);
               }}
-              className="rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+              className="independent-tasks-filter-control rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
               disabled={lookupLoading}
             >
               <option value="">{lookupLoading ? 'Loading users...' : 'All Assignees'}</option>
@@ -590,7 +590,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                 setPage(1);
                 setSupervisorFilter(e.target.value);
               }}
-              className="rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+              className="independent-tasks-filter-control rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
               disabled={lookupLoading}
             >
               <option value="">{lookupLoading ? 'Loading users...' : 'All Supervisors'}</option>
@@ -601,7 +601,7 @@ const taskMatterLabel = (task: IndependentTask) =>
               ))}
             </select>
 
-            <div className="flex items-center justify-end gap-2 lg:col-span-6">
+            <div className="independent-tasks-filter-actions">
               <button
                 type="button"
                 onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
@@ -626,18 +626,29 @@ const taskMatterLabel = (task: IndependentTask) =>
 
           <div className="independent-tasks-table-wrap mt-4 overflow-hidden rounded-2xl border border-gray-200">
             <div className="overflow-x-auto">
-              <table className="independent-tasks-table min-w-[1270px] w-full divide-y divide-gray-200">
+              <table className="independent-tasks-table min-w-[1600px] w-full divide-y divide-gray-200">
+                <colgroup>
+                  <col className="independent-task-col-number" />
+                  <col className="independent-task-col-task" />
+                  <col className="independent-task-col-matter" />
+                  <col className="independent-task-col-assignee" />
+                  <col className="independent-task-col-creator" />
+                  <col className="independent-task-col-deadline" />
+                  <col className="independent-task-col-status" />
+                  <col className="independent-task-col-due" />
+                  <col className="independent-task-col-actions" />
+                </colgroup>
                 <thead className="bg-gray-50">
                   <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
-                    <th className="px-4 py-3">#</th>
-                    <th className="px-4 py-3">Task</th>
-                    <th className="px-4 py-3">Matter</th>
-                    <th className="px-4 py-3">Assignee</th>
-                    <th className="px-4 py-3">Created by</th>
-                    <th className="px-4 py-3">Deadline</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Due</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th scope="col" className="px-4 py-3">#</th>
+                    <th scope="col" className="px-4 py-3">Task</th>
+                    <th scope="col" className="px-4 py-3">Matter</th>
+                    <th scope="col" className="px-4 py-3">Assignee</th>
+                    <th scope="col" className="px-4 py-3">Created by</th>
+                    <th scope="col" className="px-4 py-3">Deadline</th>
+                    <th scope="col" className="px-4 py-3">Status</th>
+                    <th scope="col" className="px-4 py-3">Due date</th>
+                    <th scope="col" className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
@@ -657,15 +668,15 @@ const taskMatterLabel = (task: IndependentTask) =>
                         <tr key={task._id} className="align-top">
                           <td className="px-4 py-4 text-sm font-medium text-gray-500">{rowNumber}</td>
                           <td className="px-4 py-4">
-                            <div className="font-medium text-gray-900">{task.title}</div>
+                            <div className="independent-task-title font-medium text-gray-900" title={task.title}>{task.title}</div>
                             <div className="text-xs text-gray-500">{task.taskNumber}</div>
                           </td>
                           <td className="px-4 py-4 text-sm text-gray-700">
-                            {taskMatterLabel(task)}
+                            <div className="independent-task-matter" title={taskMatterLabel(task)}>{taskMatterLabel(task)}</div>
                             <div className="text-xs text-gray-500">{task.relatedClient || '—'}</div>
                           </td>
                           <td className="px-4 py-4 text-sm text-gray-700">
-                            <div>{task.assignee}</div>
+                            <div className="independent-task-person">{task.assignee}</div>
                             <div className="text-xs text-gray-500">Supervisor: {task.supervisor}</div>
                           </td>
                           <td className="px-4 py-4 text-sm text-gray-700">
@@ -688,8 +699,8 @@ const taskMatterLabel = (task: IndependentTask) =>
                                         : 'Untracked';
 
                               return (
-                                <div className="space-y-2">
-                                  <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${deadlinePillClass}`}>
+                                <div className="independent-task-deadline space-y-2">
+                                  <span className={`independent-task-deadline-badge inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${deadlinePillClass}`}>
                                     {formatDueCountdown(task.dueDate)}
                                   </span>
                                   <div className="space-y-1">
@@ -719,13 +730,13 @@ const taskMatterLabel = (task: IndependentTask) =>
                             })()}
                           </td>
                           <td className="px-4 py-4">
-                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClasses[task.status]}`}>
+                            <span className={`independent-task-status inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClasses[task.status]}`}>
                               {task.status}
                             </span>
                           </td>
-                          <td className="px-4 py-4 text-sm text-gray-600">{formatDeadlineDateTime(task.dueDate)}</td>
+                          <td className="px-4 py-4 text-sm text-gray-600"><time className="independent-task-due" dateTime={task.dueDate}>{formatDeadlineDateTime(task.dueDate)}</time></td>
                           <td className="px-4 py-4">
-                            <div className="flex justify-end gap-2">
+                            <div className="independent-task-actions">
                               <Link
                                 to={`/matters/independent-tasks/${task._id}`}
                                 className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
@@ -777,7 +788,7 @@ const taskMatterLabel = (task: IndependentTask) =>
             </div>
           </div>
 
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="independent-tasks-pagination mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-gray-500">
               Page {page} of {totalPages}
             </div>

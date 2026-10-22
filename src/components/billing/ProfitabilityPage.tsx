@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle,
   ArrowLeft,
   BarChart3,
-  BookOpen,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
@@ -29,7 +27,7 @@ import {
 } from '../../services/profitabilityService';
 import usePageTitle from '../../hooks/usePageTitle';
 
-type ProfitabilityTab = 'overview' | 'matters' | 'clients' | 'practice' | 'staff' | 'definitions';
+type ProfitabilityTab = 'overview' | 'matters' | 'clients' | 'practice' | 'staff';
 
 const managementRoles: UserRole[] = [
   'managing_director',
@@ -52,7 +50,6 @@ const tabs: Array<{ id: ProfitabilityTab; label: string; icon: typeof BarChart3 
   { id: 'clients', label: 'Client', icon: Building2 },
   { id: 'practice', label: 'Practice area', icon: Building2 },
   { id: 'staff', label: 'Staff contribution', icon: UsersRound },
-  { id: 'definitions', label: 'Definitions & controls', icon: BookOpen },
 ];
 
 function MetricCard({
@@ -76,7 +73,7 @@ function MetricCard({
         <span className={`profitability-metric-icon is-${accent}`}><Icon className="h-5 w-5" /></span>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">{label}</p>
-          <p className={`mt-1.5 text-xl font-semibold tracking-tight ${valueClass}`}>{value}</p>
+          <p className={`profitability-metric-value mt-1.5 text-xl font-semibold tracking-tight ${valueClass}`} title={value}>{value}</p>
           {detail && <p className="mt-1.5 text-xs leading-5 text-slate-500 dark:text-slate-400">{detail}</p>}
         </div>
       </div>
@@ -94,24 +91,6 @@ function Skeleton() {
         ))}
       </div>
       <div className="h-72 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
-    </div>
-  );
-}
-
-function DataGap({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="profitability-notice flex gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-      <p>{children}</p>
-    </div>
-  );
-}
-
-function Formula({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
-      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{label}</p>
-      <p className="mt-1 font-mono text-xs leading-5 text-slate-600 dark:text-slate-300">{children}</p>
     </div>
   );
 }
@@ -179,7 +158,7 @@ function Pagination({ page, total, onPage }: { page: number; total: number; onPa
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (total <= PAGE_SIZE) return null;
   return (
-    <div className="flex items-center justify-between border-t border-slate-200 px-5 py-3 text-sm dark:border-slate-700">
+    <div className="profitability-pagination flex items-center justify-between border-t border-slate-200 px-5 py-3 text-sm dark:border-slate-700">
       <span className="text-slate-500 dark:text-slate-400">
         Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
       </span>
@@ -198,12 +177,10 @@ function Pagination({ page, total, onPage }: { page: number; total: number; onPa
 
 function FinancialTable({
   title,
-  subtitle,
   rows,
   kind,
 }: {
   title: string;
-  subtitle: string;
   rows: ProfitabilityRow[];
   kind: 'matter' | 'client' | 'practice';
 }) {
@@ -224,7 +201,7 @@ function FinancialTable({
   const safePage = Math.min(page, pages);
   const visibleRows = searchableRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const primary = (row: ProfitabilityRow) =>
-    kind === 'matter' ? row.matterNo : row.label || 'Unclassified';
+    kind === 'matter' ? row.matterNo || row.label || 'Unnumbered matter' : row.label || 'Unclassified';
   const secondary = (row: ProfitabilityRow) =>
     kind === 'matter'
       ? `${row.client || 'Unassigned client'} · ${row.practiceArea || 'Unclassified'}`
@@ -235,13 +212,12 @@ function FinancialTable({
   useEffect(() => setPage(1), [query, rows]);
 
   return (
-    <section className="profitability-card overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-5 dark:border-slate-700 lg:flex-row lg:items-end lg:justify-between">
+    <section className={`profitability-card profitability-data-card overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 ${kind === 'matter' ? 'profitability-matter-card' : ''}`}>
+      <div className={`profitability-table-header flex flex-col gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-700 lg:flex-row lg:items-end lg:justify-between ${kind === 'matter' ? 'profitability-matter-table-toolbar' : ''}`}>
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">{title}</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>
         </div>
-        <label className="block w-full lg:w-72">
+        <label className="profitability-search-control block w-full lg:w-72">
           <span className="sr-only">Search {title.toLowerCase()}</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${kind === 'practice' ? 'practice areas' : `${kind}s`}…`} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
         </label>
@@ -249,36 +225,41 @@ function FinancialTable({
       {!searchableRows.length ? (
         <div className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400">No records match this view.</div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-[1260px] w-full text-sm">
+        <div className="profitability-table-wrap overflow-x-auto">
+          <table className="profitability-financial-table profitability-retainer-table min-w-[1574px] w-full text-sm">
+            <colgroup>
+              <col className="profitability-col-row-number" /><col className="profitability-col-identifier" /><col className="profitability-col-contract" /><col className="profitability-col-collected" /><col className="profitability-col-billed" /><col className="profitability-col-receivables" /><col className="profitability-col-costs" /><col className="profitability-col-contribution" /><col className="profitability-col-margin" /><col className="profitability-col-allocation" />
+            </colgroup>
             <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
               <tr>
-                <th className="px-5 py-3">{kind === 'practice' ? 'Practice area' : kind === 'client' ? 'Client' : 'Matter'}</th>
-                <th className="px-4 py-3 text-right">Contract value</th>
-                <th className="px-4 py-3 text-right">Recognised collected revenue</th>
-                <th className="px-4 py-3 text-right">Fees billed</th>
-                <th className="px-4 py-3 text-right">Open receivables</th>
-                <th className="px-4 py-3 text-right">Direct matter costs</th>
-                <th className="px-4 py-3 text-right">Gross contribution</th>
-                <th className="px-4 py-3 text-right">Contribution margin</th>
-                <th className="px-4 py-3">Cost allocation</th>
+                <th scope="col" className="px-3 py-3 text-center">#</th>
+                <th scope="col" className="px-5 py-3">{kind === 'practice' ? 'Practice area' : kind === 'client' ? 'Client' : 'Matter'}</th>
+                <th scope="col" className="px-4 py-3 text-right">Contract value</th>
+                <th scope="col" className="px-4 py-3 text-right" title="Recognised collected revenue">Collected revenue</th>
+                <th scope="col" className="px-4 py-3 text-right">Fees billed</th>
+                <th scope="col" className="px-4 py-3 text-right">Open receivables</th>
+                <th scope="col" className="px-4 py-3 text-right">Direct costs</th>
+                <th scope="col" className="px-4 py-3 text-right">Gross contribution</th>
+                <th scope="col" className="px-4 py-3 text-right">Contribution margin</th>
+                <th scope="col" className="px-4 py-3">Cost allocation</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {visibleRows.map((row) => (
+              {visibleRows.map((row, index) => (
                 <tr key={row.id || row.label || row.matterNo} className="align-top transition hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                  <td className="profitability-row-number px-3 py-4 text-center">{(safePage - 1) * PAGE_SIZE + index + 1}</td>
                   <td className="px-5 py-4">
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">{primary(row)}</p>
+                    <p className="profitability-table-identifier font-semibold text-slate-900 dark:text-slate-100" title={primary(row)}>{primary(row)}</p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{secondary(row)}</p>
                   </td>
-                  <td className="px-4 py-4 text-right font-medium text-slate-700 dark:text-slate-200">{money(row.contractValue)}</td>
-                  <td className="px-4 py-4 text-right font-medium text-slate-900 dark:text-white">{money(row.collected)}</td>
-                  <td className="px-4 py-4 text-right text-slate-700 dark:text-slate-200">{money(row.billed)}</td>
-                  <td className="px-4 py-4 text-right text-amber-700 dark:text-amber-300">{money(row.outstanding)}</td>
-                  <td className="px-4 py-4 text-right text-rose-700 dark:text-rose-300">{money(row.directMatterCosts)}</td>
-                  <td className={`px-4 py-4 text-right font-semibold ${tone(row.grossContribution)}`}>{money(row.grossContribution)}</td>
-                  <td className={`px-4 py-4 text-right font-semibold ${tone(row.contributionMargin)}`}>{percentage(row.contributionMargin)}</td>
-                  <td className="px-4 py-4 text-xs leading-5 text-slate-500 dark:text-slate-400">Direct costs only<br />Staff and overhead allocation not configured</td>
+                  <td className="profitability-number-cell px-4 py-4 text-right font-medium text-slate-700 dark:text-slate-200">{money(row.contractValue)}</td>
+                  <td className="profitability-number-cell px-4 py-4 text-right font-medium text-slate-900 dark:text-white">{money(row.collected)}</td>
+                  <td className="profitability-number-cell px-4 py-4 text-right text-slate-700 dark:text-slate-200">{money(row.billed)}</td>
+                  <td className="profitability-number-cell px-4 py-4 text-right text-amber-700 dark:text-amber-300">{money(row.outstanding)}</td>
+                  <td className="profitability-number-cell px-4 py-4 text-right text-rose-700 dark:text-rose-300">{money(row.directMatterCosts)}</td>
+                  <td className={`profitability-number-cell px-4 py-4 text-right font-semibold ${tone(row.grossContribution)}`}>{money(row.grossContribution)}</td>
+                  <td className={`profitability-number-cell px-4 py-4 text-right font-semibold ${tone(row.contributionMargin)}`}>{percentage(row.contributionMargin)}</td>
+                  <td className="px-4 py-4"><span className="profitability-allocation-status" title="Direct matter costs are recorded. Staff and overhead allocation is not configured, so net contribution is not estimated.">Direct costs only</span></td>
                 </tr>
               ))}
             </tbody>
@@ -316,32 +297,35 @@ function StaffDashboardTable({ members }: { members: FirmReportResponse['team'] 
   useEffect(() => setPage(1), [query, role, sort, members]);
 
   return (
-    <section className="profitability-card overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-5 dark:border-slate-700 lg:flex-row lg:items-end lg:justify-between">
+    <section className="profitability-card profitability-data-card overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div className="profitability-table-header profitability-staff-header border-b border-slate-200 px-4 py-3 dark:border-slate-700">
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">Staff performance & revenue attribution</h2>
-          <p className="mt-1 max-w-3xl text-sm text-slate-500 dark:text-slate-400">The same source and period logic used by staff dashboards, presented separately from staff profitability.</p>
         </div>
-        <div className="flex w-full gap-2 lg:w-auto">
-          <label className="block flex-1 lg:w-44"><span className="sr-only">Filter by role</span><select value={role} onChange={(event) => setRole(event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="all">All roles</option>{roles.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-          <label className="block flex-1 lg:w-52"><span className="sr-only">Sort staff</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="fees">Highest attributed fees</option><option value="matters">Most matters completed</option><option value="overdue">Most overdue matters</option></select></label>
+        <div className="profitability-staff-controls">
+          <label><span className="sr-only">Filter by role</span><select value={role} onChange={(event) => setRole(event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="all">All roles</option>{roles.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label><span className="sr-only">Sort staff</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="fees">Highest attributed fees</option><option value="matters">Most matters completed</option><option value="overdue">Most overdue matters</option></select></label>
+          <label className="profitability-staff-search"><span className="sr-only">Search staff</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search staff…" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         </div>
-        <label className="block w-full lg:w-72"><span className="sr-only">Search staff</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search staff…" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
       </div>
       {!filtered.length ? <div className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400">No staff records match the selected filters.</div> : (
-        <div className="overflow-x-auto">
-          <table className="min-w-[1320px] w-full text-sm">
+        <div className="profitability-table-wrap overflow-x-auto">
+          <table className="profitability-financial-table profitability-retainer-table profitability-staff-table min-w-[1574px] w-full text-sm">
+            <colgroup>
+              <col className="profitability-col-row-number" /><col className="profitability-col-staff" /><col className="profitability-col-small-number" /><col className="profitability-col-small-number" /><col className="profitability-col-timing" /><col className="profitability-col-small-number" /><col className="profitability-col-money" /><col className="profitability-col-money" /><col className="profitability-col-money" /><col className="profitability-col-ratio" /><col className="profitability-col-money" />
+            </colgroup>
             <thead className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:bg-slate-800/80 dark:text-slate-400"><tr>
-              <th className="px-5 py-3">Staff member</th><th className="px-4 py-3 text-right">Active matters</th><th className="px-4 py-3 text-right">Matters completed</th><th className="px-4 py-3 text-right">Early / on time / late</th><th className="px-4 py-3 text-right">Overdue matters</th><th className="px-4 py-3 text-right">Collected fee base</th><th className="px-4 py-3 text-right">Fees attributed</th><th className="px-4 py-3 text-right">Firm retained</th><th className="px-4 py-3 text-right">Attribution ratio</th><th className="px-4 py-3 text-right">Staff net profit</th>
+              <th scope="col" className="px-3 py-3 text-center">#</th><th scope="col" className="px-5 py-3">Staff member</th><th scope="col" className="px-4 py-3 text-right">Active matters</th><th scope="col" className="px-4 py-3 text-right">Matters completed</th><th scope="col" className="px-4 py-3 text-right">Early / on time / late</th><th scope="col" className="px-4 py-3 text-right">Overdue matters</th><th scope="col" className="px-4 py-3 text-right">Collected fee base</th><th scope="col" className="px-4 py-3 text-right">Fees attributed</th><th scope="col" className="px-4 py-3 text-right">Firm retained</th><th scope="col" className="px-4 py-3 text-right">Attribution ratio</th><th scope="col" className="px-4 py-3 text-right">Staff net profit</th>
             </tr></thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {visible.map((member) => {
+              {visible.map((member, index) => {
                 const collectedBase = member.grossFeesHandled ?? member.invoicePaymentsReceived ?? 0;
                 const attributedFees = member.revenueAttributed ?? member.earnedFees ?? 0;
                 const firmRetained = member.firmRetainedEarnings ?? Math.max(0, collectedBase - attributedFees);
                 const attributionRatio = member.contributionRatio ?? (collectedBase > 0 ? (attributedFees / collectedBase) * 100 : null);
                 return <tr key={member.id} className="transition hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                  <td className="px-5 py-4"><p className="font-semibold text-slate-900 dark:text-slate-100">{member.name}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{member.role} · {member.earningRoleLabel || 'Fee-attribution role'}{member.earningSharePercent != null ? ` · ${member.earningSharePercent}% configured share` : ''}</p></td>
+                  <td className="profitability-row-number px-3 py-4 text-center">{(safePage - 1) * PAGE_SIZE + index + 1}</td>
+                  <td className="px-5 py-4"><p className="profitability-table-identifier font-semibold text-slate-900 dark:text-slate-100" title={member.name}>{member.name}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{member.role} · {member.earningRoleLabel || 'Fee-attribution role'}{member.earningSharePercent != null ? ` · ${member.earningSharePercent}% configured share` : ''}</p></td>
                   <td className="px-4 py-4 text-right text-slate-700 dark:text-slate-200">{number(member.activeCases)}</td><td className="px-4 py-4 text-right text-slate-700 dark:text-slate-200">{number(member.tasksCompleted)}</td><td className="px-4 py-4 text-right text-slate-700 dark:text-slate-200">{number(member.earlyTasks)} / {number(member.onTimeTasks)} / {number(member.lateTasks)}</td><td className="px-4 py-4 text-right font-medium text-amber-700 dark:text-amber-300">{number(member.overdueTasks)}</td>
                   <td className="px-4 py-4 text-right text-slate-700 dark:text-slate-200">{money(collectedBase)}</td><td className="px-4 py-4 text-right font-semibold text-slate-900 dark:text-white">{money(attributedFees)}</td><td className="px-4 py-4 text-right text-slate-700 dark:text-slate-200">{money(firmRetained)}</td><td className="px-4 py-4 text-right font-medium text-slate-700 dark:text-slate-200">{percentage(attributionRatio)}</td><td className="px-4 py-4 text-right text-slate-500 dark:text-slate-400">N/A</td>
                 </tr>;
@@ -404,7 +388,7 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
   }, [permitted, range, from, to, refreshKey]);
 
   useEffect(() => {
-    if (!permitted || tab !== 'staff') return;
+    if (!permitted) return;
     if (range === 'custom' && (!from || !to)) return;
 
     const reportKey = [range, range === 'custom' ? from : '', range === 'custom' ? to : '', refreshKey].join(':');
@@ -441,20 +425,19 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
     return () => {
       current = false;
     };
-  }, [permitted, tab, range, from, to, refreshKey]);
+  }, [permitted, range, from, to, refreshKey]);
 
   if (!permitted) return <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><h1 className="text-xl font-semibold">Access denied</h1><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">You do not have permission to view Billing & Finance profitability.</p></div>;
   if (loading && !data) return <Skeleton />;
 
   const firm = data?.firm;
-  const missingCostAllocation = !data?.dataAvailability.allocatedOverhead || !data?.dataAvailability.staffCostRegister;
 
   return (
     <div className="profitability-page space-y-5 pb-8">
       <header className="profitability-page-header flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
         <div>
           <Link to="/billing" className="profitability-back-link mb-3 inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-950 dark:text-slate-400 dark:hover:text-white"><ArrowLeft className="h-4 w-4" />Billing & Finance</Link>
-          <div className="profitability-identity flex items-center gap-3"><div className="rounded-xl bg-indigo-600 p-2.5 text-white shadow-sm"><BarChart3 className="h-5 w-5" /></div><div><span className="profitability-eyebrow">Billing & Finance</span><h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">Profitability</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">A reconciled view of financial contribution, from firm level through matter, client, practice area and staff.</p></div></div>
+          <div className="profitability-identity flex items-center gap-3"><div className="rounded-xl bg-indigo-600 p-2.5 text-white shadow-sm"><BarChart3 className="h-5 w-5" /></div><div><h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">Profitability</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">A reconciled view of financial contribution, from firm level through matter, client, practice area and staff.</p></div></div>
         </div>
         <div className="profitability-filter-bar flex flex-wrap items-end gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <label className="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400"><span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Reporting period</span><select value={range} onChange={(event) => setRange(event.target.value as FirmReportRange)} className="min-w-36 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 outline-none ring-indigo-500 focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="daily">Today</option><option value="weekly">Last 7 days</option><option value="monthly">This month</option><option value="quarterly">Previous quarter</option><option value="yearly">Previous year</option><option value="ytd">Year to date</option><option value="custom">Custom range</option></select></label>
@@ -468,15 +451,12 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
 
       <nav className="profitability-tabs overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900" aria-label="Profitability reports"><div className="flex min-w-max gap-1">{tabs.map((item) => { const Icon = item.icon; const active = tab === item.id; return <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`profitability-tab inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${active ? 'bg-indigo-600 text-white shadow-sm is-active' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></nav>
 
-      {missingCostAllocation && tab !== 'definitions' && <DataGap><strong>Cost completeness:</strong> direct matter costs and internal operating expenses are shown from the finance ledger. The system has no staff-cost register or approved overhead-allocation basis yet, so matter, client, practice-area and staff <strong>net contribution</strong> is intentionally shown as N/A rather than estimated.</DataGap>}
-
       {tab === 'overview' && firm && <div className="space-y-5">
         <section className="profitability-financial-summary rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 p-6 text-white shadow-lg">
           <div className="profitability-hero-main">
             <div>
-              <p className="profitability-hero-label">Firm profitability</p>
+              <p className="profitability-hero-label">Net profit</p>
               <h2>{money(firm.netProfit)}</h2>
-              <p>Net profit is recognised collected revenue less recorded direct matter costs and general overheads for the selected period. Tax and non-operating items are not recorded in this report.</p>
             </div>
             <span className="profitability-hero-art"><BarChart3 className="h-10 w-10" /></span>
           </div>
@@ -503,16 +483,14 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
         </section>
       </div>}
 
-      {tab === 'matters' && <FinancialTable title="Matter profitability" subtitle="Gross contribution = matter recognised collected revenue − direct external matter costs. Net contribution needs approved staff and overhead allocations." rows={data?.matterRows || []} kind="matter" />}
-      {tab === 'clients' && <FinancialTable title="Client profitability" subtitle="Consolidated financial contribution across each client's matters. Retainers and unbilled earned fees are not treated as recognised revenue." rows={data?.clientRows || []} kind="client" />}
-      {tab === 'practice' && <FinancialTable title="Practice area profitability" subtitle="Each matter is grouped by its designated top-level legal-service practice area. Unclassified matters remain visible and are not silently assigned." rows={data?.practiceAreaRows || []} kind="practice" />}
+      {tab === 'matters' && <FinancialTable title="Matter profitability" rows={data?.matterRows || []} kind="matter" />}
+      {tab === 'clients' && <FinancialTable title="Client profitability" rows={data?.clientRows || []} kind="client" />}
+      {tab === 'practice' && <FinancialTable title="Practice area profitability" rows={data?.practiceAreaRows || []} kind="practice" />}
       {tab === 'staff' && <div className="space-y-4">
-        <DataGap><strong>Staff profitability remains unavailable:</strong> direct employment cost and approved staff-overhead allocations are not in the finance register. The revenue and performance figures below are dashboard KPIs, not a substitute for staff net profit.</DataGap>
-        {staffReport && <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Staff members" value={number(staffReport.team.length)} detail="Active dashboard population." /><MetricCard label="Attributed fees" value={money(staffReport.team.reduce((sum, member) => sum + (member.revenueAttributed ?? member.earnedFees ?? 0), 0))} detail="Fees Earned dashboard source." valueClass="text-emerald-700 dark:text-emerald-300" /><MetricCard label="Gross fee base" value={money(staffReport.team.reduce((sum, member) => sum + (member.grossFeesHandled ?? member.invoicePaymentsReceived ?? 0), 0))} detail="Collected-base allocation used by staff KPIs." /><MetricCard label="Overdue matters" value={number(staffReport.team.reduce((sum, member) => sum + (member.overdueTasks || 0), 0))} detail="Workflow matters past their deadline." valueClass="text-amber-700 dark:text-amber-300" /></section>}
+        {staffReport && <section className="grid gap-3 md:grid-cols-3"><MetricCard label="Staff members" value={number(staffReport.team.length)} detail="Active dashboard population." /><MetricCard label="Attributed fees" value={money(staffReport.team.reduce((sum, member) => sum + (member.revenueAttributed ?? member.earnedFees ?? 0), 0))} detail="Fees Earned dashboard source." valueClass="text-emerald-700 dark:text-emerald-300" /><MetricCard label="Gross fee base" value={money(staffReport.team.reduce((sum, member) => sum + (member.grossFeesHandled ?? member.invoicePaymentsReceived ?? 0), 0))} detail="Collected-base allocation used by staff KPIs." /><MetricCard label="Overdue matters" value={number(staffReport.team.reduce((sum, member) => sum + (member.overdueTasks || 0), 0))} detail="Workflow matters past their deadline." valueClass="text-amber-700 dark:text-amber-300" /></section>}
         {staffError && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">{staffError}</div>}
         {staffLoading ? <div className="rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">Loading dashboard-aligned staff KPIs…</div> : staffReport ? <StaffDashboardTable members={staffReport.team} /> : !staffError && <div className="rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">Choose a complete reporting period to view staff KPIs.</div>}
       </div>}
-      {tab === 'definitions' && <section className="space-y-6"><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"><h2 className="text-lg font-semibold text-slate-950 dark:text-white">Calculation dictionary</h2><p className="mt-1 max-w-3xl text-sm text-slate-500 dark:text-slate-400">The page uses one reporting period and currency throughout. If a denominator is zero, the result is N/A—not zero and not a divided value.</p><div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3"><Formula label="Firm net profit">Recognised collected revenue − total recorded firm costs</Formula><Formula label="Gross contribution">Recognised collected revenue − direct matter costs</Formula><Formula label="Net profit margin">Net profit ÷ recognised collected revenue × 100</Formula><Formula label="Matter / client gross contribution">Recognised collected revenue − direct external matter costs</Formula><Formula label="Contribution margin">Net contribution ÷ recognised collected revenue × 100</Formula><Formula label="Staff attributed revenue">Sum of eligible Key Action fees × approved staff attribution percentage</Formula><Formula label="Collection rate">Payments allocated to invoices ÷ invoice amounts eligible for collection × 100</Formula><Formula label="Cost ratio">Total firm costs ÷ recognised collected revenue × 100</Formula><Formula label="Overhead allocation">Firm overhead × allocation units ÷ total allocation units</Formula></div></div><div className="grid gap-6 xl:grid-cols-2"><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"><h2 className="text-base font-semibold text-slate-950 dark:text-white">Current data coverage</h2><ul className="mt-4 space-y-3 text-sm"><li className="flex justify-between gap-4"><span className="text-slate-600 dark:text-slate-300">Contract values, issued invoices & recorded payments</span><span className="font-medium text-emerald-700 dark:text-emerald-300">Available</span></li><li className="flex justify-between gap-4"><span className="text-slate-600 dark:text-slate-300">Direct matter costs & internal operating expenses</span><span className="font-medium text-emerald-700 dark:text-emerald-300">Available</span></li><li className="flex justify-between gap-4"><span className="text-slate-600 dark:text-slate-300">Auditable Staff Key Action attribution ledger</span><span className="font-medium text-emerald-700 dark:text-emerald-300">Available</span></li><li className="flex justify-between gap-4"><span className="text-slate-600 dark:text-slate-300">Firm-wide fee-recognition / unbilled-earned-fee ledger</span><span className="font-medium text-amber-700 dark:text-amber-300">Not configured</span></li><li className="flex justify-between gap-4"><span className="text-slate-600 dark:text-slate-300">Direct employment-cost register & overhead allocation</span><span className="font-medium text-amber-700 dark:text-amber-300">Not configured</span></li><li className="flex justify-between gap-4"><span className="text-slate-600 dark:text-slate-300">Tax, non-operating items, credit notes & refund ledger</span><span className="font-medium text-amber-700 dark:text-amber-300">Not configured</span></li></ul></div><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"><h2 className="text-base font-semibold text-slate-950 dark:text-white">Controls that protect accuracy</h2><ol className="mt-4 space-y-3 text-sm leading-6 text-slate-600 dark:text-slate-300"><li><strong className="text-slate-900 dark:text-slate-100">One source of truth.</strong> Contract values, invoices, payments, expenses and staff earnings are each read from their authoritative record.</li><li><strong className="text-slate-900 dark:text-slate-100">No double counting.</strong> Direct costs are never added again as general overhead; unavailable allocations are not estimated.</li><li><strong className="text-slate-900 dark:text-slate-100">Separate events.</strong> Contracted, billed and collected amounts remain distinct throughout the report.</li><li><strong className="text-slate-900 dark:text-slate-100">Traceable period.</strong> Every response is calculated against the reporting period shown in the header.</li></ol></div></div><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900"><h2 className="text-base font-semibold text-slate-950 dark:text-white">Required staff-cost register</h2><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">These document categories are ready for the finance cost register. Once recorded with an approved allocation basis, staff, matter and practice-area net contribution can be calculated without double counting.</p><div className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-3">{['Remuneration', 'Bonuses & incentives', 'Recruitment costs', 'Training & development', 'Technology', 'Office cost allocation', 'Travel & client work', 'Employee welfare', 'Administrative costs', 'Professional memberships', 'Other employment costs'].map((category) => <div key={category} className="rounded-lg bg-slate-50 px-3 py-2 text-slate-700 dark:bg-slate-800 dark:text-slate-200">{category}</div>)}</div><p className="mt-4 text-xs leading-5 text-slate-500 dark:text-slate-400">Required record fields: cost category, cost item, actual amount, cost date / accounting period, staff member when directly attributable, matter ID when applicable, allocation method, approval status and accounting reference.</p></div></section>}
     </div>
   );
 }

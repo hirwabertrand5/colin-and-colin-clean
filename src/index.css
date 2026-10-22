@@ -4009,7 +4009,7 @@ html {
   letter-spacing: -0.04em;
 }
 
-.profitability-hero-main > div > p:last-child {
+.profitability-hero-description {
   max-width: 50rem;
   margin: 0.9rem 0 0;
   color: #486285;
@@ -4192,7 +4192,7 @@ html {
 .dark .profitability-financial-summary.bg-gradient-to-br { border-color: #355e94; background: linear-gradient(116deg, #112946 0%, #10233d 67%, #193454 100%); }
 .dark .profitability-hero-label { color: #dcecff; }
 .dark .profitability-hero-main h2 { color: #ffffff; }
-.dark .profitability-hero-main > div > p:last-child { color: #bfd0e8; }
+.dark .profitability-hero-description { color: #bfd0e8; }
 .dark .profitability-hero-art { background: #244b78; color: #a5ceff; }
 .dark .profitability-hero-stat-grid { border-color: #2b507a; background: rgba(6, 19, 35, 0.26); }
 .dark .profitability-financial-summary > .profitability-hero-stat-grid > .is-emerald { background: #123c37; }
@@ -4511,4 +4511,295 @@ html {
 
 @media (max-width: 460px) {
   .independent-tasks-summary-grid { grid-template-columns: 1fr; }
+}
+
+/* Layout audit refinements: keep complex tables legible inside the fixed app shell. */
+.independent-tasks-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1.8fr) repeat(3, minmax(9.5rem, 1fr)) auto;
+  align-items: end;
+  gap: 0.65rem;
+}
+
+.independent-tasks-search-field,
+.independent-tasks-filter-actions { min-width: 0; }
+.independent-tasks-filter-control { width: 100%; }
+.independent-tasks-filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.independent-task-col-number { width: 3.5rem; }
+.independent-task-col-task { width: 16.5rem; }
+.independent-task-col-matter { width: 14.25rem; }
+.independent-task-col-assignee { width: 12rem; }
+.independent-task-col-creator { width: 10rem; }
+.independent-task-col-deadline { width: 13.5rem; }
+.independent-task-col-status { width: 10rem; }
+.independent-task-col-due { width: 11.25rem; }
+.independent-task-col-actions { width: 17rem; }
+
+.independent-tasks-table th,
+.independent-tasks-table td { overflow: hidden; }
+.independent-tasks-table th { white-space: nowrap; }
+.independent-tasks-table th:nth-child(1),
+.independent-tasks-table td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #ffffff;
+}
+.independent-tasks-table th:nth-child(1) { z-index: 4; background: #f8fafc; }
+.independent-tasks-table th:nth-child(2),
+.independent-tasks-table td:nth-child(2) {
+  position: sticky;
+  left: 3.5rem;
+  z-index: 2;
+  background: #ffffff;
+  box-shadow: 8px 0 12px -13px rgba(15, 23, 42, 0.55);
+}
+.independent-tasks-table th:nth-child(2) { z-index: 4; background: #f8fafc; }
+.independent-tasks-table tbody tr:hover td:nth-child(1),
+.independent-tasks-table tbody tr:hover td:nth-child(2) { background: #eff6ff; }
+.independent-task-title,
+.independent-task-matter {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.independent-task-title { color: #1e293b; font-size: 0.82rem; font-weight: 800; }
+.independent-task-matter { color: #334155; }
+.independent-task-person { color: #334155; font-weight: 700; overflow-wrap: anywhere; }
+.independent-task-deadline-badge,
+.independent-task-status {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 1.7rem;
+  align-items: center;
+  white-space: nowrap;
+}
+.independent-task-deadline > div > div:first-child { min-width: 0; }
+.independent-task-deadline > div > div:first-child span { white-space: nowrap; }
+.independent-task-due { display: block; color: inherit; font-variant-numeric: tabular-nums; line-height: 1.4; }
+.independent-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.38rem;
+}
+.independent-task-actions > a,
+.independent-task-actions > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.independent-tasks-pagination {
+  min-width: 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid #e7edf5;
+}
+.independent-tasks-pagination > div:last-child { flex-wrap: wrap; }
+
+/* Financial tables retain every field and use deliberate widths rather than
+   letting flex or equal-width columns squeeze financial values. */
+.profitability-table-header {
+  min-width: 0;
+  gap: 0.5rem;
+  padding: 0.7rem 1rem;
+}
+.profitability-table-header > div:first-child { min-width: 0; }
+.profitability-search-control { flex: 0 1 18rem; min-width: min(100%, 16rem); }
+.profitability-matter-card { min-height: 0; }
+.profitability-matter-table-toolbar {
+  align-content: start;
+  height: auto;
+  min-height: 0;
+  justify-content: flex-start;
+  padding-bottom: 1rem;
+}
+.profitability-matter-table-toolbar .profitability-search-control {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 18rem;
+  min-width: 0;
+  margin: 0;
+}
+.profitability-table-wrap { max-width: 100%; }
+.profitability-financial-table { border-collapse: collapse; table-layout: fixed; }
+.profitability-retainer-table th { padding: 0.7rem 1rem; font-size: 0.69rem; font-weight: 800; letter-spacing: 0.04em; }
+.profitability-retainer-table td { padding: 0.65rem 1rem; border-top: 1px solid #edf1f6; }
+.profitability-retainer-table tbody tr { transition: background-color 140ms ease; }
+.profitability-retainer-table tbody tr:hover { background: #eff6ff; }
+.profitability-col-row-number { width: 4rem; }
+.profitability-col-identifier { width: 17rem; }
+.profitability-col-contract { width: 10.5rem; }
+.profitability-col-collected { width: 12.75rem; }
+.profitability-col-billed { width: 10rem; }
+.profitability-col-receivables { width: 11.25rem; }
+.profitability-col-costs { width: 10.5rem; }
+.profitability-col-contribution { width: 12rem; }
+.profitability-col-margin { width: 10.25rem; }
+.profitability-col-allocation { width: 11.5rem; }
+.profitability-col-staff { width: 18rem; }
+.profitability-col-small-number { width: 9.5rem; }
+.profitability-col-timing { width: 13rem; }
+.profitability-col-money { width: 11.5rem; }
+.profitability-col-ratio { width: 10rem; }
+.profitability-financial-table th,
+.profitability-financial-table td { vertical-align: middle; }
+.profitability-financial-table th { white-space: nowrap; }
+.profitability-financial-table th:first-child,
+.profitability-financial-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #ffffff;
+}
+.profitability-financial-table th:first-child { z-index: 4; background: #f8fafc; }
+.profitability-financial-table tbody tr:hover td:first-child { background: #f8fafc; }
+.profitability-financial-table th:nth-child(2),
+.profitability-financial-table td:nth-child(2) {
+  position: sticky;
+  left: 4rem;
+  z-index: 2;
+  background: #ffffff;
+  box-shadow: 8px 0 12px -13px rgba(15, 23, 42, 0.55);
+}
+.profitability-financial-table th:nth-child(2) { z-index: 4; background: #f8fafc; }
+.profitability-financial-table tbody tr:hover td:nth-child(2) { background: #eff6ff; }
+.profitability-row-number { color: #64748b; font-size: 0.76rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.profitability-table-identifier {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.profitability-number-cell,
+.profitability-financial-table td.text-right {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.profitability-allocation-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.profitability-pagination { min-width: 0; }
+.profitability-pagination > div:last-child { flex-wrap: wrap; }
+
+.profitability-staff-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(32rem, auto);
+  align-items: end;
+  gap: 0.5rem;
+}
+.profitability-staff-controls {
+  display: grid;
+  grid-template-columns: 10.5rem 13rem minmax(13rem, 18rem);
+  gap: 0.55rem;
+  min-width: 0;
+}
+.profitability-staff-controls label { min-width: 0; }
+.profitability-staff-controls select,
+.profitability-staff-controls input { min-height: 2.4rem; border-radius: 7px; }
+
+.profitability-metric-value {
+  overflow: hidden;
+  font-size: clamp(0.98rem, 1.6vw, 1.16rem);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profitability-hero-stat-grid strong { font-size: clamp(0.9rem, 1.25vw, 1rem); }
+.profitability-tab:focus-visible,
+.independent-tasks-page button:focus-visible,
+.independent-tasks-page a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.dark .independent-tasks-table th:nth-child(1),
+.dark .independent-tasks-table th:nth-child(2) { background: #111d30; }
+.dark .independent-tasks-table td:nth-child(1),
+.dark .independent-tasks-table td:nth-child(2) { background: #1b283b; }
+.dark .independent-tasks-table tbody tr:hover td:nth-child(1),
+.dark .independent-tasks-table tbody tr:hover td:nth-child(2) { background: #193b68; }
+.dark .independent-task-title { color: #f8fafc; }
+.dark .independent-task-matter,
+.dark .independent-task-person { color: #d7e1ef; }
+.dark .independent-tasks-pagination { border-color: #30415b; }
+.dark .profitability-retainer-table td { border-color: #1e293b; }
+.dark .profitability-retainer-table tbody tr:hover { background: #1e293b; }
+.dark .profitability-financial-table th:first-child,
+.dark .profitability-financial-table th:nth-child(2) { background: #1e293b; }
+.dark .profitability-financial-table td:first-child,
+.dark .profitability-financial-table td:nth-child(2) { background: #0f172a; }
+.dark .profitability-financial-table tbody tr:hover td:first-child,
+.dark .profitability-financial-table tbody tr:hover td:nth-child(2) { background: #1e293b; }
+.dark .profitability-allocation-status { border-color: #285f9f; background: #14365d; color: #bfdbfe; }
+
+@media (max-width: 1700px) {
+  .independent-tasks-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 1180px) {
+  .profitability-page-header { align-items: stretch; flex-direction: column; }
+  .profitability-filter-bar { width: 100%; }
+  .profitability-table-header { align-items: stretch; }
+  .profitability-search-control { width: 100%; }
+  .profitability-staff-header { grid-template-columns: 1fr; }
+  .profitability-staff-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .profitability-matter-table-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 640px) {
+  .profitability-matter-table-toolbar .profitability-search-control { max-width: none; }
+}
+
+@media (max-width: 1280px) {
+  .independent-tasks-filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .independent-tasks-search-field { grid-column: 1 / -1; }
+  .independent-tasks-filter-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+@media (max-width: 1120px) {
+  .independent-tasks-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .profitability-staff-controls { grid-template-columns: 1fr; }
+  .profitability-metric-value { overflow: visible; text-overflow: clip; white-space: normal; }
+  .profitability-pagination { align-items: flex-start; }
+}
+
+@media (max-width: 620px) {
+  .independent-tasks-filter-bar { grid-template-columns: 1fr; }
+  .independent-tasks-search-field,
+  .independent-tasks-filter-actions { grid-column: auto; }
+  .independent-tasks-filter-actions { align-items: stretch; flex-direction: column; }
+  .independent-tasks-filter-actions > button { width: 100%; justify-content: center; }
+  .independent-tasks-pagination { align-items: stretch; }
+  .independent-tasks-pagination > div:last-child { width: 100%; }
 }
