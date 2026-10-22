@@ -133,6 +133,9 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   }, []);
 
   const canManage = isManagerRole(userRole);
+  // Creation is intentionally available to every authenticated workspace role.
+  // The API records the authenticated actor as `createdBy`, so ownership remains auditable.
+  const canCreate = Boolean(userRole);
 
   const [dashboard, setDashboard] = useState<IndependentTaskDashboard | null>(null);
   const [tasks, setTasks] = useState<IndependentTask[]>([]);
@@ -412,6 +415,10 @@ const taskMatterLabel = (task: IndependentTask) =>
   const totalPages = Math.max(1, Math.ceil((taskTotal || 0) / limit));
 
   const canQuickTransition = (task: IndependentTask) => Boolean(nextStatus(task.status));
+  const canEditTask = (task: IndependentTask) =>
+    canManage || task.createdBy === currentUser?.name || task.supervisor === currentUser?.name;
+  const canTransitionTask = (task: IndependentTask) =>
+    canManage || task.assignee === currentUser?.name || task.supervisor === currentUser?.name;
   const transitionButtonLabel = (task: IndependentTask) => {
     const next = nextStatus(task.status);
     return next ? getTransitionLabel(task.status, next) : '';
@@ -424,24 +431,24 @@ const taskMatterLabel = (task: IndependentTask) =>
   };
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="independent-tasks-page space-y-6">
+      <header className="independent-tasks-header">
+        <div>
           <div>
-            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+            <div className="independent-tasks-eyebrow">
               <FolderTree className="h-3.5 w-3.5" />
               Matter Module
             </div>
-            <h1 className="text-3xl font-semibold text-gray-900">Independent Tasks</h1>
-            <p className="mt-2 max-w-3xl text-sm text-gray-600">
+            <h1>Independent Tasks</h1>
+            <p>
               Manage operational tasks with a dedicated workflow, timeline, comments, attachments, and activity history.
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="independent-tasks-header-actions">
             <Link
               to="/matters/closed"
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="independent-tasks-secondary-action"
             >
               <ArrowRight className="h-4 w-4" />
               Closed Matters
@@ -449,16 +456,16 @@ const taskMatterLabel = (task: IndependentTask) =>
             <button
               type="button"
               onClick={() => Promise.all([loadDashboard(), loadTasks()])}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="independent-tasks-secondary-action"
             >
               <RefreshCw className="h-4 w-4" />
               Refresh
             </button>
-            {canManage && (
+            {canCreate && (
               <button
                 type="button"
                 onClick={openCreate}
-                className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+                className="independent-tasks-primary-action"
               >
                 <Plus className="h-4 w-4" />
                 New Task
@@ -466,7 +473,7 @@ const taskMatterLabel = (task: IndependentTask) =>
             )}
           </div>
         </div>
-      </div>
+      </header>
 
       {(dashboardLoading || loading) && (
         <div className="rounded-3xl border border-gray-200 bg-white p-10 text-center text-gray-500">
@@ -479,26 +486,29 @@ const taskMatterLabel = (task: IndependentTask) =>
         <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="independent-tasks-summary-grid">
         {[
-          { label: 'Total Tasks', value: counts?.totalTasks || 0, tone: 'bg-slate-900 text-white' },
-          { label: 'Open Tasks', value: counts?.openTasks || 0, tone: 'bg-blue-50 text-blue-700' },
-          { label: 'In Progress', value: counts?.inProgress || 0, tone: 'bg-indigo-50 text-indigo-700' },
-          { label: 'Awaiting Review', value: counts?.awaitingReview || 0, tone: 'bg-amber-50 text-amber-700' },
-          { label: 'Awaiting External Action', value: counts?.awaitingExternalAction || 0, tone: 'bg-orange-50 text-orange-700' },
-          { label: 'Completed', value: counts?.completed || 0, tone: 'bg-green-50 text-green-700' },
-          { label: 'Closed', value: counts?.closed || 0, tone: 'bg-gray-100 text-gray-900' },
-          { label: 'Critical Tasks', value: counts?.criticalTasks || 0, tone: 'bg-rose-50 text-rose-700' },
-        ].map((card) => (
-          <div key={card.label} className={`rounded-2xl border border-gray-200 p-5 shadow-sm ${card.tone}`}>
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] opacity-80">{card.label}</div>
-            <div className="mt-3 text-3xl font-semibold">{card.value}</div>
-          </div>
-        ))}
+          { label: 'Total Tasks', value: counts?.totalTasks || 0, icon: FolderTree, accent: 'blue' },
+          { label: 'Open Tasks', value: counts?.openTasks || 0, icon: ArrowRight, accent: 'sky' },
+          { label: 'In Progress', value: counts?.inProgress || 0, icon: Loader2, accent: 'indigo' },
+          { label: 'Awaiting Review', value: counts?.awaitingReview || 0, icon: Filter, accent: 'amber' },
+          { label: 'Awaiting External Action', value: counts?.awaitingExternalAction || 0, icon: CalendarDays, accent: 'orange' },
+          { label: 'Completed', value: counts?.completed || 0, icon: CheckCircle2, accent: 'emerald' },
+          { label: 'Closed', value: counts?.closed || 0, icon: CheckCircle2, accent: 'slate' },
+          { label: 'Critical Tasks', value: counts?.criticalTasks || 0, icon: Filter, accent: 'rose' },
+        ].map((card) => {
+          const Icon = card.icon;
+          return (
+            <article key={card.label} className={`independent-tasks-summary-metric is-${card.accent}`}>
+              <div><Icon />{card.label}</div>
+              <strong>{card.value}</strong>
+            </article>
+          );
+        })}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm xl:col-span-2">
+      <div className="independent-tasks-workspace">
+        <section className="independent-tasks-list-card">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Task List</h2>
@@ -516,6 +526,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                   { label: 'Related Client', value: (t: IndependentTask) => t.relatedClient || '' },
                   { label: 'Assignee', value: (t: IndependentTask) => t.assignee || '' },
                   { label: 'Supervisor', value: (t: IndependentTask) => t.supervisor || '' },
+                  { label: 'Created by', value: (t: IndependentTask) => t.createdBy || '' },
                   { label: 'Deadline Used %', value: (t: IndependentTask) => { const deadline = getDeadlineUsage(t); return typeof deadline.usedPercent === 'number' ? `${deadline.usedPercent}%` : ''; } },
                   { label: 'Status', value: (t: IndependentTask) => t.status || '' },
                   { label: 'Due Date', value: (t: IndependentTask) => t.dueDate || '' },
@@ -526,7 +537,7 @@ const taskMatterLabel = (task: IndependentTask) =>
             )}
           </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-5">
+          <div className="independent-tasks-filter-bar mt-4 grid gap-3 lg:grid-cols-5">
             <div className="relative lg:col-span-2">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
@@ -613,15 +624,16 @@ const taskMatterLabel = (task: IndependentTask) =>
             </div>
           </div>
 
-          <div className="mt-4 overflow-hidden rounded-2xl border border-gray-200">
+          <div className="independent-tasks-table-wrap mt-4 overflow-hidden rounded-2xl border border-gray-200">
             <div className="overflow-x-auto">
-              <table className="min-w-[1150px] w-full divide-y divide-gray-200">
+              <table className="independent-tasks-table min-w-[1270px] w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
                     <th className="px-4 py-3">#</th>
                     <th className="px-4 py-3">Task</th>
                     <th className="px-4 py-3">Matter</th>
                     <th className="px-4 py-3">Assignee</th>
+                    <th className="px-4 py-3">Created by</th>
                     <th className="px-4 py-3">Deadline</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Due</th>
@@ -631,7 +643,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {tasks.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-12 text-center text-sm text-gray-500">
+                      <td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-500">
                         <CheckCircle2 className="mx-auto mb-2 h-5 w-5 text-gray-300" />
                         No independent tasks found.
                       </td>
@@ -655,6 +667,10 @@ const taskMatterLabel = (task: IndependentTask) =>
                           <td className="px-4 py-4 text-sm text-gray-700">
                             <div>{task.assignee}</div>
                             <div className="text-xs text-gray-500">Supervisor: {task.supervisor}</div>
+                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-700">
+                            <div>{task.createdBy || 'Not recorded'}</div>
+                            <div className="text-xs text-gray-500">Task creator</div>
                           </td>
                           <td className="px-4 py-4">
                             {(() => {
@@ -717,17 +733,19 @@ const taskMatterLabel = (task: IndependentTask) =>
                                 <ExternalLink className="h-3.5 w-3.5" />
                                 Open
                               </Link>
-                              {canManage && !isClosed && (
+                              {!isClosed && (
                                 <>
-                                  <button
-                                    type="button"
-                                    onClick={() => openEdit(task)}
-                                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                                  >
-                                    <Edit3 className="h-3.5 w-3.5" />
-                                    Edit
-                                  </button>
-                                  {canQuickTransition(task) && (
+                                  {canEditTask(task) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openEdit(task)}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                    >
+                                      <Edit3 className="h-3.5 w-3.5" />
+                                      Edit
+                                    </button>
+                                  )}
+                                  {canTransitionTask(task) && canQuickTransition(task) && (
                                     <button
                                       type="button"
                                       onClick={() => handleTransitionQuick(task)}
@@ -736,14 +754,16 @@ const taskMatterLabel = (task: IndependentTask) =>
                                       {transitionButtonLabel(task)}
                                     </button>
                                   )}
-                                  <button
-                                    type="button"
-                                    onClick={() => removeTask(task)}
-                                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                    Delete
-                                  </button>
+                                  {canManage && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeTask(task)}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      Delete
+                                    </button>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -796,9 +816,9 @@ const taskMatterLabel = (task: IndependentTask) =>
               </select>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="space-y-4">
+        <aside className="independent-tasks-sidebar space-y-4">
           <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
             <h3 className="text-lg font-semibold text-gray-900">Deadline Health</h3>
             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -939,7 +959,7 @@ const taskMatterLabel = (task: IndependentTask) =>
               )}
             </div>
           </div>
-        </div>
+        </aside>
       </div>
 
       {showModal && (

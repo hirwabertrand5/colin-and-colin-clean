@@ -5,8 +5,6 @@ export interface CaseDocument {
   caseId: string;
   name: string;
 
-  category?: string;
-
   // ✅ workflow linkage (optional)
   workflowInstanceId?: string;
   stepKey?: string;
@@ -37,7 +35,6 @@ export const addDocumentToCase = async (
   doc: {
     name: string;
     file: File;
-    category?: string;
     workflowInstanceId?: string;
     stepKey?: string;
     outputKey?: string;
@@ -47,7 +44,6 @@ export const addDocumentToCase = async (
   formData.append('name', doc.name);
   formData.append('file', doc.file);
 
-  if (doc.category) formData.append('category', doc.category);
   if (doc.workflowInstanceId) formData.append('workflowInstanceId', doc.workflowInstanceId);
   if (doc.stepKey) formData.append('stepKey', doc.stepKey);
   if (doc.outputKey) formData.append('outputKey', doc.outputKey);

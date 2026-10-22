@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/authMiddleware';
 import { getFirmReports, getMyProductivityEarningsReport } from '../controllers/firmReportsController';
+import { getProfitabilityReport } from '../controllers/profitabilityController';
 import { getStaffEarningsReport } from '../controllers/staffEarningsController';
 
 const router = express.Router();
@@ -42,6 +43,16 @@ router.get(
   authenticate,
   authorize(MANAGEMENT_REPORT_ROLES),
   getFirmReports
+);
+
+// Dedicated, projection-only endpoint for Billing & Finance > Profitability.
+// It avoids loading every unrelated Firm Reports data set before the
+// profitability screen can render.
+router.get(
+  '/reports/profitability',
+  authenticate,
+  authorize(MANAGEMENT_REPORT_ROLES),
+  getProfitabilityReport
 );
 
 /**

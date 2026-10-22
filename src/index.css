@@ -3773,3 +3773,742 @@ html {
 .workflow-template-builder .space-y-5.p-4 > div:nth-child(3) > p {
   order: 1;
 }
+
+/* Profitability follows the same compact portfolio language as Retainers:
+   one calm page header, a clear filter bar, and quiet financial cards. */
+.profitability-page {
+  max-width: 1500px;
+  margin: 0 auto;
+  color: #1e293b;
+}
+
+.profitability-page-header {
+  align-items: flex-start;
+  margin-bottom: 0.1rem;
+  text-align: left;
+}
+
+.profitability-page-header > :first-child {
+  align-self: flex-start;
+  text-align: left;
+}
+
+.profitability-back-link {
+  color: #2563eb;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.profitability-back-link:hover { color: #1d4ed8; }
+
+.profitability-identity > div:first-child {
+  border-radius: 10px;
+  background: #1d4ed8;
+  box-shadow: 0 5px 14px rgba(37, 99, 235, 0.2);
+}
+
+.profitability-eyebrow {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #2563eb;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.profitability-page h1 {
+  color: #0f172a;
+  font-size: 1.65rem;
+  font-weight: 850;
+}
+
+.profitability-filter-bar,
+.profitability-tabs,
+.profitability-card,
+.profitability-metric {
+  border-color: #dbe4ef;
+  box-shadow: 0 5px 20px rgba(15, 23, 42, 0.045);
+}
+
+.profitability-page .rounded-2xl.border.border-slate-200.bg-white {
+  border-color: #dbe4ef;
+  border-radius: 12px;
+  box-shadow: 0 5px 20px rgba(15, 23, 42, 0.045);
+}
+
+.profitability-filter-bar {
+  padding: 0.75rem;
+  border-radius: 10px;
+}
+
+.profitability-filter-bar select,
+.profitability-filter-bar input {
+  min-height: 2.4rem;
+  border-color: #b7c5d7;
+  border-radius: 7px;
+}
+
+.profitability-filter-bar button {
+  min-height: 2.4rem;
+  border-radius: 7px;
+  background: #1d4ed8;
+}
+
+.profitability-filter-bar button:hover:not(:disabled) { background: #1e40af; }
+
+.profitability-tabs {
+  border-radius: 10px;
+}
+
+.profitability-tab { border-radius: 7px; }
+.profitability-tab.is-active { background: #1d4ed8; }
+
+.profitability-metric {
+  padding: 1rem;
+  border-radius: 10px;
+}
+
+.profitability-metric > p:first-child {
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+}
+
+.profitability-metric > p:nth-child(2) {
+  font-size: 1.18rem;
+  font-weight: 850;
+}
+
+.profitability-card { border-radius: 12px; }
+
+.profitability-card > div:first-child {
+  border-color: #e7edf5;
+}
+
+.profitability-financial-summary.bg-gradient-to-br {
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+  box-shadow: none;
+  color: #1e3a5f;
+}
+
+.profitability-financial-summary .text-indigo-200,
+.profitability-financial-summary .text-slate-400,
+.profitability-financial-summary .text-slate-300 {
+  color: #64748b;
+}
+
+.profitability-financial-summary h2,
+.profitability-financial-summary .text-lg {
+  color: #0f172a;
+}
+
+.profitability-financial-summary > div > div:last-child > div {
+  min-width: 8.6rem;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.dark .profitability-page { color: #e2e8f0; }
+.dark .profitability-page h1 { color: #f8fafc; }
+.dark .profitability-filter-bar,
+.dark .profitability-tabs,
+.dark .profitability-card,
+.dark .profitability-metric { border-color: #3d506a; }
+.dark .profitability-page .rounded-2xl.border.border-slate-200.bg-white { border-color: #3d506a; }
+.dark .profitability-filter-bar { background: #1b283b; }
+.dark .profitability-filter-bar select,
+.dark .profitability-filter-bar input { border-color: #52637b; }
+.dark .profitability-filter-bar button,
+.dark .profitability-tab.is-active { background: #2563eb; }
+.dark .profitability-financial-summary.bg-gradient-to-br {
+  border-color: #3568b0;
+  background: #142b4b;
+  color: #dbeafe;
+}
+.dark .profitability-financial-summary .text-indigo-200,
+.dark .profitability-financial-summary .text-slate-400,
+.dark .profitability-financial-summary .text-slate-300 { color: #b8c7da; }
+.dark .profitability-financial-summary h2,
+.dark .profitability-financial-summary .text-lg { color: #f8fafc; }
+.dark .profitability-financial-summary > div > div:last-child > div { background: #111d30; }
+
+@media (max-width: 640px) {
+  .profitability-page-header { align-items: stretch; }
+  .profitability-filter-bar { width: 100%; }
+  .profitability-filter-bar > * { flex: 1 1 100%; }
+}
+
+/* Profitability dashboard reference layout. These component-level tokens keep
+   the hierarchy and text contrast intact in both application themes. */
+.profitability-notice {
+  border-color: #f5d68c;
+  background: #fff9eb;
+  color: #5c3d08;
+  box-shadow: 0 4px 14px rgba(146, 96, 8, 0.04);
+}
+
+.profitability-metric {
+  min-height: 8.55rem;
+}
+
+.profitability-metric-icon,
+.profitability-detail-icon,
+.profitability-hero-stat-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+}
+
+.profitability-metric-icon {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.profitability-metric-icon.is-blue { background: #e7f0ff; color: #2875d6; }
+.profitability-metric-icon.is-emerald { background: #e3f8f1; color: #07976c; }
+.profitability-metric-icon.is-violet { background: #f0eaff; color: #7547df; }
+.profitability-metric-icon.is-amber { background: #fff2db; color: #be7000; }
+.profitability-metric-icon.is-rose { background: #fee9e8; color: #d84c45; }
+
+.profitability-financial-summary.bg-gradient-to-br {
+  overflow: hidden;
+  padding: 0;
+  border-color: #91bafb;
+  background: linear-gradient(116deg, #f8fbff 0%, #edf6ff 67%, #e4f0ff 100%);
+}
+
+.profitability-hero-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  min-height: 10.75rem;
+  padding: 2rem 2rem 1.45rem;
+}
+
+.profitability-hero-label {
+  margin: 0;
+  color: #132c55;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.profitability-hero-main h2 {
+  margin: 0.65rem 0 0;
+  color: #0f2558;
+  font-size: clamp(2rem, 4vw, 2.65rem);
+  font-weight: 850;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.profitability-hero-main > div > p:last-child {
+  max-width: 50rem;
+  margin: 0.9rem 0 0;
+  color: #486285;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.profitability-hero-art {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 2rem;
+  background: #dcecff;
+  color: #3d82df;
+}
+
+.profitability-hero-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid rgba(137, 180, 240, 0.35);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.profitability-financial-summary > .profitability-hero-stat-grid > div {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+}
+
+.profitability-hero-stat-grid > .is-emerald { background: #eaf8f4; }
+.profitability-hero-stat-grid > .is-violet { background: #f3efff; }
+.profitability-hero-stat-grid > .is-amber { background: #fff6e8; }
+.profitability-hero-stat-icon { width: 2.5rem; height: 2.5rem; }
+.is-emerald .profitability-hero-stat-icon { background: #d5f4ea; color: #07976c; }
+.is-violet .profitability-hero-stat-icon { background: #e8dfff; color: #7142dc; }
+.is-amber .profitability-hero-stat-icon { background: #ffebc4; color: #b96c00; }
+.profitability-hero-stat-grid > div > div {
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.profitability-hero-stat-grid > div > div > span {
+  display: block;
+  color: #314b6c;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.profitability-hero-stat-grid strong {
+  display: block;
+  margin-top: 0.15rem;
+  overflow: hidden;
+  color: #10265d;
+  font-size: 1.1rem;
+  font-weight: 850;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profitability-detail-card {
+  min-width: 0;
+  padding: 1.35rem;
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 5px 20px rgba(15, 23, 42, 0.045);
+}
+
+.profitability-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.profitability-detail-icon {
+  width: 2.45rem;
+  height: 2.45rem;
+  background: #f2f6fb;
+  color: #17345d;
+}
+
+.profitability-detail-heading h2 {
+  margin: 0.05rem 0 0;
+  color: #101c34;
+  font-size: 1.05rem;
+  font-weight: 850;
+}
+
+.profitability-detail-heading p {
+  margin: 0.25rem 0 0;
+  color: #5d708c;
+  font-size: 0.79rem;
+  line-height: 1.4;
+}
+
+.profitability-cost-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1.25rem, 4vw, 2.75rem);
+  min-height: 12.5rem;
+  padding: 1.35rem 0 1.15rem;
+}
+
+.profitability-donut {
+  display: grid;
+  flex: 0 0 auto;
+  width: 10.25rem;
+  height: 10.25rem;
+  padding: 1.7rem;
+  border-radius: 50%;
+  place-items: center;
+}
+
+.profitability-donut > div {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #14223d;
+  flex-direction: column;
+  text-align: center;
+}
+
+.profitability-donut strong { font-size: 0.95rem; font-weight: 850; letter-spacing: -0.025em; }
+.profitability-donut span { margin-top: 0.1rem; color: #596b85; font-size: 0.7rem; font-weight: 700; }
+.profitability-cost-legend { display: grid; gap: 0.9rem; min-width: min(100%, 14rem); }
+.profitability-cost-legend > div { display: grid; gap: 0.3rem; }
+.profitability-cost-legend dt { display: flex; align-items: center; gap: 0.45rem; color: #526782; font-size: 0.78rem; }
+.profitability-cost-legend i { display: block; width: 0.7rem; height: 0.7rem; border-radius: 50%; }
+.profitability-cost-legend i.is-direct { background: #2f80ed; }
+.profitability-cost-legend i.is-overhead { background: #9ac4f8; }
+.profitability-cost-legend dd { margin: 0; color: #13264a; font-size: 0.8rem; font-weight: 800; }
+.profitability-cost-legend small { margin-left: 0.55rem; color: #64748b; font-size: 0.72rem; font-weight: 600; }
+
+.profitability-total-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  background: #f6f8fc;
+}
+
+.profitability-total-strip > div { min-width: 0; }
+.profitability-total-strip > div > span,
+.profitability-total-strip small { display: block; color: #5c6f8c; font-size: 0.73rem; }
+.profitability-total-strip strong { display: block; margin: 0.2rem 0; color: #10265d; font-size: 1.05rem; font-weight: 850; letter-spacing: -0.025em; }
+
+.profitability-ageing-list { display: grid; gap: 1.2rem; padding: 1.55rem 0 1.35rem; }
+.profitability-ageing-row { display: grid; grid-template-columns: minmax(4.8rem, 1fr) minmax(4.25rem, 1.75fr) 2.75rem; align-items: end; gap: 0.75rem; }
+.profitability-ageing-row > div:first-child { display: grid; gap: 0.25rem; }
+.profitability-ageing-row > div:first-child > span { color: #5c6f8c; font-size: 0.75rem; }
+.profitability-ageing-row strong { color: #172b51; font-size: 0.8rem; font-weight: 850; white-space: nowrap; }
+.profitability-ageing-row small { color: #5c6f8c; font-size: 0.72rem; text-align: right; }
+.profitability-ageing-track { height: 0.5rem; overflow: hidden; border-radius: 999px; background: #edf1f7; }
+.profitability-ageing-track i { display: block; height: 100%; min-width: 0; border-radius: inherit; background: #2f80ed; }
+.profitability-ageing-track i.is-sky { background: #5ba7f8; }
+.profitability-ageing-track i.is-amber { background: #f0a941; }
+.profitability-ageing-track i.is-rose { background: #e36e69; }
+
+.dark .profitability-notice { border-color: #825e1b; background: #33270f; color: #fde8b3; }
+.dark .profitability-metric-icon.is-blue { background: #193b69; color: #91c4ff; }
+.dark .profitability-metric-icon.is-emerald { background: #133f39; color: #6ce4bd; }
+.dark .profitability-metric-icon.is-violet { background: #32245c; color: #c3afff; }
+.dark .profitability-metric-icon.is-amber { background: #4a3511; color: #fbd281; }
+.dark .profitability-metric-icon.is-rose { background: #512526; color: #ffaaa7; }
+.dark .profitability-financial-summary.bg-gradient-to-br { border-color: #355e94; background: linear-gradient(116deg, #112946 0%, #10233d 67%, #193454 100%); }
+.dark .profitability-hero-label { color: #dcecff; }
+.dark .profitability-hero-main h2 { color: #ffffff; }
+.dark .profitability-hero-main > div > p:last-child { color: #bfd0e8; }
+.dark .profitability-hero-art { background: #244b78; color: #a5ceff; }
+.dark .profitability-hero-stat-grid { border-color: #2b507a; background: rgba(6, 19, 35, 0.26); }
+.dark .profitability-financial-summary > .profitability-hero-stat-grid > .is-emerald { background: #123c37; }
+.dark .profitability-financial-summary > .profitability-hero-stat-grid > .is-violet { background: #2d2552; }
+.dark .profitability-financial-summary > .profitability-hero-stat-grid > .is-amber { background: #4a3511; }
+.dark .is-emerald .profitability-hero-stat-icon { background: #1b5c51; color: #89f0ca; }
+.dark .is-violet .profitability-hero-stat-icon { background: #48387c; color: #d4c5ff; }
+.dark .is-amber .profitability-hero-stat-icon { background: #6a4a12; color: #ffda8a; }
+.dark .profitability-hero-stat-grid > div > div > span { color: #c8d7ea; }
+.dark .profitability-hero-stat-grid > div > div { background: transparent; }
+.dark .profitability-hero-stat-grid strong { color: #ffffff; }
+.dark .profitability-detail-card { border-color: #3d506a; background: #1b283b; }
+.dark .profitability-detail-icon { background: #263952; color: #c6ddf8; }
+.dark .profitability-detail-heading h2 { color: #f8fafc; }
+.dark .profitability-detail-heading p { color: #b8c7da; }
+.dark .profitability-donut > div { background: #1b283b; color: #f8fafc; }
+.dark .profitability-donut span { color: #b8c7da; }
+.dark .profitability-cost-legend dt,
+.dark .profitability-cost-legend small,
+.dark .profitability-total-strip > div > span,
+.dark .profitability-total-strip small,
+.dark .profitability-ageing-row > div:first-child > span,
+.dark .profitability-ageing-row small { color: #b8c7da; }
+.dark .profitability-cost-legend dd,
+.dark .profitability-total-strip strong,
+.dark .profitability-ageing-row strong { color: #f8fafc; }
+.dark .profitability-total-strip { background: #111d30; }
+.dark .profitability-ageing-track { background: #30415b; }
+
+@media (max-width: 720px) {
+  .profitability-hero-main { min-height: 0; padding: 1.35rem; }
+  .profitability-hero-art { width: 4.25rem; height: 4.25rem; border-radius: 1.25rem; }
+  .profitability-hero-stat-grid { grid-template-columns: 1fr; padding: 0.8rem; }
+  .profitability-cost-body { align-items: flex-start; flex-direction: column; }
+  .profitability-ageing-row { grid-template-columns: minmax(4.5rem, 1fr) minmax(3.5rem, 1fr); }
+  .profitability-ageing-row small { grid-column: 2; }
+}
+
+/* Independent tasks use the same compact portfolio language as Retainers. */
+.independent-tasks-page {
+  max-width: 1500px;
+  margin: 0 auto;
+  color: #1e293b;
+}
+
+.independent-tasks-page > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1.25rem;
+}
+
+.independent-tasks-header > div {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.independent-tasks-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.38rem;
+  margin-bottom: 0.35rem;
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.independent-tasks-eyebrow svg { width: 0.9rem; height: 0.9rem; }
+.independent-tasks-header h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.65rem;
+  font-weight: 850;
+  line-height: 1.2;
+}
+.independent-tasks-header p {
+  max-width: 48rem;
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.independent-tasks-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.independent-tasks-primary-action,
+.independent-tasks-secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  font-weight: 750;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.independent-tasks-primary-action { border-color: #1d4ed8; background: #1d4ed8; color: #ffffff; }
+.independent-tasks-primary-action:hover { border-color: #1e40af; background: #1e40af; }
+.independent-tasks-secondary-action { border-color: #b7c5d7; background: #ffffff; color: #334155; }
+.independent-tasks-secondary-action:hover { background: #f1f5f9; }
+.independent-tasks-primary-action svg,
+.independent-tasks-secondary-action svg { width: 0.95rem; height: 0.95rem; }
+
+.independent-tasks-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.independent-tasks-summary-metric {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid #dbe4ef;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+}
+
+.independent-tasks-summary-metric > div {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.independent-tasks-summary-metric svg { width: 1rem; height: 1rem; color: #2563eb; }
+.independent-tasks-summary-metric.is-sky svg { color: #0284c7; }
+.independent-tasks-summary-metric.is-indigo svg { color: #4f46e5; }
+.independent-tasks-summary-metric.is-amber svg { color: #b45309; }
+.independent-tasks-summary-metric.is-orange svg { color: #c2410c; }
+.independent-tasks-summary-metric.is-emerald svg { color: #047857; }
+.independent-tasks-summary-metric.is-slate svg { color: #475569; }
+.independent-tasks-summary-metric.is-rose svg { color: #be123c; }
+.independent-tasks-summary-metric strong {
+  display: block;
+  margin-top: 0.55rem;
+  color: #0f172a;
+  font-size: 1.15rem;
+  font-weight: 850;
+  line-height: 1.1;
+}
+
+.independent-tasks-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.85fr);
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.independent-tasks-list-card,
+.independent-tasks-sidebar > div {
+  min-width: 0;
+  padding: 1.1rem;
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 5px 20px rgba(15, 23, 42, 0.045);
+}
+
+.independent-tasks-list-card h2,
+.independent-tasks-sidebar h3 {
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 800;
+}
+.independent-tasks-list-card h2 + p { color: #64748b; font-size: 0.78rem; }
+
+.independent-tasks-filter-bar {
+  padding: 0.9rem 0;
+  border-bottom: 1px solid #e7edf5;
+}
+
+.independent-tasks-filter-bar input,
+.independent-tasks-filter-bar select,
+.independent-tasks-list-card > div:last-child select {
+  min-height: 2.45rem;
+  border-color: #b7c5d7;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.8rem;
+}
+
+.independent-tasks-filter-bar button,
+.independent-tasks-list-card > div:last-child button,
+.independent-tasks-table td a,
+.independent-tasks-table td button {
+  border-color: #b7c5d7;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 700;
+}
+
+.independent-tasks-filter-bar button:hover,
+.independent-tasks-list-card > div:last-child button:hover:not(:disabled),
+.independent-tasks-table td a:hover,
+.independent-tasks-table td button:hover:not(:disabled) { background: #f1f5f9; }
+
+.independent-tasks-table-wrap { border-color: #dbe4ef; border-radius: 9px; }
+.independent-tasks-table { border-collapse: collapse; table-layout: fixed; }
+.independent-tasks-table th {
+  padding: 0.7rem 0.8rem;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.69rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.independent-tasks-table td {
+  padding: 0.85rem 0.8rem;
+  border-top: 1px solid #edf1f6;
+  color: #475569;
+  font-size: 0.78rem;
+}
+.independent-tasks-table tbody tr { transition: background-color 140ms ease; }
+.independent-tasks-table tbody tr:hover { background: #eff6ff; }
+.independent-tasks-table td:first-child { color: #64748b; font-size: 0.76rem; font-weight: 800; text-align: center; }
+.independent-tasks-table td:nth-child(2) > div:first-child { color: #1e293b; font-size: 0.8rem; font-weight: 800; }
+.independent-tasks-table td:nth-child(9) > div { gap: 0.35rem; }
+.independent-tasks-table td a,
+.independent-tasks-table td button { min-height: 1.9rem; padding: 0.36rem 0.5rem; }
+.independent-tasks-table td button.border-red-200 { border-color: #fecaca; background: #fef2f2; color: #dc2626; }
+
+.independent-tasks-sidebar > div { padding: 1.1rem; }
+.independent-tasks-sidebar .rounded-2xl { border-radius: 8px; }
+.independent-tasks-sidebar a { border-color: #e7edf5; }
+.independent-tasks-sidebar a:hover { background: #eff6ff; }
+
+/* Profitability uses the same density as the Retainers portfolio. */
+.profitability-page > :not([hidden]) ~ :not([hidden]),
+.profitability-page .space-y-5 > :not([hidden]) ~ :not([hidden]) { margin-top: 1.25rem; }
+.profitability-financial-summary.bg-gradient-to-br { border-radius: 12px; }
+.profitability-hero-main { min-height: 0; padding: 1.2rem 1.35rem 0.9rem; }
+.profitability-hero-main h2 { margin-top: 0.45rem; font-size: clamp(1.75rem, 3vw, 2.2rem); }
+.profitability-hero-main > div > p:last-child { margin-top: 0.55rem; font-size: 0.8rem; }
+.profitability-hero-art { width: 4.5rem; height: 4.5rem; border-radius: 1.35rem; }
+.profitability-hero-stat-grid { gap: 0.75rem; padding: 0.7rem 0.8rem 0.8rem; }
+.profitability-financial-summary > .profitability-hero-stat-grid > div { gap: 0.65rem; padding: 0.7rem 0.8rem; }
+.profitability-hero-stat-icon { width: 2.1rem; height: 2.1rem; }
+.profitability-hero-stat-grid strong { font-size: 0.98rem; }
+.profitability-metric { min-height: 7.1rem; padding: 0.85rem; }
+.profitability-metric-icon { width: 2.35rem; height: 2.35rem; border-radius: 9px; }
+.profitability-detail-card { padding: 1.1rem; }
+.profitability-cost-body { min-height: 9.5rem; padding: 0.9rem 0; }
+.profitability-donut { width: 8.5rem; height: 8.5rem; padding: 1.4rem; }
+.profitability-ageing-list { gap: 0.85rem; padding: 1rem 0; }
+.profitability-total-strip { padding: 0.75rem 0.8rem; }
+
+.dark .independent-tasks-page { color: #e2e8f0; }
+.dark .independent-tasks-header h1,
+.dark .independent-tasks-summary-metric strong,
+.dark .independent-tasks-list-card h2,
+.dark .independent-tasks-sidebar h3 { color: #f8fafc; }
+.dark .independent-tasks-header p,
+.dark .independent-tasks-summary-metric > div,
+.dark .independent-tasks-list-card h2 + p { color: #b8c7da; }
+.dark .independent-tasks-secondary-action,
+.dark .independent-tasks-filter-bar input,
+.dark .independent-tasks-filter-bar select,
+.dark .independent-tasks-list-card > div:last-child select,
+.dark .independent-tasks-filter-bar button,
+.dark .independent-tasks-list-card > div:last-child button,
+.dark .independent-tasks-table td a,
+.dark .independent-tasks-table td button { border-color: #52637b; background: #0d1728; color: #dbeafe; }
+.dark .independent-tasks-secondary-action:hover,
+.dark .independent-tasks-filter-bar button:hover,
+.dark .independent-tasks-list-card > div:last-child button:hover:not(:disabled),
+.dark .independent-tasks-table td a:hover,
+.dark .independent-tasks-table td button:hover:not(:disabled) { background: #263952; }
+.dark .independent-tasks-summary-metric,
+.dark .independent-tasks-list-card,
+.dark .independent-tasks-sidebar > div { border-color: #3d506a; background: #1b283b; }
+.dark .independent-tasks-filter-bar { border-color: #30415b; }
+.dark .independent-tasks-table-wrap { border-color: #3d506a; }
+.dark .independent-tasks-table th { background: #111d30; color: #aebfd4; }
+.dark .independent-tasks-table td { border-color: #30415b; color: #c8d7ea; }
+.dark .independent-tasks-table td:first-child,
+.dark .independent-tasks-table .text-gray-500,
+.dark .independent-tasks-page .text-gray-500 { color: #b8c7da; }
+.dark .independent-tasks-table td:nth-child(2) > div:first-child,
+.dark .independent-tasks-page .text-gray-900 { color: #f8fafc; }
+.dark .independent-tasks-page .text-gray-700,
+.dark .independent-tasks-page .text-gray-600 { color: #d7e1ef; }
+.dark .independent-tasks-page .border-gray-200,
+.dark .independent-tasks-page .border-gray-300 { border-color: #3d506a; }
+.dark .independent-tasks-page .bg-white { background: #1b283b; }
+.dark .independent-tasks-page .bg-gray-50 { background: #111d30; }
+.dark .independent-tasks-table tbody tr:hover,
+.dark .independent-tasks-sidebar a:hover { background: #193b68; }
+
+@media (max-width: 1024px) {
+  .independent-tasks-workspace { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .independent-tasks-header > div { align-items: stretch; flex-direction: column; }
+  .independent-tasks-header-actions { width: 100%; }
+  .independent-tasks-header-actions > * { flex: 1 1 auto; }
+  .independent-tasks-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profitability-hero-main { padding: 1rem; }
+}
+
+@media (max-width: 460px) {
+  .independent-tasks-summary-grid { grid-template-columns: 1fr; }
+}

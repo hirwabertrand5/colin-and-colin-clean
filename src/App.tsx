@@ -23,6 +23,7 @@ import NotificationCenter from './components/notifications/NotificationCenter';
 import BillingDashboard from './components/billing/BillingDashboard';
 import InvoiceManagement from './components/billing/InvoiceManagement';
 import BillingFinancePage from './components/billing/BillingFinancePage';
+import ProfitabilityPage from './components/billing/ProfitabilityPage';
 import RetainerManagement from './components/billing/RetainerManagement';
 import RetainerDetail from './components/billing/RetainerDetail';
 import PerformanceDashboard from './components/reports/PerformanceDashboard';
@@ -315,7 +316,7 @@ function App() {
                       <Route path="/billing/finance/financial-dashboard" element={<BillingFinancePage view="financial-dashboard" userRole={user.role} />} />
                       <Route path="/billing/finance/invoicing" element={<BillingFinancePage view="invoicing" userRole={user.role} />} />
                       <Route path="/billing/finance/collections" element={<BillingFinancePage view="collections" userRole={user.role} />} />
-                      <Route path="/billing/finance/profitability" element={<BillingFinancePage view="profitability" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability" element={<ProfitabilityPage userRole={user.role} />} />
                       <Route path="/billing/finance/cash-flow" element={<BillingFinancePage view="cash-flow" userRole={user.role} />} />
                       <Route path="/billing/finance/expenses" element={<BillingFinancePage view="expenses" userRole={user.role} />} />
                       <Route path="/billing/finance/remuneration" element={<BillingFinancePage view="remuneration" userRole={user.role} />} />
@@ -345,12 +346,12 @@ function App() {
                       <Route path="/billing/finance/collections/collections-debtor-ageing" element={<BillingFinancePage view="debtor-ageing" userRole={user.role} />} />
                       <Route path="/billing/finance/collections/collections-payment-follow-up" element={<BillingFinancePage view="payment-follow-up" userRole={user.role} />} />
                       <Route path="/billing/finance/collections/collections-collection-triggers" element={<BillingFinancePage view="collection-triggers" userRole={user.role} />} />
-                      <Route path="/billing/finance/profitability/firm-profitability" element={<BillingFinancePage view="firm-profitability" userRole={user.role} />} />
-                      <Route path="/billing/finance/profitability/department-profitability" element={<BillingFinancePage view="department-profitability" userRole={user.role} />} />
-                      <Route path="/billing/finance/profitability/matter-profitability" element={<BillingFinancePage view="matter-profitability" userRole={user.role} />} />
-                      <Route path="/billing/finance/profitability/client-profitability" element={<BillingFinancePage view="client-profitability" userRole={user.role} />} />
-                      <Route path="/billing/finance/profitability/staff-profitability" element={<BillingFinancePage view="staff-profitability" userRole={user.role} />} />
-                      <Route path="/billing/finance/profitability/net-profit-margin" element={<BillingFinancePage view="net-profit-margin" userRole={user.role} />} />
+                      <Route path="/billing/finance/profitability/firm-profitability" element={<ProfitabilityPage userRole={user.role} initialTab="overview" />} />
+                      <Route path="/billing/finance/profitability/department-profitability" element={<ProfitabilityPage userRole={user.role} initialTab="practice" />} />
+                      <Route path="/billing/finance/profitability/matter-profitability" element={<ProfitabilityPage userRole={user.role} initialTab="matters" />} />
+                      <Route path="/billing/finance/profitability/client-profitability" element={<ProfitabilityPage userRole={user.role} initialTab="clients" />} />
+                      <Route path="/billing/finance/profitability/staff-profitability" element={<ProfitabilityPage userRole={user.role} initialTab="staff" />} />
+                      <Route path="/billing/finance/profitability/net-profit-margin" element={<ProfitabilityPage userRole={user.role} initialTab="overview" />} />
                       <Route path="/billing/finance/cash-flow/cash-position" element={<BillingFinancePage view="cash-position" userRole={user.role} />} />
                       <Route path="/billing/finance/cash-flow/cash-inflows" element={<BillingFinancePage view="cash-inflows" userRole={user.role} />} />
                       <Route path="/billing/finance/cash-flow/cash-outflows" element={<BillingFinancePage view="cash-outflows" userRole={user.role} />} />

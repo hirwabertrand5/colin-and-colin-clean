@@ -458,6 +458,7 @@ export const independentTaskService = {
           { taskNumber: regex },
           { assignee: regex },
           { supervisor: regex },
+          { createdBy: regex },
           { relatedClient: regex },
           { relatedMatterLabel: regex },
         ],

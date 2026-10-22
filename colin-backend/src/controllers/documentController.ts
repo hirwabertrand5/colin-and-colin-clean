@@ -45,7 +45,6 @@ export const addDocumentToCase = async (req: AuthRequest, res: Response) => {
     const newDoc = new Document({
       caseId: new mongoose.Types.ObjectId(caseId),
       name: req.body.name,
-      category: req.body.category || undefined,
       workflowInstanceId: req.body.workflowInstanceId
         ? new mongoose.Types.ObjectId(req.body.workflowInstanceId)
         : undefined,

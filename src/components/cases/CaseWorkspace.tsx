@@ -1050,9 +1050,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   };
 
   useEffect(() => {
-    reloadDocuments();
+    if (activeTab === 'documents') void reloadDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [caseData?._id, showUploadModal]);
+  }, [caseData?._id, showUploadModal, activeTab]);
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2137,6 +2137,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
             });
             void getWorkflowForCase(caseData._id).then((nextWorkflow) => setWorkflowInstance(nextWorkflow));
           }}
+          onDocumentsChanged={() => reloadDocuments()}
         />
       )}
 
