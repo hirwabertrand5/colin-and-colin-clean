@@ -166,6 +166,18 @@ export const getAllCases = async (): Promise<CaseData[]> => {
   return res.json();
 };
 
+/**
+ * Independent tasks may be linked to any matter. This intentionally uses the
+ * dedicated, minimal lookup rather than the assignment-filtered Cases list.
+ */
+export const getIndependentTaskMatterOptions = async (): Promise<CaseData[]> => {
+  const res = await fetch(`${API_URL}/cases/independent-task-options`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to fetch matter options');
+  return res.json();
+};
+
 export const createCase = async (caseData: CaseData): Promise<CaseData> => {
   const res = await fetch(`${API_URL}/cases`, {
     method: 'POST',

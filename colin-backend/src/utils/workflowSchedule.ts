@@ -205,18 +205,70 @@ export const buildWorkflowSchedule = (
   return result;
 };
 
+/**
+ * Returns instance Key Actions in the order represented by the active template:
+ * template stage order first, then each Key Action's position in that stage.
+ * Stored `stageOrder` is a legacy fallback only, because it can become stale
+ * after a template is reordered.
+ */
+export const orderWorkflowSteps = <T extends { stageKey?: unknown; stageOrder?: unknown; order?: unknown }>(
+  steps: T[] | undefined,
+  template?: { stages?: unknown } | null
+): T[] => {
+  const source = Array.isArray(steps) ? steps : [];
+  const stages = Array.isArray(template?.stages)
+    ? (template.stages as Array<Record<string, unknown>>)
+        .slice()
+        .sort((left, right) => Number(left?.order ?? 0) - Number(right?.order ?? 0))
+    : [];
+  const templateRanks = new Map<string, number>();
+  stages.forEach((stage, index) => {
+    const key = String(stage?.key || '').trim();
+    if (key && !templateRanks.has(key)) templateRanks.set(key, index);
+  });
+
+  const templateRankOf = (step: T) => templateRanks.get(String(step?.stageKey || '').trim());
+  const storedRankOf = (step: T) => {
+    const rank = Number(step?.stageOrder);
+    return Number.isFinite(rank) ? rank : undefined;
+  };
+  const actionOrderOf = (step: T) => {
+    const order = Number(step?.order);
+    return Number.isFinite(order) ? order : 0;
+  };
+
+  return source
+    .map((step, index) => ({ step, index }))
+    .sort((left, right) => {
+      const leftTemplateRank = templateRankOf(left.step);
+      const rightTemplateRank = templateRankOf(right.step);
+      const leftInTemplate = leftTemplateRank !== undefined;
+      const rightInTemplate = rightTemplateRank !== undefined;
+
+      if (leftInTemplate && rightInTemplate && leftTemplateRank !== rightTemplateRank) {
+        return leftTemplateRank - rightTemplateRank;
+      }
+      if (leftInTemplate !== rightInTemplate) return leftInTemplate ? -1 : 1;
+
+      if (!leftInTemplate) {
+        const leftStoredRank = storedRankOf(left.step);
+        const rightStoredRank = storedRankOf(right.step);
+        if (leftStoredRank !== undefined && rightStoredRank !== undefined && leftStoredRank !== rightStoredRank) {
+          return leftStoredRank - rightStoredRank;
+        }
+        if (leftStoredRank !== undefined && rightStoredRank === undefined) return -1;
+        if (leftStoredRank === undefined && rightStoredRank !== undefined) return 1;
+      }
+
+      return actionOrderOf(left.step) - actionOrderOf(right.step) || left.index - right.index;
+    })
+    .map(({ step }) => step);
+};
+
 export const selectNextScheduledStepKey = (
   steps: Array<{ stepKey?: string; status?: string; stageOrder?: number; order?: number }> | undefined
 ): string | undefined => {
-  const ordered = (Array.isArray(steps) ? steps : []).slice().sort((a, b) => {
-    const aHasStage = typeof a?.stageOrder === 'number' && Number.isFinite(a.stageOrder);
-    const bHasStage = typeof b?.stageOrder === 'number' && Number.isFinite(b.stageOrder);
-    if (aHasStage && bHasStage && (a.stageOrder as number) !== (b.stageOrder as number)) {
-      return (a.stageOrder as number) - (b.stageOrder as number);
-    }
-    if (aHasStage !== bHasStage) return aHasStage ? -1 : 1;
-    return Number(a?.order ?? 0) - Number(b?.order ?? 0);
-  });
+  const ordered = orderWorkflowSteps(steps);
   return ordered.find((step) => String(step?.status || '') !== 'Completed')?.stepKey;
 };
 
@@ -230,15 +282,7 @@ export const selectNextScheduledStepKey = (
 export const selectNextWorkPendingStepKey = (
   steps: Array<{ stepKey?: string; status?: string; stageOrder?: number; order?: number }> | undefined
 ): string | undefined => {
-  const ordered = (Array.isArray(steps) ? steps : []).slice().sort((a, b) => {
-    const aHasStage = typeof a?.stageOrder === 'number' && Number.isFinite(a.stageOrder);
-    const bHasStage = typeof b?.stageOrder === 'number' && Number.isFinite(b.stageOrder);
-    if (aHasStage && bHasStage && (a.stageOrder as number) !== (b.stageOrder as number)) {
-      return (a.stageOrder as number) - (b.stageOrder as number);
-    }
-    if (aHasStage !== bHasStage) return aHasStage ? -1 : 1;
-    return Number(a?.order ?? 0) - Number(b?.order ?? 0);
-  });
+  const ordered = orderWorkflowSteps(steps);
   return ordered.find((step) => !isStepWorkDone(step))?.stepKey;
 };
 

@@ -480,6 +480,25 @@ export const getAllCases = async (req: AuthRequest, res: Response) => {
   }
 };
 
+/**
+ * A deliberately small, system-wide matter lookup for the Independent Task
+ * form. Creating an independent task is available to every authenticated
+ * workspace member, so its Related Matter selector must not inherit the
+ * assignment-filtered Cases-list visibility rules. The endpoint returns only
+ * the fields needed to identify a matter in that selector.
+ */
+export const getIndependentTaskMatterOptions = async (_req: AuthRequest, res: Response) => {
+  try {
+    const matters = await Case.find({})
+      .select('_id caseNo parties status')
+      .sort({ caseNo: 1, _id: 1 })
+      .lean();
+    return res.json(matters);
+  } catch {
+    return res.status(500).json({ message: 'Failed to fetch matter options.' });
+  }
+};
+
 export const createCase = async (req: AuthRequest, res: Response) => {
   try {
     if (!isAdminCaseRole(req.user?.role)) {

@@ -22,6 +22,7 @@ import {
   isStepWorkDone,
   toDateTimeLocalValue,
 } from '../../utils/workflowDeadline';
+import { orderWorkflowSteps } from '../../utils/workflowOrder';
 
 type Props = {
   caseId: string;
@@ -410,14 +411,10 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   if (err) return <div className="py-4 text-red-700 bg-red-50 border border-red-100 rounded px-4">{err}</div>;
   if (!wf) return <div className="py-8 text-gray-500">No workflow found for this case.</div>;
 
-  // Authoritative stage order first (persisted `stageOrder`, backfilled from
-  // legacy `order`), then action order — so deadlines always read sequentially.
-  const stageRankOf = (s: WorkflowInstance['steps'][number]) =>
-    typeof (s as { stageOrder?: unknown }).stageOrder === 'number' &&
-    Number.isFinite((s as { stageOrder?: number }).stageOrder as number)
-      ? Number((s as { stageOrder?: number }).stageOrder)
-      : Number(s.order ?? 0);
-  const steps = [...wf.steps].sort((a, b) => stageRankOf(a) - stageRankOf(b) || a.order - b.order);
+  // The template is the canonical stage sequence. This keeps the checklist's
+  // visible order and its sequential lock in sync even when an older instance
+  // carries stale stage-order values.
+  const steps = orderWorkflowSteps(wf.steps, template);
   // The API is authoritative, but calculate the same sequential gate locally
   // so the next permitted Key Action is obvious before a user clicks it.
   // Existing completed/out-of-order records remain readable; only an unticked

@@ -14,6 +14,7 @@ import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps, isStepChecklistReadyToAutoComplete } from '../utils/workflowCompute';
 import {
   hasActiveFixedAmendment,
+  orderWorkflowSteps,
   selectNextScheduledStepKey,
   selectNextWorkPendingStepKey,
 } from '../utils/workflowSchedule';
@@ -274,21 +275,12 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
 
   // Steps the template no longer defines stay on the case with their progress.
   // A Key Action deleted on the case only is never restored here.
-  // Ordering is authoritative stage order first (`stageOrder`, backfilled
-  // from the legacy `order` so old instances sort identically), then action
-  // order — never raw action order alone.
   const builtKeys = new Set(builtSteps.map((step: any) => String(step?.stepKey)));
   const removedFromTemplate = (existingSteps || [])
     .filter((step: any) => !builtKeys.has(String(step?.stepKey)) && !deletedKeys.has(String(step?.stepKey || '')))
     .map((step: any) => ({ ...step }));
 
-  const stageRankOf = (step: any) =>
-    typeof step?.stageOrder === 'number' && Number.isFinite(step.stageOrder)
-      ? Number(step.stageOrder)
-      : Number(step?.order ?? 0);
-  return [...mergedSteps, ...removedFromTemplate].sort(
-    (a, b) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0))
-  );
+  return orderWorkflowSteps([...mergedSteps, ...removedFromTemplate], template);
 };
 
 const syncCaseWorkflowInstanceFromTemplate = async (caseId: string, template: any, wfStart: Date) => {
@@ -650,7 +642,7 @@ const completeStepInternal = async (
   c: any,
   inst: any,
   stepKey: string,
-  options?: { finalApproval?: boolean }
+  options?: { finalApproval?: boolean; template?: { stages?: unknown } | null }
 ) => {
   const step = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
   if (!step) throw new Error('Step not found.');
@@ -664,13 +656,15 @@ const completeStepInternal = async (
   const previousStepStatus = step.status;
 
   const finalApproval = Boolean(options?.finalApproval);
-  // Stage order first (`stageOrder`, backfilled for legacy instances), then
-  // action order — so the current step always advances sequentially.
-  const stageRankOf = (s: any) =>
-    typeof s?.stageOrder === 'number' && Number.isFinite(s.stageOrder) ? Number(s.stageOrder) : Number(s?.order ?? 0);
-  const orderedSteps = (inst.steps || [])
-    .slice()
-    .sort((a: any, b: any) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0)));
+  // The active template determines the stage sequence. Persisted `stageOrder`
+  // can be stale after a template reorder, so it is only a legacy fallback.
+  const orderingTemplate =
+    options?.template !== undefined
+      ? options.template
+      : inst?.templateId
+        ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
+        : null;
+  const orderedSteps = orderWorkflowSteps(inst.steps || [], orderingTemplate);
 
   if (finalApproval) {
     // Signed off by the Approver.
@@ -804,16 +798,12 @@ const completeStepInternal = async (
  * historical out-of-order work that is already ticked/completed; it only
  * protects a new attempt to tick an outstanding action.
  */
-const findEarlierPendingWorkStep = (inst: any, targetStepKey: string) => {
-  const stageRankOf = (step: any) =>
-    typeof step?.stageOrder === 'number' && Number.isFinite(step.stageOrder)
-      ? Number(step.stageOrder)
-      : Number(step?.order ?? 0);
-  const ordered = (Array.isArray(inst?.steps) ? inst.steps : [])
-    .slice()
-    .sort((left: any, right: any) =>
-      stageRankOf(left) - stageRankOf(right) || Number(left?.order ?? 0) - Number(right?.order ?? 0)
-    );
+const findEarlierPendingWorkStep = (
+  inst: any,
+  targetStepKey: string,
+  template?: { stages?: unknown } | null
+) => {
+  const ordered = orderWorkflowSteps(Array.isArray(inst?.steps) ? inst.steps : [], template);
   const targetIndex = ordered.findIndex((step: any) => String(step?.stepKey || '') === String(targetStepKey || ''));
   if (targetIndex <= 0) return null;
   return ordered.slice(0, targetIndex).find((step: any) => !isStepWorkDone(step)) || null;
@@ -837,17 +827,15 @@ export const autoCompleteFullyCheckedSteps = async (
   c: any,
   inst: any
 ): Promise<string[]> => {
-  // Stage order first, then action order — the pass must walk sequentially.
-  const stageRankOf = (s: any) =>
-    typeof s?.stageOrder === 'number' && Number.isFinite(s.stageOrder) ? Number(s.stageOrder) : Number(s?.order ?? 0);
-  const ordered = (inst.steps || [])
-    .slice()
-    .sort((a: any, b: any) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0)));
+  const template: any = inst?.templateId
+    ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
+    : null;
+  const ordered = orderWorkflowSteps(inst.steps || [], template);
   const completedKeys: string[] = [];
   for (const step of ordered) {
     if (String(step?.status || '') === 'Completed') continue;
     if (!isStepChecklistReadyToAutoComplete(step)) break;
-    await completeStepInternal(actor, c, inst, step.stepKey);
+    await completeStepInternal(actor, c, inst, step.stepKey, { template });
     completedKeys.push(String(step?.stepKey || ''));
   }
   return completedKeys;
@@ -1346,10 +1334,13 @@ export const completeStep = async (req: AuthRequest, res: Response) => {
     const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
 
-    // The Overview is now sequential for new work.  Already-recorded legacy
-    // work stays untouched; only an attempt to tick a later outstanding action
-    // is stopped until its earlier action is done.
-    const earlierPending = findEarlierPendingWorkStep(inst, stepKey);
+    // The Overview is sequential for new work. Use the live template stage
+    // order, not a potentially stale instance rank, so the same Key Action is
+    // unlocked on screen and through this API.
+    const template: any = inst.templateId
+      ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
+      : null;
+    const earlierPending = findEarlierPendingWorkStep(inst, stepKey, template);
     if (earlierPending) {
       const error: any = new Error(
         `Complete the previous Key Action, "${String(earlierPending.title || earlierPending.stepKey)}", before marking this one done.`
@@ -1357,7 +1348,7 @@ export const completeStep = async (req: AuthRequest, res: Response) => {
       error.statusCode = 409;
       throw error;
     }
-    const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey);
+    const updated = await completeStepInternal(actorFromReq(req), c, inst, stepKey, { template });
     res.json(updated);
   } catch (e: any) {
     const status = typeof e?.statusCode === 'number' ? e.statusCode : 500;
@@ -1462,13 +1453,11 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       return Number.isFinite(next.getTime()) ? next : undefined;
     };
 
-    // "Downstream" = later in authoritative stage/step order, so an amended
-    // deadline shifts the actions that actually follow it.
-    const stageRankOf = (s: any) =>
-      typeof s?.stageOrder === 'number' && Number.isFinite(s.stageOrder) ? Number(s.stageOrder) : Number(s?.order ?? 0);
-    const orderedSteps = (inst.steps || [])
-      .slice()
-      .sort((a: any, b: any) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0)));
+    // "Downstream" follows the same template-backed sequence as the Overview.
+    const template: any = inst.templateId
+      ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
+      : null;
+    const orderedSteps = orderWorkflowSteps(inst.steps || [], template);
     const currentIndex = orderedSteps.findIndex((s: any) => s.stepKey === stepKey);
     const downstreamSteps = currentIndex >= 0 ? orderedSteps.slice(currentIndex + 1) : [];
 
@@ -1563,11 +1552,10 @@ export const revokeStepDeadlineAmendment = async (req: AuthRequest, res: Respons
     const record = history[recordIndex];
     if (record?.revoked === true) return res.status(400).json({ message: 'Amendment is already revoked.' });
 
-    const stageRankOf = (s: any) =>
-      typeof s?.stageOrder === 'number' && Number.isFinite(s.stageOrder) ? Number(s.stageOrder) : Number(s?.order ?? 0);
-    const orderedSteps = (inst.steps || [])
-      .slice()
-      .sort((a: any, b: any) => stageRankOf(a) - stageRankOf(b) || (Number(a?.order ?? 0) - Number(b?.order ?? 0)));
+    const template: any = inst.templateId
+      ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
+      : null;
+    const orderedSteps = orderWorkflowSteps(inst.steps || [], template);
     const currentIndex = orderedSteps.findIndex((s: any) => s.stepKey === stepKey);
     const downstreamSteps = currentIndex >= 0 ? orderedSteps.slice(currentIndex + 1) : [];
 

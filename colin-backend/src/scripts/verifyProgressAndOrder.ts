@@ -14,10 +14,11 @@
  */
 import { computeCompletedPercentFromInstance } from '../utils/workflowPercentages';
 import { isStepWorkDone } from '../models/workflowInstanceModel';
+import { orderWorkflowSteps } from '../utils/workflowSchedule';
 
 /** Mirrors the Case Workspace Overview's visible sequence lock. */
-const blockersBefore = (steps: any[], stepKey: string) => {
-  const ordered = steps.slice().sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+const blockersBefore = (steps: any[], stepKey: string, template?: { stages?: unknown }) => {
+  const ordered = orderWorkflowSteps(steps, template);
   const index = ordered.findIndex((s: any) => s.stepKey === stepKey);
   if (index <= 0) return [];
   // Work done, not approval, is what unlocks the next Key Action.
@@ -126,6 +127,55 @@ check(
 check(
   'a ticked first visible Key Action unlocks the second despite interleaved stored order',
   !isStepWorkDone(visibleSequence[1]) && isStepWorkDone(visibleSequence[0])
+);
+
+console.log('\nH. Stale instance stage ranks cannot lock an earlier visible Key Action');
+const staleStageOrderTemplate = {
+  stages: [
+    { key: 'pleadings', order: 10 },
+    { key: 'judgment', order: 20 },
+  ],
+};
+const staleStageOrderSteps = [
+  {
+    stepKey: 'follow-up',
+    title: 'Follow up on judgement to be delivered',
+    stageKey: 'judgment',
+    // A legacy/stale persisted rank that previously put this next action first.
+    stageOrder: 0,
+    order: 1,
+    status: 'Not Started',
+  },
+  {
+    stepKey: 'previous-pleading',
+    title: 'Prepare written submissions',
+    stageKey: 'pleadings',
+    stageOrder: 5,
+    order: 1,
+    status: 'Done',
+  },
+  {
+    stepKey: 'draft-note',
+    title: 'Draft and file Note de plaidoirrie',
+    stageKey: 'pleadings',
+    stageOrder: 5,
+    order: 2,
+    status: 'Not Started',
+  },
+];
+const canonicalSteps = orderWorkflowSteps(staleStageOrderSteps, staleStageOrderTemplate);
+check(
+  'the template places the pleading action before the later judgement follow-up',
+  canonicalSteps.map((workflowStep) => workflowStep.stepKey).join(',') === 'previous-pleading,draft-note,follow-up'
+);
+check(
+  'the Draft and file action is unlocked after its actual previous action is done',
+  blockersBefore(staleStageOrderSteps, 'draft-note', staleStageOrderTemplate).length === 0
+);
+check(
+  'the later judgement follow-up remains locked until Draft and file is done',
+  blockersBefore(staleStageOrderSteps, 'follow-up', staleStageOrderTemplate).map((workflowStep) => workflowStep.stepKey).join(',') ===
+    'draft-note'
 );
 
 console.log(`\nResult: ${passed} passed, ${failed} failed.`);

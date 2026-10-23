@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserRole } from '../../App';
-import { getAllCases, CaseData } from '../../services/caseService';
+import { getIndependentTaskMatterOptions, CaseData } from '../../services/caseService';
 import { getAssignmentUsers, type User as SystemUser } from '../../services/userService';
 import {
   createIndependentTask,
@@ -177,7 +177,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   const loadLookups = async () => {
     try {
       setLookupLoading(true);
-      const [caseData, userData] = await Promise.all([getAllCases(), getAssignmentUsers()]);
+      const [caseData, userData] = await Promise.all([getIndependentTaskMatterOptions(), getAssignmentUsers()]);
       setCases(caseData || []);
       setUsers(userData || []);
     } catch {
@@ -1025,9 +1025,9 @@ const taskMatterLabel = (task: IndependentTask) =>
                     value={form.relatedMatterId}
                     onChange={(e) => setForm((prev) => ({ ...prev, relatedMatterId: e.target.value }))}
                     className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-                    disabled={saving}
+                    disabled={saving || lookupLoading}
                   >
-                    <option value="">No matter linked</option>
+                    <option value="">{lookupLoading ? 'Loading matters...' : 'No matter linked'}</option>
                     {matterOptions.map((matter) => (
                       <option key={matter._id} value={matter._id}>
                         {matter.label}

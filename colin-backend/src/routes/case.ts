@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   getAllCases,
+  getIndependentTaskMatterOptions,
   createCase,
   getCaseById,
   updateCase,
@@ -21,6 +22,7 @@ const router = express.Router();
  * - Associate: can GET only their assigned cases (controller enforces)
  */
 router.get('/', authenticate, getAllCases);
+router.get('/independent-task-options', authenticate, getIndependentTaskMatterOptions);
 router.get('/:id', authenticate, getCaseById);
 router.post('/:id/take-request', authenticate, requestTakeCase);
 router.post('/:id/take-request/:requestId/approve', authenticate, approveTakeRequest);
