@@ -421,10 +421,10 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   };
 
   const removeTask = async (task: IndependentTask) => {
-    if (!window.confirm(`Delete ${task.taskNumber}?`)) return;
+    if (!window.confirm(`Permanently delete ${task.taskNumber}? This also removes its comments, attachments, history, notifications, mirrored case documents, and independent case-work attribution.`)) return;
     try {
       await deleteIndependentTask(task._id);
-      toast.success('Task deleted.');
+      toast.success('Task and all related records deleted.');
       await Promise.all([loadDashboard(), loadTasks()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete task');

@@ -650,6 +650,13 @@ export const moveProspectToTemporaryMatter = async (req: AuthRequest, res: Respo
     const alreadyTemporarilyClosed = Boolean(prospect.isTemporarilyClosed);
     const matter: any = await createMatterFromProspect(prospect, req.user?.name || 'System', 'Temporarily Closed');
     if (!matter) return res.status(500).json({ message: 'Failed to create the temporary matter.' });
+    // The matter status is the source of truth for the list it belongs to.
+    // Keep this explicit after workflow setup so a workflow's own "Active"
+    // state can never be mistaken for an Active Matter state.
+    if (String(matter.status || '').trim() !== 'Temporarily Closed') {
+      matter.status = 'Temporarily Closed';
+      await matter.save();
+    }
 
     if (!alreadyTemporarilyClosed) {
       pushStageHistory(prospect, {

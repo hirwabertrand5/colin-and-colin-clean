@@ -61,6 +61,8 @@ export type AuditAction =
 
 export interface IAuditLog extends Document {
   caseId: mongoose.Types.ObjectId;
+  /** Links independent-task activity without overloading the sentinel case id. */
+  independentTaskId?: mongoose.Types.ObjectId;
   actorUserId?: mongoose.Types.ObjectId;
   actorName: string;
   action: AuditAction;
@@ -72,6 +74,7 @@ export interface IAuditLog extends Document {
 const AuditLogSchema = new Schema<IAuditLog>(
   {
     caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true, index: true },
+    independentTaskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask', index: true },
     actorUserId: { type: Schema.Types.ObjectId, ref: 'User' },
     actorName: { type: String, required: true },
     action: { type: String, required: true, index: true },
@@ -82,6 +85,7 @@ const AuditLogSchema = new Schema<IAuditLog>(
 );
 
 AuditLogSchema.index({ caseId: 1, createdAt: -1 });
+AuditLogSchema.index({ independentTaskId: 1, createdAt: -1 });
 // The "My Activity Trail" query filters by actorUserId (with a createdAt range
 // for the reporting period) and sorts newest-first, so a compound index serves
 // both the filter and the sort without an in-memory sort.

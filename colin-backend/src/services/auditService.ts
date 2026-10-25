@@ -3,6 +3,7 @@ import AuditLog, { AuditAction } from '../models/auditLogModel';
 
 export const writeAudit = async (params: {
   caseId: string;
+  independentTaskId?: string;
   actorUserId?: string;
   actorName: string;
   action: AuditAction;
@@ -17,6 +18,10 @@ export const writeAudit = async (params: {
   };
 
   if (params.detail) doc.detail = params.detail;
+
+  if (params.independentTaskId) {
+    doc.independentTaskId = new mongoose.Types.ObjectId(params.independentTaskId);
+  }
 
   if (params.actorUserId) {
     doc.actorUserId = new mongoose.Types.ObjectId(params.actorUserId);

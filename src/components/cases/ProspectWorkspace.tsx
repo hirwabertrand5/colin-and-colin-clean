@@ -201,8 +201,8 @@ export default function ProspectWorkspace() {
     try {
       setMovingToTemporaryMatter(true);
       setError('');
-      const result = await moveProspectToTemporaryMatter(prospect._id);
-      navigate(`/matters/${result.matter._id}`);
+      await moveProspectToTemporaryMatter(prospect._id);
+      navigate('/matters/temporarily-closed');
     } catch (err: any) {
       setError(err?.message || 'Failed to move prospect to Temporarily Closed Matters.');
     } finally {

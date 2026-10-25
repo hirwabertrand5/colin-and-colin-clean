@@ -1,7 +1,9 @@
 import mongoose from 'mongoose';
+import AuditLog from '../../../models/auditLogModel';
 import Case from '../../../models/caseModel';
 import Document from '../../../models/documentModel';
 import Invoice from '../../../models/invoiceModel';
+import Notification from '../../../models/notificationModel';
 import Task from '../../../models/taskModel';
 import User from '../../../models/userModel';
 import WorkflowInstance from '../../../models/workflowInstanceModel';
@@ -21,7 +23,7 @@ import IndependentTaskHistory, {
   IndependentTaskHistoryAction,
 } from '../models/independentTaskHistoryModel';
 import { caseMatchesAssignee } from '../../../utils/caseAssignments';
-import { storeUploadedFile } from '../../../services/fileStorageService';
+import { deleteStoredFile, storeUploadedFile } from '../../../services/fileStorageService';
 import { completeStepForCase } from '../../../controllers/workflowController';
 import { computeCaseEarnedFees, computeStepTimelinessAt, normalizeEffectiveWorkflowSteps } from '../../../utils/caseEarnedFees';
 import { allocateCollectedValueAcrossKeyActions, calculateCollectedKeyActionEarnings } from '../../../utils/keyActionEarnings';
@@ -285,8 +287,15 @@ const buildHistory = async (
   await IndependentTaskHistory.create(historyDoc);
 };
 
-const buildAudit = (req: AuthRequest, action: any, message: string, detail?: string) => ({
+const buildAudit = (
+  req: AuthRequest,
+  action: any,
+  message: string,
+  detail?: string,
+  independentTaskId?: string
+) => ({
   caseId: '000000000000000000000000',
+  ...(independentTaskId ? { independentTaskId } : {}),
   actorName: req.user?.name || 'System',
   ...(req.user?.id ? { actorUserId: req.user.id } : {}),
   action,
@@ -402,7 +411,7 @@ const notifyAssigned = async (task: any, req: AuthRequest) => {
       html: `<div style="font-family: Arial, sans-serif"><p>An independent task has been assigned to you.</p><p><b>${task.taskNumber}</b> - ${task.title}</p><p>Due: ${task.dueDate}</p></div>`,
     },
   });
-  await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_ASSIGNED', 'Independent task assigned', task.title));
+  await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_ASSIGNED', 'Independent task assigned', task.title, String(task._id)));
 };
 
 const notifyReview = async (task: any, req: AuthRequest) => {
@@ -612,7 +621,7 @@ export const independentTaskService = {
           { session, ordered: true }
         );
       });
-      await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_CREATED', 'Independent task created', `${taskNumber} • ${title}`));
+      await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_CREATED', 'Independent task created', `${taskNumber} • ${title}`, String(created._id)));
       await notifyAssigned(created, req);
       return this.getTaskById(String(created._id), req);
     } finally {
@@ -904,7 +913,7 @@ export const independentTaskService = {
           });
         }
       });
-      await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_UPDATED', 'Independent task updated', task.title));
+      await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_UPDATED', 'Independent task updated', task.title, String(task._id)));
       hydrated = await this.getTaskById(String(task._id), req);
       return hydrated;
     } finally {
@@ -943,7 +952,7 @@ export const independentTaskService = {
       if (nextStatus === 'Completed') await buildHistory(String(task._id), 'TASK_COMPLETED', 'Task completed', req, task.title);
       if (nextStatus === 'Closed') await buildHistory(String(task._id), 'TASK_CLOSED', 'Task closed', req, task.title);
       if (nextStatus === 'Awaiting Review') await notifyReview(task, req);
-      await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_STATUS_CHANGED', 'Independent task status changed', `${task.title} • ${nextStatus}`));
+      await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_STATUS_CHANGED', 'Independent task status changed', `${task.title} • ${nextStatus}`, String(task._id)));
       return this.getTaskById(taskId, req);
     } finally {
       session.endSession();
@@ -1037,6 +1046,7 @@ export const independentTaskService = {
     await buildHistory(String(task._id), 'TASK_COMPLETED', 'Task completed through case lifecycle', req, lifecycleLabel);
     await writeAudit({
       caseId: String(caseDoc._id),
+      independentTaskId: String(task._id),
       actorName: req.user?.name || task.assignee || 'System',
       ...(req.user?.id ? { actorUserId: req.user.id } : {}),
       action: 'INDEPENDENT_TASK_CASE_LIFECYCLE_UPDATED',
@@ -1049,12 +1059,92 @@ export const independentTaskService = {
   async deleteTask(taskId: string, req: AuthRequest) {
     const task = await assertTaskExists(taskId);
     await assertCanDelete(req, task);
-    await IndependentTaskComment.deleteMany({ taskId: task._id });
-    await IndependentTaskAttachment.deleteMany({ taskId: task._id });
-    await IndependentTaskHistory.deleteMany({ taskId: task._id });
-    await IndependentTask.findByIdAndDelete(taskId);
-    await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_DELETED', 'Independent task deleted', task.title));
-    return { message: 'Task deleted.' };
+
+    // Collect linked records before removing them. An Independent Task is not
+    // a soft-delete record: deleting it must remove every task-owned surface,
+    // including documents copied into the linked matter and notifications that
+    // would otherwise point people to a missing workspace.
+    const [attachments, history] = await Promise.all([
+      IndependentTaskAttachment.find({ taskId: task._id }).lean(),
+      IndependentTaskHistory.find({ taskId: task._id }).lean(),
+    ]);
+
+    const caseDocumentIds = attachments
+      .map((attachment: any) => attachment.caseDocumentId)
+      .filter(Boolean);
+    const storedFileUrls = Array.from(new Set(attachments.map((attachment: any) => cleanString(attachment.url)).filter(Boolean)));
+
+    // The contributor records power Case Management, earned-fee rows and
+    // dashboard visibility. Remove only this task's entries; do not roll back
+    // a Key Action's workflow state because it may have been handed off or
+    // advanced by another legitimate contributor after this task acted.
+    const workflowInstances: any[] = await WorkflowInstance.find({
+      'steps.independentContributors.taskId': task._id,
+    });
+    await Promise.all(workflowInstances.map(async (instance) => {
+      let changed = false;
+      for (const step of instance.steps || []) {
+        const contributors = Array.isArray(step.independentContributors) ? step.independentContributors : [];
+        const retained = contributors.filter((entry: any) => String(entry?.taskId || '') !== String(task._id));
+        if (retained.length !== contributors.length) {
+          step.independentContributors = retained;
+          changed = true;
+        }
+      }
+      if (changed) await instance.save();
+    }));
+
+    const auditActions = [
+      'INDEPENDENT_TASK_CREATED',
+      'INDEPENDENT_TASK_UPDATED',
+      'INDEPENDENT_TASK_STATUS_CHANGED',
+      'INDEPENDENT_TASK_ASSIGNED',
+      'INDEPENDENT_TASK_COMMENTED',
+      'INDEPENDENT_TASK_ATTACHMENT_UPLOADED',
+      'INDEPENDENT_TASK_ATTACHMENT_DELETED',
+      'INDEPENDENT_TASK_CASE_LIFECYCLE_UPDATED',
+    ];
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const legacyAuditDetails = Array.from(new Set([
+      cleanString(task.taskNumber),
+      cleanString(task.title),
+      ...attachments.map((attachment: any) => cleanString(attachment.fileName)),
+      ...history.map((entry: any) => cleanString(entry.detail)),
+    ].filter(Boolean)));
+    const legacyAuditDetailPatterns = legacyAuditDetails.map(
+      (detail) => new RegExp(`^${escapeRegExp(detail)}(?:\\s|$|•|—|→)`, 'i')
+    );
+
+    await Promise.all([
+      IndependentTaskComment.deleteMany({ taskId: task._id }),
+      IndependentTaskAttachment.deleteMany({ taskId: task._id }),
+      IndependentTaskHistory.deleteMany({ taskId: task._id }),
+      Notification.deleteMany({ taskId: task._id }),
+      caseDocumentIds.length ? Document.deleteMany({ _id: { $in: caseDocumentIds } }) : Promise.resolve(),
+      AuditLog.deleteMany({
+        $or: [
+          { independentTaskId: task._id },
+          ...(legacyAuditDetailPatterns.length
+            ? [{ action: { $in: auditActions }, detail: { $in: legacyAuditDetailPatterns } }]
+            : []),
+        ],
+      }),
+      IndependentTask.findByIdAndDelete(task._id),
+    ]);
+
+    // GridFS files are separate from document rows. Remove them last; its
+    // deletion helper is idempotent, so a legacy/local URL is safe to ignore.
+    await Promise.all(storedFileUrls.map((url) => deleteStoredFile(url)));
+
+    return {
+      message: 'Task and all related records deleted.',
+      removed: {
+        attachments: attachments.length,
+        history: history.length,
+        caseDocuments: caseDocumentIds.length,
+        workflowContributorEntries: workflowInstances.length,
+      },
+    };
   },
 
   async listHistory(taskId: string, req: AuthRequest) {
@@ -1094,7 +1184,7 @@ export const independentTaskService = {
         );
         await buildHistory(String(task._id), 'TASK_COMMENTED', 'Comment added', req, body.slice(0, 120));
       });
-      await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_COMMENTED', 'Independent task commented', body.slice(0, 120)));
+      await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_COMMENTED', 'Independent task commented', body.slice(0, 120), String(task._id)));
       return comment?.[0];
     } finally {
       session.endSession();
@@ -1148,7 +1238,7 @@ export const independentTaskService = {
     const attachment = await IndependentTaskAttachment.create(attachmentDoc);
 
     await buildHistory(String(task._id), 'TASK_ATTACHMENT_UPLOADED', 'Attachment uploaded', req, attachment.fileName);
-    await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_ATTACHMENT_UPLOADED', 'Independent task attachment uploaded', attachment.fileName));
+    await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_ATTACHMENT_UPLOADED', 'Independent task attachment uploaded', attachment.fileName, String(task._id)));
     return attachment;
   },
 
@@ -1164,7 +1254,7 @@ export const independentTaskService = {
     }
 
     await buildHistory(String(task._id), 'TASK_ATTACHMENT_DELETED', 'Attachment deleted', req, attachment.fileName);
-    await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_ATTACHMENT_DELETED', 'Independent task attachment deleted', attachment.fileName));
+    await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_ATTACHMENT_DELETED', 'Independent task attachment deleted', attachment.fileName, String(task._id)));
     return { message: 'Attachment deleted.' };
   },
 };
