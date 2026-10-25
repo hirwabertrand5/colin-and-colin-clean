@@ -35,6 +35,7 @@ import {
   IndependentTaskStatus,
   listIndependentTaskAttachments,
   listIndependentTaskComments,
+  performIndependentTaskCaseLifecycle,
   transitionIndependentTask,
   uploadIndependentTaskAttachment,
 } from '../../services/independentTaskService';
@@ -106,6 +107,11 @@ const formatDate = (value?: string) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
 };
 
+const formatMoney = (value: number | null | undefined, currency = 'RWF') => {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+  return new Intl.NumberFormat('en-RW', { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(value));
+};
+
 const getActorUser = () => {
   try {
     return JSON.parse(localStorage.getItem('user') || 'null') as { id?: string; name?: string; role?: UserRole } | null;
@@ -135,6 +141,7 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
   const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'comments' | 'attachments' | 'activity'>('overview');
 
   const [statusBusy, setStatusBusy] = useState<IndependentTaskStatus | null>(null);
+  const [caseLifecycleBusy, setCaseLifecycleBusy] = useState(false);
   const [commentBody, setCommentBody] = useState('');
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
   const [commentSaving, setCommentSaving] = useState(false);
@@ -146,7 +153,9 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
 
   usePageTitle(task ? `${task.taskNumber} • Independent Tasks` : 'Independent Task Detail');
 
-  const canEdit = Boolean(task && (isAdmin || task.status !== 'Closed'));
+  const canEdit = Boolean(
+    task && task.status !== 'Closed' && (isAdmin || currentUser?.name === task.assignee || currentUser?.name === task.supervisor)
+  );
   const canAct = Boolean(
     task && (isAdmin || currentUser?.name === task.assignee || currentUser?.name === task.supervisor)
   );
@@ -261,6 +270,30 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
     }
   };
 
+  const caseLifecycleLabel = task?.caseRole === 'Initiator'
+    ? 'Submit to Reviewer'
+    : task?.caseRole === 'Reviewer'
+      ? 'Submit to Signer / Approver'
+      : 'Approve & Complete';
+
+  const performCaseLifecycle = async () => {
+    if (!task) return;
+    try {
+      setCaseLifecycleBusy(true);
+      const updated = await performIndependentTaskCaseLifecycle(task._id);
+      toast.success(
+        updated.caseLifecycleStatus === 'Approved'
+          ? 'Key Action approved and completed.'
+          : `${updated.caseLifecycleStatus || 'Case lifecycle updated.'}`
+      );
+      await refreshTask();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to submit delegated case work.');
+    } finally {
+      setCaseLifecycleBusy(false);
+    }
+  };
+
   const submitComment = async (e: FormEvent) => {
     e.preventDefault();
     if (!task || !canComment) return;
@@ -361,8 +394,8 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+    <div className="independent-task-workspace space-y-6">
+      <div className="independent-task-workspace-header rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
             <Link to="/matters/independent-tasks" className="inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900">
@@ -415,6 +448,17 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
                 {getTransitionLabel(next)}
               </button>
             ))}
+            {task?.caseRole && task.status === 'In Progress' && currentUser?.name === task.assignee && (
+              <button
+                type="button"
+                onClick={performCaseLifecycle}
+                disabled={caseLifecycleBusy}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-60"
+              >
+                {caseLifecycleBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {caseLifecycleLabel}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -496,6 +540,41 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
                       </dl>
                     </div>
                   </div>
+
+                  {task.caseRole && (
+                    <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Delegated case work</div>
+                          <div className="mt-1 text-base font-semibold text-gray-900">Acting as {task.caseRole}</div>
+                          <p className="mt-1 text-sm text-gray-600">Complete the selected lifecycle step here. The case workspace remains separate.</p>
+                        </div>
+                        <span className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-800">
+                          {task.caseWork?.lifecycleStatus || task.caseLifecycleStatus || 'Ready'}
+                        </span>
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {(task.caseWork?.selectedKeyActions || []).map((action) => (
+                          <div key={action.key} className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="font-medium text-gray-900">{action.title}</div>
+                              <div className="text-xs text-gray-500">{action.stageTitle}</div>
+                            </div>
+                            <span className="text-xs font-semibold text-blue-800">{action.status}</span>
+                          </div>
+                        ))}
+                        {!task.caseWork?.selectedKeyActions?.length && task.keyActionKeys?.length ? (
+                          <div className="text-sm text-gray-600">Selected Key Actions are being refreshed from the matter workflow.</div>
+                        ) : null}
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                        <div><div className="text-xs text-gray-500">TPA</div><div className="mt-1 font-semibold text-gray-900">{task.caseWork?.tpaPercent ? `${task.caseWork.tpaPercent}%` : '—'}</div></div>
+                        <div><div className="text-xs text-gray-500">Timeliness</div><div className="mt-1 font-semibold text-gray-900">{task.caseWork?.timelinessScore == null ? '—' : `${task.caseWork.timelinessScore}%`}</div></div>
+                        <div><div className="text-xs text-gray-500">Quality</div><div className="mt-1 font-semibold text-gray-900">{task.caseWork?.qualityScore == null ? '—' : `${task.caseWork.qualityScore}%`}</div></div>
+                        <div><div className="text-xs text-gray-500">Earned fee</div><div className="mt-1 font-semibold text-emerald-700">{formatMoney(task.caseWork?.earnedFee, task.caseWork?.currency)}</div></div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-4">
@@ -587,7 +666,7 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
                   <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Status History</div>
                   <div className="mt-4 space-y-3">
                     {(history || []).filter((item) =>
-                      ['TASK_STATUS_CHANGED', 'TASK_COMPLETED', 'TASK_CLOSED', 'TASK_REVIEW_REQUESTED', 'TASK_EXTERNAL_ACTION_REQUESTED'].includes(
+                      ['TASK_STATUS_CHANGED', 'TASK_COMPLETED', 'TASK_CLOSED', 'TASK_REVIEW_REQUESTED', 'TASK_EXTERNAL_ACTION_REQUESTED', 'TASK_CASE_LIFECYCLE_UPDATED'].includes(
                         item.action
                       )
                     ).length === 0 ? (
@@ -595,7 +674,7 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
                     ) : (
                       (history || [])
                         .filter((item) =>
-                          ['TASK_STATUS_CHANGED', 'TASK_COMPLETED', 'TASK_CLOSED', 'TASK_REVIEW_REQUESTED', 'TASK_EXTERNAL_ACTION_REQUESTED'].includes(
+                          ['TASK_STATUS_CHANGED', 'TASK_COMPLETED', 'TASK_CLOSED', 'TASK_REVIEW_REQUESTED', 'TASK_EXTERNAL_ACTION_REQUESTED', 'TASK_CASE_LIFECYCLE_UPDATED'].includes(
                             item.action
                           )
                         )

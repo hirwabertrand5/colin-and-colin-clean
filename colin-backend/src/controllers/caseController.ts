@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import mongoose from 'mongoose';
 import Case from '../models/caseModel';
+import Prospect from '../models/prospectModel';
 import Task from '../models/taskModel';
 import User from '../models/userModel';
 import CaseTakeRequest from '../models/caseTakeRequestModel';
@@ -59,6 +60,12 @@ const isAssociateLikeRole = (role?: string) =>
   role === 'trainee_associate' ||
   role === 'senior_associate' ||
   role === 'intern';
+
+// Intake users may place a prospect in the temporary-matter lifecycle, so
+// they must also be able to return that same lifecycle to Intake. This does
+// not grant them general case operational-status access.
+const canReturnProspectMatterToIntake = (role?: string) =>
+  isAdminCaseRole(role) || isAssociateLikeRole(role);
 
 const TAKE_REQUEST_AUDIENCE_ROLES = [
   'managing_director',
@@ -1072,6 +1079,54 @@ export const approveTakeRequest = async (req: AuthRequest, res: Response) =>
 export const denyTakeRequest = async (req: AuthRequest, res: Response) =>
   resolveTakeRequestDecision(req, res, 'Denied');
 
+/** Return a prospect-origin temporary matter to the Intake & Prospect workspace. */
+export const returnProspectTemporaryMatterToIntake = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!canReturnProspectMatterToIntake(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
+
+    const caseId = String(req.params.id || '').trim();
+    if (!caseId) return res.status(400).json({ message: 'Missing case id.' });
+    const matter: any = await Case.findById(caseId);
+    if (!matter) return res.status(404).json({ message: 'Case not found.' });
+    if (String(matter.status || '').trim() !== 'Temporarily Closed' || !matter.intakeProspectId) {
+      return res.status(400).json({ message: 'Only a prospect-origin temporarily closed matter can be returned to Intake.' });
+    }
+
+    const prospect: any = await Prospect.findById(matter.intakeProspectId);
+    if (!prospect) return res.status(404).json({ message: 'The source prospect could not be found.' });
+
+    matter.status = 'Returned to Intake';
+    await matter.save();
+
+    prospect.isActive = true;
+    prospect.isTemporarilyClosed = false;
+    const history = Array.isArray(prospect.stageHistory) ? prospect.stageHistory : [];
+    history.push({
+      stage: prospect.stage,
+      status: prospect.stageStatus || 'In Progress',
+      startedAt: prospect.stageStartedAt,
+      dueAt: prospect.stageDueAt,
+      waitingOn: prospect.waitingOn,
+      recordedAt: new Date(),
+    });
+    prospect.stageHistory = history;
+    await prospect.save();
+
+    await writeAudit({
+      caseId,
+      ...(req.user?.id ? { actorUserId: String(req.user.id) } : {}),
+      actorName: req.user?.name || 'System',
+      action: 'CASE_UPDATED',
+      message: 'Returned prospect-origin matter to Client Intake & Prospect',
+      detail: `Matter ${matter.caseNo || caseId} was returned to prospect ${prospect.prospectNo || prospect._id}.`,
+    });
+
+    return res.json({ case: matter, prospect: { _id: String(prospect._id) } });
+  } catch (error: any) {
+    return res.status(500).json({ message: error?.message || 'Failed to return matter to Client Intake & Prospect.' });
+  }
+};
+
 export const setCaseOperationalStatus = async (req: AuthRequest, res: Response) => {
   try {
     if (!isAdminCaseRole(req.user?.role)) {
@@ -1087,6 +1142,14 @@ export const setCaseOperationalStatus = async (req: AuthRequest, res: Response) 
 
     const existing: any = await Case.findById(caseId);
     if (!existing) return res.status(404).json({ message: 'Case not found.' });
+
+    if (
+      String(existing.status || '').trim() === 'Temporarily Closed' &&
+      existing.intakeProspectId &&
+      nextStatus === 'Active'
+    ) {
+      return res.status(400).json({ message: 'Return this matter to Client Intake & Prospect instead of reopening it as an Active matter.' });
+    }
 
     const workflowState = String(existing.workflowProgress?.status || '').trim();
     if (workflowState === 'Completed' || String(existing.status || '').trim() === 'Closed') {

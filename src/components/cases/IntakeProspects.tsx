@@ -424,7 +424,7 @@ export default function IntakeProspects() {
         {/* Workflow-control filters (search lives in the table header below) */}
         <div className="mb-6 flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Waiting on:</span>
-          {(['Firm', 'Client', 'Third Party', 'None'] as ProspectWaitingOn[]).map((option) => {
+            {(['Firm', 'Client', 'Third Party', 'None'] as ProspectWaitingOn[]).map((option) => {
             const active = filterWaitingOn === option;
             return (
               <button

@@ -2,6 +2,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const getToken = () => localStorage.getItem('token');
 
 export type IndependentTaskPriority = 'Low' | 'Medium' | 'High' | 'Critical';
+export type IndependentTaskCaseRole = 'Initiator' | 'Reviewer' | 'Signer/Approver';
 export type IndependentTaskStatus =
   | 'Created'
   | 'Assigned'
@@ -50,8 +51,33 @@ export interface IndependentTaskAttachment {
   uploadedDate: string;
   url: string;
   note?: string;
+  caseDocumentId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IndependentTaskKeyActionOption {
+  key: string;
+  title: string;
+  stageTitle: string;
+  status: string;
+  dueAt?: string | null;
+  percentage?: number;
+}
+
+export interface IndependentTaskCaseWork {
+  role: IndependentTaskCaseRole;
+  currency: string;
+  lifecycleStatus: 'Ready' | 'Submitted to Reviewer' | 'Submitted to Approver' | 'Approved';
+  selectedKeyActions: Array<IndependentTaskKeyActionOption & { completed: boolean; contributedByTask: boolean }>;
+  performedKeyActions: number;
+  completedKeyActions: number;
+  tpaPercent: number;
+  timelinessScore: number | null;
+  qualityScore: number | null;
+  collectedBase: number;
+  earnedFee: number | null;
+  caseNo?: string;
 }
 
 export interface IndependentTask {
@@ -63,6 +89,11 @@ export interface IndependentTask {
   relatedMatterLabel?: string;
   relatedMatter?: IndependentTaskMatter | null;
   relatedClient?: string;
+  caseRole?: IndependentTaskCaseRole;
+  keyActionKeys?: string[];
+  caseLifecycleStatus?: 'Ready' | 'Submitted to Reviewer' | 'Submitted to Approver' | 'Approved';
+  caseLifecycleCompletedAt?: string;
+  caseWork?: IndependentTaskCaseWork;
   assignee: string;
   supervisor: string;
   priority: IndependentTaskPriority;
@@ -109,6 +140,10 @@ export interface IndependentTaskDashboard {
   upcomingDeadlines: IndependentTask[];
   assignedToMe: IndependentTask[];
   tasksDueToday: IndependentTask[];
+  independentTaskEarnings?: {
+    earnedFee: number | null;
+    taskCount: number;
+  };
 }
 
 const authHeaders = (extra?: Record<string, string>) => ({
@@ -127,6 +162,17 @@ const json = async <T>(res: Response): Promise<T> => {
 export const getIndependentTaskDashboard = async (): Promise<IndependentTaskDashboard> => {
   const res = await fetch(`${API_URL}/independent-tasks/dashboard`, { headers: authHeaders() });
   return json<IndependentTaskDashboard>(res);
+};
+
+export const getIndependentTaskCaseKeyActions = async (caseId: string): Promise<{
+  caseId: string;
+  caseNo: string;
+  parties: string;
+  assignments: { initiator?: string; reviewer?: string; approver?: string };
+  keyActions: IndependentTaskKeyActionOption[];
+}> => {
+  const res = await fetch(`${API_URL}/independent-tasks/case-options/${caseId}`, { headers: authHeaders() });
+  return json(res);
 };
 
 export const listIndependentTasks = async (params?: {
@@ -184,6 +230,14 @@ export const transitionIndependentTask = async (taskId: string, status: Independ
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ status }),
+  });
+  return json<IndependentTask>(res);
+};
+
+export const performIndependentTaskCaseLifecycle = async (taskId: string): Promise<IndependentTask> => {
+  const res = await fetch(`${API_URL}/independent-tasks/${taskId}/case-lifecycle`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
   });
   return json<IndependentTask>(res);
 };

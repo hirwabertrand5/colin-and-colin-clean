@@ -177,6 +177,11 @@ export type CaseTeamEarnedFee = {
   /** Completed Key Actions attributable to this person in this role. */
   keyActionKeys: string[];
   completedKeyActions: number;
+  /** Delegated Key Actions this person has performed, including pending approval. */
+  performedKeyActions?: number;
+  /** Task ids prove that this role/action was delegated outside the standing case assignment. */
+  independentTaskIds?: string[];
+  isIndependentContributor?: boolean;
 };
 
 /**
@@ -203,6 +208,8 @@ export const computeCaseTeamEarnedFees = ({
 }): CaseTeamEarnedFee[] => {
   const actionKeysByRoleAndMember = new Map<string, Set<string>>();
   const collectedBaseByRoleAndMember = new Map<string, number>();
+  const independentTaskIdsByRoleAndMember = new Map<string, Set<string>>();
+  const independentPerformedKeysByRoleAndMember = new Map<string, Set<string>>();
   const contributionKey = (role: CaseAssignmentRole, name: string) => `${role}:${normalizeName(name)}`;
   const assignmentContributors = getCaseAssignmentContributors(caseDoc);
   const steps: any[] = Array.isArray(workflowInstance?.steps) ? workflowInstance.steps : [];
@@ -234,9 +241,54 @@ export const computeCaseTeamEarnedFees = ({
     // current approver merely because an Initiator checked a nested checklist.
     return approvedAt || (step ? undefined : fallback);
   };
+  /**
+   * An independent task is a narrow, action-level delegation.  When it records
+   * a lifecycle event, that named contributor takes precedence over the
+   * standing assignment for that role on this one Key Action only.  This is
+   * what makes an extra initiator/reviewer/approver visible and paid
+   * separately without rewriting the case's normal team.
+   */
+  const independentContributorForRole = (step: any, role: CaseAssignmentRole) => {
+    const entries = Array.isArray(step?.independentContributors) ? step.independentContributors : [];
+    const matches = entries
+      .filter((entry: any) => String(entry?.role || '') === role && normalizeName(entry?.name))
+      .sort((left: any, right: any) => {
+        const leftMs = resolveDeadlineDateTime(left?.actedAt)?.getTime() || 0;
+        const rightMs = resolveDeadlineDateTime(right?.actedAt)?.getTime() || 0;
+        return rightMs - leftMs;
+      });
+    const latest = matches[0];
+    return latest
+      ? { name: String(latest.name).trim(), actedAt: latest.actedAt, taskId: String(latest.taskId || '') }
+      : null;
+  };
   const contributorByKey = new Map(
     assignmentContributors.map((contributor) => [contributionKey(contributor.role, contributor.name), contributor])
   );
+
+  // Record delegated work as soon as it is performed. This intentionally runs
+  // before the completed-action pass below: an Initiator or Reviewer must be
+  // visible in the case team table while their Key Action awaits the next
+  // lifecycle hand-off, with the earned amount still pending final approval.
+  for (const step of steps) {
+    for (const entry of Array.isArray(step?.independentContributors) ? step.independentContributors : []) {
+      const role = String(entry?.role || '') as CaseAssignmentRole;
+      const name = String(entry?.name || '').trim();
+      if (!CASE_ASSIGNMENT_ROLE_CONFIG.some((config) => config.role === role) || !name) continue;
+      const key = contributionKey(role, name);
+      if (!contributorByKey.has(key)) {
+        contributorByKey.set(key, { role, name, isCurrentAssignment: false, assignmentStartedAt: null });
+      }
+      const performedKeys = independentPerformedKeysByRoleAndMember.get(key) || new Set<string>();
+      if (String(step?.stepKey || '').trim()) performedKeys.add(String(step.stepKey).trim());
+      independentPerformedKeysByRoleAndMember.set(key, performedKeys);
+      if (entry?.taskId) {
+        const taskIds = independentTaskIdsByRoleAndMember.get(key) || new Set<string>();
+        taskIds.add(String(entry.taskId));
+        independentTaskIdsByRoleAndMember.set(key, taskIds);
+      }
+    }
+  }
 
   // A completed Key Action can have three contributors. Attribute the
   // Initiator, Reviewer and Signer/Approver portions using their own recorded
@@ -254,7 +306,8 @@ export const computeCaseTeamEarnedFees = ({
       // owner or earned fee for it. Task-only legacy records keep the existing
       // completion-time fallback above.
       if (workflowStep && !ownershipAt) continue;
-      const owner = resolveCaseAssignmentOwnerAt(caseDoc, role, ownershipAt);
+      const delegated = workflowStep ? independentContributorForRole(workflowStep, role) : null;
+      const owner = delegated?.name || resolveCaseAssignmentOwnerAt(caseDoc, role, ownershipAt);
       if (!owner) continue;
       const key = contributionKey(role, owner);
       const keys = actionKeysByRoleAndMember.get(key) || new Set<string>();
@@ -266,6 +319,11 @@ export const computeCaseTeamEarnedFees = ({
       );
       if (!contributorByKey.has(key)) {
         contributorByKey.set(key, { role, name: owner, isCurrentAssignment: false, assignmentStartedAt: null });
+      }
+      if (delegated?.taskId) {
+        const taskIds = independentTaskIdsByRoleAndMember.get(key) || new Set<string>();
+        taskIds.add(delegated.taskId);
+        independentTaskIdsByRoleAndMember.set(key, taskIds);
       }
     }
   }
@@ -279,7 +337,9 @@ export const computeCaseTeamEarnedFees = ({
       isCurrentAssignment: contributor.isCurrentAssignment,
       assignmentStartedAt: contributor.assignmentStartedAt,
       keyActionKeys: actionKeysByRoleAndMember.get(key) || new Set<string>(),
+      performedKeyActionKeys: independentPerformedKeysByRoleAndMember.get(key) || new Set<string>(),
       taskFeeCollected: collectedBaseByRoleAndMember.get(key) || 0,
+      independentTaskIds: Array.from(independentTaskIdsByRoleAndMember.get(key) || []),
     };
   });
 
@@ -310,10 +370,20 @@ export const computeCaseTeamEarnedFees = ({
       return assignee === me || supervisor === me || stageMembers.includes(me);
     });
     const completedMine = mine.filter((task: any) => String(task?.status || '').toLowerCase() === 'completed');
-    const ownedActionScores = Array.from(spec.keyActionKeys)
+    const ownedActionScores = Array.from(new Set([...spec.keyActionKeys, ...spec.performedKeyActionKeys]))
       .map((key) => {
         const step = steps.find((item: any) => String(item?.stepKey || '') === key);
-        return computeStepWorkTimelinessScore(step);
+        const delegatedEvent = (Array.isArray(step?.independentContributors) ? step.independentContributors : []).find(
+          (entry: any) =>
+            String(entry?.role || '') === spec.label &&
+            normalizeName(entry?.name) === me
+        );
+        // Temporary contributors are scored against their own lifecycle event
+        // (submit, review or approval), rather than an earlier contributor's
+        // submission timestamp on the same Key Action.
+        return delegatedEvent?.actedAt
+          ? computeStepTimelinessAt(step, delegatedEvent.actedAt)
+          : computeStepWorkTimelinessScore(step);
       })
       .filter((value): value is number => value !== null);
 
@@ -386,6 +456,9 @@ export const computeCaseTeamEarnedFees = ({
       assignmentStartedAt: spec.assignmentStartedAt,
       keyActionKeys: Array.from(spec.keyActionKeys),
       completedKeyActions: spec.keyActionKeys.size,
+      performedKeyActions: spec.performedKeyActionKeys.size,
+      independentTaskIds: spec.independentTaskIds,
+      isIndependentContributor: spec.independentTaskIds.length > 0,
     };
   });
 };

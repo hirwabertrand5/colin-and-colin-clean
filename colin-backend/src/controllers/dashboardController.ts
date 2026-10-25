@@ -203,6 +203,8 @@ type StaffDashboardMatterRow = {
   earnedFee: number | null;
   /** False when this is a retained handover/earnings record, not live work. */
   isCurrentAssignment: boolean;
+  /** True when this earnings row was earned through a delegated Independent Task. */
+  isIndependentContributor?: boolean;
   completed: boolean;
   outstanding: boolean;
   overdueSections: number;
@@ -390,9 +392,15 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       : [];
     const identityRegexes = [...nameIdentityRegexes, ...emailIdentityRegexes];
 
-    const matters: any[] = identityRegexes.length
-      ? await Case.find({
-          $or: identityRegexes.flatMap((identity) => [
+    // A delegated independent task grants a narrow workflow role, not general
+    // case-workspace access. It must nevertheless put the contributor's fee
+    // row on their personal dashboard once they have performed that role.
+    const independentContributorCaseIds: any[] = identityRegexes.length
+      ? await WorkflowInstance.distinct('caseId', {
+          $or: identityRegexes.map((identity) => ({ 'steps.independentContributors.name': identity })),
+        })
+      : [];
+    const matterVisibilityFilters: any[] = identityRegexes.flatMap((identity) => [
             { assignedTo: identity },
             { 'caseAssignments.initiator': identity },
             { 'caseAssignments.reviewer': identity },
@@ -401,8 +409,12 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
             // completed before a handover.
             { 'assignmentHandoverHistory.previousAssignee': identity },
             { 'assignmentHandoverHistory.nextAssignee': identity },
-          ]),
-        })
+          ]);
+    if (independentContributorCaseIds.length) {
+      matterVisibilityFilters.push({ _id: { $in: independentContributorCaseIds } });
+    }
+    const matters: any[] = matterVisibilityFilters.length
+      ? await Case.find({ $or: matterVisibilityFilters })
           .sort({ updatedAt: -1 })
           .lean()
       : [];
@@ -545,6 +557,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       // Earned-Fees rows for me — matched canonically so a full-name stored slot
       // ("Badiel Rubangutsangabo") still counts for the account ("Badiel").
       const myRows = earned.team.filter((member) => matchesCurrentUser(member.name));
+      const hasIndependentContribution = myRows.some((member) => member.isIndependentContributor);
 
       currency = SINGLE_CURRENCY;
 
@@ -623,7 +636,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       let hadInPeriodWork = false;
       // All Time: every CURRENT assignment is in scope. A former owner remains
       // visible in fee history but is not counted as an active assigned matter.
-      if (!period && isCurrentAssignment) hadInPeriodWork = true;
+      if (!period && (isCurrentAssignment || hasIndependentContribution)) hadInPeriodWork = true;
 
       const collectedInPeriod = collectedInPeriodByCase.get(caseId) || 0;
 
@@ -661,6 +674,10 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       if (earnedFeeInPeriod != null) {
         periodFeesEarned += earnedFeeInPeriod;
         hasPeriodFee = true;
+        // A temporary contributor has no standing case assignment, but their
+        // earned amount is still personal work and must remain visible in a
+        // payment-period dashboard.
+        if (hasIndependentContribution) hadInPeriodWork = true;
       }
 
       // ---- Key Actions checked & Sections completed in the scope ------------
@@ -770,6 +787,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
         collectedBase: round2(collectedBase),
         earnedFee,
         isCurrentAssignment,
+        isIndependentContributor: hasIndependentContribution,
         completed,
         outstanding: isCurrentAssignment && outstanding,
         overdueSections: isCurrentAssignment ? matterOverdueSections : 0,

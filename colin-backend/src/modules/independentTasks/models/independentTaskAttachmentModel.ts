@@ -10,6 +10,8 @@ export interface IIndependentTaskAttachment extends Document {
   uploadedDate: string;
   url: string;
   note?: string;
+  /** When the task is linked to a matter, this is the shared case-document record. */
+  caseDocumentId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,6 +27,7 @@ const IndependentTaskAttachmentSchema = new Schema<IIndependentTaskAttachment>(
     uploadedDate: { type: String, required: true, trim: true },
     url: { type: String, required: true, trim: true },
     note: { type: String },
+    caseDocumentId: { type: Schema.Types.ObjectId, ref: 'Document' },
   },
   { timestamps: true, collection: 'independent_task_attachments' }
 );

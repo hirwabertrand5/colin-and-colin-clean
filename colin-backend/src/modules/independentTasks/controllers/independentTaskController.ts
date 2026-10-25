@@ -25,6 +25,17 @@ export const listTasks = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getCaseKeyActions = async (req: AuthRequest, res: Response) => {
+  try {
+    const caseId = getParam(req.params.caseId);
+    if (!caseId) return res.status(400).json({ message: 'Matter id is required.' });
+    const data = await independentTaskService.getCaseKeyActions(caseId);
+    return res.json(data);
+  } catch (error: any) {
+    return res.status(400).json({ message: error?.message || 'Failed to load available Key Actions.' });
+  }
+};
+
 export const createTask = async (req: AuthRequest, res: Response) => {
   try {
     const task = await independentTaskService.createTask(req.body, req);
@@ -69,6 +80,18 @@ export const transitionTask = async (req: AuthRequest, res: Response) => {
     const message = error?.message || 'Failed to update workflow.';
     const status = message === 'Forbidden.' ? 403 : 400;
     return res.status(status).json({ message });
+  }
+};
+
+export const performCaseLifecycle = async (req: AuthRequest, res: Response) => {
+  try {
+    const taskId = getParam(req.params.taskId);
+    if (!taskId) return res.status(400).json({ message: 'Task id is required.' });
+    const task = await independentTaskService.performCaseLifecycle(taskId, req);
+    return res.json(task);
+  } catch (error: any) {
+    const message = error?.message || 'Failed to submit delegated case work.';
+    return res.status(message === 'Forbidden.' ? 403 : 400).json({ message });
   }
 };
 

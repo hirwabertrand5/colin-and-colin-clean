@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowUpDown,
   ArrowRight,
@@ -14,7 +14,6 @@ import {
   FolderTree,
   Loader2,
   Plus,
-  RefreshCw,
   Search,
   Trash2,
 } from 'lucide-react';
@@ -26,7 +25,10 @@ import {
   createIndependentTask,
   deleteIndependentTask,
   getIndependentTaskDashboard,
+  getIndependentTaskCaseKeyActions,
   IndependentTask,
+  IndependentTaskCaseRole,
+  IndependentTaskKeyActionOption,
   IndependentTaskDashboard,
   IndependentTaskStatus,
   listIndependentTasks,
@@ -99,6 +101,8 @@ type TaskForm = {
   description: string;
   relatedMatterId: string;
   relatedClient: string;
+  caseRole: '' | IndependentTaskCaseRole;
+  keyActionKeys: string[];
   assignee: string;
   supervisor: string;
   startDate: string;
@@ -111,6 +115,8 @@ const emptyForm = (): TaskForm => ({
   description: '',
   relatedMatterId: '',
   relatedClient: '',
+  caseRole: '',
+  keyActionKeys: [],
   assignee: '',
   supervisor: '',
   startDate: new Date().toISOString().slice(0, 10),
@@ -123,6 +129,7 @@ interface IndependentTaskModuleProps {
 
 export default function IndependentTaskModule({ userRole }: IndependentTaskModuleProps) {
   usePageTitle('Independent Tasks');
+  const navigate = useNavigate();
 
   const currentUser = useMemo(() => {
     try {
@@ -159,6 +166,9 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   const [editingTask, setEditingTask] = useState<IndependentTask | null>(null);
   const [form, setForm] = useState<TaskForm>(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [caseKeyActions, setCaseKeyActions] = useState<IndependentTaskKeyActionOption[]>([]);
+  const [caseKeyActionsLoading, setCaseKeyActionsLoading] = useState(false);
+  const [caseKeyActionsError, setCaseKeyActionsError] = useState('');
 
   const deferredSearch = useDeferredValue(search);
 
@@ -223,6 +233,32 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deferredSearch, statusFilter, assigneeFilter, supervisorFilter, page, limit, sortBy, sortDir]);
+
+  useEffect(() => {
+    if (!showModal || !form.relatedMatterId) {
+      setCaseKeyActions([]);
+      setCaseKeyActionsError('');
+      return;
+    }
+    let cancelled = false;
+    const loadCaseKeyActions = async () => {
+      setCaseKeyActionsLoading(true);
+      setCaseKeyActionsError('');
+      try {
+        const data = await getIndependentTaskCaseKeyActions(form.relatedMatterId);
+        if (!cancelled) setCaseKeyActions(data.keyActions || []);
+      } catch (err: any) {
+        if (!cancelled) {
+          setCaseKeyActions([]);
+          setCaseKeyActionsError(err.message || 'Unable to load open Key Actions for this matter.');
+        }
+      } finally {
+        if (!cancelled) setCaseKeyActionsLoading(false);
+      }
+    };
+    void loadCaseKeyActions();
+    return () => { cancelled = true; };
+  }, [showModal, form.relatedMatterId]);
 
   const matterOptions = useMemo(
     () =>
@@ -292,6 +328,19 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     });
   }, [dashboard?.upcomingDeadlines]);
 
+  // A reviewer can only take submitted actions and an approver can only take
+  // reviewed actions. Filtering the already-open list here prevents a task
+  // from being configured for a lifecycle step it cannot perform yet.
+  const selectableCaseKeyActions = useMemo(() => {
+    if (!form.caseRole) return caseKeyActions;
+    const statusForRole: Record<IndependentTaskCaseRole, string[]> = {
+      Initiator: ['Not Started', 'In Progress', 'Done'],
+      Reviewer: ['Awaiting Review'],
+      'Signer/Approver': ['Awaiting Approval'],
+    };
+    return caseKeyActions.filter((action) => statusForRole[form.caseRole].includes(action.status));
+  }, [caseKeyActions, form.caseRole]);
+
   const counts = dashboard?.summary;
 
   const openCreate = () => {
@@ -308,6 +357,8 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
       description: task.description || '',
       relatedMatterId: task.relatedMatterId || '',
       relatedClient: task.relatedClient || '',
+      caseRole: task.caseRole || '',
+      keyActionKeys: task.keyActionKeys || [],
       assignee: task.assignee || '',
       supervisor: task.supervisor || '',
       startDate: task.startDate || new Date().toISOString().slice(0, 10),
@@ -329,6 +380,9 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     if (!form.supervisor.trim()) return toast.error('Supervisor is required.');
     if (!form.dueDate) return toast.error('Due date is required.');
     if (form.startDate && form.dueDate < form.startDate) return toast.error('Due date cannot be earlier than start date.');
+    if ((form.caseRole || form.keyActionKeys.length) && (!form.relatedMatterId || !form.caseRole || !form.keyActionKeys.length)) {
+      return toast.error('Case delegation needs a matter, a role, and at least one open Key Action.');
+    }
 
     try {
       setSaving(true);
@@ -338,6 +392,11 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
         description: form.description || undefined,
         relatedMatterId: form.relatedMatterId || undefined,
         relatedClient: form.relatedClient || undefined,
+        // Send null deliberately when clearing the optional delegation on an
+        // existing task. `undefined` is omitted by JSON.stringify and would
+        // leave the prior role in place on the server.
+        caseRole: form.caseRole || null,
+        keyActionKeys: form.keyActionKeys,
         assignee: form.assignee,
         supervisor: form.supervisor,
         startDate: form.startDate,
@@ -372,10 +431,15 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     }
   };
 
-const taskMatterLabel = (task: IndependentTask) =>
+  const taskMatterLabel = (task: IndependentTask) =>
     task.relatedMatter?.caseNo
       ? [task.relatedMatter.caseNo, task.relatedMatter.parties].filter(Boolean).join(' • ')
       : task.relatedMatterLabel || '—';
+
+  const formatMoney = (value: number | null | undefined, currency = 'RWF') => {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+    return new Intl.NumberFormat('en-RW', { style: 'currency', currency, maximumFractionDigits: 0 }).format(Number(value));
+  };
 
   const nextStatus = (status: IndependentTaskStatus): IndependentTaskStatus | null => WORKFLOW_PRIMARY_TRANSITIONS[status];
   const getTransitionLabel = (status: IndependentTaskStatus, next: IndependentTaskStatus) => {
@@ -435,32 +499,13 @@ const taskMatterLabel = (task: IndependentTask) =>
       <header className="independent-tasks-header">
         <div>
           <div>
-            <div className="independent-tasks-eyebrow">
-              <FolderTree className="h-3.5 w-3.5" />
-              Matter Module
-            </div>
             <h1>Independent Tasks</h1>
             <p>
-              Manage operational tasks with a dedicated workflow, timeline, comments, attachments, and activity history.
+              Complete operational work and delegated case Key Actions from one focused workspace.
             </p>
           </div>
 
           <div className="independent-tasks-header-actions">
-            <Link
-              to="/matters/closed"
-              className="independent-tasks-secondary-action"
-            >
-              <ArrowRight className="h-4 w-4" />
-              Closed Matters
-            </Link>
-            <button
-              type="button"
-              onClick={() => Promise.all([loadDashboard(), loadTasks()])}
-              className="independent-tasks-secondary-action"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </button>
             {canCreate && (
               <button
                 type="button"
@@ -494,6 +539,7 @@ const taskMatterLabel = (task: IndependentTask) =>
           { label: 'Awaiting Review', value: counts?.awaitingReview || 0, icon: Filter, accent: 'amber' },
           { label: 'Awaiting External Action', value: counts?.awaitingExternalAction || 0, icon: CalendarDays, accent: 'orange' },
           { label: 'Completed', value: counts?.completed || 0, icon: CheckCircle2, accent: 'emerald' },
+          { label: 'My Delegated Fees', value: formatMoney(dashboard?.independentTaskEarnings?.earnedFee), icon: CheckCircle2, accent: 'emerald' },
           { label: 'Closed', value: counts?.closed || 0, icon: CheckCircle2, accent: 'slate' },
           { label: 'Critical Tasks', value: counts?.criticalTasks || 0, icon: Filter, accent: 'rose' },
         ].map((card) => {
@@ -527,6 +573,10 @@ const taskMatterLabel = (task: IndependentTask) =>
                   { label: 'Assignee', value: (t: IndependentTask) => t.assignee || '' },
                   { label: 'Supervisor', value: (t: IndependentTask) => t.supervisor || '' },
                   { label: 'Created by', value: (t: IndependentTask) => t.createdBy || '' },
+                  { label: 'Delegated case role', value: (t: IndependentTask) => t.caseRole || '' },
+                  { label: 'Selected Key Actions', value: (t: IndependentTask) => t.caseWork?.selectedKeyActions.map((item) => item.title).join(' | ') || '' },
+                  { label: 'Case lifecycle', value: (t: IndependentTask) => t.caseWork?.lifecycleStatus || t.caseLifecycleStatus || '' },
+                  { label: 'Independent task earned fee', value: (t: IndependentTask) => t.caseWork?.earnedFee == null ? '' : String(t.caseWork.earnedFee) },
                   { label: 'Deadline Used %', value: (t: IndependentTask) => { const deadline = getDeadlineUsage(t); return typeof deadline.usedPercent === 'number' ? `${deadline.usedPercent}%` : ''; } },
                   { label: 'Status', value: (t: IndependentTask) => t.status || '' },
                   { label: 'Due Date', value: (t: IndependentTask) => t.dueDate || '' },
@@ -626,13 +676,14 @@ const taskMatterLabel = (task: IndependentTask) =>
 
           <div className="independent-tasks-table-wrap mt-4 overflow-hidden rounded-2xl border border-gray-200">
             <div className="overflow-x-auto">
-              <table className="independent-tasks-table min-w-[1600px] w-full divide-y divide-gray-200">
+              <table className="independent-tasks-table min-w-[1780px] w-full divide-y divide-gray-200">
                 <colgroup>
                   <col className="independent-task-col-number" />
                   <col className="independent-task-col-task" />
                   <col className="independent-task-col-matter" />
                   <col className="independent-task-col-assignee" />
                   <col className="independent-task-col-creator" />
+                  <col className="independent-task-col-case-work" />
                   <col className="independent-task-col-deadline" />
                   <col className="independent-task-col-status" />
                   <col className="independent-task-col-due" />
@@ -645,6 +696,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                     <th scope="col" className="px-4 py-3">Matter</th>
                     <th scope="col" className="px-4 py-3">Assignee</th>
                     <th scope="col" className="px-4 py-3">Created by</th>
+                    <th scope="col" className="px-4 py-3">Case work &amp; earned fee</th>
                     <th scope="col" className="px-4 py-3">Deadline</th>
                     <th scope="col" className="px-4 py-3">Status</th>
                     <th scope="col" className="px-4 py-3">Due date</th>
@@ -654,18 +706,28 @@ const taskMatterLabel = (task: IndependentTask) =>
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {tasks.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-500">
+                      <td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-500">
                         <CheckCircle2 className="mx-auto mb-2 h-5 w-5 text-gray-300" />
                         No independent tasks found.
                       </td>
                     </tr>
                   ) : (
                     tasks.map((task, index) => {
-                      const next = nextStatus(task.status);
                       const isClosed = task.status === 'Closed';
                       const rowNumber = (page - 1) * limit + index + 1;
                       return (
-                        <tr key={task._id} className="align-top">
+                        <tr
+                          key={task._id}
+                          onClick={() => navigate(`/matters/independent-tasks/${task._id}`)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              navigate(`/matters/independent-tasks/${task._id}`);
+                            }
+                          }}
+                          tabIndex={0}
+                          className="cursor-pointer align-top transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-400"
+                        >
                           <td className="px-4 py-4 text-sm font-medium text-gray-500">{rowNumber}</td>
                           <td className="px-4 py-4">
                             <div className="independent-task-title font-medium text-gray-900" title={task.title}>{task.title}</div>
@@ -682,6 +744,23 @@ const taskMatterLabel = (task: IndependentTask) =>
                           <td className="px-4 py-4 text-sm text-gray-700">
                             <div>{task.createdBy || 'Not recorded'}</div>
                             <div className="text-xs text-gray-500">Task creator</div>
+                          </td>
+                          <td className="px-4 py-4 text-sm text-gray-700">
+                            {task.caseWork ? (
+                              <div className="space-y-1.5">
+                                <div className="font-semibold text-gray-900">{task.caseWork.role}</div>
+                                <div className="text-xs text-gray-500">
+                                  {task.caseWork.lifecycleStatus} · {task.caseWork.performedKeyActions}/{task.caseWork.selectedKeyActions.length} actions performed
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  Earned: <span className="font-semibold text-emerald-700">{formatMoney(task.caseWork.earnedFee, task.caseWork.currency)}</span>
+                                </div>
+                              </div>
+                            ) : task.caseRole ? (
+                              <div className="text-xs text-gray-500">{task.caseRole} delegation · earnings pending</div>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
                           </td>
                           <td className="px-4 py-4">
                             {(() => {
@@ -735,7 +814,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                             </span>
                           </td>
                           <td className="px-4 py-4 text-sm text-gray-600"><time className="independent-task-due" dateTime={task.dueDate}>{formatDeadlineDateTime(task.dueDate)}</time></td>
-                          <td className="px-4 py-4">
+                          <td className="px-4 py-4" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
                             <div className="independent-task-actions">
                               <Link
                                 to={`/matters/independent-tasks/${task._id}`}
@@ -917,6 +996,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                   <Link key={task._id} to={`/matters/independent-tasks/${task._id}`} className="block rounded-2xl border border-gray-200 p-3 hover:bg-gray-50">
                     <div className="font-medium text-gray-900">{task.title}</div>
                     <div className="mt-1 text-xs text-gray-500">{task.taskNumber}</div>
+                    {task.caseWork && <div className="mt-1 text-xs font-semibold text-emerald-700">{task.caseWork.role} · {formatMoney(task.caseWork.earnedFee, task.caseWork.currency)}</div>}
                   </Link>
                 ))
               )}
@@ -974,22 +1054,32 @@ const taskMatterLabel = (task: IndependentTask) =>
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4">
-          <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-            <div className="border-b border-gray-200 px-6 py-4">
+        <div className="independent-task-modal-backdrop" role="presentation" onMouseDown={closeModal}>
+          <form
+            onSubmit={saveTask}
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="independent-task-form-title"
+            className="independent-task-form-card independent-task-form-dialog"
+          >
+            <header className="independent-task-form-header">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-semibold text-gray-900">{editingTask ? 'Edit Independent Task' : 'Create Independent Task'}</h2>
-                  <p className="text-sm text-gray-500">Independent tasks can be linked to a matter, a client, both, or neither.</p>
+                  <div className="text-xs font-bold uppercase tracking-[0.2em] text-blue-700">Task workspace</div>
+                  <h2 id="independent-task-form-title" className="text-xl font-semibold text-gray-900">{editingTask ? 'Edit Independent Task' : 'Create Independent Task'}</h2>
+                  <p className="mt-1 text-sm text-gray-500">Create focused operational work or safely delegate selected case Key Actions without opening the case workspace.</p>
                 </div>
-                <button type="button" onClick={closeModal} className="rounded-full p-2 text-gray-500 hover:bg-gray-100">
-                  <ChevronLeft className="h-5 w-5" />
+                <button type="button" onClick={closeModal} disabled={saving} className="independent-task-icon-close" aria-label="Close independent task form">
+                  ×
                 </button>
               </div>
-            </div>
+            </header>
 
-            <form onSubmit={saveTask} className="grid gap-6 p-6 lg:grid-cols-2">
-              <div className="space-y-4">
+            <div className="independent-task-form-body">
+              <div className="independent-task-form-grid">
+              <section className="independent-task-form-section space-y-4">
+                <div className="independent-task-section-heading"><h3>Task details</h3><p>Set the assignment context before choosing any delegated case work.</p></div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Task Number</label>
                   <input
@@ -1023,7 +1113,7 @@ const taskMatterLabel = (task: IndependentTask) =>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Related Matter</label>
                   <select
                     value={form.relatedMatterId}
-                    onChange={(e) => setForm((prev) => ({ ...prev, relatedMatterId: e.target.value }))}
+                    onChange={(e) => setForm((prev) => ({ ...prev, relatedMatterId: e.target.value, caseRole: '', keyActionKeys: [] }))}
                     className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
                     disabled={saving || lookupLoading}
                   >
@@ -1035,6 +1125,72 @@ const taskMatterLabel = (task: IndependentTask) =>
                     ))}
                   </select>
                 </div>
+                {form.relatedMatterId && (
+                  <section className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900">Delegated case work <span className="font-normal text-gray-500">(optional)</span></h3>
+                        <p className="mt-1 text-xs leading-5 text-gray-600">Choose the temporary role this assignee will perform. Only Key Actions ready for that lifecycle step are available, and all work stays in this task workspace.</p>
+                      </div>
+                      {caseKeyActionsLoading && <Loader2 className="h-4 w-4 animate-spin text-blue-700" />}
+                    </div>
+                    {caseKeyActionsError && <p className="mt-3 text-xs text-red-700">{caseKeyActionsError}</p>}
+                    <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                      {(['Initiator', 'Reviewer', 'Signer/Approver'] as IndependentTaskCaseRole[]).map((role) => (
+                        <button
+                          key={role}
+                          type="button"
+                          disabled={saving || caseKeyActionsLoading}
+                          onClick={() => setForm((prev) => ({ ...prev, caseRole: prev.caseRole === role ? '' : role, keyActionKeys: [] }))}
+                          className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${
+                            form.caseRole === role
+                              ? 'border-blue-700 bg-blue-700 text-white shadow-sm'
+                              : 'border-blue-200 bg-white text-blue-900 hover:border-blue-400'
+                          }`}
+                        >
+                          {role}
+                        </button>
+                      ))}
+                    </div>
+                    {form.caseRole && (
+                      <div className="mt-4 rounded-xl border border-blue-100 bg-white p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-gray-600">Open Key Actions</span>
+                          <span className="text-xs text-gray-500">{form.keyActionKeys.length} selected</span>
+                        </div>
+                        <div className="independent-task-key-actions-list mt-3 space-y-2 pr-1" aria-label="Available Key Actions">
+                          {caseKeyActionsLoading ? (
+                            <div className="text-xs text-gray-500">Loading Key Actions…</div>
+                          ) : selectableCaseKeyActions.length === 0 ? (
+                            <div className="text-xs text-gray-500">No Key Actions are ready for the {form.caseRole} lifecycle step yet.</div>
+                          ) : selectableCaseKeyActions.map((action) => {
+                            const selected = form.keyActionKeys.includes(action.key);
+                            return (
+                              <label key={action.key} className="independent-task-key-action flex cursor-pointer items-start gap-3 rounded-lg border border-gray-100 p-2.5 hover:bg-gray-50">
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  disabled={saving}
+                                  onChange={() => setForm((prev) => ({
+                                    ...prev,
+                                    keyActionKeys: selected
+                                      ? prev.keyActionKeys.filter((key) => key !== action.key)
+                                      : [...prev.keyActionKeys, action.key],
+                                  }))}
+                                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-700"
+                                />
+                                <span className="min-w-0">
+                                  <span className="block text-sm font-medium text-gray-900">{action.title}</span>
+                                  <span className="mt-0.5 block text-xs text-gray-500">{action.stageTitle} · {action.status}{action.dueAt ? ` · due ${formatDeadlineDateTime(action.dueAt)}` : ''}</span>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">Related Client</label>
                   <input
@@ -1044,9 +1200,10 @@ const taskMatterLabel = (task: IndependentTask) =>
                     disabled={saving}
                   />
                 </div>
-              </div>
+              </section>
 
-              <div className="space-y-4">
+              <section className="independent-task-form-section space-y-4">
+                <div className="independent-task-section-heading"><h3>Ownership &amp; timeline</h3><p>Give the task a clear owner, supervisor, and delivery window.</p></div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700">Assignee</label>
@@ -1102,27 +1259,29 @@ const taskMatterLabel = (task: IndependentTask) =>
                     disabled={saving}
                   />
                 </div>
-              </div>
+              </section>
 
-              <div className="col-span-full flex flex-col-reverse gap-3 border-t border-gray-200 pt-4 sm:flex-row sm:justify-end">
+              <footer className="independent-task-form-footer">
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="rounded-xl border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  disabled={saving}
+                  className="independent-task-button independent-task-button-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+                  className="independent-task-button independent-task-button-primary"
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   {editingTask ? 'Save Changes' : 'Create Task'}
                 </button>
+              </footer>
               </div>
-            </form>
-          </div>
+            </div>
+          </form>
         </div>
       )}
     </div>

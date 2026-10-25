@@ -8,11 +8,13 @@ import {
   deleteAttachment,
   deleteTask,
   getTask,
+  getCaseKeyActions,
   listAttachments,
   listComments,
   listHistory,
   listTasks,
   transitionTask,
+  performCaseLifecycle,
   updateTask,
   upload,
 } from '../modules/independentTasks/controllers/independentTaskController';
@@ -20,12 +22,14 @@ import {
 const router = express.Router();
 
 router.get('/independent-tasks/dashboard', authenticate, dashboard);
+router.get('/independent-tasks/case-options/:caseId', authenticate, getCaseKeyActions);
 router.get('/independent-tasks', authenticate, listTasks);
 router.post('/independent-tasks', authenticate, createTask);
 router.get('/independent-tasks/:taskId', authenticate, getTask);
 router.put('/independent-tasks/:taskId', authenticate, updateTask);
 router.delete('/independent-tasks/:taskId', authenticate, deleteTask);
 router.post('/independent-tasks/:taskId/transition', authenticate, transitionTask);
+router.post('/independent-tasks/:taskId/case-lifecycle', authenticate, performCaseLifecycle);
 
 router.get('/independent-tasks/:taskId/history', authenticate, listHistory);
 router.get('/independent-tasks/:taskId/comments', authenticate, listComments);

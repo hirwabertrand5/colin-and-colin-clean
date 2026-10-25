@@ -363,20 +363,44 @@ const buildFeedbackEmailHtml = (prospectId: string) => {
   `;
 };
 
-const createMatterFromTerminalProspect = async (
+const createMatterFromProspect = async (
   prospect: any,
   actorName: string,
-  matterStatus: 'Active' | 'Closed'
+  matterStatus: 'Active' | 'Closed' | 'Temporarily Closed'
 ) => {
   if (!prospect) return null;
-  if (prospect.convertedToMatters) {
+  const isTemporaryMatter = matterStatus === 'Temporarily Closed';
+  const linkedMatterId = isTemporaryMatter ? prospect.temporaryClosedMatterId : prospect.convertedToMatters;
+  if (linkedMatterId) {
+    const existingMatter: any = await Case.findById(linkedMatterId);
+    if (isTemporaryMatter && existingMatter) {
+      const existingStatus = String(existingMatter.status || '').trim();
+      // A matter returned to Intake can be put on hold again. An Active or
+      // Closed matter, however, is a different lifecycle and must never be
+      // silently repurposed as the intake hold record.
+      if (existingStatus === 'Temporarily Closed' || existingStatus === 'Returned to Intake') {
+        if (existingStatus !== 'Temporarily Closed') {
+          existingMatter.status = 'Temporarily Closed';
+          await existingMatter.save();
+        }
+        prospect.isActive = false;
+        prospect.isTemporarilyClosed = true;
+        prospect.temporarilyClosedAt = prospect.temporarilyClosedAt || new Date();
+        prospect.temporarilyClosedBy = prospect.temporarilyClosedBy || actorName || 'System';
+        await prospect.save();
+        return existingMatter;
+      }
+    }
+
+    if (!isTemporaryMatter) {
     if (prospect.isActive !== false) {
       prospect.isActive = false;
       prospect.engagementDate = prospect.engagementDate || new Date();
       await prospect.save();
     }
 
-    return Case.findById(prospect.convertedToMatters).lean();
+      return Case.findById(prospect.convertedToMatters).lean();
+    }
   }
 
   const assigneeSource = prospect.responsibleAssociate || prospect.assignedTo;
@@ -418,6 +442,7 @@ const createMatterFromTerminalProspect = async (
     ],
     assignedTo: assignedToDisplay,
     ...(Object.keys(caseAssignments).length ? { caseAssignments } : {}),
+    ...(isTemporaryMatter ? { intakeProspectId: prospect._id } : {}),
     status: matterStatus,
     priority: 'Medium',
     caseType: 'Transactional Cases',
@@ -438,7 +463,7 @@ const createMatterFromTerminalProspect = async (
   // Attach a workflow so the matter behaves like a normal Active Matter:
   // resolve the canonical template from the prospect's legal-service path,
   // create its instance, and seed planned/completed values.
-  if (matterStatus === 'Active') {
+  if (matterStatus !== 'Closed') {
     try {
       const labels = Array.isArray(prospect.legalServicePath) ? prospect.legalServicePath : [];
       const leafLabel = labels.length ? String(labels[labels.length - 1]?.label || '') : '';
@@ -501,10 +526,18 @@ const createMatterFromTerminalProspect = async (
     }
   }
 
-  prospect.convertedToMatters = savedCase._id;
-  prospect.stage = matterStatus === 'Closed' ? 'Non-Converted' : 'Converted';
-  prospect.engagementDate = new Date();
-  prospect.isActive = false;
+  if (isTemporaryMatter) {
+    prospect.temporaryClosedMatterId = savedCase._id;
+    prospect.isActive = false;
+    prospect.isTemporarilyClosed = true;
+    prospect.temporarilyClosedAt = new Date();
+    prospect.temporarilyClosedBy = actorName || 'System';
+  } else {
+    prospect.convertedToMatters = savedCase._id;
+    prospect.stage = matterStatus === 'Closed' ? 'Non-Converted' : 'Converted';
+    prospect.engagementDate = new Date();
+    prospect.isActive = false;
+  }
   await prospect.save();
 
   return savedCase;
@@ -530,7 +563,7 @@ export const reconcileTerminalProspects = async () => {
 
     const linkedCaseExists = prospect.convertedToMatters ? await Case.exists({ _id: prospect.convertedToMatters }) : false;
     if (!linkedCaseExists) {
-      await createMatterFromTerminalProspect(prospect, 'System', matterStatus);
+      await createMatterFromProspect(prospect, 'System', matterStatus);
       reconciledCount += 1;
       continue;
     }
@@ -595,6 +628,43 @@ export const getAllProspects = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('getAllProspects error:', error);
     return res.status(500).json({ message: 'Failed to fetch prospects.' });
+  }
+};
+
+/**
+ * Put a live intake record into the normal Matter lifecycle under
+ * Temporarily Closed. The prospect leaves Intake immediately; the linked
+ * matter retains the workflow and is the only place it can be reopened.
+ */
+export const moveProspectToTemporaryMatter = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!canManageProspects(req.user?.role)) return res.status(403).json({ message: 'Forbidden.' });
+    const prospectId = getRouteId(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(prospectId)) return res.status(400).json({ message: 'Invalid prospect ID.' });
+    const prospect: any = await Prospect.findById(prospectId);
+    if (!prospect) return res.status(404).json({ message: 'Prospect not found.' });
+    if (terminalStages.includes(String(prospect.stage))) {
+      return res.status(400).json({ message: 'Converted or non-converted prospects cannot be temporarily closed.' });
+    }
+
+    const alreadyTemporarilyClosed = Boolean(prospect.isTemporarilyClosed);
+    const matter: any = await createMatterFromProspect(prospect, req.user?.name || 'System', 'Temporarily Closed');
+    if (!matter) return res.status(500).json({ message: 'Failed to create the temporary matter.' });
+
+    if (!alreadyTemporarilyClosed) {
+      pushStageHistory(prospect, {
+        stage: prospect.stage,
+        status: 'Temporarily Closed',
+        startedAt: prospect.stageStartedAt,
+        dueAt: prospect.stageDueAt,
+        waitingOn: prospect.waitingOn,
+      });
+      await prospect.save();
+    }
+
+    return res.json({ prospect, matter: { _id: matter._id, caseNo: matter.caseNo, status: matter.status } });
+  } catch (error: any) {
+    return res.status(500).json({ message: error?.message || 'Failed to move prospect to temporarily closed matters.' });
   }
 };
 
@@ -671,7 +741,7 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
 
     const saved = await prospect.save();
     if (terminalStages.includes(saved.stage as any)) {
-      await createMatterFromTerminalProspect(
+      await createMatterFromProspect(
         saved,
         req.user?.name || 'System',
         saved.stage === 'Converted' ? 'Active' : 'Closed'
@@ -804,11 +874,11 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
     const saved = await prospect.save();
 
     if (saved.stage === 'Converted' && !saved.convertedToMatters) {
-      await createMatterFromTerminalProspect(saved, req.user?.name || 'System', 'Active');
+      await createMatterFromProspect(saved, req.user?.name || 'System', 'Active');
     }
 
     if (saved.stage === 'Non-Converted' && !saved.convertedToMatters) {
-      await createMatterFromTerminalProspect(saved, req.user?.name || 'System', 'Closed');
+      await createMatterFromProspect(saved, req.user?.name || 'System', 'Closed');
     }
 
     if (terminalStages.includes(saved.stage as any) && saved.isActive !== false) {
@@ -1043,7 +1113,7 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
       return res.status(400).json({ message: 'Please record a conversion outcome before converting this prospect.' });
     }
 
-    const savedCase = await createMatterFromTerminalProspect(prospect, req.user?.name || 'System', 'Active');
+    const savedCase = await createMatterFromProspect(prospect, req.user?.name || 'System', 'Active');
 
     return res.json({
       message: 'Prospect converted to matter successfully.',

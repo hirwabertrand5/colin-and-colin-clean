@@ -98,6 +98,9 @@ export type CaseTeamEarnedFee = {
   assignmentStartedAt?: string | null;
   keyActionKeys?: string[];
   completedKeyActions?: number;
+  performedKeyActions?: number;
+  independentTaskIds?: string[];
+  isIndependentContributor?: boolean;
 };
 
 export type CaseEarnedFees = {

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Receipt, ClipboardList, Briefcase, Circle, Trash2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Receipt, ClipboardList, Briefcase, Circle, Trash2, Loader2 } from 'lucide-react';
 import usePageTitle from '../../hooks/usePageTitle';
-import { deleteProspect, getProspectById, Prospect } from '../../services/prospectService';
+import { deleteProspect, getProspectById, moveProspectToTemporaryMatter, Prospect } from '../../services/prospectService';
 import { getProspectFeedback, upsertProspectFeedback, ProspectFeedback as ProspectFeedbackModel } from '../../services/prospectFeedbackService';
 import { sendClientExperienceRequest } from '../../services/clientExperienceService';
 import AutomationCard from './AutomationCard';
@@ -97,6 +97,7 @@ export default function ProspectWorkspace() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [movingToTemporaryMatter, setMovingToTemporaryMatter] = useState(false);
   const [feedback, setFeedback] = useState<ProspectFeedbackModel | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackForm, setFeedbackForm] = useState({
@@ -192,6 +193,21 @@ export default function ProspectWorkspace() {
   const handleEditClose = async () => {
     setShowEditForm(false);
     await loadProspect();
+  };
+
+  const handleMoveToTemporaryMatter = async () => {
+    if (!prospect) return;
+    if (!window.confirm('Move this prospect into Temporarily Closed Matters? It will leave Intake & Prospects and continue from the matter workspace.')) return;
+    try {
+      setMovingToTemporaryMatter(true);
+      setError('');
+      const result = await moveProspectToTemporaryMatter(prospect._id);
+      navigate(`/matters/${result.matter._id}`);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to move prospect to Temporarily Closed Matters.');
+    } finally {
+      setMovingToTemporaryMatter(false);
+    }
   };
 
   const stageIndex = useMemo(() => {
@@ -341,6 +357,15 @@ export default function ProspectWorkspace() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleMoveToTemporaryMatter}
+                    disabled={movingToTemporaryMatter}
+                    className="inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300"
+                  >
+                    {movingToTemporaryMatter ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Briefcase className="mr-2 h-4 w-4" />}
+                    Move to Temporarily Closed Matters
+                  </button>
                   <button
                     type="button"
                     onClick={() => setShowDeleteModal(true)}

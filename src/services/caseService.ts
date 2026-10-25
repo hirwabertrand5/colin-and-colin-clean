@@ -62,6 +62,7 @@ export interface CaseData {
   _id?: string;
   caseNo: string;
   parties: string;
+  intakeProspectId?: string;
   caseType: CaseType;
   status: string;
   priority: string;
@@ -265,6 +266,21 @@ export const setCaseOperationalStatus = async (caseId: string, status: 'Active' 
     body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to update case status');
+  return res.json();
+};
+
+export const returnProspectTemporaryMatterToIntake = async (caseId: string): Promise<{
+  case: CaseData;
+  prospect: { _id: string };
+}> => {
+  const res = await fetch(`${API_URL}/cases/${caseId}/reopen-to-intake`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getToken()}`,
+    },
+  });
+  if (!res.ok) throw new Error((await res.json()).message || 'Failed to return matter to Client Intake & Prospect');
   return res.json();
 };
 

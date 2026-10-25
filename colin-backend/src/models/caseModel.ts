@@ -56,6 +56,8 @@ export interface ICase extends Document {
   caseNo: string;
   parties: string;
   caseType: CaseType;
+  /** Source intake record for a matter that was temporarily closed before conversion. */
+  intakeProspectId?: mongoose.Types.ObjectId;
 
   status: string;
   priority: string;
@@ -229,6 +231,7 @@ const CaseSchema = new Schema<ICase>(
   {
     caseNo: { type: String, required: true, trim: true },
     parties: { type: String, required: true, trim: true },
+    intakeProspectId: { type: Schema.Types.ObjectId, ref: 'Prospect', index: true },
 
     caseType: {
       type: String,
@@ -442,5 +445,6 @@ CaseSchema.index({ 'caseAssignments.signerApprover': 1 });
 // "Matters Opened" (entry date) and period scoping filter/sort on createdAt.
 CaseSchema.index({ createdAt: -1 });
 CaseSchema.index({ retainerId: 1, status: 1 });
+CaseSchema.index({ intakeProspectId: 1, status: 1 });
 
 export default mongoose.model<ICase>('Case', CaseSchema);

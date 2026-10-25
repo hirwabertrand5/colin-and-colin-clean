@@ -66,6 +66,8 @@ export type StaffDashboardMatterRow = {
   earnedFee: number | null;
   /** False when the matter is shown solely because this user earned fees before a handover. */
   isCurrentAssignment: boolean;
+  /** True when this earnings row came from a delegated Independent Task. */
+  isIndependentContributor?: boolean;
   completed: boolean;
   outstanding: boolean;
   overdueSections: number;

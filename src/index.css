@@ -4425,7 +4425,7 @@ html {
 .independent-tasks-table tbody tr:hover { background: #eff6ff; }
 .independent-tasks-table td:first-child { color: #64748b; font-size: 0.76rem; font-weight: 800; text-align: center; }
 .independent-tasks-table td:nth-child(2) > div:first-child { color: #1e293b; font-size: 0.8rem; font-weight: 800; }
-.independent-tasks-table td:nth-child(9) > div { gap: 0.35rem; }
+.independent-tasks-table td:nth-child(10) > div { gap: 0.35rem; }
 .independent-tasks-table td a,
 .independent-tasks-table td button { min-height: 1.9rem; padding: 0.36rem 0.5rem; }
 .independent-tasks-table td button.border-red-200 { border-color: #fecaca; background: #fef2f2; color: #dc2626; }
@@ -4434,6 +4434,170 @@ html {
 .independent-tasks-sidebar .rounded-2xl { border-radius: 8px; }
 .independent-tasks-sidebar a { border-color: #e7edf5; }
 .independent-tasks-sidebar a:hover { background: #eff6ff; }
+
+.independent-task-workspace { max-width: 1500px; margin: 0 auto; }
+.independent-task-workspace-header {
+  border-color: #cbd8e8;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 55%, #eff6ff 100%);
+  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.06);
+}
+.independent-task-workspace .bg-blue-50\/60 { background: #f4f8ff; }
+
+/* The task form follows the Retainer workspace treatment: a clear banded
+   header, paired form columns and a quiet, bordered working surface. */
+.independent-task-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 1.5rem;
+  background: rgba(2, 6, 23, 0.68);
+}
+
+.independent-task-form-card {
+  box-sizing: border-box;
+  width: min(100%, 70rem);
+  max-height: calc(100dvh - 3rem);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #cbd8e8;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(2, 6, 23, 0.38);
+  color: #111827;
+}
+.independent-task-form-header {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  padding: 1.35rem 1.5rem 1.15rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 52%, #ffffff 100%);
+}
+.independent-task-form-header h2 { letter-spacing: -0.02em; }
+.independent-task-icon-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid #d6e0ec;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.independent-task-icon-close:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #eef2f7;
+  color: #0f172a;
+}
+.independent-task-form-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1rem 1.25rem 1.25rem;
+  scrollbar-gutter: stable;
+}
+.independent-task-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(18rem, 0.75fr);
+  align-items: start;
+  gap: 1rem;
+}
+.independent-task-form-section {
+  min-width: 0;
+  padding: 1.1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+.independent-task-section-heading {
+  margin-bottom: 1rem;
+}
+.independent-task-section-heading h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.94rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+.independent-task-section-heading p {
+  margin: 0.4rem 0 0;
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.independent-task-form-card label { color: #334155; font-size: 0.78rem; font-weight: 750; }
+.independent-task-form-card input,
+.independent-task-form-card select,
+.independent-task-form-card textarea {
+  border-color: #b7c5d7;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.025);
+}
+.independent-task-form-card input:focus,
+.independent-task-form-card select:focus,
+.independent-task-form-card textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.13);
+}
+.independent-task-form-card .bg-blue-50\/60 { background: #f4f8ff; }
+.independent-task-form-card .border-blue-100 { border-color: #cfe0fb; }
+.independent-task-key-actions-list {
+  min-height: 0;
+  max-height: min(38dvh, 22rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+.independent-task-key-actions-list::-webkit-scrollbar { width: 0.45rem; }
+.independent-task-key-actions-list::-webkit-scrollbar-thumb { border-radius: 999px; background: #94a3b8; }
+.independent-task-key-action { transition: border-color 160ms ease, background-color 160ms ease; }
+.independent-task-key-action:hover { border-color: #bfdbfe; background: #f8fbff; }
+.independent-task-form-footer {
+  position: sticky;
+  bottom: -1.25rem;
+  z-index: 1;
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin: 0 -1.25rem -1.25rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+.independent-task-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.65rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.independent-task-button:disabled { cursor: not-allowed; opacity: 0.65; }
+.independent-task-button-secondary { border: 1px solid #cbd5e1; background: #ffffff; color: #334155; }
+.independent-task-button-secondary:hover:not(:disabled) { border-color: #94a3b8; background: #f8fafc; }
+.independent-task-button-primary { border: 1px solid #1d4ed8; background: #2563eb; color: #ffffff; box-shadow: 0 2px 5px rgba(37, 99, 235, 0.22); }
+.independent-task-button-primary:hover:not(:disabled) { border-color: #1e40af; background: #1d4ed8; }
 
 /* Profitability uses the same density as the Retainers portfolio. */
 .profitability-page > :not([hidden]) ~ :not([hidden]),
@@ -4496,6 +4660,30 @@ html {
 .dark .independent-tasks-page .bg-gray-50 { background: #111d30; }
 .dark .independent-tasks-table tbody tr:hover,
 .dark .independent-tasks-sidebar a:hover { background: #193b68; }
+.dark .independent-task-form-card { border-color: #3d506a; background: #1b283b; color: #f8fafc; color-scheme: dark; }
+.dark .independent-task-form-header { border-color: #3d506a; background: linear-gradient(135deg, #14233a, #1b283b); }
+.dark .independent-task-form-section { border-color: #3d506a; background: #1b283b; }
+.dark .independent-task-form-card label,
+.dark .independent-task-form-card .text-gray-900,
+.dark .independent-task-section-heading h3 { color: #f8fafc; }
+.dark .independent-task-form-card .text-gray-500,
+.dark .independent-task-form-card .text-gray-600,
+.dark .independent-task-section-heading p { color: #b8c7da; }
+.dark .independent-task-form-card input,
+.dark .independent-task-form-card select,
+.dark .independent-task-form-card textarea { border-color: #52637b; background: #0d1728; color: #f8fafc; }
+.dark .independent-task-form-card .bg-white { background: #1b283b; }
+.dark .independent-task-form-card .bg-blue-50\/60 { background: #142a48; }
+.dark .independent-task-form-card .border-blue-100 { border-color: #285f9f; }
+.dark .independent-task-key-action { border-color: #3d506a; }
+.dark .independent-task-key-action:hover { border-color: #52637b; background: #263952; }
+.dark .independent-task-form-footer { border-color: #3d506a; background: rgba(27, 40, 59, 0.96); }
+.dark .independent-task-icon-close,
+.dark .independent-task-button-secondary { border-color: #52637b; background: #0d1728; color: #dbeafe; }
+.dark .independent-task-icon-close:hover:not(:disabled),
+.dark .independent-task-button-secondary:hover:not(:disabled) { background: #263952; }
+.dark .independent-task-workspace-header { border-color: #3d506a; background: linear-gradient(135deg, #1b283b, #14233a); }
+.dark .independent-task-workspace .bg-blue-50\/60 { background: #142a48; }
 
 @media (max-width: 1024px) {
   .independent-tasks-workspace { grid-template-columns: 1fr; }
@@ -4507,6 +4695,22 @@ html {
   .independent-tasks-header-actions > * { flex: 1 1 auto; }
   .independent-tasks-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .profitability-hero-main { padding: 1rem; }
+}
+
+@media (max-width: 900px) {
+  .independent-task-form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .independent-task-modal-backdrop { align-items: flex-start; padding: 0.5rem; }
+  .independent-task-form-card { max-height: calc(100dvh - 1rem); border-radius: 14px; }
+  .independent-task-form-header { padding: 1rem; }
+  .independent-task-form-header h2 { font-size: 1.1rem; }
+  .independent-task-form-body { padding: 0.75rem; }
+  .independent-task-form-section { padding: 1rem; }
+  .independent-task-form-footer { bottom: -0.75rem; margin: 0 -0.75rem -0.75rem; padding: 0.75rem; }
+  .independent-task-form-footer > button { flex: 1 1 0; }
+  .independent-task-key-actions-list { max-height: min(34dvh, 18rem); }
 }
 
 @media (max-width: 460px) {
@@ -4537,6 +4741,7 @@ html {
 .independent-task-col-matter { width: 14.25rem; }
 .independent-task-col-assignee { width: 12rem; }
 .independent-task-col-creator { width: 10rem; }
+.independent-task-col-case-work { width: 15rem; }
 .independent-task-col-deadline { width: 13.5rem; }
 .independent-task-col-status { width: 10rem; }
 .independent-task-col-due { width: 11.25rem; }

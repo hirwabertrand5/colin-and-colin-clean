@@ -15,6 +15,7 @@ export type IndependentTaskHistoryAction =
   | 'TASK_CLOSED'
   | 'TASK_REVIEW_REQUESTED'
   | 'TASK_EXTERNAL_ACTION_REQUESTED'
+  | 'TASK_CASE_LIFECYCLE_UPDATED'
   | 'TASK_REOPENED';
 
 export interface IIndependentTaskHistory extends Document {

@@ -617,8 +617,12 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                           {member.isCurrentAssignment === false ? (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">Handover record</span>
                           ) : null}
+                          {member.isIndependentContributor ? (
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">Independent task</span>
+                          ) : null}
                         </div>
                         {member.isCurrentAssignment === false && <div className="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">Completed work and earned fee retained.</div>}
+                        {member.isIndependentContributor && <div className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">Delegated Key Actions: {member.performedKeyActions || 0} performed · {member.completedKeyActions || 0} approved</div>}
                       </td>
                       <td
                         className="px-3 py-2 text-right text-gray-600 dark:text-gray-300"

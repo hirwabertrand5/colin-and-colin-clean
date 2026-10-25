@@ -9,6 +9,7 @@ import {
   convertProspectToMatter,
   recordProspectFollowUp,
   toggleProspectChecklistItem,
+  moveProspectToTemporaryMatter,
 } from '../controllers/prospectController.js';
 import { authenticate } from '../middleware/authMiddleware.js';
 
@@ -32,6 +33,7 @@ router.post('/', authenticate, createProspect);
 router.put('/:id', authenticate, updateProspect);
 router.post('/:id/follow-up', authenticate, recordProspectFollowUp);
 router.patch('/:id/checklist', authenticate, toggleProspectChecklistItem);
+router.post('/:id/move-to-temporary-matter', authenticate, moveProspectToTemporaryMatter);
 router.delete('/:id', authenticate, deleteProspect);
 router.post('/:id/convert', authenticate, convertProspectToMatter);
 

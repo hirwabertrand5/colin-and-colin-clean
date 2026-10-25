@@ -73,6 +73,11 @@ export interface Prospect {
   assignedTo: string | { _id: string; name: string; email?: string };
   createdBy?: string | { _id: string; name: string; email?: string } | null;
   isActive: boolean;
+  isTemporarilyClosed?: boolean;
+  temporarilyClosedAt?: Date | string;
+  temporarilyClosedBy?: string;
+  temporaryCloseReason?: string;
+  temporaryClosedMatterId?: string | { _id: string; caseNo?: string } | null;
   convertedToMatters?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -202,6 +207,14 @@ export const updateProspect = async (id: string, data: Partial<Prospect>): Promi
 
 export const deleteProspect = async (id: string): Promise<void> => {
   await axios.delete(`${API_BASE_URL}/prospects/${id}`, { headers: getAuthHeaders() });
+};
+
+export const moveProspectToTemporaryMatter = async (id: string): Promise<{
+  prospect: Prospect;
+  matter: { _id: string; caseNo: string; status: string };
+}> => {
+  const response = await axios.post(`${API_BASE_URL}/prospects/${id}/move-to-temporary-matter`, {}, { headers: getAuthHeaders() });
+  return response.data;
 };
 
 export const getProspectStats = async (): Promise<Record<string, number>> => {

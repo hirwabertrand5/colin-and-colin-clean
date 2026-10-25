@@ -37,6 +37,7 @@ import {
   approveTakeCaseRequest,
   denyTakeCaseRequest,
   setCaseOperationalStatus,
+  returnProspectTemporaryMatterToIntake,
 } from '../../services/caseService';
 import {
   getTasksForCase,
@@ -1238,6 +1239,14 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
     if (!caseData?._id) return;
     try {
       setWorkflowError('');
+      const isProspectTemporaryMatter =
+        caseData.status === 'Temporarily Closed' && Boolean(caseData.intakeProspectId);
+      if (isProspectTemporaryMatter) {
+        if (!window.confirm('Return this matter to Client Intake & Prospect? It will leave Temporarily Closed Matters and retain its intake workflow.')) return;
+        const result = await returnProspectTemporaryMatterToIntake(caseData._id);
+        navigate(`/matters/intake-prospects/${result.prospect._id}`);
+        return;
+      }
       const nextStatus = caseData.status === 'Temporarily Closed' ? 'Active' : 'Temporarily Closed';
       const updated = await setCaseOperationalStatus(caseData._id, nextStatus as 'Active' | 'Temporarily Closed');
       setCaseData(updated);
@@ -1698,7 +1707,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 </div>
               </div>
             )}
-            {canManageCase && String(caseData.status || '').toLowerCase() !== 'closed' && (
+            {(canManageCase || (caseData.status === 'Temporarily Closed' && Boolean(caseData.intakeProspectId))) && String(caseData.status || '').toLowerCase() !== 'closed' && (
               <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
@@ -1717,7 +1726,11 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     }`}
                   >
                     {caseData.status === 'Temporarily Closed' ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
-                    {caseData.status === 'Temporarily Closed' ? 'Reopen to Active' : 'Move to Temporarily Closed'}
+                    {caseData.status === 'Temporarily Closed' && caseData.intakeProspectId
+                      ? 'Reopen to Client Intake & Prospect'
+                      : caseData.status === 'Temporarily Closed'
+                        ? 'Reopen to Active'
+                        : 'Move to Temporarily Closed'}
                   </button>
                 </div>
               </div>

@@ -1,10 +1,17 @@
 import mongoose from 'mongoose';
 import Case from '../../../models/caseModel';
+import Document from '../../../models/documentModel';
+import Invoice from '../../../models/invoiceModel';
+import Task from '../../../models/taskModel';
+import User from '../../../models/userModel';
+import WorkflowInstance from '../../../models/workflowInstanceModel';
+import WorkflowTemplate from '../../../models/workflowTemplateModel';
 import { AuthRequest } from '../../../middleware/authMiddleware';
 import { writeAudit } from '../../../services/auditService';
 import { findUserByAssigneeString, notifyRoles, notifyUsersById } from '../../../services/notifyService';
 import { buildYearlySequence } from '../../../utils/counter';
 import IndependentTask, {
+  IndependentTaskCaseRole,
   IndependentTaskPriority,
   IndependentTaskStatus,
 } from '../models/independentTaskModel';
@@ -15,6 +22,10 @@ import IndependentTaskHistory, {
 } from '../models/independentTaskHistoryModel';
 import { caseMatchesAssignee } from '../../../utils/caseAssignments';
 import { storeUploadedFile } from '../../../services/fileStorageService';
+import { completeStepForCase } from '../../../controllers/workflowController';
+import { computeCaseEarnedFees, computeStepTimelinessAt, normalizeEffectiveWorkflowSteps } from '../../../utils/caseEarnedFees';
+import { allocateCollectedValueAcrossKeyActions, calculateCollectedKeyActionEarnings } from '../../../utils/keyActionEarnings';
+import { buildRoleByName, computeEarnedFee } from '../../../utils/workflowPercentages';
 
 export type IndependentTaskListQuery = {
   q?: string;
@@ -77,6 +88,23 @@ const STATUS_FLOW: Record<IndependentTaskStatus, IndependentTaskStatus[]> = {
   Closed: [],
 };
 
+const CASE_TASK_ROLES: IndependentTaskCaseRole[] = ['Initiator', 'Reviewer', 'Signer/Approver'];
+
+const samePerson = (left: unknown, right: unknown) =>
+  cleanString(left).toLocaleLowerCase() === cleanString(right).toLocaleLowerCase();
+
+const keyActionKeysFrom = (value: unknown) =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((key) => cleanString(key))
+        .filter(Boolean)
+    )
+  );
+
+const isCaseTaskRole = (value: unknown): value is IndependentTaskCaseRole =>
+  CASE_TASK_ROLES.includes(cleanString(value) as IndependentTaskCaseRole);
+
 const actor = (req: AuthRequest) => ({
   actorName: req.user?.name || 'System',
   actorUserId: req.user?.id,
@@ -93,6 +121,129 @@ const toDateMs = (value?: string) => {
   return Number.isFinite(ms) ? ms : NaN;
 };
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const loadCaseTaskContext = async (caseId: string) => {
+  const caseDoc: any = await Case.findById(caseId);
+  if (!caseDoc) throw new Error('Selected matter was not found.');
+  const inst: any = await WorkflowInstance.findOne({ caseId: caseDoc._id });
+  if (!inst) throw new Error('This matter does not have an active Key Action workflow.');
+  const template: any = await WorkflowTemplate.findById(inst.templateId).lean();
+  if (!template) throw new Error('The workflow template for this matter was not found.');
+  return { caseDoc, inst, template };
+};
+
+const publicKeyActions = (inst: any, template: any) => {
+  const steps = normalizeEffectiveWorkflowSteps(inst, template);
+  return steps.map((step: any) => ({
+    key: cleanString(step?.stepKey),
+    title: cleanString(step?.title) || cleanString(step?.stepKey) || 'Key Action',
+    stageTitle: cleanString(step?.stageTitle) || cleanString(step?.stageKey) || 'Workflow stage',
+    status: cleanString(step?.status) || 'Not Started',
+    dueAt: step?.dueAt || null,
+    percentage: Number(step?.percentage) || 0,
+  })).filter((step) => Boolean(step.key));
+};
+
+const keyActionIsReadyForRole = (role: IndependentTaskCaseRole, status: string) => {
+  if (role === 'Initiator') return ['Not Started', 'In Progress', 'Done'].includes(status);
+  if (role === 'Reviewer') return status === 'Awaiting Review';
+  return status === 'Awaiting Approval';
+};
+
+/**
+ * The task table/workspace needs task-specific money, not the total earned by
+ * the person elsewhere on the same matter.  We therefore derive the amount
+ * from only the task's selected Key Actions and only the lifecycle events that
+ * this task recorded. The common case calculation remains the source for
+ * collection caps, Quality Score and TPA.
+ */
+const buildCaseTaskMetrics = async (task: any, knownMatter?: any) => {
+  const role = task?.caseRole as IndependentTaskCaseRole | undefined;
+  const taskKeys = keyActionKeysFrom(task?.keyActionKeys);
+  if (!task?.relatedMatterId || !role || !taskKeys.length) return null;
+
+  try {
+    const { caseDoc, inst, template } = await loadCaseTaskContext(String(task.relatedMatterId));
+    const [tasks, paidInvoices, users] = await Promise.all([
+      Task.find({ caseId: caseDoc._id }).lean(),
+      Invoice.find({ caseId: caseDoc._id, status: 'Paid' }).select('amount').lean(),
+      User.find({ isActive: { $ne: false } }).select('name role').lean(),
+    ]);
+    const collectedAmount = (paidInvoices || []).reduce((sum: number, invoice: any) => sum + Math.max(0, Number(invoice?.amount) || 0), 0);
+    const effectiveSteps = normalizeEffectiveWorkflowSteps(inst, template);
+    const workflowInstance = { ...(typeof inst.toObject === 'function' ? inst.toObject() : inst), steps: effectiveSteps };
+    const roleByName = buildRoleByName(users as any[]);
+    const earned = computeCaseEarnedFees({
+      caseDoc,
+      template,
+      workflowInstance,
+      tasks,
+      collectedAmount,
+      roleByName,
+    });
+    const keyActionEarnings = calculateCollectedKeyActionEarnings({
+      matter: caseDoc,
+      template,
+      workflowInstance,
+      tasks,
+      collectedAmount,
+    });
+    const collectedByKey = allocateCollectedValueAcrossKeyActions(keyActionEarnings);
+    const selectedSteps = effectiveSteps.filter((step: any) => taskKeys.includes(cleanString(step?.stepKey)));
+    const contributedSteps = selectedSteps.filter((step: any) =>
+      (Array.isArray(step?.independentContributors) ? step.independentContributors : []).some(
+        (entry: any) => String(entry?.taskId || '') === String(task._id) && entry?.role === role && samePerson(entry?.name, task.assignee)
+      )
+    );
+    const completedSteps = contributedSteps.filter((step: any) => cleanString(step?.status) === 'Completed');
+    const timelinessSamples = contributedSteps
+      .map((step: any) => {
+        const contribution = (Array.isArray(step?.independentContributors) ? step.independentContributors : []).find(
+          (entry: any) => String(entry?.taskId || '') === String(task._id) && entry?.role === role && samePerson(entry?.name, task.assignee)
+        );
+        return computeStepTimelinessAt(step, contribution?.actedAt);
+      })
+      .filter((score: number | null): score is number => score !== null);
+    const timelinessScore = timelinessSamples.length
+      ? Math.round((timelinessSamples.reduce((sum, score) => sum + score, 0) / timelinessSamples.length) * 10) / 10
+      : null;
+    const teamMember = earned.team.find((member) => member.role === role && samePerson(member.name, task.assignee));
+    const collectedBase = completedSteps.reduce(
+      (sum: number, step: any) => sum + (Number(collectedByKey.get(cleanString(step?.stepKey))) || 0),
+      0
+    );
+    const tpaPercent = Number(teamMember?.tpaPercent) || 0;
+    const qualityScore = earned.qualityScore;
+    const earnedFee = computeEarnedFee(collectedBase, tpaPercent, timelinessScore, qualityScore);
+
+    return {
+      role,
+      currency: earned.currency,
+      lifecycleStatus: task.caseLifecycleStatus || 'Ready',
+      selectedKeyActions: selectedSteps.map((step: any) => ({
+        key: cleanString(step?.stepKey),
+        title: cleanString(step?.title) || cleanString(step?.stepKey),
+        stageTitle: cleanString(step?.stageTitle) || cleanString(step?.stageKey),
+        status: cleanString(step?.status) || 'Not Started',
+        dueAt: step?.dueAt || null,
+        completed: cleanString(step?.status) === 'Completed',
+        contributedByTask: contributedSteps.includes(step),
+      })),
+      performedKeyActions: contributedSteps.length,
+      completedKeyActions: completedSteps.length,
+      tpaPercent,
+      timelinessScore,
+      qualityScore,
+      collectedBase: Math.round(collectedBase * 100) / 100,
+      earnedFee,
+      caseNo: knownMatter?.caseNo || caseDoc.caseNo,
+    };
+  } catch {
+    // A missing/deleted workflow must never hide the independent task. Its
+    // normal metadata remains available and the UI can show earnings as pending.
+    return null;
+  }
+};
 
 const requireDateString = (value: unknown, message: string) => {
   const str = cleanString(value);
@@ -174,7 +325,7 @@ const hydrateTask = async (task: any) => {
     ? await Case.findById(task.relatedMatterId).select('caseNo parties status assignedTo caseAssignments').lean()
     : null;
   const taskObj = typeof task.toObject === 'function' ? task.toObject() : task;
-
+  const caseWork = await buildCaseTaskMetrics(taskObj, matter);
   return {
     ...taskObj,
     relatedMatter: matter
@@ -187,6 +338,7 @@ const hydrateTask = async (task: any) => {
           caseAssignments: (matter as any).caseAssignments,
         }
       : null,
+    ...(caseWork ? { caseWork } : {}),
   };
 };
 
@@ -336,6 +488,25 @@ const applyWorkflowTransition = async (task: any, nextStatus: IndependentTaskSta
 };
 
 export const independentTaskService = {
+  async getCaseKeyActions(caseId: string) {
+    if (!mongoose.Types.ObjectId.isValid(caseId)) throw new Error('Invalid matter id.');
+    const { caseDoc, inst, template } = await loadCaseTaskContext(caseId);
+    return {
+      caseId: String(caseDoc._id),
+      caseNo: String(caseDoc.caseNo || ''),
+      parties: String(caseDoc.parties || ''),
+      assignments: {
+        initiator: cleanString(caseDoc.caseAssignments?.initiator || caseDoc.assignedTo),
+        reviewer: cleanString(caseDoc.caseAssignments?.reviewer),
+        approver: cleanString(caseDoc.caseAssignments?.signerApprover),
+      },
+      // An action remains selectable until final approval. This enables a
+      // reviewer/approver delegation to be created after the initiator has
+      // already submitted the work, while finalised Key Actions never appear.
+      keyActions: publicKeyActions(inst, template).filter((step) => step.status !== 'Completed'),
+    };
+  },
+
   async createTask(payload: any, req: AuthRequest) {
     const title = requireString(payload.title, 'Title is required.');
     const assignee = requireString(payload.assignee, 'Assignee is required.');
@@ -359,6 +530,26 @@ export const independentTaskService = {
       if (!matter) throw new Error('Selected matter was not found.');
       matterLabel = [matter.caseNo, matter.parties].filter(Boolean).join(' • ');
       if (!relatedClient) relatedClient = cleanString((matter as any).parties);
+    }
+
+    const requestedCaseRole = cleanString(payload.caseRole);
+    const keyActionKeys = keyActionKeysFrom(payload.keyActionKeys);
+    if (requestedCaseRole || keyActionKeys.length) {
+      if (!relatedMatterId) throw new Error('Select a matter before delegating case work.');
+      if (!isCaseTaskRole(requestedCaseRole)) {
+        throw new Error('Select whether the task assignee is acting as Initiator, Reviewer or Signer/Approver.');
+      }
+      if (!keyActionKeys.length) throw new Error('Select at least one open Key Action for this case delegation.');
+      const { inst, template } = await loadCaseTaskContext(relatedMatterId);
+      const selectable = new Map(
+        publicKeyActions(inst, template)
+          .filter((step) => step.status !== 'Completed')
+          .map((step) => [step.key, step])
+      );
+      const invalid = keyActionKeys.find((key) => !selectable.has(key));
+      if (invalid) throw new Error('One or more selected Key Actions are already completed or no longer available. Refresh the matter selection and try again.');
+      const incompatible = keyActionKeys.find((key) => !keyActionIsReadyForRole(requestedCaseRole as IndependentTaskCaseRole, selectable.get(key)?.status || ''));
+      if (incompatible) throw new Error('One or more selected Key Actions are not ready for the chosen lifecycle role.');
     }
 
     const taskNumber = cleanString(payload.taskNumber) || (await generateTaskNumber());
@@ -386,6 +577,11 @@ export const independentTaskService = {
         if (description) taskDoc.description = description;
         if (matterLabel) taskDoc.relatedMatterLabel = matterLabel;
         if (relatedClient) taskDoc.relatedClient = relatedClient;
+        if (requestedCaseRole && keyActionKeys.length) {
+          taskDoc.caseRole = requestedCaseRole;
+          taskDoc.keyActionKeys = keyActionKeys;
+          taskDoc.caseLifecycleStatus = 'Ready';
+        }
         if (req.user?.id) {
           const userId = new mongoose.Types.ObjectId(req.user.id);
           taskDoc.createdByUserId = userId;
@@ -521,6 +717,16 @@ export const independentTaskService = {
       .limit(8)
       .lean();
 
+    const delegatedToMeRaw = visible.filter(
+      (task) => cleanString(task.assignee) === cleanString(req.user?.name) && Boolean(task.caseRole)
+    );
+    const hydratedDelegatedToMe = await Promise.all(delegatedToMeRaw.map((task) => hydrateTask(task)));
+    const assignedToMeRaw = visible.filter((task) => cleanString(task.assignee) === cleanString(req.user?.name)).slice(0, 5);
+    const assignedToMe = await Promise.all(assignedToMeRaw.map((task) => hydrateTask(task)));
+    const knownIndependentEarnedFees = hydratedDelegatedToMe
+      .map((task: any) => task?.caseWork?.earnedFee)
+      .filter((fee: unknown): fee is number => typeof fee === 'number' && Number.isFinite(fee));
+
     return {
       summary: {
         totalTasks: visible.length,
@@ -542,8 +748,14 @@ export const independentTaskService = {
         ...(typeof t.toObject === 'function' ? t.toObject() : t),
         relatedMatter: t.relatedMatterId ? undefined : null,
       })),
-      assignedToMe: visible.filter((t) => cleanString(t.assignee) === cleanString(req.user?.name)).slice(0, 5),
+      assignedToMe,
       tasksDueToday: visible.filter((t) => t.dueDate === today && !['Closed', 'Completed'].includes(t.status)),
+      independentTaskEarnings: {
+        earnedFee: knownIndependentEarnedFees.length
+          ? Math.round(knownIndependentEarnedFees.reduce((sum, fee) => sum + fee, 0) * 100) / 100
+          : null,
+        taskCount: hydratedDelegatedToMe.length,
+      },
     };
   },
 
@@ -577,6 +789,51 @@ export const independentTaskService = {
       } else {
         updates.relatedMatterId = null;
         updates.relatedMatterLabel = undefined;
+      }
+    }
+    const delegationPayloadPresent = payload.caseRole !== undefined || payload.keyActionKeys !== undefined || payload.relatedMatterId !== undefined;
+    const rawRequestedMatterId = payload.relatedMatterId !== undefined ? payload.relatedMatterId : task.relatedMatterId;
+    const matterId = cleanString(rawRequestedMatterId) || (rawRequestedMatterId ? String(rawRequestedMatterId) : '');
+    const requestedCaseRole = cleanString(payload.caseRole !== undefined ? payload.caseRole : task.caseRole);
+    const keyActionKeys = keyActionKeysFrom(payload.keyActionKeys !== undefined ? payload.keyActionKeys : task.keyActionKeys);
+    const existingMatterId = task.relatedMatterId ? String(task.relatedMatterId) : '';
+    const existingCaseRole = cleanString(task.caseRole);
+    const existingKeyActionKeys = keyActionKeysFrom(task.keyActionKeys);
+    const sameKeyActions =
+      keyActionKeys.length === existingKeyActionKeys.length &&
+      keyActionKeys.every((key) => existingKeyActionKeys.includes(key));
+    const changingDelegation = delegationPayloadPresent && (
+      matterId !== existingMatterId ||
+      requestedCaseRole !== existingCaseRole ||
+      !sameKeyActions
+    );
+    if (changingDelegation && task.caseLifecycleCompletedAt) {
+      throw new Error('Case delegation cannot be changed after lifecycle work has been recorded.');
+    }
+    if (changingDelegation) {
+      if (requestedCaseRole || keyActionKeys.length) {
+        if (!matterId || !isCaseTaskRole(requestedCaseRole) || !keyActionKeys.length) {
+          throw new Error('A case delegation needs a linked matter, role and at least one open Key Action.');
+        }
+        const { inst, template } = await loadCaseTaskContext(matterId);
+        const selectable = new Map(
+          publicKeyActions(inst, template)
+            .filter((step) => step.status !== 'Completed')
+            .map((step) => [step.key, step])
+        );
+        if (keyActionKeys.some((key) => !selectable.has(key))) {
+          throw new Error('One or more selected Key Actions are already completed or unavailable.');
+        }
+        if (keyActionKeys.some((key) => !keyActionIsReadyForRole(requestedCaseRole as IndependentTaskCaseRole, selectable.get(key)?.status || ''))) {
+          throw new Error('One or more selected Key Actions are not ready for the chosen lifecycle role.');
+        }
+        updates.caseRole = requestedCaseRole;
+        updates.keyActionKeys = keyActionKeys;
+        updates.caseLifecycleStatus = task.caseLifecycleStatus || 'Ready';
+      } else {
+        updates.caseRole = undefined;
+        updates.keyActionKeys = [];
+        updates.caseLifecycleStatus = undefined;
       }
     }
     if (payload.startDate !== undefined) updates.startDate = requireDateString(payload.startDate, 'Start date is required.');
@@ -693,6 +950,102 @@ export const independentTaskService = {
     }
   },
 
+  async performCaseLifecycle(taskId: string, req: AuthRequest) {
+    const task: any = await assertTaskExists(taskId);
+    await assertCanView(req, task);
+    if (!canActAsAssignee(req, task)) throw new Error('Only the assigned independent-task contributor can perform this case action.');
+    if (task.status !== 'In Progress') throw new Error('Acknowledge and start this independent task before submitting its case work.');
+    if (!task.relatedMatterId || !isCaseTaskRole(task.caseRole) || !keyActionKeysFrom(task.keyActionKeys).length) {
+      throw new Error('This independent task is not configured as a case-work delegation.');
+    }
+
+    const { caseDoc, inst } = await loadCaseTaskContext(String(task.relatedMatterId));
+    const keys = keyActionKeysFrom(task.keyActionKeys);
+    const selected = keys.map((key) => (inst.steps || []).find((step: any) => cleanString(step?.stepKey) === key));
+    if (selected.some((step: any) => !step)) throw new Error('A selected Key Action is no longer available.');
+    if (selected.some((step: any) => cleanString(step.status) === 'Completed')) {
+      throw new Error('One or more selected Key Actions are already completed.');
+    }
+
+    const role = task.caseRole as IndependentTaskCaseRole;
+    const now = new Date();
+    const actionActor = {
+      actorName: req.user?.name || task.assignee || 'System',
+      ...(req.user?.id ? { actorUserId: req.user.id } : {}),
+      ...(req.user?.email ? { actorEmail: req.user.email } : {}),
+      ...(req.user?.role ? { actorRole: req.user.role } : {}),
+    };
+    const lifecycleLabel = role === 'Initiator'
+      ? 'Submitted to Reviewer'
+      : role === 'Reviewer'
+        ? 'Submitted to Approver'
+        : 'Approved';
+
+    for (const selectedStep of selected as any[]) {
+      const currentStatus = cleanString(selectedStep.status);
+      if (role === 'Initiator') {
+        if (!['Not Started', 'In Progress', 'Done'].includes(currentStatus)) {
+          throw new Error(`"${selectedStep.title}" must be ready for initiator work before it can be submitted for review.`);
+        }
+        if (currentStatus !== 'Done') {
+          await completeStepForCase(actionActor, caseDoc, inst, selectedStep.stepKey);
+        }
+        const step = (inst.steps || []).find((item: any) => item.stepKey === selectedStep.stepKey);
+        step.status = 'Awaiting Review';
+        step.submittedAt = now;
+      } else if (role === 'Reviewer') {
+        if (currentStatus !== 'Awaiting Review') {
+          throw new Error(`"${selectedStep.title}" must be awaiting review before it can be submitted to the approver.`);
+        }
+        selectedStep.status = 'Awaiting Approval';
+        selectedStep.reviewedAt = now;
+      } else {
+        if (currentStatus !== 'Awaiting Approval') {
+          throw new Error(`"${selectedStep.title}" must be awaiting approval before it can be completed.`);
+        }
+        await completeStepForCase(actionActor, caseDoc, inst, selectedStep.stepKey, { finalApproval: true });
+      }
+
+      const step = (inst.steps || []).find((item: any) => item.stepKey === selectedStep.stepKey);
+      const contributions = Array.isArray(step.independentContributors) ? step.independentContributors : [];
+      const exists = contributions.some(
+        (entry: any) => String(entry?.taskId || '') === String(task._id) && entry?.role === role && samePerson(entry?.name, task.assignee)
+      );
+      if (!exists) {
+        contributions.push({
+          taskId: task._id,
+          role,
+          name: task.assignee,
+          ...(req.user?.id ? { userId: new mongoose.Types.ObjectId(req.user.id) } : {}),
+          actedAt: now,
+        });
+      }
+      step.independentContributors = contributions;
+    }
+
+    await inst.save();
+    task.status = 'Completed';
+    task.completedAt = task.completedAt || now;
+    task.caseLifecycleStatus = lifecycleLabel;
+    task.caseLifecycleCompletedAt = now;
+    task.lastActionBy = req.user?.name || task.assignee || 'System';
+    if (req.user?.id) task.lastActionByUserId = new mongoose.Types.ObjectId(req.user.id);
+    await task.save();
+
+    const actionTitles = selected.map((step: any) => step.title || step.stepKey).join(', ');
+    await buildHistory(String(task._id), 'TASK_CASE_LIFECYCLE_UPDATED', lifecycleLabel, req, actionTitles, { role, keyActionKeys: keys });
+    await buildHistory(String(task._id), 'TASK_COMPLETED', 'Task completed through case lifecycle', req, lifecycleLabel);
+    await writeAudit({
+      caseId: String(caseDoc._id),
+      actorName: req.user?.name || task.assignee || 'System',
+      ...(req.user?.id ? { actorUserId: req.user.id } : {}),
+      action: 'INDEPENDENT_TASK_CASE_LIFECYCLE_UPDATED',
+      message: `${role} completed delegated case work`,
+      detail: `${task.taskNumber} â€¢ ${lifecycleLabel} â€¢ ${actionTitles}`,
+    });
+    return this.getTaskById(String(task._id), req);
+  },
+
   async deleteTask(taskId: string, req: AuthRequest) {
     const task = await assertTaskExists(taskId);
     await assertCanDelete(req, task);
@@ -774,6 +1127,24 @@ export const independentTaskService = {
     if (note) attachmentDoc.note = note;
     if (req.user?.id) attachmentDoc.uploadedByUserId = new mongoose.Types.ObjectId(req.user.id);
 
+    // A file uploaded while performing delegated case work is one shared file,
+    // not a private copy: the attachment keeps the independent-task context
+    // while the linked Document makes it immediately visible in the matter's
+    // Documents tab and Case Management tab.
+    if (task.relatedMatterId) {
+      const caseDocument = await Document.create({
+        caseId: task.relatedMatterId,
+        name: attachmentDoc.fileName,
+        category: 'Independent Task',
+        ...(keyActionKeysFrom(task.keyActionKeys).length === 1 ? { stepKey: keyActionKeysFrom(task.keyActionKeys)[0] } : {}),
+        uploadedBy: attachmentDoc.uploadedBy,
+        uploadedDate: attachmentDoc.uploadedDate,
+        size: attachmentDoc.fileSize,
+        url,
+      });
+      attachmentDoc.caseDocumentId = caseDocument._id;
+    }
+
     const attachment = await IndependentTaskAttachment.create(attachmentDoc);
 
     await buildHistory(String(task._id), 'TASK_ATTACHMENT_UPLOADED', 'Attachment uploaded', req, attachment.fileName);
@@ -788,6 +1159,9 @@ export const independentTaskService = {
     await assertCanEdit(req, task);
 
     await IndependentTaskAttachment.findByIdAndDelete(attachmentId);
+    if ((attachment as any).caseDocumentId) {
+      await Document.findByIdAndDelete((attachment as any).caseDocumentId);
+    }
 
     await buildHistory(String(task._id), 'TASK_ATTACHMENT_DELETED', 'Attachment deleted', req, attachment.fileName);
     await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_ATTACHMENT_DELETED', 'Independent task attachment deleted', attachment.fileName));

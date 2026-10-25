@@ -141,6 +141,13 @@ export interface IProspect extends Document {
   
   // Status flags
   isActive: boolean;
+  /** Operational pause: preserves the intake record and its workflow so it can be reopened. */
+  isTemporarilyClosed?: boolean;
+  temporarilyClosedAt?: Date;
+  temporarilyClosedBy?: string;
+  temporaryCloseReason?: string;
+  /** Matter created when this intake record is sent to Temporarily Closed. */
+  temporaryClosedMatterId?: mongoose.Types.ObjectId;
   convertedToMatters?: mongoose.Types.ObjectId; // Reference to Case if converted
   
   // Timestamps
@@ -399,6 +406,16 @@ const ProspectSchema = new Schema<IProspect>(
       default: true,
       index: true,
     },
+    isTemporarilyClosed: { type: Boolean, default: false, index: true },
+    temporarilyClosedAt: Date,
+    temporarilyClosedBy: String,
+    temporaryCloseReason: String,
+    temporaryClosedMatterId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Case',
+      default: null,
+      index: true,
+    },
     convertedToMatters: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Case',
@@ -413,6 +430,8 @@ const ProspectSchema = new Schema<IProspect>(
 // Indexes for common queries
 ProspectSchema.index({ stage: 1, isActive: 1 });
 ProspectSchema.index({ assignedTo: 1, isActive: 1 });
+ProspectSchema.index({ isActive: 1, isTemporarilyClosed: 1, dateReceived: -1 });
+ProspectSchema.index({ temporaryClosedMatterId: 1 });
 ProspectSchema.index({ dateReceived: -1 });
 
 export default mongoose.model<IProspect>('Prospect', ProspectSchema);

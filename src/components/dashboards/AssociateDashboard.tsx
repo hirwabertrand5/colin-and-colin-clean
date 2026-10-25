@@ -2032,12 +2032,22 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                       <tr key={row.caseId} className="align-top">
                         <td className="px-3 py-3 text-gray-500">{(feePageClamped - 1) * PAGE_SIZE + index + 1}</td>
                         <td className="px-4 py-3 text-gray-700">
-                          <Link to={`/matters/${row.caseId}`} className="hover:text-gray-900">{row.caseNo || row.parties || '—'}</Link>
+                          {row.isIndependentContributor ? (
+                            <span title="This contribution is completed from Independent Tasks, not the case workspace.">
+                              {row.caseNo || row.parties || '—'}
+                            </span>
+                          ) : (
+                            <Link to={`/matters/${row.caseId}`} className="hover:text-gray-900">{row.caseNo || row.parties || '—'}</Link>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-700">{row.parties || '—'}</td>
                         <td className="px-4 py-3 text-gray-700">
                           <div>{row.role || '—'}</div>
-                          {!row.isCurrentAssignment ? (
+                          {row.isIndependentContributor ? (
+                            <div className="mt-1 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800">
+                              Independent-task contribution
+                            </div>
+                          ) : !row.isCurrentAssignment ? (
                             <div className="mt-1 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800">
                               Retained after handover
                             </div>

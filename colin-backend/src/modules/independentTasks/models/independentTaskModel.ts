@@ -1,6 +1,12 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export type IndependentTaskPriority = 'Low' | 'Medium' | 'High' | 'Critical';
+/**
+ * A task can temporarily delegate one of the case-delivery roles without
+ * changing the case's standing assignment.  The delegation is deliberately
+ * scoped to selected Key Actions and remains auditable on the task itself.
+ */
+export type IndependentTaskCaseRole = 'Initiator' | 'Reviewer' | 'Signer/Approver';
 export type IndependentTaskStatus =
   | 'Created'
   | 'Assigned'
@@ -19,6 +25,12 @@ export interface IIndependentTask extends Document {
   relatedMatterId?: mongoose.Types.ObjectId | null;
   relatedMatterLabel?: string;
   relatedClient?: string;
+  /** Optional case-work delegation metadata. */
+  caseRole?: IndependentTaskCaseRole;
+  keyActionKeys?: string[];
+  /** The last lifecycle hand-off performed from this workspace. */
+  caseLifecycleStatus?: 'Ready' | 'Submitted to Reviewer' | 'Submitted to Approver' | 'Approved';
+  caseLifecycleCompletedAt?: Date;
 
   assignee: string;
   supervisor: string;
@@ -57,6 +69,13 @@ const IndependentTaskSchema = new Schema<IIndependentTask>(
     relatedMatterId: { type: Schema.Types.ObjectId, ref: 'Case', default: null, index: true },
     relatedMatterLabel: { type: String, trim: true },
     relatedClient: { type: String, trim: true },
+    caseRole: { type: String, enum: ['Initiator', 'Reviewer', 'Signer/Approver'], index: true },
+    keyActionKeys: { type: [String], default: [] },
+    caseLifecycleStatus: {
+      type: String,
+      enum: ['Ready', 'Submitted to Reviewer', 'Submitted to Approver', 'Approved'],
+    },
+    caseLifecycleCompletedAt: { type: Date },
 
     assignee: { type: String, required: true, trim: true, index: true },
     supervisor: { type: String, required: true, trim: true, index: true },

@@ -70,6 +70,18 @@ export interface IInstanceStep {
   /** Case Management: when the Reviewer reviewed the work and requested approval. */
   reviewedAt?: Date;
   /**
+   * Role-specific work carried out through an Independent Task. These records
+   * supplement (never replace) normal case assignments so fee attribution can
+   * distinguish a temporary contributor from the standing team.
+   */
+  independentContributors?: Array<{
+    taskId: mongoose.Types.ObjectId;
+    role: 'Initiator' | 'Reviewer' | 'Signer/Approver';
+    name: string;
+    userId?: mongoose.Types.ObjectId;
+    actedAt: Date;
+  }>;
+  /**
    * Set the moment the assigned member ticked the work as done. This is the
    * instant the Key Action's deadline clock freezes (see
    * `getKeyActionDeadlineClock` on the client): the countdown stops and the
@@ -230,6 +242,21 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     completedAt: { type: Date },
     submittedAt: { type: Date },
     reviewedAt: { type: Date },
+    independentContributors: {
+      type: [
+        new Schema(
+          {
+            taskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask', required: true },
+            role: { type: String, enum: ['Initiator', 'Reviewer', 'Signer/Approver'], required: true },
+            name: { type: String, required: true, trim: true },
+            userId: { type: Schema.Types.ObjectId, ref: 'User' },
+            actedAt: { type: Date, required: true, default: Date.now },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     // Set when the assigned member ticks the work done; freezes the deadline clock.
     doneAt: { type: Date },
     extensionHistory: {

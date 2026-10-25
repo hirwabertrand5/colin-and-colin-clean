@@ -112,9 +112,10 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
         const status = String(c.status || '').toLowerCase();
         const isClosedStatus = status === 'closed';
         const isTemporaryClosed = status === 'temporarily closed';
+        const isReturnedToIntake = status === 'returned to intake';
         const isWorkflowCompleted = (c.workflowProgress && c.workflowProgress.status) === 'Completed';
         if (isTemporaryClosedMode) return isTemporaryClosed;
-        return !(isClosedStatus || isWorkflowCompleted || isTemporaryClosed);
+        return !(isClosedStatus || isWorkflowCompleted || isTemporaryClosed || isReturnedToIntake);
       });
       setCases(active);
     } catch (err: any) {
