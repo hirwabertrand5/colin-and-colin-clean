@@ -423,16 +423,11 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   };
 
   const removeTask = async (task: IndependentTask) => {
-    const hasSubmittedDelegatedWork = Boolean(
-      task.caseRole && (task.caseLifecycleCompletedAt || (task.caseLifecycleStatus && task.caseLifecycleStatus !== 'Ready') || ['In Progress', 'Completed', 'Closed'].includes(task.status))
-    );
-    const confirmation = hasSubmittedDelegatedWork
-      ? `Cancel ${task.taskNumber}? Its matter documents, approvals, audit history, and financial attribution will be preserved.`
-      : `Permanently delete ${task.taskNumber}? Its private task records and Key Action reservation will be removed. Shared matter documents are preserved.`;
+    const confirmation = `Permanently delete ${task.taskNumber}, its comments, private attachments, history and notifications? This cannot be undone. Shared matter documents and recorded case work remain.`;
     if (!window.confirm(confirmation)) return;
     try {
-      const result = await deleteIndependentTask(task._id);
-      toast.success(result.cancelled ? 'Delegated task cancelled; matter records preserved.' : 'Task and private records deleted.');
+      await deleteIndependentTask(task._id);
+      toast.success('Task permanently deleted.');
       await Promise.all([loadDashboard(), loadTasks()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete task');

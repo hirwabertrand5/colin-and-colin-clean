@@ -114,10 +114,11 @@ Creating initiator work does not grant case workspace or management access.
   review or approve their own work, even through another delegated task.
 - **Unstarted deletion:** the creator can delete an untouched task. Its reservation
   is released, and the action becomes claimable again.
-- **Started/submitted cancellation:** deletion becomes cancellation. Repeating
-  deletion on an unsubmitted cancelled task permanently removes its private
-  records and releases reservations. If submission or financial contribution
-  exists, cancellation preserves review history, attribution and shared matter documents.
+- **Permanent deletion:** started, submitted, completed, closed and previously
+  cancelled tasks are permanently removed by Delete, including their private
+  records and reservations. Shared matter documents, case review history and
+  actual performer attribution remain, with deleted task links detached. The
+  task must disappear from the list and dashboard instead of becoming cancelled.
 - **Shared attachment removal:** removing a task attachment must leave the shared
   matter document and its downloadable file available.
 - **Standard tasks:** create a task without delegation and run its ordinary

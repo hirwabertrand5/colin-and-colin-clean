@@ -378,13 +378,10 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
 
   const deleteTaskRecord = async () => {
     if (!task) return;
-    const protectedWork = Boolean(task.caseRole && (task.caseLifecycleCompletedAt || ['In Progress', 'Completed', 'Closed'].includes(task.status)));
-    if (!window.confirm(protectedWork
-      ? 'Cancel this delegated task? Shared matter documents, approvals and financial history will be preserved.'
-      : 'Permanently delete this task, its comments, private attachments, history and notifications? Shared matter documents are preserved.')) return;
+    if (!window.confirm('Permanently delete this task, its comments, private attachments, history and notifications? This cannot be undone. Shared matter documents and recorded case work remain.')) return;
     try {
-      const result = await deleteIndependentTask(task._id);
-      toast.success(result.cancelled ? 'Task cancelled; matter records preserved.' : 'Task and private records deleted.');
+      await deleteIndependentTask(task._id);
+      toast.success('Task permanently deleted.');
       navigate('/matters/independent-tasks');
     } catch (error: any) { toast.error(error.message || 'Failed to delete task.'); }
   };

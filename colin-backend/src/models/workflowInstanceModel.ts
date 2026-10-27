@@ -88,7 +88,7 @@ export interface IInstanceStep {
    * distinguish a temporary contributor from the standing team.
    */
   independentContributors?: Array<{
-    taskId: mongoose.Types.ObjectId;
+    taskId?: mongoose.Types.ObjectId;
     role: 'Initiator' | 'Reviewer' | 'Signer/Approver';
     name: string;
     userId?: mongoose.Types.ObjectId;
@@ -289,7 +289,7 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
       type: [
         new Schema(
           {
-            taskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask', required: true },
+            taskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask' },
             role: { type: String, enum: ['Initiator', 'Reviewer', 'Signer/Approver'], required: true },
             name: { type: String, required: true, trim: true },
             userId: { type: Schema.Types.ObjectId, ref: 'User' },

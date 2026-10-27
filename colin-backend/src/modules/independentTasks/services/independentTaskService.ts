@@ -1390,50 +1390,6 @@ export const independentTaskService = {
   async deleteTask(taskId: string, req: AuthRequest) {
     const task = await assertTaskExists(taskId);
     await assertCanDelete(req, task);
-    const hasRecordedContribution = Boolean(await WorkflowInstance.exists({
-      'steps.independentContributors.taskId': task._id,
-    }));
-    const delegatedWorkHasLegalRecord = Boolean(
-      hasRecordedContribution || (task.caseRole && (
-        task.caseLifecycleCompletedAt ||
-        (task.caseLifecycleStatus && task.caseLifecycleStatus !== 'Ready') ||
-        ['Completed', 'Closed'].includes(task.status)
-      ))
-    );
-    if (task.status === 'Cancelled' && delegatedWorkHasLegalRecord) {
-      return { message: 'This task contains submitted case work. Its cancellation preserves the matter approvals, audit and financial attribution.', cancelled: true };
-    }
-    const delegatedWorkHasStarted = Boolean(task.caseRole && task.status === 'In Progress');
-
-    // A submitted/reviewed/approved delegation is part of the matter's legal
-    // and financial record. Deletion becomes a controlled cancellation: the
-    // task, contributor attribution, documents and audit trail stay intact.
-    if (delegatedWorkHasLegalRecord || delegatedWorkHasStarted) {
-      {
-        task.status = 'Cancelled';
-        task.cancelledAt = new Date();
-        task.cancelledBy = req.user?.name || 'System';
-        task.lastActionBy = req.user?.name || 'System';
-        if (req.user?.id) task.lastActionByUserId = new mongoose.Types.ObjectId(req.user.id);
-        await task.save();
-        // Cancellation ends active reservations, including returned work.
-        // Contributor events and legal/financial evidence are separate records.
-        await releaseDelegatedClaims(task._id);
-        await buildHistory(String(task._id), 'TASK_CANCELLED', 'Delegated task cancelled — matter record preserved', req);
-        await writeAudit(buildAudit(
-          req,
-          'INDEPENDENT_TASK_UPDATED',
-          'Independent task cancelled — legal and financial history preserved',
-          task.title,
-          String(task._id)
-        ));
-      }
-      return {
-        message: 'Delegated work was cancelled. Its matter documents, approvals, audit trail and financial attribution were preserved.',
-        cancelled: true,
-      };
-    }
-
     // An untouched task can be removed completely. Any Key Action reservation
     // is released first so another authorized contributor may claim it.
     const [attachments, history] = await Promise.all([
@@ -1467,6 +1423,18 @@ export const independentTaskService = {
     try {
       await cleanupSession.withTransaction(async () => {
         await releaseDelegatedClaims(task._id, cleanupSession);
+        // Keep actual case work/earnings attributed to its performer, but
+        // remove links to the task that is being permanently deleted.
+        await WorkflowInstance.updateMany(
+          { 'steps.independentContributors.taskId': task._id },
+          { $unset: { 'steps.$[step].independentContributors.$[contributor].taskId': '' } },
+          { arrayFilters: [{ 'step.independentContributors.taskId': task._id }, { 'contributor.taskId': task._id }], session: cleanupSession }
+        );
+        await WorkflowInstance.updateMany(
+          { 'steps.correctionRequest.contributorTaskId': task._id },
+          { $unset: { 'steps.$[step].correctionRequest.contributorTaskId': '' } },
+          { arrayFilters: [{ 'step.correctionRequest.contributorTaskId': task._id }], session: cleanupSession }
+        );
         await IndependentTaskComment.deleteMany({ taskId: task._id }, { session: cleanupSession });
         await IndependentTaskAttachment.deleteMany({ taskId: task._id }, { session: cleanupSession });
         await IndependentTaskHistory.deleteMany({ taskId: task._id }, { session: cleanupSession });

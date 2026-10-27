@@ -278,13 +278,14 @@ async function main() {
     assert.equal(await IndependentTask.findById(docsTask._id), null);
     assert.equal(await History.countDocuments({ taskId: docsTask._id }), 0);
     assert(!(await Workflow.findById(docsFixture.instance._id))!.steps[0]!.delegatedClaim);
-    const cancelled = await ok('Winnie', `/independent-tasks/${task._id}`, undefined, 'DELETE');
-    assert.equal(cancelled.cancelled, true);
     await ok('Winnie', `/independent-tasks/${task._id}`, undefined, 'DELETE');
-    assert.equal((await IndependentTask.findById(task._id))!.status, 'Cancelled');
-    assert(await AuditLog.exists({ independentTaskId: task._id }));
+    assert.equal(await IndependentTask.findById(task._id), null);
+    assert.equal(await History.countDocuments({ taskId: task._id }), 0);
+    assert.equal(await AuditLog.countDocuments({ independentTaskId: task._id }), 0);
+    assert.equal(await Workflow.exists({ 'steps.independentContributors.taskId': task._id }), null);
+    assert(!(await ok('Winnie', '/independent-tasks?limit=100')).items.some((item: any) => item._id === task._id));
     assert.equal((await state(f)).earnedFees.team.find((member: any) => member.name === 'Winnie').earnedFee, contributor.earnedFee);
-    pass('Unstarted deletion releases claims; repeated submitted cancellation preserves audit and financial records');
+    pass('Submitted task permanently disappears with private history and task links; actual case earnings remain accurate');
 
     const race = await fixture();
     const attempts = await Promise.all(['Winnie', 'Other'].map((name) => request(name, '/independent-tasks', {
@@ -368,8 +369,9 @@ async function main() {
     assert.equal((await state(partial)).steps.filter((step: any) => step.status === 'Completed').length, 2);
     await IndependentTask.findByIdAndUpdate(batchApprover._id, { $set: { status: 'Closed', closedAt: new Date() } });
     assert.equal((await ok('DelegateApprover', `/independent-tasks/${batchApprover._id}`)).caseWork.lifecycleStatus, 'Closed');
-    assert.equal((await ok('DelegateApprover', `/independent-tasks/${batchApprover._id}`, undefined, 'DELETE')).cancelled, true);
-    assert.equal((await IndependentTask.findById(batchApprover._id))!.status, 'Cancelled');
+    await ok('DelegateApprover', `/independent-tasks/${batchApprover._id}`, undefined, 'DELETE');
+    assert.equal(await IndependentTask.findById(batchApprover._id), null);
+    assert.equal((await state(partial)).steps.filter((step: any) => step.status === 'Completed').length, 2);
     pass('Partial multi-action approval stays pending; correction/resubmission preserves already-approved work');
 
     const own = await fixture();
@@ -407,8 +409,7 @@ async function main() {
     const cancelledFixture = await fixture();
     const cancelledDraft = await create(cancelledFixture, 'Other');
     await start('Other', cancelledDraft);
-    assert.equal((await ok('Other', `/independent-tasks/${cancelledDraft._id}`, undefined, 'DELETE')).cancelled, true);
-    assert.equal((await IndependentTask.findById(cancelledDraft._id))!.status, 'Cancelled');
+    await IndependentTask.updateOne({ _id: cancelledDraft._id }, { $set: { status: 'Cancelled' } });
     await ok('Other', `/independent-tasks/${cancelledDraft._id}`, undefined, 'DELETE');
     assert.equal(await IndependentTask.findById(cancelledDraft._id), null);
     assert.equal(await History.countDocuments({ taskId: cancelledDraft._id }), 0);
