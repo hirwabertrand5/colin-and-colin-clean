@@ -31,8 +31,9 @@ Creating initiator work does not grant case workspace or management access.
 4. Prepare an active test matter with a workflow and three distinct permanent
    assignees. Also prepare an authorized substitute who is not one of those assignees.
 5. Select any number of unreserved **Not Started** Key Actions, or use **Select
-   all available**. There is no selection limit. Initiator submissions process
-   the selected actions in workflow order, regardless of checkbox click order.
+   all available**. There is no selection limit, but selections must follow
+   workflow order starting with the first available action. Skipping an earlier
+   action is rejected. Deselecting an earlier action clears later selections.
    Actions reserved by another task stay unavailable. Reviewers and approvers
    select only actions awaiting their respective lifecycle stage.
 6. For positive earned-fee testing, configure the matter's contract/budget,

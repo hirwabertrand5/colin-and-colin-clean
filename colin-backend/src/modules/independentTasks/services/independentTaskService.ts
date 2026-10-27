@@ -24,7 +24,8 @@ import IndependentTaskHistory, {
 } from '../models/independentTaskHistoryModel';
 import { caseMatchesAssignee } from '../../../utils/caseAssignments';
 import { deleteStoredFile, storeUploadedFile } from '../../../services/fileStorageService';
-import { completeStepForCase } from '../../../controllers/workflowController';
+import { buildUpdatedInstanceSteps, completeStepForCase } from '../../../controllers/workflowController';
+import { orderWorkflowSteps } from '../../../utils/workflowSchedule';
 import { computeCaseEarnedFees, computeStepTimelinessAt, normalizeEffectiveWorkflowSteps } from '../../../utils/caseEarnedFees';
 import { allocateCollectedValueAcrossKeyActions, calculateCollectedKeyActionEarnings } from '../../../utils/keyActionEarnings';
 import { buildRoleByName, computeEarnedFee } from '../../../utils/workflowPercentages';
@@ -163,11 +164,20 @@ const loadCaseTaskContext = async (caseId: string) => {
   if (!inst) throw new Error('This matter does not have an active Key Action workflow.');
   const template: any = await WorkflowTemplate.findById(inst.templateId).lean();
   if (!template) throw new Error('The workflow template for this matter was not found.');
+  // Older instances can contain only part of a stage. Materialize missing
+  // template actions using the same merge as the case workspace, preserving
+  // recorded progress, case overrides and deliberately deleted actions.
+  const merged = buildUpdatedInstanceSteps(inst.steps, template, new Date(caseDoc.workflowStartDate || caseDoc.createdAt || Date.now()), inst.deletedStepKeys);
+  const existingKeys = new Set(inst.steps.map((step: any) => String(step.stepKey)));
+  if (merged.some((step: any) => !existingKeys.has(String(step.stepKey)))) {
+    inst.steps = merged;
+    await inst.save();
+  }
   return { caseDoc, inst, template };
 };
 
 const publicKeyActions = (inst: any, template: any) => {
-  const steps = normalizeEffectiveWorkflowSteps(inst, template);
+  const steps = orderWorkflowSteps<any>(normalizeEffectiveWorkflowSteps(inst, template), template);
   return steps.map((step: any) => ({
     key: cleanString(step?.stepKey),
     title: cleanString(step?.title) || cleanString(step?.stepKey) || 'Key Action',
@@ -187,7 +197,7 @@ const keyActionIsReadyForRole = (role: IndependentTaskCaseRole, status: string) 
 };
 
 const delegatedKeyActionOptions = (inst: any, template: any) => {
-  const steps = normalizeEffectiveWorkflowSteps(inst, template);
+  const steps = orderWorkflowSteps<any>(normalizeEffectiveWorkflowSteps(inst, template), template);
   return steps
     .map((step: any) => {
       const status = cleanString(step?.status) || 'Not Started';
@@ -215,6 +225,13 @@ const delegatedKeyActionOptions = (inst: any, template: any) => {
       };
     })
     .filter((step) => Boolean(step.key));
+};
+
+const assertSequentialSelection = (options: ReturnType<typeof delegatedKeyActionOptions>, role: IndependentTaskCaseRole, keys: string[]) => {
+  const available = options.filter((action) => action.eligibility[role]);
+  if (keys.some((key, index) => available[index]?.key !== key)) {
+    throw new Error('Select Key Actions in workflow sequence, beginning with the first available action. Do not skip earlier actions.');
+  }
 };
 
 const releaseDelegatedClaims = async (taskId: unknown, session?: mongoose.ClientSession) => {
@@ -684,7 +701,7 @@ export const independentTaskService = {
       // Return the live instance actions, including locked or reserved rows,
       // so the form can explain why a future action cannot be selected rather
       // than silently bypassing the established workflow sequence.
-      keyActions: delegatedKeyActionOptions(inst, template).filter((step) => step.status !== 'Completed'),
+      keyActions: delegatedKeyActionOptions(inst, template).filter((step) => ['Not Started', 'Awaiting Review', 'Awaiting Approval'].includes(step.status)),
     };
   },
 
@@ -750,6 +767,7 @@ export const independentTaskService = {
       if (invalid) throw new Error('One or more selected Key Actions are already completed or no longer available. Refresh the matter selection and try again.');
       const incompatible = keyActionKeys.find((key) => !selectable.get(key)?.eligibility?.[requestedCaseRole as IndependentTaskCaseRole]);
       if (incompatible) throw new Error('One or more selected Key Actions are not ready for the chosen lifecycle role.');
+      assertSequentialSelection(delegatedKeyActionOptions(inst, template), requestedCaseRole as IndependentTaskCaseRole, keyActionKeys);
     }
 
     const taskNumber = cleanString(payload.taskNumber) || (await generateTaskNumber());
@@ -1068,6 +1086,7 @@ export const independentTaskService = {
           throw new Error('One or more selected Key Actions are not ready for the chosen lifecycle role.');
         }
         updates.caseRole = requestedCaseRole;
+        assertSequentialSelection(delegatedKeyActionOptions(inst, template), requestedCaseRole as IndependentTaskCaseRole, keyActionKeys);
         updates.keyActionKeys = keyActionKeys;
         updates.caseLifecycleStatus = task.caseLifecycleStatus || 'Ready';
       } else {
@@ -1222,10 +1241,10 @@ export const independentTaskService = {
       throw new Error('This independent task is not configured as a case-work delegation.');
     }
 
-    const { caseDoc, inst } = await loadCaseTaskContext(String(task.relatedMatterId));
+    const { caseDoc, inst, template } = await loadCaseTaskContext(String(task.relatedMatterId));
     const keys = keyActionKeysFrom(task.keyActionKeys);
     // Follow the matter's workflow order regardless of checkbox click order.
-    const allSelected = normalizeEffectiveWorkflowSteps(inst, await WorkflowTemplate.findById(inst.templateId).lean())
+    const allSelected = orderWorkflowSteps<any>(normalizeEffectiveWorkflowSteps(inst, template), template)
       .filter((step: any) => keys.includes(cleanString(step.stepKey)))
       .map((step: any) => (inst.steps || []).find((item: any) => item.stepKey === step.stepKey));
     if (allSelected.length !== keys.length) throw new Error('A selected Key Action is no longer available.');

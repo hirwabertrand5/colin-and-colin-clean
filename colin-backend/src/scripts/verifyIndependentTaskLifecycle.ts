@@ -140,7 +140,7 @@ async function main() {
       const ownTask = await ok('Winnie', '/independent-tasks', {
         title: 'Self assigned batch ' + role, assignee: 'stale display name', assigneeUserId: String(users.Winnie._id),
         supervisorUserId: String(users.Reviewer._id), startDate: '2026-10-25', dueDate: '2026-11-05',
-        relatedMatterId: ownFixture.id, caseRole: 'Initiator', keyActionKeys: ['action-3', 'action-1', 'action-2'],
+        relatedMatterId: ownFixture.id, caseRole: 'Initiator', keyActionKeys: ['action-1', 'action-2', 'action-3'],
       });
       assert.equal(ownTask.assignee, 'Winnie');
       await start('Winnie', ownTask);
@@ -166,6 +166,34 @@ async function main() {
     assert.match(inactiveResult.data.message, /inactive/);
     await User.updateOne({ _id: users.Intern._id }, { $set: { isActive: true } });
     pass('Inactive accounts receive a specific assignment error');
+    const sequenceFixture = await fixture(4);
+    // Simulate a legacy instance containing only each stage's first action.
+    const sequenceTemplate: any = await Template.findById(sequenceFixture.template._id);
+    sequenceTemplate.stages = [
+      { key: 'second', title: 'Second stage', order: 2, percentage: 50 },
+      { key: 'first', title: 'First stage', order: 1, percentage: 50 },
+    ];
+    sequenceTemplate.steps.forEach((step: any, index: number) => { step.stageKey = index < 2 ? 'first' : 'second'; });
+    await sequenceTemplate.save();
+    const sparse: any = await Workflow.findById(sequenceFixture.instance._id);
+    sparse.steps = [sparse.steps[2], sparse.steps[0]];
+    await sparse.save();
+    const sequenceOptions = await ok('Winnie', `/independent-tasks/case-options/${sequenceFixture.id}`);
+    assert.deepEqual(sequenceOptions.keyActions.map((step: any) => step.key), ['action-1', 'action-2', 'action-3', 'action-4']);
+    assert.equal((await Workflow.findById(sparse._id))!.steps.length, 4);
+    for (const keys of [['action-2'], ['action-2', 'action-1'], ['action-1', 'action-3']]) {
+      const result = await request('Winnie', '/independent-tasks', {
+        title: 'Skipped selection', assignee: 'Winnie', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05',
+        relatedMatterId: sequenceFixture.id, caseRole: 'Initiator', keyActionKeys: keys,
+      });
+      assert.equal(result.status, 400);
+      assert.match(result.data.message, /sequence/);
+    }
+    const sequentialTask = await create(sequenceFixture, 'Winnie', 'Initiator', ['action-1', 'action-2', 'action-3', 'action-4']);
+    await start('Winnie', sequentialTask);
+    await submit('Winnie', sequentialTask);
+    assert((await state(sequenceFixture)).steps.every((step: any) => step.status === 'Awaiting Review'));
+    pass('All stage actions are restored and ordered; skipped/reversed selections are rejected and ordered batches submit');
     const f = await fixture();
     const task = await create(f);
     await start('Winnie', task);

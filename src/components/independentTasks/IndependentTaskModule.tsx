@@ -337,8 +337,9 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   // of truth for role eligibility and workflow sequence; hiding future work
   // would make the established case lifecycle look bypassable.
   const selectableCaseKeyActions = useMemo(() => {
-    return caseKeyActions;
-  }, [caseKeyActions]);
+    const status = form.caseRole === 'Initiator' ? 'Not Started' : form.caseRole === 'Reviewer' ? 'Awaiting Review' : 'Awaiting Approval';
+    return caseKeyActions.filter((action) => action.status === status);
+  }, [caseKeyActions, form.caseRole]);
 
   const counts = dashboard?.summary;
 
@@ -1133,7 +1134,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900">Delegated case work <span className="font-normal text-gray-500">(optional)</span></h3>
-                        <p className="mt-1 text-xs leading-5 text-gray-600">Choose the temporary role and select any number of available Key Actions. Initiator actions are submitted in workflow order; review and approval keep their required stages.</p>
+                        <p className="mt-1 text-xs leading-5 text-gray-600">All eligible Key Actions are listed across stages in workflow order. Select from the first available action onward without skipping. Removing an action also removes the following selections.</p>
                       </div>
                       {caseKeyActionsLoading && <Loader2 className="h-4 w-4 animate-spin text-blue-700" />}
                     </div>
@@ -1172,17 +1173,20 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                           ) : selectableCaseKeyActions.map((action) => {
                             const selected = form.keyActionKeys.includes(action.key);
                             const eligible = Boolean(action.eligibility?.[form.caseRole as IndependentTaskCaseRole]);
+                            const available = selectableCaseKeyActions.filter((item) => item.eligibility?.[form.caseRole as IndependentTaskCaseRole]);
+                            const position = available.findIndex((item) => item.key === action.key);
+                            const nextInSequence = selected || position === form.keyActionKeys.length;
                             return (
                               <label key={action.key} className={`independent-task-key-action flex items-start gap-3 rounded-lg border border-gray-100 p-2.5 ${eligible ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed bg-gray-50 opacity-70'}`}>
                                 <input
                                   type="checkbox"
                                   checked={selected}
-                                  disabled={saving || !eligible}
+                                  disabled={saving || !eligible || !nextInSequence}
                                   onChange={() => setForm((prev) => ({
                                     ...prev,
                                     keyActionKeys: selected
-                                      ? prev.keyActionKeys.filter((key) => key !== action.key)
-                                      : [...prev.keyActionKeys, action.key],
+                                      ? prev.keyActionKeys.slice(0, position)
+                                      : available.slice(0, position + 1).map((item) => item.key),
                                   }))}
                                   className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-700"
                                 />
@@ -1190,6 +1194,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                                   <span className="block text-sm font-medium text-gray-900">{action.title}</span>
                                   <span className="mt-0.5 block text-xs text-gray-500">{action.stageTitle} · {action.status}{action.dueAt ? ` · due ${formatDeadlineDateTime(action.dueAt)}` : ''}{typeof action.percentage === 'number' ? ` · ${action.percentage}%` : ''}{action.originalResponsibleRole ? ` · ${action.originalResponsibleRole}` : ''}</span>
                                   {!eligible && <span className="mt-1 block text-xs font-medium text-amber-700">{action.unavailableReason || 'Not eligible for the selected delegated role yet.'}</span>}
+                                  {eligible && !nextInSequence && <span className="mt-1 block text-xs text-gray-500">Select the preceding Key Actions first.</span>}
                                 </span>
                               </label>
                             );

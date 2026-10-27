@@ -179,9 +179,12 @@ async function main() {
     await field('Related Matter', 'select').selectOption('ui-matter');
     await dialog.getByRole('button', { name: 'Initiator', exact: true }).click();
     await dialog.getByRole('checkbox').first().waitFor();
-    await dialog.getByRole('checkbox').nth(2).check();
+    assert(await dialog.getByRole('checkbox').nth(2).isDisabled());
     await dialog.getByRole('checkbox').nth(0).check();
+    await dialog.getByRole('checkbox').nth(1).check();
     assert.equal(await dialog.getByRole('checkbox', { checked: true }).count(), 2);
+    await dialog.getByRole('checkbox').nth(0).uncheck();
+    assert.equal(await dialog.getByRole('checkbox', { checked: true }).count(), 0);
     await dialog.getByRole('button', { name: 'Select all available', exact: true }).click();
     assert.equal(await dialog.getByRole('checkbox', { checked: true }).count(), 3);
     await dialog.getByRole('button', { name: 'Clear', exact: true }).click();
