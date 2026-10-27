@@ -29,7 +29,7 @@ export const getCaseKeyActions = async (req: AuthRequest, res: Response) => {
   try {
     const caseId = getParam(req.params.caseId);
     if (!caseId) return res.status(400).json({ message: 'Matter id is required.' });
-    const data = await independentTaskService.getCaseKeyActions(caseId);
+    const data = await independentTaskService.getCaseKeyActions(caseId, req);
     return res.json(data);
   } catch (error: any) {
     return res.status(400).json({ message: error?.message || 'Failed to load available Key Actions.' });
@@ -95,6 +95,15 @@ export const performCaseLifecycle = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const returnCaseWork = async (req: AuthRequest, res: Response) => {
+  try {
+    const task = await independentTaskService.returnCaseWork(String(getParam(req.params.taskId) || ''), req.body || {}, req);
+    return res.json(task);
+  } catch (error: any) {
+    return res.status(error.message === 'Forbidden.' ? 403 : 400).json({ message: error.message || 'Failed to return work.' });
+  }
+};
+
 export const deleteTask = async (req: AuthRequest, res: Response) => {
   try {
     const taskId = getParam(req.params.taskId);
@@ -103,7 +112,7 @@ export const deleteTask = async (req: AuthRequest, res: Response) => {
     return res.json(result);
   } catch (error: any) {
     const message = error?.message || 'Failed to delete task.';
-    const status = message === 'Forbidden.' ? 403 : 400;
+    const status = error?.statusCode || (message === 'Forbidden.' ? 403 : 400);
     return res.status(status).json({ message });
   }
 };

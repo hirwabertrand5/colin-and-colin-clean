@@ -26,6 +26,8 @@ import {
   deleteIndependentTask,
   getIndependentTaskDashboard,
   getIndependentTaskCaseKeyActions,
+  getIndependentTaskDisplayStatus,
+  canDeleteIndependentTask,
   IndependentTask,
   IndependentTaskCaseRole,
   IndependentTaskKeyActionOption,
@@ -54,6 +56,7 @@ const TASK_STATUSES: IndependentTaskStatus[] = [
   'Awaiting External Action',
   'Completed',
   'Closed',
+  'Cancelled',
 ];
 
 const WORKFLOW_PRIMARY_TRANSITIONS: Record<IndependentTaskStatus, IndependentTaskStatus | null> = {
@@ -65,6 +68,7 @@ const WORKFLOW_PRIMARY_TRANSITIONS: Record<IndependentTaskStatus, IndependentTas
   'Awaiting External Action': 'In Progress',
   Completed: 'Closed',
   Closed: null,
+  Cancelled: null,
 };
 
 const isManagerRole = (role: UserRole) =>
@@ -93,6 +97,7 @@ const statusClasses: Record<IndependentTaskStatus, string> = {
   'Awaiting External Action': 'bg-orange-50 text-orange-700 border-orange-100',
   Completed: 'bg-green-50 text-green-700 border-green-100',
   Closed: 'bg-gray-900 text-white border-gray-900',
+  Cancelled: 'bg-rose-50 text-rose-700 border-rose-100',
 };
 
 type TaskForm = {
@@ -328,18 +333,12 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     });
   }, [dashboard?.upcomingDeadlines]);
 
-  // A reviewer can only take submitted actions and an approver can only take
-  // reviewed actions. Filtering the already-open list here prevents a task
-  // from being configured for a lifecycle step it cannot perform yet.
+  // Keep locked/reserved actions visible with a reason. The API is the source
+  // of truth for role eligibility and workflow sequence; hiding future work
+  // would make the established case lifecycle look bypassable.
   const selectableCaseKeyActions = useMemo(() => {
-    if (!form.caseRole) return caseKeyActions;
-    const statusForRole: Record<IndependentTaskCaseRole, string[]> = {
-      Initiator: ['Not Started', 'In Progress', 'Done'],
-      Reviewer: ['Awaiting Review'],
-      'Signer/Approver': ['Awaiting Approval'],
-    };
-    return caseKeyActions.filter((action) => statusForRole[form.caseRole].includes(action.status));
-  }, [caseKeyActions, form.caseRole]);
+    return caseKeyActions;
+  }, [caseKeyActions]);
 
   const counts = dashboard?.summary;
 
@@ -359,8 +358,8 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
       relatedClient: task.relatedClient || '',
       caseRole: task.caseRole || '',
       keyActionKeys: task.keyActionKeys || [],
-      assignee: task.assignee || '',
-      supervisor: task.supervisor || '',
+      assignee: task.assigneeUserId || users.find((user) => user.name === task.assignee)?._id || task.assignee || '',
+      supervisor: task.supervisorUserId || users.find((user) => user.name === task.supervisor)?._id || task.supervisor || '',
       startDate: task.startDate || new Date().toISOString().slice(0, 10),
       dueDate: task.dueDate || '',
     });
@@ -397,8 +396,10 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
         // leave the prior role in place on the server.
         caseRole: form.caseRole || null,
         keyActionKeys: form.keyActionKeys,
-        assignee: form.assignee,
-        supervisor: form.supervisor,
+        assignee: users.find((user) => user._id === form.assignee)?.name || form.assignee,
+        assigneeUserId: users.find((user) => user._id === form.assignee)?._id,
+        supervisor: users.find((user) => user._id === form.supervisor)?.name || form.supervisor,
+        supervisorUserId: users.find((user) => user._id === form.supervisor)?._id,
         startDate: form.startDate,
         dueDate: form.dueDate,
       };
@@ -421,10 +422,16 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   };
 
   const removeTask = async (task: IndependentTask) => {
-    if (!window.confirm(`Permanently delete ${task.taskNumber}? This also removes its comments, attachments, history, notifications, mirrored case documents, and independent case-work attribution.`)) return;
+    const hasSubmittedDelegatedWork = Boolean(
+      task.caseRole && (task.caseLifecycleCompletedAt || (task.caseLifecycleStatus && task.caseLifecycleStatus !== 'Ready') || ['In Progress', 'Completed', 'Closed'].includes(task.status))
+    );
+    const confirmation = hasSubmittedDelegatedWork
+      ? `Cancel ${task.taskNumber}? Its matter documents, approvals, audit history, and financial attribution will be preserved.`
+      : `Permanently delete ${task.taskNumber}? Its private task records and Key Action reservation will be removed. Shared matter documents are preserved.`;
+    if (!window.confirm(confirmation)) return;
     try {
-      await deleteIndependentTask(task._id);
-      toast.success('Task and all related records deleted.');
+      const result = await deleteIndependentTask(task._id);
+      toast.success(result.cancelled ? 'Delegated task cancelled; matter records preserved.' : 'Task and private records deleted.');
       await Promise.all([loadDashboard(), loadTasks()]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete task');
@@ -713,7 +720,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                     </tr>
                   ) : (
                     tasks.map((task, index) => {
-                      const isClosed = task.status === 'Closed';
+                      const isClosed = task.status === 'Closed' || task.status === 'Cancelled';
                       const rowNumber = (page - 1) * limit + index + 1;
                       return (
                         <tr
@@ -810,7 +817,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                           </td>
                           <td className="px-4 py-4">
                             <span className={`independent-task-status inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClasses[task.status]}`}>
-                              {task.status}
+                              {getIndependentTaskDisplayStatus(task)}
                             </span>
                           </td>
                           <td className="px-4 py-4 text-sm text-gray-600"><time className="independent-task-due" dateTime={task.dueDate}>{formatDeadlineDateTime(task.dueDate)}</time></td>
@@ -823,6 +830,12 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                                 <ExternalLink className="h-3.5 w-3.5" />
                                 Open
                               </Link>
+                              {canDeleteIndependentTask(task, { ...currentUser, role: userRole }) && (
+                                <button type="button" onClick={() => removeTask(task)} aria-label={'Delete ' + task.taskNumber}
+                                  className="independent-task-delete inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50">
+                                  <Trash2 className="h-3.5 w-3.5" />Delete
+                                </button>
+                              )}
                               {!isClosed && (
                                 <>
                                   {canEditTask(task) && (
@@ -835,23 +848,13 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                                       Edit
                                     </button>
                                   )}
-                                  {canTransitionTask(task) && canQuickTransition(task) && (
+                                  {!task.caseRole && canTransitionTask(task) && canQuickTransition(task) && (
                                     <button
                                       type="button"
                                       onClick={() => handleTransitionQuick(task)}
                                       className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
                                     >
                                       {transitionButtonLabel(task)}
-                                    </button>
-                                  )}
-                                  {canManage && (
-                                    <button
-                                      type="button"
-                                      onClick={() => removeTask(task)}
-                                      className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                      Delete
                                     </button>
                                   )}
                                 </>
@@ -1130,7 +1133,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900">Delegated case work <span className="font-normal text-gray-500">(optional)</span></h3>
-                        <p className="mt-1 text-xs leading-5 text-gray-600">Choose the temporary role this assignee will perform. Only Key Actions ready for that lifecycle step are available, and all work stays in this task workspace.</p>
+                        <p className="mt-1 text-xs leading-5 text-gray-600">Choose the temporary role and select any number of available Key Actions. Initiator actions are submitted in workflow order; review and approval keep their required stages.</p>
                       </div>
                       {caseKeyActionsLoading && <Loader2 className="h-4 w-4 animate-spin text-blue-700" />}
                     </div>
@@ -1140,7 +1143,8 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                         <button
                           key={role}
                           type="button"
-                          disabled={saving || caseKeyActionsLoading}
+                          disabled={saving || caseKeyActionsLoading || (role !== 'Initiator' && (!canManage || !isManagerRole((users.find((user) => user._id === form.assignee || user.name === form.assignee)?.role || '') as UserRole)))}
+                          title={role !== 'Initiator' ? 'Reviewer and approver work requires an authorized creator and assignee.' : 'Available to all active staff.'}
                           onClick={() => setForm((prev) => ({ ...prev, caseRole: prev.caseRole === role ? '' : role, keyActionKeys: [] }))}
                           className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${
                             form.caseRole === role
@@ -1157,6 +1161,8 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-xs font-semibold uppercase tracking-wide text-gray-600">Open Key Actions</span>
                           <span className="text-xs text-gray-500">{form.keyActionKeys.length} selected</span>
+                          <button type="button" disabled={saving || caseKeyActionsLoading} className="text-xs font-semibold text-blue-700" onClick={() => setForm((prev) => ({ ...prev, keyActionKeys: selectableCaseKeyActions.filter((action) => action.eligibility?.[prev.caseRole as IndependentTaskCaseRole]).map((action) => action.key) }))}>Select all available</button>
+                          <button type="button" disabled={saving} className="text-xs font-semibold text-blue-700" onClick={() => setForm((prev) => ({ ...prev, keyActionKeys: [] }))}>Clear</button>
                         </div>
                         <div className="independent-task-key-actions-list mt-3 space-y-2 pr-1" aria-label="Available Key Actions">
                           {caseKeyActionsLoading ? (
@@ -1165,12 +1171,13 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                             <div className="text-xs text-gray-500">No Key Actions are ready for the {form.caseRole} lifecycle step yet.</div>
                           ) : selectableCaseKeyActions.map((action) => {
                             const selected = form.keyActionKeys.includes(action.key);
+                            const eligible = Boolean(action.eligibility?.[form.caseRole as IndependentTaskCaseRole]);
                             return (
-                              <label key={action.key} className="independent-task-key-action flex cursor-pointer items-start gap-3 rounded-lg border border-gray-100 p-2.5 hover:bg-gray-50">
+                              <label key={action.key} className={`independent-task-key-action flex items-start gap-3 rounded-lg border border-gray-100 p-2.5 ${eligible ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed bg-gray-50 opacity-70'}`}>
                                 <input
                                   type="checkbox"
                                   checked={selected}
-                                  disabled={saving}
+                                  disabled={saving || !eligible}
                                   onChange={() => setForm((prev) => ({
                                     ...prev,
                                     keyActionKeys: selected
@@ -1181,7 +1188,8 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                                 />
                                 <span className="min-w-0">
                                   <span className="block text-sm font-medium text-gray-900">{action.title}</span>
-                                  <span className="mt-0.5 block text-xs text-gray-500">{action.stageTitle} · {action.status}{action.dueAt ? ` · due ${formatDeadlineDateTime(action.dueAt)}` : ''}</span>
+                                  <span className="mt-0.5 block text-xs text-gray-500">{action.stageTitle} · {action.status}{action.dueAt ? ` · due ${formatDeadlineDateTime(action.dueAt)}` : ''}{typeof action.percentage === 'number' ? ` · ${action.percentage}%` : ''}{action.originalResponsibleRole ? ` · ${action.originalResponsibleRole}` : ''}</span>
+                                  {!eligible && <span className="mt-1 block text-xs font-medium text-amber-700">{action.unavailableReason || 'Not eligible for the selected delegated role yet.'}</span>}
                                 </span>
                               </label>
                             );
@@ -1214,9 +1222,9 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                       disabled={saving || lookupLoading}
                     >
                       <option value="">{lookupLoading ? 'Loading users...' : 'Select assignee'}</option>
-                      {userOptions.map((user) => (
-                        <option key={`form-assignee-${user.value}`} value={user.value}>
-                          {user.label}
+                      {users.filter((user) => user.isActive !== false).map((user) => (
+                        <option key={`form-assignee-${user._id}`} value={user._id}>
+                          {user.name} · {user.email}
                         </option>
                       ))}
                     </select>
@@ -1230,9 +1238,9 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                       disabled={saving || lookupLoading}
                     >
                       <option value="">{lookupLoading ? 'Loading users...' : 'Select supervisor'}</option>
-                      {supervisorOptions.map((user) => (
-                        <option key={`form-supervisor-${user.value}`} value={user.value}>
-                          {user.label}
+                      {users.filter((user) => user.isActive !== false && user.role !== 'intern').map((user) => (
+                        <option key={`form-supervisor-${user._id}`} value={user._id}>
+                          {user.name} · {user.email}
                         </option>
                       ))}
                     </select>

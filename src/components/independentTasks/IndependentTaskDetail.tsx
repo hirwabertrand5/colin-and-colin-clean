@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import type { FormEvent, ReactNode } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   CalendarDays,
@@ -16,11 +16,15 @@ import {
   Send,
   Trash2,
   Upload,
+  FileText, Folder, UsersRound, UserRoundCheck, ChevronDown, ArrowRight,
+  ClipboardList, ClipboardCheck, ListChecks, BadgeDollarSign, Timer, Info,
+  Save, Check, LockKeyhole,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
+import './IndependentTaskWorkspace.css';
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 import {
   addIndependentTaskComment,
@@ -31,13 +35,16 @@ import {
   IndependentTaskAttachment,
   IndependentTaskComment,
   IndependentTaskHistory,
-  IndependentTaskPriority,
   IndependentTaskStatus,
   listIndependentTaskAttachments,
   listIndependentTaskComments,
   performIndependentTaskCaseLifecycle,
+  returnIndependentTaskCaseWork,
   transitionIndependentTask,
   uploadIndependentTaskAttachment,
+  deleteIndependentTask,
+  getIndependentTaskDisplayStatus,
+  canDeleteIndependentTask,
 } from '../../services/independentTaskService';
 import { uploadedFileUrl } from '../../services/apiConfig';
 
@@ -50,6 +57,7 @@ const WORKFLOW_STATUSES: IndependentTaskStatus[] = [
   'Awaiting External Action',
   'Completed',
   'Closed',
+  'Cancelled',
 ];
 
 const WORKFLOW_FLOW: Record<IndependentTaskStatus, IndependentTaskStatus[]> = {
@@ -61,6 +69,7 @@ const WORKFLOW_FLOW: Record<IndependentTaskStatus, IndependentTaskStatus[]> = {
   'Awaiting External Action': ['In Progress'],
   Completed: ['Closed'],
   Closed: [],
+  Cancelled: [],
 };
 
 const ADMIN_ROLES: UserRole[] = [
@@ -77,23 +86,6 @@ const ADMIN_ROLES: UserRole[] = [
   'originating_attorney',
 ];
 
-const statusTone: Record<IndependentTaskStatus, string> = {
-  Created: 'bg-gray-100 text-gray-700 border-gray-200',
-  Assigned: 'bg-blue-50 text-blue-700 border-blue-100',
-  Acknowledged: 'bg-sky-50 text-sky-700 border-sky-100',
-  'In Progress': 'bg-indigo-50 text-indigo-700 border-indigo-100',
-  'Awaiting Review': 'bg-amber-50 text-amber-700 border-amber-100',
-  'Awaiting External Action': 'bg-orange-50 text-orange-700 border-orange-100',
-  Completed: 'bg-green-50 text-green-700 border-green-100',
-  Closed: 'bg-gray-900 text-white border-gray-900',
-};
-
-const priorityTone: Record<IndependentTaskPriority, string> = {
-  Low: 'bg-green-50 text-green-700 border-green-100',
-  Medium: 'bg-yellow-50 text-yellow-800 border-yellow-100',
-  High: 'bg-red-50 text-red-700 border-red-100',
-  Critical: 'bg-rose-600 text-white border-rose-600',
-};
 
 const formatDateTime = (value?: string | Date) => {
   if (!value) return '—';
@@ -128,6 +120,7 @@ interface IndependentTaskDetailProps {
 
 export default function IndependentTaskDetail({ userRole }: IndependentTaskDetailProps) {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const currentUser = useMemo(() => getActorUser(), []);
   const isAdmin = ADMIN_ROLES.includes(userRole);
@@ -138,10 +131,17 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
   const [attachments, setAttachments] = useState<IndependentTaskAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'timeline' | 'comments' | 'attachments' | 'activity'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'key-actions' | 'timeline' | 'comments' | 'attachments' | 'activity'>('overview');
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [expandedAction, setExpandedAction] = useState<string | null>(null);
+  const [showWorkEditor, setShowWorkEditor] = useState(false);
+  const [workDraft, setWorkDraft] = useState('');
+  const [progressSaving, setProgressSaving] = useState(false);
 
   const [statusBusy, setStatusBusy] = useState<IndependentTaskStatus | null>(null);
   const [caseLifecycleBusy, setCaseLifecycleBusy] = useState(false);
+  const [returnStepKey, setReturnStepKey] = useState('');
+  const [returnReason, setReturnReason] = useState('');
   const [commentBody, setCommentBody] = useState('');
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
   const [commentSaving, setCommentSaving] = useState(false);
@@ -154,12 +154,13 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
   usePageTitle(task ? `${task.taskNumber} • Independent Tasks` : 'Independent Task Detail');
 
   const canEdit = Boolean(
-    task && task.status !== 'Closed' && (isAdmin || currentUser?.name === task.assignee || currentUser?.name === task.supervisor)
+    task && !['Closed', 'Cancelled'].includes(task.status) && (isAdmin || currentUser?.name === task.createdBy || currentUser?.name === task.assignee || currentUser?.name === task.supervisor)
   );
   const canAct = Boolean(
     task && (isAdmin || currentUser?.name === task.assignee || currentUser?.name === task.supervisor)
   );
-  const canComment = Boolean(task && task.status !== 'Closed' && (canAct || isAdmin));
+  const canComment = Boolean(task && !['Closed', 'Cancelled'].includes(task.status) && (canAct || currentUser?.name === task.createdBy));
+  const canRemoveAttachment = Boolean(task && !['Closed', 'Cancelled'].includes(task.status) && (isAdmin || currentUser?.name === task.createdBy || currentUser?.name === task.supervisor));
 
   const loadData = async () => {
     if (!id) {
@@ -193,6 +194,10 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
   };
 
   useEffect(() => {
+    setActiveTab('overview');
+    setExpandedAction(null);
+    setWorkDraft('');
+    setShowWorkEditor(false);
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -225,6 +230,8 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
 
   const allowedTransitions = useMemo(() => {
     if (!task) return [];
+    if (['Closed', 'Cancelled'].includes(task.status)) return [];
+    if (task.caseRole) return [];
     if (isAdmin) {
       return WORKFLOW_STATUSES.filter((status) => status !== task.status && !(status === 'Closed' && task.status !== 'Completed'));
     }
@@ -271,7 +278,7 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
   };
 
   const caseLifecycleLabel = task?.caseRole === 'Initiator'
-    ? 'Submit to Reviewer'
+    ? (task.caseWork?.lifecycleStatus === 'Changes Requested' ? 'Resubmit to Reviewer' : 'Submit to Reviewer')
     : task?.caseRole === 'Reviewer'
       ? 'Submit to Signer / Approver'
       : 'Approve & Complete';
@@ -292,6 +299,24 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
     } finally {
       setCaseLifecycleBusy(false);
     }
+  };
+
+  const startDelegatedWork = async () => {
+    if (!task) return;
+    await handleTransition('In Progress');
+  };
+  const returnForCorrections = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!task || !returnStepKey || !returnReason.trim()) return;
+    setCaseLifecycleBusy(true);
+    try {
+      await returnIndependentTaskCaseWork(task._id, returnStepKey, returnReason);
+      setReturnStepKey('');
+      setReturnReason('');
+      toast.success('Work returned to its contributor for corrections.');
+      await refreshTask();
+    } catch (error: any) { toast.error(error.message || 'Failed to return work.'); }
+    finally { setCaseLifecycleBusy(false); }
   };
 
   const submitComment = async (e: FormEvent) => {
@@ -351,531 +376,184 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
     }
   };
 
-  const renderComment = (comment: CommentNode, depth = 0) => (
-    <div key={comment._id} className="space-y-3" style={{ marginLeft: depth * 18 }}>
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-900">{comment.authorName}</span>
-              <span className="text-xs text-gray-500">{formatDateTime(comment.createdAt)}</span>
-            </div>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-700">{comment.body}</p>
-          </div>
-          {canComment && (
-            <button
-              type="button"
-              onClick={() => {
-                setReplyParentId(comment._id);
-                setActiveTab('comments');
-              }}
-              className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
-            >
-              <Reply className="h-3.5 w-3.5" />
-              Reply
-            </button>
-          )}
-        </div>
-      </div>
-      {comment.replies.length > 0 && (
-        <div className="space-y-3 border-l-2 border-dashed border-gray-200 pl-4">
-          {comment.replies.map((reply) => renderComment(reply, depth + 1))}
-        </div>
-      )}
+  const deleteTaskRecord = async () => {
+    if (!task) return;
+    const protectedWork = Boolean(task.caseRole && (task.caseLifecycleCompletedAt || ['In Progress', 'Completed', 'Closed'].includes(task.status)));
+    if (!window.confirm(protectedWork
+      ? 'Cancel this delegated task? Shared matter documents, approvals and financial history will be preserved.'
+      : 'Permanently delete this task, its comments, private attachments, history and notifications? Shared matter documents are preserved.')) return;
+    try {
+      const result = await deleteIndependentTask(task._id);
+      toast.success(result.cancelled ? 'Task cancelled; matter records preserved.' : 'Task and private records deleted.');
+      navigate('/matters/independent-tasks');
+    } catch (error: any) { toast.error(error.message || 'Failed to delete task.'); }
+  };
+
+  const delegated = Boolean(task?.caseRole && task.relatedMatterId);
+  const locked = Boolean(task && ['Closed', 'Cancelled'].includes(task.status));
+  const displayStatus = task ? getIndependentTaskDisplayStatus(task) : '';
+  const actions = task?.caseWork?.selectedKeyActions || [];
+  const approved = actions.filter((action) => action.completed).length;
+  const progress = actions.length ? Math.round(approved / actions.length * 100) : 0;
+  const weight = actions.reduce((sum, action) => sum + (action.percentage || 0), 0);
+  const assignments = task?.relatedMatter?.caseAssignments;
+  const team = [
+    { role: 'Initiator', name: assignments?.initiator || task?.relatedMatter?.assignedTo },
+    { role: 'Reviewer', name: assignments?.reviewer },
+    { role: 'Signer/Approver', name: assignments?.signerApprover },
+  ];
+  const contributorCanAct = currentUser?.name === task?.assignee && !locked;
+  const canStart = delegated && contributorCanAct && Boolean(task && ['Assigned', 'Acknowledged'].includes(task.status));
+  const canSubmit = delegated && contributorCanAct && Boolean(task && ['In Progress', 'Awaiting Review'].includes(task.status)) && actions.some((action) =>
+    task?.caseRole === 'Initiator' ? ['Not Started', 'In Progress'].includes(action.status)
+      : action.status === (task?.caseRole === 'Reviewer' ? 'Awaiting Review' : 'Awaiting Approval'));
+  const standardNext = task && !delegated && !locked ? WORKFLOW_FLOW[task.status]?.[0] : undefined;
+  const busy = Boolean(statusBusy || caseLifecycleBusy || progressSaving);
+  const stage = actions.length && approved === actions.length ? 3 : actions.some((action) => action.status === 'Awaiting Approval') ? 2 : actions.some((action) => action.status === 'Awaiting Review') ? 1 : 0;
+  const standardStage = task && ['Completed', 'Closed'].includes(task.status) ? 3 : task?.status === 'Awaiting Review' ? 2 : ['In Progress', 'Awaiting External Action'].includes(task?.status || '') ? 1 : 0;
+  const dueDays = task?.dueDate ? Math.ceil((new Date(task.dueDate).getTime() - Date.now()) / 86400000) : NaN;
+  const dueLabel = !Number.isFinite(dueDays) ? '' : dueDays < 0 ? Math.abs(dueDays) + ' days overdue' : dueDays === 0 ? 'Due today' : dueDays + ' days left';
+  const avatar = (name?: string, small = false) => <span className={'it-avatar' + (small ? ' it-avatar-small' : '')} aria-hidden="true">{(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>;
+  const badge = (value: string) => <span className="it-badge" data-tone={['Completed', 'Approved'].includes(value) ? 'green' : ['Closed', 'Cancelled'].includes(value) ? 'neutral' : ['Changes Requested', 'Awaiting Review', 'Awaiting Approval'].includes(value) ? 'amber' : 'blue'}>{value}</span>;
+  const switchTab = (value: typeof activeTab) => { setActiveTab(value); setReturnStepKey(''); };
+  const saveProgress = async () => {
+    if (!task || !canComment) return;
+    if (!workDraft.trim()) { setShowWorkEditor(true); setActiveTab('overview'); return; }
+    setProgressSaving(true);
+    try {
+      await addIndependentTaskComment(task._id, { body: workDraft.trim() });
+      setWorkDraft(''); setShowWorkEditor(false);
+      toast.success('Work progress saved to the task discussion.');
+      await refreshTask();
+    } catch (error: any) { toast.error(error.message || 'Failed to save progress.'); }
+    finally { setProgressSaving(false); }
+  };
+  const primaryAction = canStart
+    ? <button className="it-button it-primary" disabled={busy} onClick={startDelegatedWork}>{busy ? <Loader2 className="it-spin" /> : <CheckCircle2 />}Start Work</button>
+    : canSubmit ? <button className="it-button it-primary" disabled={busy} onClick={performCaseLifecycle}>{busy ? <Loader2 className="it-spin" /> : <Send />}{caseLifecycleLabel}</button>
+      : standardNext && canAct ? <button className="it-button it-primary" disabled={busy} onClick={() => handleTransition(standardNext)}><CheckCircle2 />{getTransitionLabel(standardNext)}</button> : null;
+  const renderComment = (comment: CommentNode, depth = 0): ReactNode => (
+    <div className={'it-comment-thread' + (depth ? ' it-comment-reply' : '')} key={comment._id}>
+      <article className="it-comment">{avatar(comment.authorName, true)}<div className="it-comment-body">
+        <div className="it-comment-byline"><strong>{comment.authorName}</strong><time>{formatDateTime(comment.createdAt)}</time></div><p>{comment.body}</p>
+        {canComment && <button className="it-text-button" onClick={() => { setReplyParentId(comment._id); setActiveTab('comments'); }}><Reply />Reply</button>}
+      </div></article>{comment.replies.map((reply) => renderComment(reply, depth + 1))}
     </div>
   );
-
-  if (!id) {
-    return (
-      <div className="rounded-3xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-        Task id is required.
-      </div>
-    );
-  }
-
-  return (
-    <div className="independent-task-workspace space-y-6">
-      <div className="independent-task-workspace-header rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-3">
-            <Link to="/matters/independent-tasks" className="inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900">
-              <ArrowLeft className="h-4 w-4" />
-              Back to Independent Tasks
-            </Link>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-semibold text-gray-900">{task?.title || 'Independent Task'}</h1>
-              {task && (
-                <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusTone[task.status]}`}>
-                  {task.status}
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500">
-              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 font-medium text-gray-700">
-                {task?.taskNumber || '—'}
-              </span>
-              {task?.priority && (
-                <span className={`inline-flex rounded-full border px-3 py-1 font-semibold ${priorityTone[task.priority]}`}>
-                  {task.priority}
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1.5">
-                <CalendarDays className="h-4 w-4" />
-                Due {formatDeadlineDateTime(task?.dueDate)}
-              </span>
-              {task?.relatedMatterLabel && <span>{task.relatedMatterLabel}</span>}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => refreshTask()}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </button>
-            {allowedTransitions.map((next) => (
-              <button
-                key={next}
-                type="button"
-                onClick={() => handleTransition(next)}
-                disabled={statusBusy === next || !task || task.status === 'Closed'}
-                className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
-              >
-                {statusBusy === next ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                {getTransitionLabel(next)}
-              </button>
-            ))}
-            {task?.caseRole && task.status === 'In Progress' && currentUser?.name === task.assignee && (
-              <button
-                type="button"
-                onClick={performCaseLifecycle}
-                disabled={caseLifecycleBusy}
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-60"
-              >
-                {caseLifecycleBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                {caseLifecycleLabel}
-              </button>
-            )}
-          </div>
+  const documentsTable = (recent = false) => attachments.length ? <div className="it-table-scroll"><table className="it-documents-table">
+    <thead><tr><th>Name</th>{delegated && <th>Linked work</th>}<th>Uploaded by</th><th>Date</th><th>Size</th><th><span className="it-sr-only">Actions</span></th></tr></thead>
+    <tbody>{(recent ? attachments.slice(0, 3) : attachments).map((file) => <tr key={file._id}>
+      <td><span className="it-file-name"><FileText /><span>{file.fileName}{!recent && file.note && <small>{file.note}</small>}</span></span></td>
+      {delegated && <td><span className="it-document-tag">{actions.length === 1 ? actions[0].title : 'Selected Key Actions'}</span></td>}
+      <td>{file.uploadedBy}</td><td>{formatDate(file.uploadedDate)}</td><td>{file.fileSize}</td><td><div className="it-row-actions">
+        <a className="it-icon-button" aria-label={'Download ' + file.fileName} href={uploadedFileUrl(file.url)} target="_blank" rel="noreferrer"><Download /></a>
+        {!recent && canRemoveAttachment && <button className="it-icon-button it-danger" aria-label={'Delete ' + file.fileName} onClick={() => removeAttachment(file._id)}><Trash2 /></button>}
+      </div></td></tr>)}</tbody>
+    </table></div> : <div className="it-empty"><Paperclip /><p>No documents yet.</p><span>{canEdit ? 'Upload supporting files from the Documents tab.' : 'Task documents will appear here.'}</span></div>;
+  const keyActionsPanel = <section className="it-card">
+    <div className="it-card-heading"><div><h2><ClipboardList />Delegated Key Actions</h2><p>Selected actions from the linked matter workflow.</p></div><span className="it-count">{actions.length}</span></div>
+    {returnStepKey && <form onSubmit={returnForCorrections} className="it-feedback-form">
+      <label htmlFor="it-correction-feedback">Required correction feedback</label><textarea id="it-correction-feedback" required maxLength={5000} rows={3} value={returnReason} onChange={(event) => setReturnReason(event.target.value)} />
+      <div className="it-row-actions"><button className="it-button it-primary" type="submit" disabled={caseLifecycleBusy || !returnReason.trim()}>Return to contributor</button><button className="it-button" type="button" disabled={caseLifecycleBusy} onClick={() => setReturnStepKey('')}>Cancel</button></div>
+    </form>}
+    <div className="it-action-list">{actions.length ? actions.map((action, index) => {
+      const open = expandedAction === action.key;
+      const canReturn = contributorCanAct && Boolean(task && ['In Progress', 'Awaiting Review'].includes(task.status)) && ((task?.caseRole === 'Reviewer' && action.status === 'Awaiting Review') || (task?.caseRole === 'Signer/Approver' && action.status === 'Awaiting Approval'));
+      return <article className="it-action" key={action.key}>
+        <div className="it-action-title"><span className="it-action-number">{index + 1}</span><h3>{action.title}</h3><div className="it-row-actions">
+          {canReturn && <button className="it-button it-button-small" disabled={busy} onClick={() => { setReturnStepKey(action.key); setReturnReason(''); }}>Return for corrections</button>}
+          {contributorCanAct && <button className="it-button it-primary it-button-small" disabled={busy} onClick={() => { if (canStart) void startDelegatedWork(); else setExpandedAction(open ? null : action.key); }}>{canStart ? 'Start Work' : action.completed ? 'View Work' : 'Continue Work'}</button>}
+          <button className="it-icon-button" aria-label={(open ? 'Collapse ' : 'Expand ') + action.title} aria-expanded={open} aria-controls={'it-action-' + index} onClick={() => setExpandedAction(open ? null : action.key)}><ChevronDown className={open ? 'it-rotate' : ''} /></button>
+        </div></div>
+        <div className="it-action-metadata">
+          <div><span>Workflow stage</span><strong className="it-stage-tag">{action.stageTitle || 'Not recorded'}</strong></div>
+          <div><span>Status</span>{badge(action.correctionRequest && !action.correctionRequest.resolvedAt ? 'Changes Requested' : action.status)}</div>
+          <div><span>Deadline</span><strong><CalendarDays />{action.dueAt ? formatDeadlineDateTime(action.dueAt) : 'Not set'}</strong></div>
+          <div><span>Contribution</span><strong>{action.percentage == null ? 'Not allocated' : action.percentage + '%'}</strong></div>
+          <div><span>Original role</span><strong>{action.originalResponsibleRole || task?.caseRole || 'Not recorded'}</strong></div>
         </div>
-      </div>
-
-      {loading ? (
-        <div className="rounded-3xl border border-gray-200 bg-white p-10 text-center text-gray-500">
-          <Loader2 className="mx-auto mb-3 h-6 w-6 animate-spin text-gray-400" />
-          Loading independent task...
-        </div>
-      ) : error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      ) : task ? (
-        <>
-          {task.status === 'Closed' && (
-            <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-              This task is closed and locked for editing.
-            </div>
-          )}
-
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="space-y-4">
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-white p-2 shadow-sm md:grid-cols-5">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="timeline">Timeline</TabsTrigger>
-              <TabsTrigger value="comments">Comments</TabsTrigger>
-              <TabsTrigger value="attachments">Attachments</TabsTrigger>
-              <TabsTrigger value="activity">Activity Log</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="overview">
-              <div className="grid gap-4 xl:grid-cols-3">
-                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm xl:col-span-2">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Task Details</div>
-                      <dl className="mt-4 space-y-3 text-sm">
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-gray-500">Title</dt>
-                          <dd className="font-medium text-gray-900 text-right">{task.title}</dd>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-gray-500">Description</dt>
-                          <dd className="max-w-[60%] text-right text-gray-700">{task.description || 'No description provided.'}</dd>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-gray-500">Matter</dt>
-                          <dd className="text-right text-gray-700">{task.relatedMatterLabel || 'Not linked'}</dd>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-gray-500">Client</dt>
-                          <dd className="text-right text-gray-700">{task.relatedClient || 'Not linked'}</dd>
-                        </div>
-                      </dl>
-                    </div>
-
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Ownership</div>
-                      <dl className="mt-4 space-y-3 text-sm">
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-gray-500">Assignee</dt>
-                          <dd className="font-medium text-gray-900 text-right">{task.assignee}</dd>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-gray-500">Supervisor</dt>
-                          <dd className="font-medium text-gray-900 text-right">{task.supervisor}</dd>
-                        </div>
-                        {task.assignmentHistory?.length ? (
-                          <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-                            <span className="font-semibold">Continuity protected.</span> {task.assignmentHistory.length} handover{task.assignmentHistory.length === 1 ? '' : 's'} recorded; progress, dates and evidence were retained for the current owner.
-                          </div>
-                        ) : null}
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-gray-500">Start Date</dt>
-                          <dd className="text-right text-gray-700">{formatDate(task.startDate)}</dd>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-gray-500">Due Date</dt>
-                          <dd className="text-right text-gray-700">{formatDeadlineDateTime(task.dueDate)}</dd>
-                        </div>
-                      </dl>
-                    </div>
-                  </div>
-
-                  {task.caseRole && (
-                    <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Delegated case work</div>
-                          <div className="mt-1 text-base font-semibold text-gray-900">Acting as {task.caseRole}</div>
-                          <p className="mt-1 text-sm text-gray-600">Complete the selected lifecycle step here. The case workspace remains separate.</p>
-                        </div>
-                        <span className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-800">
-                          {task.caseWork?.lifecycleStatus || task.caseLifecycleStatus || 'Ready'}
-                        </span>
-                      </div>
-                      <div className="mt-4 space-y-2">
-                        {(task.caseWork?.selectedKeyActions || []).map((action) => (
-                          <div key={action.key} className="flex flex-col gap-1 rounded-xl border border-blue-100 bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <div className="font-medium text-gray-900">{action.title}</div>
-                              <div className="text-xs text-gray-500">{action.stageTitle}</div>
-                            </div>
-                            <span className="text-xs font-semibold text-blue-800">{action.status}</span>
-                          </div>
-                        ))}
-                        {!task.caseWork?.selectedKeyActions?.length && task.keyActionKeys?.length ? (
-                          <div className="text-sm text-gray-600">Selected Key Actions are being refreshed from the matter workflow.</div>
-                        ) : null}
-                      </div>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-4">
-                        <div><div className="text-xs text-gray-500">TPA</div><div className="mt-1 font-semibold text-gray-900">{task.caseWork?.tpaPercent ? `${task.caseWork.tpaPercent}%` : '—'}</div></div>
-                        <div><div className="text-xs text-gray-500">Timeliness</div><div className="mt-1 font-semibold text-gray-900">{task.caseWork?.timelinessScore == null ? '—' : `${task.caseWork.timelinessScore}%`}</div></div>
-                        <div><div className="text-xs text-gray-500">Quality</div><div className="mt-1 font-semibold text-gray-900">{task.caseWork?.qualityScore == null ? '—' : `${task.caseWork.qualityScore}%`}</div></div>
-                        <div><div className="text-xs text-gray-500">Earned fee</div><div className="mt-1 font-semibold text-emerald-700">{formatMoney(task.caseWork?.earnedFee, task.caseWork?.currency)}</div></div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Status Summary</div>
-                    <div className="mt-4 space-y-3 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Created</span>
-                        <span className="text-gray-900">{formatDateTime(task.createdAt)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Updated</span>
-                        <span className="text-gray-900">{formatDateTime(task.updatedAt)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Completion</span>
-                        <span className="text-gray-900">{formatDateTime(task.completedAt)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Closed</span>
-                        <span className="text-gray-900">{formatDateTime(task.closedAt)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Last Action By</span>
-                        <span className="text-gray-900">{task.lastActionBy || '—'}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Quick Facts</div>
-                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
-                        <div className="text-xs text-gray-500">Attachments</div>
-                        <div className="mt-1 text-lg font-semibold text-gray-900">{attachments.length}</div>
-                      </div>
-                      <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
-                        <div className="text-xs text-gray-500">Comments</div>
-                        <div className="mt-1 text-lg font-semibold text-gray-900">{comments.length}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="timeline">
-              <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <Clock3 className="h-5 w-5 text-gray-500" />
-                  <h2 className="text-lg font-semibold text-gray-900">Workflow Timeline</h2>
-                </div>
-                <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  {WORKFLOW_STATUSES.map((status, index) => {
-                    const currentIndex = WORKFLOW_STATUSES.indexOf(task.status);
-                    const isActive = status === task.status;
-                    const isComplete = currentIndex > index;
-                    return (
-                      <div
-                        key={status}
-                        className={`rounded-2xl border p-4 ${
-                          isActive
-                            ? 'border-gray-900 bg-gray-900 text-white'
-                            : isComplete
-                              ? 'border-green-200 bg-green-50'
-                              : 'border-gray-200 bg-gray-50'
-                        }`}
-                      >
-                        <div className="text-xs font-semibold uppercase tracking-[0.16em] opacity-80">
-                          Step {index + 1}
-                        </div>
-                        <div className="mt-2 text-base font-semibold">{status}</div>
-                        <p className="mt-2 text-sm opacity-80">
-                          {status === 'Created' && 'Task record created.'}
-                          {status === 'Assigned' && 'Owner assigned and task becomes actionable.'}
-                          {status === 'Acknowledged' && 'Assignee confirmed receipt.'}
-                          {status === 'In Progress' && 'Work is actively underway.'}
-                          {status === 'Awaiting Review' && 'Supervisor review requested.'}
-                          {status === 'Awaiting External Action' && 'Task paused pending outside input.'}
-                          {status === 'Completed' && 'Task completed and ready to close.'}
-                          {status === 'Closed' && 'Task fully closed and locked.'}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="mt-8 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Status History</div>
-                  <div className="mt-4 space-y-3">
-                    {(history || []).filter((item) =>
-                      ['TASK_STATUS_CHANGED', 'TASK_COMPLETED', 'TASK_CLOSED', 'TASK_REVIEW_REQUESTED', 'TASK_EXTERNAL_ACTION_REQUESTED', 'TASK_CASE_LIFECYCLE_UPDATED'].includes(
-                        item.action
-                      )
-                    ).length === 0 ? (
-                      <div className="text-sm text-gray-500">No status transitions recorded yet.</div>
-                    ) : (
-                      (history || [])
-                        .filter((item) =>
-                          ['TASK_STATUS_CHANGED', 'TASK_COMPLETED', 'TASK_CLOSED', 'TASK_REVIEW_REQUESTED', 'TASK_EXTERNAL_ACTION_REQUESTED', 'TASK_CASE_LIFECYCLE_UPDATED'].includes(
-                            item.action
-                          )
-                        )
-                        .map((item) => (
-                          <div key={item._id} className="rounded-2xl border border-gray-200 bg-white p-3">
-                            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-                              <div className="font-medium text-gray-900">{item.message}</div>
-                              <div className="text-xs text-gray-500">
-                                {item.actorName} • {formatDateTime(item.createdAt)}
-                              </div>
-                            </div>
-                            {item.detail && <div className="mt-1 text-sm text-gray-700">{item.detail}</div>}
-                          </div>
-                        ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="comments">
-              <div className="grid gap-4 xl:grid-cols-3">
-                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm xl:col-span-2">
-                  <div className="flex items-center gap-2">
-                    <MessageSquare className="h-5 w-5 text-gray-500" />
-                    <h2 className="text-lg font-semibold text-gray-900">Discussion Thread</h2>
-                  </div>
-
-                  <div className="mt-6 space-y-4">
-                    {commentsTree.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-500">
-                        No comments yet. Add the first note to start the discussion.
-                      </div>
-                    ) : (
-                      commentsTree.map((comment) => renderComment(comment))
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-                  <div className="flex items-center gap-2">
-                    <Send className="h-5 w-5 text-gray-500" />
-                    <h3 className="text-lg font-semibold text-gray-900">{replyParentId ? 'Reply to Comment' : 'Add Comment'}</h3>
-                  </div>
-                  {replyParentId && (
-                    <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                      Replying to an existing comment.
-                      <button type="button" onClick={() => setReplyParentId(null)} className="ml-2 font-medium underline">
-                        Cancel reply
-                      </button>
-                    </div>
-                  )}
-                  <form onSubmit={submitComment} className="mt-4 space-y-3">
-                    <textarea
-                      value={commentBody}
-                      onChange={(e) => setCommentBody(e.target.value)}
-                      rows={8}
-                      placeholder="Write a comment or instruction..."
-                      disabled={!canComment || commentSaving}
-                      className="w-full rounded-2xl border border-gray-300 px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400 disabled:bg-gray-50"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!canComment || commentSaving}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
-                    >
-                      {commentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      Post Comment
-                    </button>
-                  </form>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="attachments">
-              <div className="grid gap-4 xl:grid-cols-3">
-                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm xl:col-span-2">
-                  <div className="flex items-center gap-2">
-                    <Paperclip className="h-5 w-5 text-gray-500" />
-                    <h2 className="text-lg font-semibold text-gray-900">Uploaded Files</h2>
-                  </div>
-                  <div className="mt-6 space-y-3">
-                    {attachments.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-500">
-                        No attachments uploaded yet.
-                      </div>
-                    ) : (
-                      attachments.map((attachment) => (
-                        <div key={attachment._id} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                            <div>
-                              <div className="font-medium text-gray-900">{attachment.fileName}</div>
-                              <div className="mt-1 text-xs text-gray-500">
-                                {attachment.originalName} • {attachment.fileSize} • {attachment.uploadedBy} • {formatDateTime(attachment.createdAt)}
-                              </div>
-                              {attachment.note && <div className="mt-2 text-sm text-gray-700">{attachment.note}</div>}
-                            </div>
-                            <div className="flex gap-2">
-                              <a
-                                href={uploadedFileUrl(attachment.url)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                              >
-                                <Download className="h-3.5 w-3.5" />
-                                Download
-                              </a>
-                              {canEdit && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeAttachment(attachment._id)}
-                                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  Delete
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-                  <div className="flex items-center gap-2">
-                    <Upload className="h-5 w-5 text-gray-500" />
-                    <h3 className="text-lg font-semibold text-gray-900">Upload Attachment</h3>
-                  </div>
-                  <form onSubmit={submitAttachment} className="mt-4 space-y-3">
-                    <input
-                      value={attachmentName}
-                      onChange={(e) => setAttachmentName(e.target.value)}
-                      placeholder="Display file name"
-                      disabled={!canEdit || uploading}
-                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400 disabled:bg-gray-50"
-                    />
-                    <textarea
-                      value={attachmentNote}
-                      onChange={(e) => setAttachmentNote(e.target.value)}
-                      placeholder="Optional note"
-                      rows={4}
-                      disabled={!canEdit || uploading}
-                      className="w-full rounded-2xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400 disabled:bg-gray-50"
-                    />
-                    <input
-                      type="file"
-                      onChange={(e) => setAttachmentFile(e.target.files?.[0] || null)}
-                      disabled={!canEdit || uploading}
-                      className="w-full rounded-xl border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-sm"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!canEdit || uploading}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
-                    >
-                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                      Upload File
-                    </button>
-                  </form>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="activity">
-              <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <History className="h-5 w-5 text-gray-500" />
-                  <h2 className="text-lg font-semibold text-gray-900">Activity Log</h2>
-                </div>
-
-                <div className="mt-6 space-y-4">
-                  {(history || []).slice().reverse().length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-500">
-                      No activity logged yet.
-                    </div>
-                  ) : (
-                    (history || [])
-                      .slice()
-                      .reverse()
-                      .map((item) => (
-                        <div key={item._id} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                            <div>
-                              <div className="font-medium text-gray-900">{item.message}</div>
-                              {item.detail && <div className="mt-1 text-sm text-gray-700">{item.detail}</div>}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {item.actorName} • {formatDateTime(item.createdAt)}
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                  )}
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </>
-      ) : null}
+        {action.correctionRequest && !action.correctionRequest.resolvedAt && <div className="it-notice" data-tone="amber"><MessageSquare /><div><strong>Changes requested by {action.correctionRequest.requestedBy}</strong><p>{action.correctionRequest.reason}</p></div></div>}
+        {open && <div className="it-action-expanded" id={'it-action-' + index}><h4>Instructions & requirements</h4>
+          {action.instructions?.length || action.requirements?.length ? <ul>{(action.instructions || []).map((item, i) => <li key={'i' + i}>{item}</li>)}{(action.requirements || []).map((item, i) => <li key={'r' + i}>{item.name}{item.required ? ' (required deliverable)' : ''}</li>)}</ul> : <p>No additional instructions were recorded. Follow the task description and review feedback.</p>}
+          <div className="it-row-actions"><button className="it-text-button" onClick={() => switchTab('attachments')}><Paperclip />Supporting documents</button><button className="it-text-button" onClick={() => switchTab('comments')}><MessageSquare />Work notes & comments</button></div>
+          {action.reviewHistory?.length ? <div className="it-review-history"><h4>Submission & review history</h4>{action.reviewHistory.map((entry, i) => <div key={i}><strong>{entry.action}</strong><span>{entry.actorName} · {formatDateTime(entry.at)}</span>{entry.reason && <p>{entry.reason}</p>}</div>)}</div> : <p className="it-muted">No returns or resubmissions recorded.</p>}
+        </div>}
+      </article>;
+    }) : <div className="it-empty"><ClipboardList /><p>Key Actions are unavailable.</p><span>Refresh to retrieve the latest matter workflow.</span></div>}</div>
+  </section>;
+  const tabs: Array<{ value: typeof activeTab; label: string; icon: typeof History }> = [
+    { value: 'overview', label: 'Overview', icon: ClipboardList },
+    ...(delegated ? [{ value: 'key-actions' as const, label: 'Key Actions (' + actions.length + ')', icon: ListChecks }] : []),
+    { value: 'attachments', label: 'Documents (' + attachments.length + ')', icon: FileText },
+    { value: 'comments', label: 'Comments (' + comments.length + ')', icon: MessageSquare },
+    { value: 'activity', label: 'Activity History', icon: History },
+    ...(!delegated ? [{ value: 'timeline' as const, label: 'Timeline', icon: Clock3 }] : []),
+  ];
+  if (!id) return <div className="it-workspace"><div className="it-notice" data-tone="amber">Task id is required.</div></div>;
+  if (loading && !task) return <div className="it-workspace" aria-busy="true"><div className="it-loading-heading" /><div className="it-loading-summary" /><div className="it-loading-grid"><div /><div /></div><span className="it-sr-only">Loading task workspace</span></div>;
+  if (!task) return <div className="it-workspace"><Link to="/matters/independent-tasks" className="it-back"><ArrowLeft />Back to Independent Tasks</Link><div className="it-notice" data-tone="amber">{error || 'Task not found.'}</div><button className="it-button" onClick={() => void refreshTask()}><RefreshCw />Try again</button></div>;
+  return <div className="it-workspace">
+    <header className="it-page-header"><Link to="/matters/independent-tasks" className="it-back"><ArrowLeft />Back to Independent Tasks</Link>
+      <div className="it-title-row"><h1>{task.title}</h1><div className="it-header-actions">
+        <DropdownMenu><DropdownMenuTrigger asChild><button className="it-button">More Actions<ChevronDown /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="it-workspace-menu">
+          <DropdownMenuItem onSelect={() => void refreshTask()}><RefreshCw />Refresh task</DropdownMenuItem><DropdownMenuItem onSelect={() => switchTab('activity')}><History />View activity history</DropdownMenuItem>
+          {!delegated && !locked && canAct && allowedTransitions.filter((next) => next !== standardNext && next !== 'Cancelled').map((next) => <DropdownMenuItem key={next} disabled={busy} onSelect={() => void handleTransition(next)}>{getTransitionLabel(next)}</DropdownMenuItem>)}
+        </DropdownMenuContent></DropdownMenu>
+        {canDeleteIndependentTask(task, { ...currentUser, role: userRole }) && <button type="button" className="it-button it-delete-button" disabled={busy} onClick={() => void deleteTaskRecord()}><Trash2 />Delete Task</button>}
+        {canComment && <button className="it-button" disabled={busy} onClick={() => void saveProgress()}>{progressSaving ? <Loader2 className="it-spin" /> : <Save />}Save Progress</button>}{primaryAction}
+      </div></div>
+      <div className="it-header-meta"><span className="it-badge" data-tone={delegated ? 'green' : 'neutral'}>{delegated ? <UsersRound /> : <ClipboardList />}{delegated ? 'Delegated Case Work' : 'Independent Task'}</span><span>Task Ref: {task.taskNumber}</span>{badge(displayStatus)}<span className="it-badge" data-tone={['Critical', 'High'].includes(task.priority) ? 'amber' : 'neutral'}>{task.priority} Priority</span><span className="it-due-inline"><CalendarDays />Due {formatDeadlineDateTime(task.dueDate)}</span></div>
+    </header>
+    {locked && <div className="it-notice" data-tone="neutral"><LockKeyhole /><div><strong>{task.status === 'Closed' ? 'This task is closed and locked for editing.' : 'This task has been cancelled.'}</strong><p>{delegated ? 'Matter Key Action states and recorded contributions remain available below.' : 'Task details, documents and activity remain available for reference.'}</p></div></div>}
+    <section className="it-summary-strip" aria-label="Task summary">
+      {task.relatedMatterId && <div className="it-summary-item"><span className="it-summary-icon"><Folder /></span><div><span className="it-label">Linked Matter</span><strong className="it-link-color">{task.relatedMatter?.caseNo && task.relatedMatter.caseNo !== 'N/A' ? task.relatedMatter.caseNo : 'Linked matter'}</strong><p>{task.relatedMatter?.parties || task.relatedMatterLabel || 'Matter details not recorded'}</p>{task.relatedClient && <small>Client: {task.relatedClient}</small>}</div></div>}
+      {delegated && <div className="it-summary-item"><span className="it-summary-icon it-green"><UsersRound /></span><div><span className="it-label">Your Acting Role</span><strong>Acting as {task.caseRole}</strong><small>Original {task.caseRole}: {team.find((member) => member.role === task.caseRole)?.name || 'Not recorded'}</small><span className="it-badge" data-tone="blue">Delegated Contributor</span></div></div>}
+      <div className="it-summary-item"><div><span className="it-label">Created By</span><div className="it-person">{avatar(task.createdBy)}<div><strong>{task.createdBy || 'Not recorded'}</strong><small>Task creator</small><small>{formatDateTime(task.createdAt)}</small></div></div></div></div>
+      <div className="it-summary-item"><div><span className="it-label">Assigned To</span><div className="it-person">{avatar(task.assignee)}<div><strong>{task.assignee}</strong><small>{delegated ? 'Delegated contributor' : 'Task assignee'}</small><small>Supervisor: {task.supervisor}</small></div></div></div></div>
+      <div className="it-summary-item"><div><span className="it-label">Start Date</span><strong className="it-date"><CalendarDays />{formatDate(task.startDate)}</strong></div></div>
+      <div className="it-summary-item"><div><span className="it-label">Due Date</span><strong className="it-date"><CalendarDays />{formatDeadlineDateTime(task.dueDate)}</strong>{!locked && dueLabel && <small className={dueDays < 0 ? 'it-danger' : 'it-muted'}>{dueLabel}</small>}</div></div>
+    </section>
+    <nav className="it-tabs" role="tablist" aria-label="Task workspace sections">{tabs.map(({ value, label, icon: Icon }) => <button key={value} role="tab" id={'it-tab-' + value} aria-selected={activeTab === value} aria-controls={'it-panel-' + value} tabIndex={activeTab === value ? 0 : -1} onClick={() => switchTab(value)} onKeyDown={(event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault(); const index = tabs.findIndex((tab) => tab.value === value);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      switchTab(tabs[next].value); document.getElementById('it-tab-' + tabs[next].value)?.focus();
+    }}><Icon />{label}</button>)}</nav>
+    <div role="tabpanel" id={'it-panel-' + activeTab} aria-labelledby={'it-tab-' + activeTab}>
+      {activeTab === 'overview' && <div className="it-layout"><main className="it-main-column">
+        <section className="it-card it-description"><div><h2><FileText />Task Description</h2><p className={'it-description-text' + (!descriptionExpanded ? ' it-clamp' : '')}>{task.description || 'No description has been added to this task.'}</p>
+          {task.description && task.description.length > 220 && <button className="it-text-button" aria-expanded={descriptionExpanded} onClick={() => setDescriptionExpanded(!descriptionExpanded)}>{descriptionExpanded ? 'Show less' : 'Show more'}<ChevronDown /></button>}
+          {!delegated && !task.relatedMatterId && task.relatedClient && <p className="it-muted">Client: {task.relatedClient}</p>}
+        </div>{delegated && <aside className="it-instructions"><h3><Info />Instructions & Requirements</h3><p>Follow the selected action requirements, add supporting documents and submit your work for the next review stage.</p><button className="it-text-button" onClick={() => switchTab('key-actions')}>View action requirements<ArrowRight /></button></aside>}
+          {showWorkEditor && canComment && <form className="it-work-editor" onSubmit={(event) => { event.preventDefault(); void saveProgress(); }}><label htmlFor="it-work-draft">Work progress</label><textarea id="it-work-draft" autoFocus rows={4} value={workDraft} onChange={(event) => setWorkDraft(event.target.value)} placeholder="Describe completed work, updates or next steps…" required /><p className="it-muted">Saved updates appear in this task’s comments.</p><div className="it-row-actions"><button className="it-button it-primary" type="submit" disabled={progressSaving || !workDraft.trim()}>Save Progress</button><button className="it-button" type="button" onClick={() => setShowWorkEditor(false)}>Cancel</button></div></form>}
+        </section>
+        {delegated && keyActionsPanel}
+        <section className="it-card"><div className="it-card-heading"><h2><FileText />Recent Documents</h2><button className="it-text-button" onClick={() => switchTab('attachments')}>View All Documents<ArrowRight /></button></div>{documentsTable(true)}</section>
+        <section className="it-card"><div className="it-card-heading"><h2><MessageSquare />Recent Comments</h2><button className="it-text-button" onClick={() => switchTab('comments')}>View All Comments<ArrowRight /></button></div>{commentsTree.length ? commentsTree.slice(-2).map((comment) => renderComment(comment)) : <div className="it-empty"><MessageSquare /><p>No comments yet.</p><span>Work updates and discussion will appear here.</span></div>}</section>
+      </main><aside className="it-sidebar">
+        <section className="it-card"><h2><Timer />{delegated ? 'Overall Progress' : 'Task Progress'}</h2>{delegated ? <><p className="it-progress-caption">{approved} of {actions.length} actions approved and completed</p><div className="it-progress-row"><div className="it-progress-track" role="progressbar" aria-label="Approved Key Actions" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}><span style={{ width: progress + '%' }} /></div><strong>{progress}%</strong></div></> : <><p className="it-progress-caption">Current task status</p>{badge(task.status)}</>}</section>
+        <section className="it-card"><h2><ClipboardCheck />Current Step</h2><ol className="it-steps">{(delegated ? ['In Progress', 'Submitted for Review', 'Awaiting Approval', 'Approved'] : ['Assigned', 'In Progress', 'Awaiting Review', 'Completed']).map((label, index) => <li key={label} data-active={index <= (delegated ? stage : standardStage)} aria-current={index === (delegated ? stage : standardStage) ? 'step' : undefined}><span>{index <= (delegated ? stage : standardStage) ? <Check /> : null}</span><small>{label}</small></li>)}</ol>{displayStatus === 'Changes Requested' && <p className="it-muted">Corrections are required before this work can move forward.</p>}{!delegated && task.status === 'Awaiting External Action' && <p className="it-muted">Paused while awaiting external action.</p>}</section>
+        {delegated && <section className="it-card"><h2><BadgeDollarSign />Financial Summary <small>(This Task)</small></h2><div className="it-financial-grid">
+          <div><span>Contribution Weight</span><strong>{weight}%</strong><small>{actions.length} Key Actions</small></div>
+          <div><span>TPA</span><strong>{task.caseWork?.tpaPercent ? task.caseWork.tpaPercent + '%' : 'Pending'}</strong><small>Role allocation</small></div>
+          <div><span>Timeliness</span><strong>{task.caseWork?.timelinessScore == null ? 'Pending' : task.caseWork.timelinessScore + '%'}</strong><small>Submission timing</small></div>
+          <div><span>Quality</span><strong>{task.caseWork?.qualityScore == null ? 'Pending' : task.caseWork.qualityScore + '%'}</strong><small>Authorized review</small></div>
+          <div><span>Earned Fee</span><strong>{task.caseWork?.earnedFee == null ? 'Pending' : formatMoney(task.caseWork.earnedFee, task.caseWork.currency)}</strong><small>Approved, collected work</small></div>
+        </div><div className="it-collected-base"><span>Collected base</span><strong>{task.caseWork ? formatMoney(task.caseWork.collectedBase, task.caseWork.currency) : 'Pending calculation'}</strong></div><div className="it-notice" data-tone="blue"><Info /><p>Earnings follow approved Key Actions, collected fees and performance scores. Action weight is not a direct share of client revenue.</p></div></section>}
+        {delegated && <section className="it-card"><h2><UsersRound />Original Matter Team</h2><div className="it-team">{team.map((member) => <div className="it-team-member" key={member.role}>{avatar(member.name, true)}<div><strong>{member.name || 'Not recorded'}</strong><small>{member.role}</small><span className="it-badge" data-tone="blue">Original Assignee</span></div></div>)}</div></section>}
+        {delegated && <section className="it-card"><h2><UserRoundCheck />Delegated Contributor</h2><div className="it-person it-contributor">{avatar(task.assignee)}<div><strong>{task.assignee}</strong><p>Acting as {task.caseRole} <span className="it-badge" data-tone="blue">Delegated</span></p><small>Performing {actions.length} Key Actions ({weight}% weight)</small></div></div></section>}
+        <section className="it-card"><details className="it-record-details"><summary>Task record & dates</summary><dl>{[['Created', formatDateTime(task.createdAt)], ['Updated', formatDateTime(task.updatedAt)], ['Completed', formatDateTime(task.completedAt)], ['Closed', formatDateTime(task.closedAt)], ['Last action by', task.lastActionBy || 'Not recorded']].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></details></section>
+      </aside></div>}
+      {activeTab === 'key-actions' && delegated && keyActionsPanel}
+      {activeTab === 'attachments' && <div className="it-layout it-support-layout"><section className="it-card"><div className="it-card-heading"><h2><Paperclip />Documents</h2><span className="it-count">{attachments.length}</span></div>{documentsTable()}</section><aside className="it-card"><h2><Upload />Upload Document</h2>{canEdit ? <form className="it-form" onSubmit={submitAttachment}>
+        <label htmlFor="it-file-name">Display name</label><input id="it-file-name" value={attachmentName} onChange={(event) => setAttachmentName(event.target.value)} placeholder="Use the original file name" disabled={uploading} />
+        <label htmlFor="it-file-note">Optional note</label><textarea id="it-file-note" rows={3} value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} disabled={uploading} />
+        <label htmlFor="it-file-upload">Choose a file</label><input id="it-file-upload" type="file" onChange={(event) => setAttachmentFile(event.target.files?.[0] || null)} disabled={uploading} />
+        {delegated && <p className="it-muted">This upload will also appear in the linked matter.</p>}<button className="it-button it-primary" type="submit" disabled={uploading || !attachmentFile}>{uploading ? <Loader2 className="it-spin" /> : <Upload />}Upload Document</button>
+      </form> : <p className="it-muted">{locked ? 'This task is read-only.' : 'You do not have permission to upload documents.'}</p>}</aside></div>}
+      {activeTab === 'comments' && <div className="it-layout it-support-layout"><section className="it-card"><div className="it-card-heading"><h2><MessageSquare />Discussion</h2><span className="it-count">{comments.length}</span></div>{commentsTree.length ? commentsTree.map((comment) => renderComment(comment)) : <div className="it-empty"><MessageSquare /><p>No comments yet.</p><span>Add a work update or start a discussion.</span></div>}</section><aside className="it-card"><h2><Send />{replyParentId ? 'Reply to Comment' : 'Add Comment'}</h2>{replyParentId && <div className="it-notice" data-tone="blue">Replying to a comment.<button className="it-text-button" onClick={() => setReplyParentId(null)}>Cancel reply</button></div>}<form className="it-form" onSubmit={submitComment}><label htmlFor="it-comment-body">Your comment</label><textarea id="it-comment-body" rows={6} value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Write a work update, question or instruction…" required disabled={!canComment || commentSaving} /><button className="it-button it-primary" type="submit" disabled={!canComment || commentSaving || !commentBody.trim()}>{commentSaving ? <Loader2 className="it-spin" /> : <Send />}Post Comment</button></form></aside></div>}
+      {activeTab === 'activity' && <section className="it-card"><h2><History />Activity History</h2><div className="it-activity-list">{history.length ? [...history].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map((item) => <article key={item._id}>{avatar(item.actorName, true)}<div><h3>{item.message}</h3>{item.detail && <p>{item.detail}</p>}<small>{item.actorName} · {formatDateTime(item.createdAt)}</small></div></article>) : <div className="it-empty"><History /><p>No activity recorded yet.</p></div>}</div></section>}
+      {activeTab === 'timeline' && !delegated && <section className="it-card"><h2><Clock3 />Task Timeline</h2><p className="it-muted">Standard Independent Task workflow and recorded status changes.</p><div className="it-standard-timeline">{WORKFLOW_STATUSES.filter((status) => status !== 'Cancelled').map((status) => <div key={status} data-current={task.status === status}>{badge(status)}{task.status === status && <span>Current status</span>}</div>)}</div><div className="it-activity-list">{history.filter((item) => /STATUS|COMPLETED|CLOSED|REVIEW|EXTERNAL/.test(item.action)).map((item) => <article key={item._id}><History /><div><h3>{item.message}</h3><p>{item.detail}</p><small>{formatDateTime(item.createdAt)} · {item.actorName}</small></div></article>)}</div></section>}
     </div>
-  );
+  </div>;
 }

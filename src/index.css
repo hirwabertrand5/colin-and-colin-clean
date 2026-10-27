@@ -4745,7 +4745,7 @@ html {
 .independent-task-col-deadline { width: 13.5rem; }
 .independent-task-col-status { width: 10rem; }
 .independent-task-col-due { width: 11.25rem; }
-.independent-task-col-actions { width: 17rem; }
+.independent-task-col-actions { width: 14rem; }
 
 .independent-tasks-table th,
 .independent-tasks-table td { overflow: hidden; }
@@ -4803,6 +4803,25 @@ html {
 .independent-task-actions > button {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+.independent-tasks-table th:last-child,
+.independent-tasks-table td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  background: #ffffff;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -8px 0 12px -13px rgba(15, 23, 42, 0.55);
+}
+.independent-tasks-table th:last-child { z-index: 5; background: #f8fafc; }
+.independent-tasks-table tbody tr:hover td:last-child { background: #eff6ff; }
+.dark .independent-tasks-table th:last-child { background: #111d30; border-color: #3d506a; }
+.dark .independent-tasks-table td:last-child { background: #1b283b; border-color: #3d506a; }
+.dark .independent-tasks-table tbody tr:hover td:last-child { background: #193b68; }
+@media (max-width: 900px) {
+  .independent-task-col-actions { width: 10rem; }
+  .independent-tasks-table th:nth-child(1), .independent-tasks-table td:nth-child(1),
+  .independent-tasks-table th:nth-child(2), .independent-tasks-table td:nth-child(2) { position: static; box-shadow: none; }
 }
 .independent-tasks-pagination {
   min-width: 0;
@@ -4948,6 +4967,9 @@ html {
 .dark .independent-task-title { color: #f8fafc; }
 .dark .independent-task-matter,
 .dark .independent-task-person { color: #d7e1ef; }
+.independent-tasks-table .independent-task-delete { color: #b91c1c; border-color: #fecaca; }
+.dark .independent-tasks-table .independent-task-delete { color: #fecdd3; border-color: #9f4357; background: #3b2130; }
+.dark .independent-tasks-table .independent-task-delete:hover { background: #552838; }
 .dark .independent-tasks-pagination { border-color: #30415b; }
 .dark .profitability-retainer-table td { border-color: #1e293b; }
 .dark .profitability-retainer-table tbody tr:hover { background: #1e293b; }

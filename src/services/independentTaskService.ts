@@ -11,7 +11,8 @@ export type IndependentTaskStatus =
   | 'Awaiting Review'
   | 'Awaiting External Action'
   | 'Completed'
-  | 'Closed';
+  | 'Closed'
+  | 'Cancelled';
 
 export interface IndependentTaskMatter {
   _id: string;
@@ -19,6 +20,7 @@ export interface IndependentTaskMatter {
   parties?: string;
   status?: string;
   assignedTo?: string;
+  caseAssignments?: { initiator?: string; reviewer?: string; signerApprover?: string };
 }
 
 export interface IndependentTaskHistory {
@@ -63,12 +65,20 @@ export interface IndependentTaskKeyActionOption {
   status: string;
   dueAt?: string | null;
   percentage?: number;
+  originalResponsibleRole?: string;
+  claimed?: boolean;
+  eligibility?: Partial<Record<IndependentTaskCaseRole, boolean>>;
+  unavailableReason?: string;
+  instructions?: string[];
+  requirements?: Array<{ name: string; required: boolean }>;
+  correctionRequest?: { reason: string; requestedBy: string; requestedAt: string; contributorTaskId?: string; resolvedAt?: string };
+  reviewHistory?: Array<{ action: 'Returned' | 'Resubmitted'; actorName: string; reason?: string; at: string }>;
 }
 
 export interface IndependentTaskCaseWork {
   role: IndependentTaskCaseRole;
   currency: string;
-  lifecycleStatus: 'Ready' | 'Submitted to Reviewer' | 'Submitted to Approver' | 'Approved';
+  lifecycleStatus: 'Ready' | 'In Progress' | 'Awaiting Review' | 'Awaiting Approval' | 'Changes Requested' | 'Completed' | 'Closed' | 'Cancelled' | 'Submitted to Reviewer' | 'Submitted to Approver' | 'Approved';
   selectedKeyActions: Array<IndependentTaskKeyActionOption & { completed: boolean; contributedByTask: boolean }>;
   performedKeyActions: number;
   completedKeyActions: number;
@@ -82,6 +92,9 @@ export interface IndependentTaskCaseWork {
 
 export interface IndependentTask {
   _id: string;
+  /** Server-authorized deletion permission for the authenticated user. */
+  canDelete?: boolean;
+  createdByUserId?: string;
   taskNumber: string;
   title: string;
   description?: string;
@@ -96,12 +109,17 @@ export interface IndependentTask {
   caseWork?: IndependentTaskCaseWork;
   assignee: string;
   supervisor: string;
+  assigneeUserId?: string;
+  supervisorUserId?: string;
   priority: IndependentTaskPriority;
   status: IndependentTaskStatus;
   startDate: string;
   dueDate: string;
   completedAt?: string;
   closedAt?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancellationReason?: string;
   createdBy?: string;
   assignedBy?: string;
   lastActionBy?: string;
@@ -115,6 +133,30 @@ export interface IndependentTask {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export const getIndependentTaskDisplayStatus = (task: IndependentTask): string => {
+  if (task.status === 'Closed' || task.status === 'Cancelled') return task.status;
+  return task.caseRole && task.relatedMatterId
+    ? task.caseWork?.lifecycleStatus || task.caseLifecycleStatus || 'Ready'
+    : task.status;
+};
+
+const SENIOR_TASK_DELETE_ROLES = new Set([
+  'managing_director', 'managing_partner', 'executive_managing_partner',
+  'senior_partner', 'partner', 'executive_partner', 'associate_partner',
+  'executive_associate_partner', 'senior_executive_assistant', 'executive_assistant',
+  'originating_attorney', 'senior_associate',
+]);
+
+export const canDeleteIndependentTask = (
+  task: IndependentTask,
+  user?: { id?: string; name?: string; role?: string } | null
+): boolean => {
+  if (typeof task.canDelete === 'boolean') return task.canDelete;
+  if (SENIOR_TASK_DELETE_ROLES.has(user?.role || '')) return true;
+  if (task.createdByUserId) return Boolean(user?.id && String(task.createdByUserId) === String(user.id));
+  return Boolean(user?.name?.trim() && task.createdBy?.trim().toLowerCase() === user.name.trim().toLowerCase());
+};
 
 export interface IndependentTaskListResponse {
   items: IndependentTask[];
@@ -242,9 +284,16 @@ export const performIndependentTaskCaseLifecycle = async (taskId: string): Promi
   return json<IndependentTask>(res);
 };
 
-export const deleteIndependentTask = async (taskId: string): Promise<void> => {
+export const deleteIndependentTask = async (taskId: string): Promise<{ message: string; cancelled?: boolean }> => {
   const res = await fetch(`${API_URL}/independent-tasks/${taskId}`, { method: 'DELETE', headers: authHeaders() });
-  await json<void>(res);
+  return json<{ message: string; cancelled?: boolean }>(res);
+};
+
+export const returnIndependentTaskCaseWork = async (taskId: string, stepKey: string, reason: string): Promise<IndependentTask> => {
+  const res = await fetch(`${API_URL}/independent-tasks/${taskId}/return-for-corrections`, {
+    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ stepKey, reason }),
+  });
+  return json<IndependentTask>(res);
 };
 
 export const getIndependentTaskHistory = async (taskId: string): Promise<IndependentTaskHistory[]> => {

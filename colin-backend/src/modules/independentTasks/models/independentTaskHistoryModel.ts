@@ -16,7 +16,8 @@ export type IndependentTaskHistoryAction =
   | 'TASK_REVIEW_REQUESTED'
   | 'TASK_EXTERNAL_ACTION_REQUESTED'
   | 'TASK_CASE_LIFECYCLE_UPDATED'
-  | 'TASK_REOPENED';
+  | 'TASK_REOPENED'
+  | 'TASK_CANCELLED';
 
 export interface IIndependentTaskHistory extends Document {
   taskId: mongoose.Types.ObjectId;

@@ -15,6 +15,7 @@ import {
   listTasks,
   transitionTask,
   performCaseLifecycle,
+  returnCaseWork,
   updateTask,
   upload,
 } from '../modules/independentTasks/controllers/independentTaskController';
@@ -30,6 +31,7 @@ router.put('/independent-tasks/:taskId', authenticate, updateTask);
 router.delete('/independent-tasks/:taskId', authenticate, deleteTask);
 router.post('/independent-tasks/:taskId/transition', authenticate, transitionTask);
 router.post('/independent-tasks/:taskId/case-lifecycle', authenticate, performCaseLifecycle);
+router.post('/independent-tasks/:taskId/return-for-corrections', authenticate, returnCaseWork);
 
 router.get('/independent-tasks/:taskId/history', authenticate, listHistory);
 router.get('/independent-tasks/:taskId/comments', authenticate, listComments);

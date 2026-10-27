@@ -2,7 +2,7 @@
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import WorkflowTemplate from '../models/workflowTemplateModel';
-import WorkflowInstance, { isStepWorkDone } from '../models/workflowInstanceModel';
+import WorkflowInstance, { IInstanceStep, isStepWorkDone } from '../models/workflowInstanceModel';
 import Case from '../models/caseModel';
 import Invoice from '../models/invoiceModel';
 import Document from '../models/documentModel';
@@ -664,7 +664,7 @@ const completeStepInternal = async (
       : inst?.templateId
         ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
         : null;
-  const orderedSteps = orderWorkflowSteps(inst.steps || [], orderingTemplate);
+  const orderedSteps = orderWorkflowSteps<IInstanceStep>(inst.steps || [], orderingTemplate);
 
   if (finalApproval) {
     // Signed off by the Approver.
@@ -803,7 +803,7 @@ const findEarlierPendingWorkStep = (
   targetStepKey: string,
   template?: { stages?: unknown } | null
 ) => {
-  const ordered = orderWorkflowSteps(Array.isArray(inst?.steps) ? inst.steps : [], template);
+  const ordered = orderWorkflowSteps<IInstanceStep>(Array.isArray(inst?.steps) ? inst.steps : [], template);
   const targetIndex = ordered.findIndex((step: any) => String(step?.stepKey || '') === String(targetStepKey || ''));
   if (targetIndex <= 0) return null;
   return ordered.slice(0, targetIndex).find((step: any) => !isStepWorkDone(step)) || null;
@@ -830,7 +830,7 @@ export const autoCompleteFullyCheckedSteps = async (
   const template: any = inst?.templateId
     ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
     : null;
-  const ordered = orderWorkflowSteps(inst.steps || [], template);
+  const ordered = orderWorkflowSteps<IInstanceStep>(inst.steps || [], template);
   const completedKeys: string[] = [];
   for (const step of ordered) {
     if (String(step?.status || '') === 'Completed') continue;
@@ -1457,7 +1457,7 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     const template: any = inst.templateId
       ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
       : null;
-    const orderedSteps = orderWorkflowSteps(inst.steps || [], template);
+    const orderedSteps = orderWorkflowSteps<IInstanceStep>(inst.steps || [], template);
     const currentIndex = orderedSteps.findIndex((s: any) => s.stepKey === stepKey);
     const downstreamSteps = currentIndex >= 0 ? orderedSteps.slice(currentIndex + 1) : [];
 
@@ -1555,7 +1555,7 @@ export const revokeStepDeadlineAmendment = async (req: AuthRequest, res: Respons
     const template: any = inst.templateId
       ? await WorkflowTemplate.findById(inst.templateId).select('stages').lean()
       : null;
-    const orderedSteps = orderWorkflowSteps(inst.steps || [], template);
+    const orderedSteps = orderWorkflowSteps<IInstanceStep>(inst.steps || [], template);
     const currentIndex = orderedSteps.findIndex((s: any) => s.stepKey === stepKey);
     const downstreamSteps = currentIndex >= 0 ? orderedSteps.slice(currentIndex + 1) : [];
 

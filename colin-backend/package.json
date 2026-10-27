@@ -2,6 +2,7 @@
   "name": "colin-backend",
   "version": "1.0.0",
   "scripts": {
+    "verify:independent-tasks": "tsx src/scripts/verifyIndependentTaskLifecycle.ts",
     "dev": "nodemon --exec tsx src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
@@ -67,6 +68,7 @@
     "@types/node": "^20.19.39",
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^7.0.11",
+    "mongodb-memory-server": "^11.3.0",
     "nodemon": "^3.1.11",
     "ts-node": "^10.9.2",
     "tsx": "^4.22.3",

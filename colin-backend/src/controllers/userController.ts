@@ -60,7 +60,9 @@ export const getStaffUsers = async (req: AuthRequest, res: Response) => {
 export const getAssignmentUsers = async (_req: AuthRequest, res: Response) => {
   try {
     const users = await User.find(
-      { isActive: true },
+      // Match authentication: legacy accounts without the flag are active
+      // unless explicitly disabled, and must remain available for assignment.
+      { isActive: { $ne: false } },
       'name email role isActive'
     ).sort({ name: 1 });
 

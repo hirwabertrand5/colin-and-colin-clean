@@ -6,6 +6,7 @@ import {
   requestApproval,
   approveStep,
   setQualityScore,
+  returnForCorrections,
 } from '../controllers/caseManagementController';
 
 const router = express.Router();
@@ -18,6 +19,7 @@ router.get('/cases/:caseId', authenticate, getCaseManagement);
 router.post('/cases/:caseId/request-review', authenticate, requestReview);
 router.post('/cases/:caseId/request-approval', authenticate, requestApproval);
 router.post('/cases/:caseId/approve', authenticate, approveStep);
+router.post('/cases/:caseId/return-for-corrections', authenticate, returnForCorrections);
 router.put('/cases/:caseId/quality-score', authenticate, setQualityScore);
 
 export default router;

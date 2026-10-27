@@ -15,7 +15,8 @@ export type IndependentTaskStatus =
   | 'Awaiting Review'
   | 'Awaiting External Action'
   | 'Completed'
-  | 'Closed';
+  | 'Closed'
+  | 'Cancelled';
 
 export interface IIndependentTask extends Document {
   taskNumber: string;
@@ -34,12 +35,17 @@ export interface IIndependentTask extends Document {
 
   assignee: string;
   supervisor: string;
+  assigneeUserId?: mongoose.Types.ObjectId;
+  supervisorUserId?: mongoose.Types.ObjectId;
   priority: IndependentTaskPriority;
   status: IndependentTaskStatus;
   startDate: string;
   dueDate: string;
   completedAt?: Date;
   closedAt?: Date;
+  cancelledAt?: Date;
+  cancelledBy?: string;
+  cancellationReason?: string;
 
   createdBy?: string;
   createdByUserId?: mongoose.Types.ObjectId;
@@ -79,6 +85,8 @@ const IndependentTaskSchema = new Schema<IIndependentTask>(
 
     assignee: { type: String, required: true, trim: true, index: true },
     supervisor: { type: String, required: true, trim: true, index: true },
+    assigneeUserId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
+    supervisorUserId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     priority: {
       type: String,
       enum: ['Low', 'Medium', 'High', 'Critical'],
@@ -96,6 +104,7 @@ const IndependentTaskSchema = new Schema<IIndependentTask>(
         'Awaiting External Action',
         'Completed',
         'Closed',
+        'Cancelled',
       ],
       default: 'Assigned',
       index: true,
@@ -104,6 +113,9 @@ const IndependentTaskSchema = new Schema<IIndependentTask>(
     dueDate: { type: String, required: true, trim: true, index: true },
     completedAt: { type: Date },
     closedAt: { type: Date },
+    cancelledAt: { type: Date },
+    cancelledBy: { type: String, trim: true },
+    cancellationReason: { type: String, trim: true },
 
     createdBy: { type: String, trim: true },
     createdByUserId: { type: Schema.Types.ObjectId, ref: 'User' },

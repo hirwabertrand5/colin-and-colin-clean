@@ -20,6 +20,7 @@ import { buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages'
 import { canEnterQualityScore, isAllowedQualityScoreRole } from '../utils/caseAssignmentPermissions';
 import { completeStepForCase, reconcileInstanceTemplateWithCanonical } from './workflowController';
 import { identityMatches } from '../utils/caseAssignments';
+import { returnCaseWorkForCorrections } from '../services/caseWorkCorrectionService';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -160,6 +161,8 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
     completedAt: step?.completedAt,
     submittedAt: step?.submittedAt,
     reviewedAt: step?.reviewedAt,
+    correctionRequest: step?.correctionRequest,
+    reviewHistory: step?.reviewHistory || [],
     timelinessScore: computeStepWorkTimelinessScore(step),
   }));
 
@@ -266,6 +269,10 @@ export const requestReview = async (req: AuthRequest, res: Response) => {
 
     step.status = 'Awaiting Review';
     step.submittedAt = new Date();
+    if (step.correctionRequest && !step.correctionRequest.resolvedAt) {
+      step.correctionRequest.resolvedAt = step.submittedAt;
+      step.reviewHistory.push({ action: 'Resubmitted', actorName: req.user?.name || 'System', at: step.submittedAt });
+    }
     await ctx.inst.save();
 
     const actor = actorFromReq(req);
@@ -332,7 +339,7 @@ export const requestApproval = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'This Key Action is already completed.' });
     }
     const current = String(step.status || '');
-    if (current !== 'Awaiting Review' && current !== 'Done' && current !== 'In Progress') {
+    if (current !== 'Awaiting Review') {
       return res.status(400).json({ message: 'The work must be submitted for review before approval can be requested.' });
     }
 
@@ -404,7 +411,7 @@ export const approveStep = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'This Key Action is already completed.' });
     }
     const current = String(step.status || '');
-    if (current !== 'Awaiting Approval' && current !== 'Awaiting Review') {
+    if (current !== 'Awaiting Approval') {
       return res.status(400).json({ message: 'The work must be awaiting review or approval before it can be approved.' });
     }
 
@@ -419,6 +426,17 @@ export const approveStep = async (req: AuthRequest, res: Response) => {
       message: e?.message || 'Failed to approve key action.',
       ...(Array.isArray(e?.remainingActions) ? { remainingActions: e.remainingActions } : {}),
     });
+  }
+};
+
+export const returnForCorrections = async (req: AuthRequest, res: Response) => {
+  try {
+    const caseId = String(req.params.caseId || '');
+    await returnCaseWorkForCorrections({ caseId, stepKey: String(req.body?.stepKey || ''), reason: String(req.body?.reason || ''), req });
+    const ctx = await loadCaseManagementContext(req);
+    return res.json(await buildCaseManagementState({ ...ctx, req }));
+  } catch (error: any) {
+    return res.status(error.message === 'Forbidden.' ? 403 : 400).json({ message: error.message || 'Failed to return work.' });
   }
 };
 

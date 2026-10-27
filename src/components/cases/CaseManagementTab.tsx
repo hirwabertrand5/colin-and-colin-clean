@@ -5,6 +5,7 @@ import {
   requestReview,
   requestApproval,
   approveKeyAction,
+  returnKeyActionForCorrections,
   saveCaseQualityScore,
   CaseManagementState,
   CaseManagementStep,
@@ -60,6 +61,8 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
+  const [returnStepKey, setReturnStepKey] = useState('');
+  const [returnReason, setReturnReason] = useState('');
   const [qualityDraft, setQualityDraft] = useState('');
   const [qualitySaving, setQualitySaving] = useState(false);
   const [documents, setDocuments] = useState<CaseDocument[]>([]);
@@ -155,13 +158,13 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
     (myRole === 'reviewer' || myRole === 'admin') &&
     step.status !== 'Completed' &&
     step.status !== 'Awaiting Approval' &&
-    (step.status === 'Awaiting Review' || step.status === 'Done' || step.status === 'In Progress');
+    step.status === 'Awaiting Review';
 
   // The Signer/Approver is the only role that signs work off as 'Completed'.
   const canApprove = (step: CaseManagementStep) =>
     (myRole === 'approver' || myRole === 'admin') &&
     step.status !== 'Completed' &&
-    (step.status === 'Awaiting Approval' || step.status === 'Awaiting Review');
+    step.status === 'Awaiting Approval';
 
   const refresh = (next: CaseManagementState) => {
     setState(next);
@@ -224,6 +227,19 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
       setQualitySaving(false);
     }
   };
+  const doReturn = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!returnStepKey || !returnReason.trim()) return;
+    setBusy(`return:${returnStepKey}`);
+    setErr('');
+    try {
+      refresh(await returnKeyActionForCorrections(caseId, returnStepKey, returnReason));
+      setReturnStepKey('');
+      setReturnReason('');
+    } catch (error: any) {
+      setErr(error.message || 'Failed to return work.');
+    } finally { setBusy(''); }
+  };
   if (loading && !state) return <div className="py-8 text-sm text-gray-500 dark:text-gray-400">Loading Case Management…</div>;
   if (!state) {
     return (
@@ -265,6 +281,16 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
 
       <QualityScorePanel state={state} qualityDraft={qualityDraft} onDraft={setQualityDraft} onSave={doSaveQualityScore} saving={qualitySaving} />
 
+      {returnStepKey && (
+        <form onSubmit={doReturn} className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <label htmlFor="case-correction-feedback" className="block text-sm font-semibold text-amber-900">Return for corrections — required feedback</label>
+          <textarea id="case-correction-feedback" required maxLength={5000} value={returnReason} onChange={(event) => setReturnReason(event.target.value)} className="min-h-24 w-full rounded-lg border border-amber-200 bg-white p-3 text-sm" />
+          <div className="flex gap-2">
+            <button type="submit" disabled={Boolean(busy) || !returnReason.trim()} className="rounded-lg bg-amber-800 px-3 py-2 text-sm text-white disabled:opacity-50">Return to contributor</button>
+            <button type="button" disabled={Boolean(busy)} onClick={() => setReturnStepKey('')} className="rounded-lg border px-3 py-2 text-sm">Cancel</button>
+          </div>
+        </form>
+      )}
       <KeyActionsList
         state={state}
         busy={busy}
@@ -274,6 +300,7 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
         onRequestReview={doRequestReview}
         onRequestApproval={doRequestApproval}
         onApprove={doApprove}
+        onReturn={(step) => { setReturnStepKey(step.stepKey); setReturnReason(''); }}
         focusStepKey={focusStepKey}
       />
 
@@ -471,6 +498,7 @@ function KeyActionsList(props: {
   onRequestReview: (step: CaseManagementStep) => void;
   onRequestApproval: (step: CaseManagementStep) => void;
   onApprove: (step: CaseManagementStep) => void;
+  onReturn: (step: CaseManagementStep) => void;
   focusStepKey?: string;
 }) {
   const {
@@ -482,6 +510,7 @@ function KeyActionsList(props: {
     onRequestReview,
     onRequestApproval,
     onApprove,
+    onReturn,
     focusStepKey,
   } = props;
   const missingPercentages = state.earnedFees.missingKeyActionPercentages || [];
@@ -727,6 +756,12 @@ function KeyActionsList(props: {
                 ) : null}
               </div>
 
+              {step.correctionRequest && !step.correctionRequest.resolvedAt && (
+                <div className="mx-5 mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  <div className="font-semibold">Changes requested by {step.correctionRequest.requestedBy}</div>
+                  <p className="mt-1 whitespace-pre-wrap">{step.correctionRequest.reason}</p>
+                </div>
+              )}
               {(canRequestReview(step) || canRequestApproval(step) || canApprove(step)) && (
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-5 py-3 dark:border-gray-700">
                   {canRequestReview(step) && (
@@ -759,6 +794,9 @@ function KeyActionsList(props: {
                     >
                       <Stamp className="h-3.5 w-3.5" /> Approve &amp; Complete
                     </button>
+                  )}
+                  {(canRequestApproval(step) || canApprove(step)) && (
+                    <button type="button" onClick={() => onReturn(step)} disabled={Boolean(busy)} className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-medium text-amber-900 disabled:opacity-50">Return for corrections</button>
                   )}
                 </div>
               )}

@@ -23,7 +23,9 @@ export type CaseManagementStep = {
   stagePercentage: number;
   percentage: number;
   order: number;
-  status: 'Not Started' | 'In Progress' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';
+  status: 'Not Started' | 'In Progress' | 'Done' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';
+  correctionRequest?: { reason: string; requestedBy: string; requestedAt: string; resolvedAt?: string };
+  reviewHistory?: Array<{ action: 'Returned' | 'Resubmitted'; actorName: string; reason?: string; at: string }>;
   startAt?: string;
   dueAt?: string;
   completedAt?: string;
@@ -99,6 +101,13 @@ export const saveCaseQualityScore = async (caseId: string, qualityScore: number)
     method: 'PUT',
     headers: jsonHeaders(),
     body: JSON.stringify({ qualityScore }),
+  });
+  return parse(res);
+};
+
+export const returnKeyActionForCorrections = async (caseId: string, stepKey: string, reason: string): Promise<CaseManagementState> => {
+  const res = await fetch(`${API_URL}/case-management/cases/${caseId}/return-for-corrections`, {
+    method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ stepKey, reason }),
   });
   return parse(res);
 };

@@ -69,6 +69,19 @@ export interface IInstanceStep {
   submittedAt?: Date;
   /** Case Management: when the Reviewer reviewed the work and requested approval. */
   reviewedAt?: Date;
+  correctionRequest?: {
+    reason: string;
+    requestedBy: string;
+    requestedAt: Date;
+    contributorTaskId?: mongoose.Types.ObjectId;
+    resolvedAt?: Date;
+  };
+  reviewHistory?: Array<{
+    action: 'Returned' | 'Resubmitted';
+    actorName: string;
+    reason?: string;
+    at: Date;
+  }>;
   /**
    * Role-specific work carried out through an Independent Task. These records
    * supplement (never replace) normal case assignments so fee attribution can
@@ -81,6 +94,17 @@ export interface IInstanceStep {
     userId?: mongoose.Types.ObjectId;
     actedAt: Date;
   }>;
+  /**
+   * Temporary exclusive reservation while delegated work is open. This is
+   * separate from completed contributor attribution and prevents two active
+   * Independent Tasks from claiming the same Key Action concurrently.
+   */
+  delegatedClaim?: {
+    taskId: mongoose.Types.ObjectId;
+    role: 'Initiator' | 'Reviewer' | 'Signer/Approver';
+    claimantName: string;
+    claimedAt: Date;
+  };
   /**
    * Set the moment the assigned member ticked the work as done. This is the
    * instant the Key Action's deadline clock freezes (see
@@ -242,6 +266,25 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     completedAt: { type: Date },
     submittedAt: { type: Date },
     reviewedAt: { type: Date },
+    correctionRequest: {
+      type: new Schema({
+        reason: { type: String, required: true },
+        requestedBy: { type: String, required: true },
+        requestedAt: { type: Date, required: true },
+        contributorTaskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask' },
+        resolvedAt: { type: Date },
+      }, { _id: false }),
+      default: undefined,
+    },
+    reviewHistory: {
+      type: [new Schema({
+        action: { type: String, enum: ['Returned', 'Resubmitted'], required: true },
+        actorName: { type: String, required: true },
+        reason: { type: String },
+        at: { type: Date, required: true },
+      }, { _id: false })],
+      default: [],
+    },
     independentContributors: {
       type: [
         new Schema(
@@ -256,6 +299,18 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
         ),
       ],
       default: [],
+    },
+    delegatedClaim: {
+      type: new Schema(
+        {
+          taskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask', required: true },
+          role: { type: String, enum: ['Initiator', 'Reviewer', 'Signer/Approver'], required: true },
+          claimantName: { type: String, required: true, trim: true },
+          claimedAt: { type: Date, required: true, default: Date.now },
+        },
+        { _id: false }
+      ),
+      default: undefined,
     },
     // Set when the assigned member ticks the work done; freezes the deadline clock.
     doneAt: { type: Date },
@@ -355,7 +410,35 @@ const WorkflowInstanceSchema = new Schema<IWorkflowInstance>(
 
     archivedActions: { type: [InstanceArchivedActionSchema], default: [] },
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
+
+// Independent Tasks are views onto these Key Actions. Keep completed handoffs
+// synchronized when an authorized reviewer/approver acts in either workspace.
+WorkflowInstanceSchema.post('save', async function (instance) {
+  const TaskModel = mongoose.models.IndependentTask;
+  if (!TaskModel) return;
+  const completedKeys = instance.steps
+    .filter((step) => step.status === 'Completed')
+    .map((step) => step.stepKey);
+  const session = instance.$session();
+  const options = session ? { session } : {};
+  const submitted = {
+    relatedMatterId: instance.caseId,
+    caseRole: { $exists: true, $ne: null },
+    caseLifecycleCompletedAt: { $exists: true, $ne: null },
+    'keyActionKeys.0': { $exists: true },
+  };
+  await TaskModel.updateMany(
+    { ...submitted, status: 'Awaiting Review', keyActionKeys: { $not: { $elemMatch: { $nin: completedKeys } } } },
+    { $set: { status: 'Completed', completedAt: new Date() } },
+    options
+  );
+  await TaskModel.updateMany(
+    { ...submitted, status: 'Completed', keyActionKeys: { $elemMatch: { $nin: completedKeys } } },
+    { $set: { status: 'Awaiting Review' }, $unset: { completedAt: 1 } },
+    options
+  );
+});
 
 export default mongoose.model<IWorkflowInstance>('WorkflowInstance', WorkflowInstanceSchema);
