@@ -11,6 +11,7 @@ import {
   Clock,
   DollarSign,
   Handshake,
+  History,
   RefreshCw,
   TrendingUp,
 } from 'lucide-react';
@@ -2048,9 +2049,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                               Independent-task contribution
                             </div>
                           ) : !row.isCurrentAssignment ? (
-                            <div className="mt-1 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800">
-                              Retained after handover
-                            </div>
+                            <span
+                              className="staff-handover-badge"
+                              title="This role was handed over. Previously recorded contributions remain attributed to this team member."
+                            >
+                              <History aria-hidden="true" />
+                              <span>Retained after handover</span>
+                            </span>
                           ) : null}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.tpaPercent > 0 ? `${row.tpaPercent}%` : '—'}</td>
