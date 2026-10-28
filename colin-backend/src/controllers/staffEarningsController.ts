@@ -1,3 +1,4 @@
+import { persistEarningSnapshots } from '../services/earningSnapshotService';
 import type { Response } from 'express';
 
 import Case from '../models/caseModel';
@@ -83,6 +84,9 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
 
 
     const scope = String(collectionScope || 'all').trim().toLowerCase();
+    if (String(persist || '').toLowerCase() === 'true' && scope !== 'all') {
+      return res.status(400).json({ message: 'Snapshots use all confirmed collections. A period-filtered report cannot replace the canonical earning snapshot.' });
+    }
     let collectionFromDate: Date | null = null;
     let collectionToDate: Date | null = null;
     if (scope === 'custom') {
@@ -134,7 +138,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
           '_id caseNo parties matterType workflow workflowTemplateId assignedTo caseAssignments assignmentHandoverHistory workflowProgress billingSettings caseManagement'
         )
         .lean(),
-      User.find({ isActive: { $ne: false } }).select('_id name role isActive').lean(),
+      User.find({ isActive: { $ne: false } }).select('_id name role isActive tpaHistory').lean(),
     ]);
 
     const matterIds = (matters as any[]).map((matter) => String(matter._id));
@@ -152,7 +156,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
       matterIds.length
         ? Task.find({ caseId: { $in: matterIds } })
             .select(
-              'caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages'
+              'caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages tpaSnapshots'
             )
             .lean()
         : Promise.resolve([]),
@@ -312,86 +316,4 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
  * A re-opened Key Action that is re-ticked resolves to the SAME entryKey, so a
  * correction supersedes the prior figure instead of paying for the work twice.
  */
-const persistLedgerEntries = async (rows: any[], recordedBy: string) => {
-  let created = 0;
-  let superseded = 0;
-  let persisted = 0;
-
-  for (const row of rows) {
-    if (!row.completionAt) continue;
-    const entryKey = buildLedgerEntryKey(row);
-    const inputs = {
-      contractValue: row.contractValue,
-      keyActionPercent: row.keyActionPercent,
-      grossActionValue: row.grossActionValue,
-      collectedAmount: row.collectedAmount,
-      eligibleCollectedBase: row.eligibleCollectedBase,
-      tpaPercent: row.tpaPercent,
-      timelinessScore: row.timelinessScore,
-      qualityScore: row.qualityScore,
-      earnedFee: row.earnedFee,
-      currency: row.currency,
-      completionAt: new Date(row.completionAt),
-    };
-
-    const existing: any = await StaffEarningsLedger.findOne({ entryKey }).lean();
-
-    if (!existing) {
-      await StaffEarningsLedger.create({
-        entryKey,
-        revision: 1,
-        caseId: row.caseId,
-        keyActionKey: row.keyActionKey,
-        keyActionTitle: row.keyActionTitle,
-        stageKey: row.stageKey,
-        stageTitle: row.stageTitle,
-        staffKey: row.staffKey,
-        staffName: row.staffName,
-        systemRole: row.systemRole,
-        assignmentRole: row.assignmentRole,
-        tpaSource: row.tpaSource,
-        completionSource: row.completionSource,
-        timeZone: row.timeZone,
-        ...inputs,
-        statusNote: row.statusNote,
-        recordedBy,
-      });
-      created += 1;
-      persisted += 1;
-      continue;
-    }
-
-    // Only bump the revision when a frozen input actually changed.
-    const changed =
-      Number(existing.contractValue) !== inputs.contractValue ||
-      (existing.keyActionPercent ?? null) !== (inputs.keyActionPercent ?? null) ||
-      Number(existing.eligibleCollectedBase) !== inputs.eligibleCollectedBase ||
-      Number(existing.tpaPercent) !== inputs.tpaPercent ||
-      (existing.timelinessScore ?? null) !== (inputs.timelinessScore ?? null) ||
-      (existing.qualityScore ?? null) !== (inputs.qualityScore ?? null) ||
-      (existing.earnedFee ?? null) !== (inputs.earnedFee ?? null) ||
-      new Date(existing.completionAt).getTime() !== inputs.completionAt.getTime();
-
-    if (!changed) {
-      persisted += 1;
-      continue;
-    }
-
-    await StaffEarningsLedger.updateOne(
-      { entryKey },
-      {
-        $set: {
-          ...inputs,
-          revision: Number(existing.revision || 1) + 1,
-          statusNote: row.statusNote,
-          correctionReason: 'Inputs recalculated — superseded by a later revision of the same earning event.',
-          recordedBy,
-        },
-      }
-    );
-    superseded += 1;
-    persisted += 1;
-  }
-
-  return { persisted, created, superseded };
-};
+const persistLedgerEntries = persistEarningSnapshots;

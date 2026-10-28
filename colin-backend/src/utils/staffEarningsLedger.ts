@@ -1,3 +1,5 @@
+import { resolveTpaAttribution } from './tpaAttribution';
+import { computeEarnedFee } from './workflowPercentages';
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps, resolveStepWorkTimeWithSource } from './caseEarnedFees';
 import { allocateCollectedValueAcrossKeyActions, calculateCollectedKeyActionEarnings } from './keyActionEarnings';
 import { baseMemberName, buildRoleByName } from './workflowPercentages';
@@ -49,6 +51,7 @@ const paidTotal = (entries: Array<{ amount: number }> | undefined) =>
 export type StaffEarningsRowStatus = 'ready' | 'awaiting-collection' | 'awaiting-input' | 'incomplete';
 
 export type StaffEarningsRow = {
+  rateActivityAt?: string | null;
   /** Stable row identity — caseId + key action + staff + assignment role. */
   key: string;
   caseId: string;
@@ -447,15 +450,15 @@ export const buildStaffEarningsRows = (input: BuildStaffEarningsInput): StaffEar
         // The member's own TPA / timeliness / quality plus their authoritative
         // earned fee, spread across this matter's actions in proportion to the
         // eligible base — so rows always re-add to the dashboard total.
-        const tpaPercent = Number(member.tpaPercent) || 0;
+        const tpaPercent = member.actionTpaRates?.[action.key] ?? (Number(member.tpaPercent) || 0);
         const timelinessScore = member.timelinessScore ?? null;
         const qualityScore = member.qualityScore ?? null;
         const share = Number(member.taskFeeCollected) > 0 ? eligibleCollectedBase / Number(member.taskFeeCollected) : 0;
         const memberEarned = member.earnedFee ?? null;
-        const earnedFee = memberEarned == null ? null : round2(memberEarned * share);
+        const earnedFee = memberEarned == null ? null : computeEarnedFee(eligibleCollectedBase, tpaPercent, timelinessScore, qualityScore);
 
         rows.push(
-          buildRow({
+          { rateActivityAt: resolveTpaAttribution(matter, instanceStep, member.role as any, action.completedAt).at?.toISOString() || null, ...buildRow({
             matter,
             caseId,
             action,
@@ -481,7 +484,7 @@ export const buildStaffEarningsRows = (input: BuildStaffEarningsInput): StaffEar
             currency,
             paymentStamps,
             timeZone,
-          })
+          }) }
         );
       }
     }

@@ -1,7 +1,7 @@
+import { activityTpaRate, resolveTpaAttribution } from './tpaAttribution';
 import { allocateCollectedValueAcrossKeyActions, calculateCollectedKeyActionEarnings } from './keyActionEarnings';
 import {
   computeEarnedFee,
-  getTpaPercent,
   computeStageBreakdownFromInstance,
   normalizeMemberName,
   parsePercentage,
@@ -13,7 +13,6 @@ import {
   CASE_ASSIGNMENT_ROLE_CONFIG,
   CaseAssignmentRole,
   getCaseAssignmentContributors,
-  resolveCaseAssignmentOwnerAt,
 } from './caseAssignmentContinuity';
 
 /**
@@ -159,6 +158,7 @@ export const getMatterQualityScore = (caseDoc: any): { qualityScore: number | nu
   };
 };
 export type CaseTeamEarnedFee = {
+  actionTpaRates: Record<string, number>;
   /** Role + person, stable across an owner handover. */
   key: string;
   role: string;
@@ -207,61 +207,13 @@ export const computeCaseTeamEarnedFees = ({
   actionCollectedBaseByKey?: Map<string, number>;
 }): CaseTeamEarnedFee[] => {
   const actionKeysByRoleAndMember = new Map<string, Set<string>>();
+  const rateBases = new Map<string, { key: string; base: number; rate: number }[]>();
   const collectedBaseByRoleAndMember = new Map<string, number>();
   const independentTaskIdsByRoleAndMember = new Map<string, Set<string>>();
   const independentPerformedKeysByRoleAndMember = new Map<string, Set<string>>();
   const contributionKey = (role: CaseAssignmentRole, name: string) => `${role}:${normalizeName(name)}`;
   const assignmentContributors = getCaseAssignmentContributors(caseDoc);
   const steps: any[] = Array.isArray(workflowInstance?.steps) ? workflowInstance.steps : [];
-  const initiatorOwnershipTime = (step: any, fallback?: Date | string) => {
-    // The Initiator earns against the time they recorded the work as done. A
-    // later submit/review/approval performed after a handover must not move
-    // that completed work to the incoming assignee.
-    const actionTicks = (Array.isArray(step?.actions) ? step.actions : [])
-      .map((action: any) => resolveDeadlineDateTime(action?.doneAt))
-      .filter((date: Date | undefined): date is Date => Boolean(date));
-    if (actionTicks.length) return new Date(Math.max(...actionTicks.map((date: Date) => date.getTime())));
-    return resolveDeadlineDateTime(step?.doneAt) || resolveDeadlineDateTime(step?.submittedAt) || fallback;
-  };
-
-  const ownershipTimeForRole = (role: CaseAssignmentRole, step: any, fallback?: Date | string) => {
-    // Each delivery role has a distinct, durable lifecycle event. This is what
-    // lets a replacement take only the remaining work and lets the predecessor
-    // retain the fee for work they already performed.
-    if (role === 'Initiator') return initiatorOwnershipTime(step, fallback);
-    if (role === 'Reviewer') {
-      const reviewedAt = resolveDeadlineDateTime(step?.reviewedAt);
-      // Workflow-backed work must actually be reviewed before the Reviewer has
-      // an earned-fee contribution. A task-only legacy record has no separate
-      // review event, so retain its historical completion fallback.
-      return reviewedAt || (step ? undefined : fallback);
-    }
-    const approvedAt = resolveDeadlineDateTime(step?.completedAt);
-    // Similarly, the Signer/Approver earns at final sign-off. Do not credit a
-    // current approver merely because an Initiator checked a nested checklist.
-    return approvedAt || (step ? undefined : fallback);
-  };
-  /**
-   * An independent task is a narrow, action-level delegation.  When it records
-   * a lifecycle event, that named contributor takes precedence over the
-   * standing assignment for that role on this one Key Action only.  This is
-   * what makes an extra initiator/reviewer/approver visible and paid
-   * separately without rewriting the case's normal team.
-   */
-  const independentContributorForRole = (step: any, role: CaseAssignmentRole) => {
-    const entries = Array.isArray(step?.independentContributors) ? step.independentContributors : [];
-    const matches = entries
-      .filter((entry: any) => String(entry?.role || '') === role && normalizeName(entry?.name))
-      .sort((left: any, right: any) => {
-        const leftMs = resolveDeadlineDateTime(left?.actedAt)?.getTime() || 0;
-        const rightMs = resolveDeadlineDateTime(right?.actedAt)?.getTime() || 0;
-        return rightMs - leftMs;
-      });
-    const latest = matches[0];
-    return latest
-      ? { name: String(latest.name).trim(), actedAt: latest.actedAt, taskId: String(latest.taskId || '') }
-      : null;
-  };
   const contributorByKey = new Map(
     assignmentContributors.map((contributor) => [contributionKey(contributor.role, contributor.name), contributor])
   );
@@ -300,17 +252,21 @@ export const computeCaseTeamEarnedFees = ({
     if (!actionKey) continue;
     const workflowStep = steps.find((step: any) => String(step?.stepKey || '') === actionKey);
     for (const { role } of CASE_ASSIGNMENT_ROLE_CONFIG) {
-      const ownershipAt = ownershipTimeForRole(role, workflowStep, action.completedAt);
+      const attribution = resolveTpaAttribution(caseDoc, workflowStep, role, action.completedAt);
+      const ownershipAt = attribution.at;
       // A current workflow record without a role-specific event means that
       // part of the Key Action has not been completed yet. Do not invent an
       // owner or earned fee for it. Task-only legacy records keep the existing
       // completion-time fallback above.
       if (workflowStep && !ownershipAt) continue;
-      const delegated = workflowStep ? independentContributorForRole(workflowStep, role) : null;
-      const owner = delegated?.name || resolveCaseAssignmentOwnerAt(caseDoc, role, ownershipAt);
+      const delegated = attribution.delegated;
+      const owner = attribution.name;
       if (!owner) continue;
       const key = contributionKey(role, owner);
       const keys = actionKeysByRoleAndMember.get(key) || new Set<string>();
+      const allocations = rateBases.get(key) || [];
+      allocations.push({ key: actionKey, base: Number(actionCollectedBaseByKey.get(actionKey)) || 0, rate: activityTpaRate(workflowStep, { tpaSnapshots: tasks.flatMap(task => task.tpaSnapshots || []) }, owner, role, ownershipAt || action.completedAt || new Date(0), roleByName) });
+      rateBases.set(key, allocations);
       keys.add(actionKey);
       actionKeysByRoleAndMember.set(key, keys);
       collectedBaseByRoleAndMember.set(
@@ -433,12 +389,12 @@ export const computeCaseTeamEarnedFees = ({
         ? Math.round((ownQualityScores.reduce((a: number, b: number) => a + b, 0) / ownQualityScores.length) * 10) / 10
         : null;
 
-    // TPA always follows the role-based table: the user record first (matched
-    // case/whitespace-insensitively), then the member label itself when it is a
-    // role title such as "Managing Partner".
+    // Applied event snapshots take precedence; unsnapshotted work resolves from user history.
     const tpa = resolveMemberTpa(spec.name, roleByName);
     const userRole = tpa.role || String(roleByName.get(me) || '').trim() || null;
-    const tpaPercent = tpa.tpaPercent;
+    const allocations = rateBases.get(spec.key) || [];
+    const totalBase = allocations.reduce((sum, row) => sum + row.base, 0);
+    const tpaPercent = totalBase > 0 ? allocations.reduce((sum, row) => sum + row.base * row.rate, 0) / totalBase : allocations.length ? allocations.reduce((sum, row) => sum + row.rate, 0) / allocations.length : tpa.tpaPercent;
     const earnedFee = computeEarnedFee(spec.taskFeeCollected, tpaPercent, timelinessScore, qualityScore);
 
     return {
@@ -447,6 +403,7 @@ export const computeCaseTeamEarnedFees = ({
       name: spec.name,
       userRole,
       tpaPercent,
+      actionTpaRates: Object.fromEntries(allocations.map(row => [row.key, row.rate])),
       tpaSource: tpa.source,
       timelinessScore,
       qualityScore,

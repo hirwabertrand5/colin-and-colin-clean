@@ -1,3 +1,4 @@
+import ContributionBadge from '../ui/ContributionBadge';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -11,7 +12,6 @@ import {
   Clock,
   DollarSign,
   Handshake,
-  History,
   RefreshCw,
   TrendingUp,
 } from 'lucide-react';
@@ -1937,7 +1937,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
               // from the qualifying matter set, never earned revenue or cash.
               ['Total Contract Value', formatRwf(period?.contractValue ?? 0), `Sum of contract values of the qualifying matters ${hasWindow && period ? `in ${period.from} → ${period.to}` : 'across all time'}`],
               // TPA is a current, role-based rate — labelled as such.
-              ['TPA', `${summary?.tpaPercent ?? profile.tpa}%`, 'Your current role participation share from the remuneration table'],
+              ['TPA', `${summary?.tpaPercent ?? profile.tpa}%`, 'Your effective participation allocation; historical activities retain their applicable rates'],
               [
                 'Matters with Earned Fees',
                 String(feeScoredMatters.length),
@@ -2045,17 +2045,9 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                         <td className="px-4 py-3 text-gray-700">
                           <div>{row.role || '—'}</div>
                           {row.isIndependentContributor ? (
-                            <div className="mt-1 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-800">
-                              Independent-task contribution
-                            </div>
+                            <ContributionBadge kind="independent" />
                           ) : !row.isCurrentAssignment ? (
-                            <span
-                              className="staff-handover-badge"
-                              title="This role was handed over. Previously recorded contributions remain attributed to this team member."
-                            >
-                              <History aria-hidden="true" />
-                              <span>Retained after handover</span>
-                            </span>
+                            <ContributionBadge kind="handover" />
                           ) : null}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{row.tpaPercent > 0 ? `${row.tpaPercent}%` : '—'}</td>

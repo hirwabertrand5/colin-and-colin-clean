@@ -1,3 +1,4 @@
+import { manageTpa, TPA_ADMIN_ROLES } from '../controllers/tpaController';
 import express from 'express';
 import {
   getAllUsers,
@@ -40,7 +41,9 @@ router.get(
 
 router.get('/assignment-options', authenticate, getAssignmentUsers);
 
-router.get('/', authenticate, authorize(USER_ADMIN_ROLES), getAllUsers);
+router.get('/:id/tpa', authenticate, authorize(TPA_ADMIN_ROLES), manageTpa);
+router.post('/:id/tpa', authenticate, authorize(TPA_ADMIN_ROLES), manageTpa);
+router.get('/', authenticate, authorize([...USER_ADMIN_ROLES, 'managing_partner']), getAllUsers);
 router.post('/', authenticate, authorize(USER_ADMIN_ROLES), addUser);
 router.post('/reset-password', authenticate, authorize(USER_ADMIN_ROLES), resetUserPassword);
 router.post('/set-active', authenticate, authorize(USER_ADMIN_ROLES), setUserActiveStatus);

@@ -1,3 +1,4 @@
+import ContributionBadge from '../ui/ContributionBadge';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Award, CheckCircle2, ClipboardCheck, FileText, Paperclip, Send, Stamp, Trash2, Upload, UserCheck } from 'lucide-react';
 import {
@@ -409,7 +410,7 @@ function AssignedMembersCard({ state }: { state: CaseManagementState }) {
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">Handover record</span>
                       ) : null}
                       {member.isIndependentContributor ? (
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">Independent task</span>
+                        <ContributionBadge kind="independent" />
                       ) : null}
                     </div>
                     {member.userRole ? <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">({member.userRole})</span> : null}

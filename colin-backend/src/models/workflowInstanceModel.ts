@@ -1,3 +1,5 @@
+import { AppliedTpaSchema } from './appliedTpaSchema';
+import type { AppliedTpaSnapshot } from '../utils/tpaAttribution';
 import mongoose, { Schema, Document } from 'mongoose';
 
 /**
@@ -56,6 +58,7 @@ export interface IInstanceOutput {
 export type DeadlineAmendmentMode = 'standard' | 'fixed';
 
 export interface IInstanceStep {
+  tpaSnapshots?: AppliedTpaSnapshot[];
   stepKey: string;
   title: string;
   stageKey: string;
@@ -249,6 +252,7 @@ const InstanceOutputSchema = new Schema<IInstanceOutput>(
 
 const InstanceStepSchema = new Schema<IInstanceStep>(
   {
+    tpaSnapshots: { type: [AppliedTpaSchema], default: [] },
     stepKey: { type: String, required: true },
     title: { type: String, required: true },
     stageKey: { type: String, required: true },
@@ -412,6 +416,13 @@ const WorkflowInstanceSchema = new Schema<IWorkflowInstance>(
   },
   { timestamps: true, optimisticConcurrency: true }
 );
+
+WorkflowInstanceSchema.pre('save', async function () {
+  if (this.isNew || this.isModified('steps')) await (await import('../services/earningSnapshotService')).captureActivityRates(this, true);
+});
+WorkflowInstanceSchema.post('save', async function (instance) {
+  await (await import('../services/earningSnapshotService')).snapshotCaseEarnings(instance.caseId, instance.$session());
+});
 
 // Independent Tasks are views onto these Key Actions. Keep completed handoffs
 // synchronized when an authorized reviewer/approver acts in either workspace.

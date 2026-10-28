@@ -428,7 +428,7 @@ export const getTeamPerformance = async (req: AuthRequest, res: Response) => {
     const userFilter: any = { isActive: true };
     if (role) userFilter.role = role;
 
-    const users = await User.find(userFilter).select('name role').lean();
+    const users = await User.find(userFilter).select('name role tpaHistory').lean();
 
     const rows = await Promise.all(
       users.map(async (u: any) => {

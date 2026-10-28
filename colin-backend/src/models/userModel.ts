@@ -24,6 +24,8 @@ export type UserRole =
   | 'intern';
 
 export interface IUser extends Document {
+  tpaHistory: any[];
+  tpaRevision: number;
   email: string;
   name: string;
   role: UserRole;
@@ -38,6 +40,8 @@ export interface IUser extends Document {
 
 const UserSchema = new Schema<IUser>(
   {
+    tpaRevision: { type: Number, default: 0 },
+    tpaHistory: [{ kind: { type: String, enum: ['normal', 'special'], required: true }, rate: { type: Number, min: 0, max: 100, required: true }, from: { type: Date, required: true }, until: { type: Date, default: null }, recordedAt: { type: Date, required: true }, actor: { type: String, required: true }, reason: { type: String, required: true } }],
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     name: { type: String, required: true },
    role: {

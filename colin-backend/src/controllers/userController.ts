@@ -1,3 +1,4 @@
+import { getTpaPercent } from '../utils/workflowPercentages';
 import { Response } from 'express';
 import User from '../models/userModel.js';
 import { AuthRequest } from '../middleware/authMiddleware.js';
@@ -152,6 +153,13 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { name, email, role } = req.body;
+    const previous = await User.findById(id);
+    if (!previous) return res.status(404).json({ message: 'User not found.' });
+    // Preserve historical allocation when a staff role changes too.
+    if (role !== previous.role && !previous.tpaHistory?.length) {
+      previous.tpaHistory = [{ kind: 'normal', rate: getTpaPercent(previous.role), from: new Date(0), until: null, recordedAt: new Date(), actor: req.user?.id, reason: 'Preserved allocation before role change' }];
+      await previous.save();
+    }
     const user = await User.findByIdAndUpdate(id, { name, email, role }, { new: true });
     if (!user) return res.status(404).json({ message: 'User not found.' });
     res.json(user);
@@ -164,6 +172,8 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
 export const deleteUser = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const existing = await User.findById(id);
+    if (existing?.tpaHistory?.length) return res.status(409).json({ message: 'This user has TPA history. Deactivate the account to retain financial history.' });
     const user = await User.findByIdAndDelete(id);
     if (!user) return res.status(404).json({ message: 'User not found.' });
     res.json({ message: 'User deleted successfully.' });

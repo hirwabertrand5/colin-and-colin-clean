@@ -16,7 +16,7 @@ import WorkflowTemplate from '../models/workflowTemplateModel';
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import { identityMatches } from '../utils/caseAssignments';
-import { buildRoleByName, getTpaPercent, normalizeMemberName } from '../utils/workflowPercentages';
+import { buildRoleByName, resolveMemberTpa, getTpaPercent, normalizeMemberName } from '../utils/workflowPercentages';
 import {
   isWithinReportRange,
   resolveOptionalReportRange,
@@ -371,7 +371,8 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     }
     const period = periodResolution || null;
 
-    const roleTpaPercent = getTpaPercent(String(req.user?.role || ''));
+    const currentTpaUser = await User.findById(req.user?.id).select('name role tpaHistory').lean();
+    const roleTpaPercent = currentTpaUser ? resolveMemberTpa(currentTpaUser.name, buildRoleByName([currentTpaUser])).tpaPercent : getTpaPercent(String(req.user?.role || ''));
     // Names may be stored as an account first name or the full picker label;
     // use the platform's canonical comparison everywhere a dashboard decides
     // whether a value belongs to the signed-in member.
@@ -482,7 +483,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     // Resolve each assigned member's system role so the TPA column follows the
     // same role-based table as the Case Workspace Earned Fees table. The users
     // collection is loaded whole and keyed case/whitespace-insensitively.
-    const users: any[] = await User.find({}).select('name role').lean();
+    const users: any[] = await User.find({}).select('name role tpaHistory').lean();
     const roleByName = buildRoleByName(users);
     if (meName && req.user?.role) roleByName.set(normalizeMemberName(meName), String(req.user.role));
 

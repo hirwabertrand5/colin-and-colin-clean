@@ -1,3 +1,4 @@
+import TpaManagement, { TpaManagementDialog } from './TpaManagement';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { Search, Plus, Edit, UserPlus, Power, PowerOff, Key, Trash2 } from 'lucide-react';
 import usePageTitle from '../../hooks/usePageTitle';
@@ -62,6 +63,7 @@ type AppStoredUser = {
 export default function UserManagement() {
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [tpaUser, setTpaUser] = useState<User | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -322,14 +324,16 @@ export default function UserManagement() {
 
   return (
     <div>
+      {tpaUser && <TpaManagementDialog user={tpaUser} onClose={() => setTpaUser(null)} />}
       {/* Page Header */}
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900 mb-1">User Management</h1>
             <p className="text-gray-600">Manage firm user accounts and system access</p>
           </div>
 
+          {['managing_partner', 'managing_director', 'executive_assistant'].includes(currentRole || '') && <select aria-label="Manage staff TPA" className="border rounded p-2" value="" onChange={e => setTpaUser(users.find(u => u._id === e.target.value) || null)}><option value="">Manage Staff TPA...</option>{users.map(u => <option key={u._id} value={u._id}>{u.name}</option>)}</select>}
           {canManageUsers && (
             <button
               onClick={() => setShowAddModal(true)}
@@ -608,13 +612,14 @@ export default function UserManagement() {
       {/* Edit User Modal */}
       {canManageUsers && showEditModal && selectedUser && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
+          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6">
             <div className="flex items-center mb-4">
               <Edit className="w-6 h-6 text-gray-700 mr-2" />
               <h3 className="text-lg font-semibold text-gray-900">Edit User</h3>
             </div>
 
             <form onSubmit={handleEditUser} className="space-y-4">
+              <TpaManagement userId={selectedUser._id} />
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                 <input

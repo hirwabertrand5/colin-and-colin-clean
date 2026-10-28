@@ -55,4 +55,11 @@ InvoiceSchema.index({ caseId: 1, seqCase: 1 }, { unique: true });
 InvoiceSchema.index({ status: 1, updatedAt: -1 });
 InvoiceSchema.index({ caseId: 1, status: 1 });
 
+InvoiceSchema.post('save', async function (invoice) {
+  await (await import('../services/earningSnapshotService')).snapshotCaseEarnings(invoice.caseId, invoice.$session());
+});
+InvoiceSchema.post('findOneAndUpdate', async function (invoice) {
+  if (invoice) await (await import('../services/earningSnapshotService')).snapshotCaseEarnings(invoice.caseId, this.getOptions().session || null);
+});
+
 export default mongoose.model<IInvoice>('Invoice', InvoiceSchema);

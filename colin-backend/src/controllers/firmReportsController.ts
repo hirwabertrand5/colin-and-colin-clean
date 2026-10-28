@@ -12,7 +12,7 @@ import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { computeRange, normalizeReportBasis } from '../utils/reportRange';
-import { buildRoleByName, TASK_TPA_SHARES } from '../utils/workflowPercentages';
+import { computeEarnedFee, buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages';
 import { caseMatchesAssigneeCanonical } from '../utils/caseAssignments';
 import {
   allocateCollectedValueAcrossKeyActions,
@@ -148,11 +148,6 @@ const parseTaskDate = (value: any, endOfDay = false) => {
 
   const parsed = new Date(raw);
   return Number.isFinite(parsed.getTime()) ? parsed : null;
-};
-
-const getTaskParticipationAllocation = (role?: string) => {
-  const normalized = String(role || '').toLowerCase();
-  return TASK_TPA_SHARES[normalized] ?? 0;
 };
 
 const normalizedTaskLabel = (value: unknown) =>
@@ -301,9 +296,10 @@ const buildCollectedKeyActionRows = ({
       const actionValueTotal = Number(member.taskFeeCollected) || 0;
 
       for (const item of ownedActions) {
+        const tpaPercent = member.actionTpaRates?.[item.action.key] ?? (Number(member.tpaPercent) || 0);
         const taskFeeCollected = item.value;
         const share = actionValueTotal > 0 ? taskFeeCollected / actionValueTotal : 0;
-        const feeEarned = memberEarned == null ? null : roundMoney(memberEarned * share);
+        const feeEarned = memberEarned == null ? null : computeEarnedFee(taskFeeCollected, tpaPercent, timelinessScore, qualityScore);
         const fmtPct = (num: number | null) => (num == null ? '_' : `${num}%`);
         const formula = `${roundMoney(taskFeeCollected)} x ${tpaPercent}% x ${fmtPct(timelinessScore)} x ${fmtPct(qualityScore)} = ${feeEarned == null ? '_' : roundMoney(feeEarned)}`;
         const timelinessStatus =
@@ -396,7 +392,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const toISO = iso(toDate);
 
     const selectedMember = teamMemberId
-      ? await User.findById(teamMemberId).select('name role').lean()
+      ? await User.findById(teamMemberId).select('name role tpaHistory').lean()
       : null;
     const selectedMemberName = selectedMember ? String(selectedMember.name || '').trim() : null;
     const selectedMemberNameNormalized = selectedMemberName ? baseNameFromLabel(selectedMemberName) : null;
@@ -413,11 +409,11 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, allTaskLinks, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
       Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
       Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
-      Task.find(tasksByDateQuery).select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore').lean(),
+      Task.find(tasksByDateQuery).select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore tpaSnapshots').lean(),
       Task.find()
-        .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages')
+        .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages tpaSnapshots')
         .lean(),
-      User.find({ isActive: { $ne: false } }).select('name role').lean(),
+      User.find({ isActive: { $ne: false } }).select('name role tpaHistory').lean(),
       Prospect.aggregate([
         { $match: { createdAt: { $gte: fromDate, $lte: toDate }, createdBy: { $exists: true } } },
         { $group: { _id: '$createdBy', count: { $sum: 1 } } },
@@ -1222,11 +1218,11 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
     const staffName = String(req.user?.name || '').trim();
     if (!staffName) return res.status(401).json({ message: 'Unauthorized.' });
 
-    const user = await User.findById(req.user?.id).select('name role').lean();
+    const user = await User.findById(req.user?.id).select('name role tpaHistory').lean();
     const role = String(user?.role || req.user?.role || '').trim();
     const normalizedName = normalizeName(user?.name || staffName);
     const displayName = String(user?.name || staffName).trim();
-    const tpaPercent = getTaskParticipationAllocation(role);
+    const tpaPercent = resolveMemberTpa(user?.name || '', buildRoleByName(user ? [user] : [])).tpaPercent;
 
     // Personal productivity uses the same Case Workspace/Firm Reports engine:
     // all three case assignments are eligible, but only this logged-in member's
@@ -1250,7 +1246,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         : [],
       memberMatterIds.length
         ? Task.find({ caseId: { $in: memberMatterIds } })
-          .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages')
+          .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages tpaSnapshots')
           .lean()
         : [],
       // Payment-date basis, matching the staff dashboard summary exactly.
@@ -1292,7 +1288,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       tasksByCaseId: memberTasksByCaseId,
       paidInvoicesByCaseId: memberPaidInvoicesByCaseId,
       historicalCollectedByCaseId: memberHistoricalCollectedByCaseId,
-      roleByName: buildRoleByName([{ name: displayName, role }]),
+      roleByName: buildRoleByName([user]),
       fromDate,
       toDate,
       selectedMemberName: displayName,

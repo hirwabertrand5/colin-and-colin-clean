@@ -447,4 +447,11 @@ CaseSchema.index({ createdAt: -1 });
 CaseSchema.index({ retainerId: 1, status: 1 });
 CaseSchema.index({ intakeProspectId: 1, status: 1 });
 
+CaseSchema.post('save', async function (matter) {
+  await (await import('../services/earningSnapshotService')).snapshotCaseEarnings(matter._id, matter.$session());
+});
+CaseSchema.post('findOneAndUpdate', async function (matter) {
+  if (matter) await (await import('../services/earningSnapshotService')).snapshotCaseEarnings(matter._id, this.getOptions().session || null);
+});
+
 export default mongoose.model<ICase>('Case', CaseSchema);

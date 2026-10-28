@@ -1,3 +1,4 @@
+import ContributionBadge from '../ui/ContributionBadge';
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
 import {
@@ -618,7 +619,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">Handover record</span>
                           ) : null}
                           {member.isIndependentContributor ? (
-                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">Independent task</span>
+                            <ContributionBadge kind="independent" />
                           ) : null}
                         </div>
                         {member.isCurrentAssignment === false && <div className="mt-1 text-xs font-normal text-gray-500 dark:text-gray-400">Completed work and earned fee retained.</div>}

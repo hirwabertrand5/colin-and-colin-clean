@@ -1184,7 +1184,7 @@ export const getCaseEarnedFees = async (req: AuthRequest, res: Response) => {
     // The users collection is small and is loaded whole: matching by name with
     // a case-sensitive `$in` used to leave members without their TPA whenever
     // their stored name differed in case, spacing or carried a role suffix.
-    const users: any[] = await User.find({}).select('name role').lean();
+    const users: any[] = await User.find({}).select('name role tpaHistory').lean();
     const roleByName = buildRoleByName(users);
 
     const result = computeCaseEarnedFees({

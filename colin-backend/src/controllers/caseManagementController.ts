@@ -223,7 +223,7 @@ const loadCaseManagementContext = async (req: AuthRequest) => {
   );
   // Loaded whole and keyed case/whitespace-insensitively so every assigned
   // member resolves to their system role (and therefore their TPA).
-  const users: any[] = await User.find({}).select('name role').lean();
+  const users: any[] = await User.find({}).select('name role tpaHistory').lean();
   const roleByName = buildRoleByName(users);
   return {
     error: null as any,

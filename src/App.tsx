@@ -379,7 +379,7 @@ function App() {
                   <Route path="/reports" element={<FirmReports userRole={user.role} />} />
 
                   {/* Admin */}
-                  {(isMD || isExec) && <Route path="/admin/users" element={<UserManagement />} />}
+                  {(isMD || isExec || user?.role === 'managing_partner') && <Route path="/admin/users" element={<UserManagement />} />}
                   {(isMD || isManagingPartner || isExec) && <Route path="/admin/settings" element={<Settings />} />}
                 </Routes>
               </DashboardLayout>

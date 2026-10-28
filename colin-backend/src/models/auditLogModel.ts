@@ -1,6 +1,8 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export type AuditAction =
+  | 'USER_TPA_CHANGED'
+  | 'EARNING_SNAPSHOT_REFRESHED'
   | 'CASE_CREATED'
   | 'CASE_UPDATED'
   | 'TASK_CREATED'

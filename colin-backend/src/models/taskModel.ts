@@ -1,3 +1,5 @@
+import { AppliedTpaSchema } from './appliedTpaSchema';
+import type { AppliedTpaSnapshot } from '../utils/tpaAttribution';
 import mongoose, { Schema, Document } from 'mongoose';
 
 export type TaskApprovalStatus = 'Not Required' | 'Draft' | 'Pending' | 'Approved' | 'Rejected';
@@ -65,6 +67,7 @@ export interface ITaskAssignmentHistory {
 }
 
 export interface ITask extends Document {
+  tpaSnapshots?: AppliedTpaSnapshot[];
   caseId: mongoose.Types.ObjectId;
   taskNo: string;
 
@@ -163,6 +166,7 @@ const TaskStageSchema = new Schema<ITaskStage>(
 
 const TaskSchema = new Schema<ITask>(
   {
+    tpaSnapshots: { type: [AppliedTpaSchema], default: [] },
     caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true, index: true },
     taskNo: { type: String, required: true, trim: true, unique: true, index: true },
 
@@ -248,5 +252,25 @@ const TaskSchema = new Schema<ITask>(
   },
   { timestamps: true }
 );
+
+TaskSchema.pre('save', async function () {
+  if (this.isNew || this.isModified('status') || this.isModified('completedAt')) await (await import('../services/earningSnapshotService')).captureActivityRates(this, false);
+});
+TaskSchema.post('save', async function (task) {
+  await (await import('../services/earningSnapshotService')).snapshotCaseEarnings(task.caseId, task.$session());
+});
+// Legacy task transitions use findByIdAndUpdate rather than document.save().
+TaskSchema.pre('findOneAndUpdate', async function () {
+  const task = await this.model.findOne(this.getQuery()).session(this.getOptions().session || null);
+  if (!task) return;
+  const update: any = this.getUpdate() || {};
+  Object.assign(task, Object.fromEntries(Object.entries(update).filter(([key]) => !key.startsWith('$'))), update.$set || {});
+  for (const key of Object.keys(update.$unset || {})) task.set(key, undefined);
+  await (await import('../services/earningSnapshotService')).captureActivityRates(task, false);
+  this.set({ tpaSnapshots: task.tpaSnapshots });
+});
+TaskSchema.post('findOneAndUpdate', async function (task) {
+  if (task) await (await import('../services/earningSnapshotService')).snapshotCaseEarnings(task.caseId, this.getOptions().session || null);
+});
 
 export default mongoose.model<ITask>('Task', TaskSchema);

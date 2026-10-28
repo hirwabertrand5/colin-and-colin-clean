@@ -27,6 +27,8 @@ import mongoose, { Schema, Document } from 'mongoose';
  * become a competing fee formula.
  */
 export interface IStaffEarningsLedger extends Document {
+  inputHistory: any[];
+  rateActivityAt?: Date | null;
   /** Deterministic identity of this earning event (see note above). */
   entryKey: string;
   /** Bumped when the same event is recalculated with different inputs. */
@@ -77,6 +79,8 @@ export interface IStaffEarningsLedger extends Document {
 
 const StaffEarningsLedgerSchema = new Schema<IStaffEarningsLedger>(
   {
+    inputHistory: { type: [Schema.Types.Mixed] as any, default: [] },
+    rateActivityAt: { type: Date, default: null },
     entryKey: { type: String, required: true },
     revision: { type: Number, required: true, default: 1 },
 

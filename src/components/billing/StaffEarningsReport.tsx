@@ -93,7 +93,7 @@ function CalculationDetail({ row }: { row: StaffEarningsRow }) {
             Staff earned fee = eligible base x TPA x timeliness x quality ={' '}
             <span className="font-medium tabular-nums">{row.formula}</span>
             <span className="block text-xs text-gray-500">
-              TPA {pct(row.tpaPercent)} comes from the staff system role
+              TPA {pct(row.tpaPercent)} comes from the effective staff allocation at the activity time
               {row.systemRole ? ` (${row.systemRole})` : ''}; quality is the matter Quality Score from Case
               Management; timeliness is the average score of the completed Key Actions.
             </span>

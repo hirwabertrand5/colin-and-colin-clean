@@ -1,3 +1,4 @@
+import { activityTpaRate } from '../../../utils/tpaAttribution';
 import mongoose from 'mongoose';
 import AuditLog from '../../../models/auditLogModel';
 import Case from '../../../models/caseModel';
@@ -28,7 +29,7 @@ import { buildUpdatedInstanceSteps, completeStepForCase } from '../../../control
 import { orderWorkflowSteps } from '../../../utils/workflowSchedule';
 import { computeCaseEarnedFees, computeStepTimelinessAt, normalizeEffectiveWorkflowSteps } from '../../../utils/caseEarnedFees';
 import { allocateCollectedValueAcrossKeyActions, calculateCollectedKeyActionEarnings } from '../../../utils/keyActionEarnings';
-import { buildRoleByName, computeEarnedFee } from '../../../utils/workflowPercentages';
+import { buildRoleByName, resolveMemberTpa, computeEarnedFee } from '../../../utils/workflowPercentages';
 import { returnCaseWorkForCorrections } from '../../../services/caseWorkCorrectionService';
 
 export type IndependentTaskListQuery = {
@@ -322,7 +323,7 @@ const buildCaseTaskMetrics = async (task: any, knownMatter?: any) => {
     const [tasks, paidInvoices, users] = await Promise.all([
       Task.find({ caseId: caseDoc._id }).lean(),
       Invoice.find({ caseId: caseDoc._id, status: 'Paid' }).select('amount').lean(),
-      User.find({ isActive: { $ne: false } }).select('name role').lean(),
+      User.find({ isActive: { $ne: false } }).select('name role tpaHistory').lean(),
     ]);
     const collectedAmount = (paidInvoices || []).reduce((sum: number, invoice: any) => sum + Math.max(0, Number(invoice?.amount) || 0), 0);
     const effectiveSteps = normalizeEffectiveWorkflowSteps(inst, template);
@@ -367,7 +368,15 @@ const buildCaseTaskMetrics = async (task: any, knownMatter?: any) => {
       (sum: number, step: any) => sum + (Number(collectedByKey.get(cleanString(step?.stepKey))) || 0),
       0
     );
-    const tpaPercent = Number(teamMember?.tpaPercent) || 0;
+    const weightedTpa = completedSteps.reduce((sum: number, step: any) => {
+      const contribution = (step.independentContributors || []).find((entry: any) => String(entry.taskId) === String(task._id) && entry.role === role && samePerson(entry.name, task.assignee));
+      return sum + (Number(collectedByKey.get(cleanString(step.stepKey))) || 0) * activityTpaRate(step, task, task.assignee, role, contribution?.actedAt || step.completedAt || new Date(0), roleByName);
+    }, 0);
+    const performedRates = contributedSteps.map((step: any) => {
+      const contribution = (step.independentContributors || []).find((entry: any) => String(entry.taskId) === String(task._id) && entry.role === role && samePerson(entry.name, task.assignee));
+      return activityTpaRate(step, task, task.assignee, role, contribution?.actedAt || step.completedAt || new Date(0), roleByName);
+    });
+    const tpaPercent = collectedBase > 0 ? weightedTpa / collectedBase : performedRates.length ? performedRates.reduce((sum, rate) => sum + rate, 0) / performedRates.length : Number(teamMember?.tpaPercent) || 0;
     const qualityScore = earned.qualityScore;
     const earnedFee = computeEarnedFee(collectedBase, tpaPercent, timelinessScore, qualityScore);
 

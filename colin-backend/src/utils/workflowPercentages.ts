@@ -1,3 +1,4 @@
+import { resolveTpaRate } from './tpaRates';
 /**
  * Workflow stage/step percentage engine + earned-fee formulas.
  *
@@ -93,11 +94,13 @@ export type MemberTpaResolution = {
  */
 export const buildRoleByName = (users: any[]): Map<string, string> => {
   const map = new Map<string, string>();
+  const records = new Map<string, any>();
+  (map as any).tpaUsers = records;
   for (const user of Array.isArray(users) ? users : []) {
     const role = String(user?.role || '').trim();
     if (!role) continue;
     for (const key of [normalizeMemberName(user?.name), baseMemberName(user?.name)]) {
-      if (key && !map.has(key)) map.set(key, role);
+      if (key && !map.has(key)) { map.set(key, role); records.set(key, user); }
     }
   }
   return map;
@@ -109,12 +112,13 @@ export const buildRoleByName = (users: any[]): Map<string, string> => {
  * itself is treated as a role title ("Managing Partner" → 10%). This is the only
  * place team TPA is resolved so every surface agrees.
  */
-export const resolveMemberTpa = (memberName: unknown, roleByName: Map<string, string>): MemberTpaResolution => {
+export const resolveMemberTpa = (memberName: unknown, roleByName: Map<string, string>, at: Date | string = new Date()): MemberTpaResolution => {
   const candidates = [normalizeMemberName(memberName), baseMemberName(memberName)].filter(Boolean);
   for (const candidate of candidates) {
     const role = String(roleByName.get(candidate) || '').trim();
-    const tpa = getTpaPercent(role);
-    if (role && tpa > 0) return { tpaPercent: tpa, role, source: 'user-record' };
+    const user = (roleByName as any).tpaUsers?.get(candidate);
+    const tpa = resolveTpaRate(user?.tpaHistory || [], at, getTpaPercent(role));
+    if (role) return { tpaPercent: tpa, role, source: 'user-record' };
   }
 
   const labelKey = TPA_ROLE_LABELS[baseMemberName(memberName)];

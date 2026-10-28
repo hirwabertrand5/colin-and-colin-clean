@@ -1,4 +1,5 @@
-import { Dispatch, FormEvent, ReactNode, SetStateAction } from 'react';
+import { StructuredFormField as RetainerFormField, StructuredFormChoice } from '../ui/StructuredForm';
+import { Dispatch, FormEvent, SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
 import { RetainerPayload } from '../../services/retainerService';
 
@@ -41,9 +42,5 @@ export function RetainerFormDialog({ form, setForm, editing, saving, onClose, on
 }
 
 function RetainerBillingOption({ value, title, description, selected, onSelect }: { value: RetainerPayload['billingModel']; title: string; description: string; selected: boolean; onSelect: (value: RetainerPayload['billingModel']) => void }) {
-  return <button type="button" role="radio" aria-checked={selected} onClick={() => onSelect(value)} className={`retainer-model-option ${selected ? 'is-selected' : ''}`}><span className="retainer-model-indicator" aria-hidden="true" /><span><strong>{title}</strong><small>{description}</small></span></button>;
-}
-
-function RetainerFormField({ label, children, required = false, hint, wide = false }: { label: string; children: ReactNode; required?: boolean; hint?: string; wide?: boolean }) {
-  return <label className={`retainer-form-field ${wide ? 'is-wide' : ''}`}><span className="retainer-form-label">{label}{required && <em> *</em>}</span>{children}{hint && <small className="retainer-form-hint">{hint}</small>}</label>;
+  return <StructuredFormChoice title={title} description={description} selected={selected} onSelect={() => onSelect(value)} />;
 }

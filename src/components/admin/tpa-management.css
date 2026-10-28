@@ -1,0 +1,90 @@
+/* TPA uses the retainer form's layout, fields, option cards and button styles. */
+.tpa-management-dialog { outline: none; }
+.tpa-management { min-width: 0; color: #334155; }
+.tpa-staff-email { display: block; margin-top: .35rem; color: #64748b; font-size: .75rem; overflow-wrap: anywhere; }
+.tpa-management .retainer-form-section { min-width: 0; }
+.tpa-editor { min-width: 0; margin: 0; padding: 0; border: 0; }
+.tpa-editor:disabled { opacity: .7; }
+.tpa-editor:disabled .retainer-model-option { cursor: default; transform: none; }
+.tpa-management button:focus-visible { outline: 3px solid #60a5fa; outline-offset: 3px; }
+.tpa-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.tpa-summary-card { display: flex; flex-direction: column; align-items: flex-start; padding: 1rem 1.1rem; border: 1px solid #d6e0ec; border-radius: 10px; background: #fff; min-width: 0; }
+.tpa-summary-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%; color: #475569; font-size: .8rem; font-weight: 700; }
+.tpa-rate-value { display: block; margin: .6rem 0 .4rem; color: #0f172a; font-size: 1.8rem; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.tpa-rate-value small { margin-left: .2rem; font-size: 1rem; color: #64748b; }
+.tpa-empty-rate { margin-top: .8rem; font-size: .95rem; color: #334155; }
+.tpa-summary-card p { flex: 1; margin: .2rem 0 .75rem; color: #64748b; font-size: .75rem; line-height: 1.6; overflow-wrap: anywhere; }
+.tpa-text-button { padding: .15rem 0; border: 0; background: transparent; color: #1d4ed8; font-size: .76rem; font-weight: 700; text-align: left; cursor: pointer; }
+.tpa-text-button:hover:not(:disabled) { text-decoration: underline; }
+.tpa-text-button:disabled { opacity: .55; cursor: default; }
+.tpa-badge { display: inline-flex; align-items: center; padding: .2rem .5rem; border: 1px solid transparent; border-radius: 99px; font-size: .65rem; font-weight: 750; line-height: 1.4; white-space: nowrap; }
+.tpa-badge.is-active { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+.tpa-badge.is-scheduled { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+.tpa-badge.is-inactive { background: #f1f5f9; border-color: #e2e8f0; color: #64748b; }
+.tpa-effective-note { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .85rem; color: #475569; font-size: .75rem; }
+.tpa-effective-note > svg { color: #059669; }
+.tpa-timezone { display: inline-flex; align-items: center; gap: .35rem; margin-left: auto; color: #64748b; }
+.tpa-date-shortcuts { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; margin-top: .85rem; }
+.tpa-date-shortcuts > span { color: #64748b; font-size: .72rem; }
+.tpa-inline-note { margin-top: .85rem; }
+.tpa-feedback { display: flex; align-items: flex-start; gap: .65rem; margin: 1rem 1.75rem; padding: .85rem 1rem; border: 1px solid; border-radius: 9px; font-size: .8rem; line-height: 1.5; }
+.tpa-feedback svg { flex: 0 0 auto; margin-top: .1rem; }
+.tpa-feedback.is-error { color: #991b1b; border-color: #fecaca; background: #fef2f2; }
+.tpa-feedback.is-success { color: #065f46; border-color: #a7f3d0; background: #ecfdf5; }
+.tpa-loading { display: flex; align-items: center; justify-content: center; gap: .6rem; min-height: 10rem; font-size: .85rem; color: #64748b; }
+.tpa-review { outline: none; background: #fffbeb; scroll-margin-top: 9rem; }
+.tpa-review:focus-visible { box-shadow: inset 0 0 0 2px #fbbf24; }
+.tpa-review-message { margin: .8rem 0; color: #64748b; font-size: .8rem; line-height: 1.6; }
+.tpa-review .tpa-feedback { margin: .8rem 0 0; }
+.tpa-impact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; margin: 1rem 0; }
+.tpa-impact-grid > div { padding: .85rem; background: #fff; border: 1px solid #e2e8f0; border-radius: 9px; }
+.tpa-impact-grid span { display: block; color: #64748b; font-size: .72rem; line-height: 1.5; }
+.tpa-impact-grid strong { display: block; margin-top: .3rem; color: #0f172a; font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.tpa-history .retainer-section-heading h3 { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.tpa-history-count { display: inline-block; min-width: 1.4rem; padding: .15rem .35rem; border-radius: 6px; background: #f1f5f9; color: #64748b; font-size: .7rem; text-align: center; }
+.tpa-history-filters { margin-bottom: 1rem; }
+.tpa-history-table { max-width: 100%; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 9px; }
+.tpa-history-table table { width: 100%; min-width: 36rem; border-collapse: collapse; text-align: left; font-size: .75rem; }
+.tpa-history-table th { padding: .75rem; background: #f8fafc; color: #64748b; font-weight: 700; font-size: .7rem; white-space: nowrap; }
+.tpa-history-table td { padding: .75rem; border-top: 1px solid #e8eef5; vertical-align: top; line-height: 1.5; }
+.tpa-history-table td:first-child { color: #0f172a; }
+.tpa-history-table td:last-child { min-width: 9rem; overflow-wrap: anywhere; }
+.tpa-history-type { display: block; color: #64748b; text-transform: capitalize; font-size: .68rem; }
+.tpa-history-empty { display: flex; flex-direction: column; align-items: center; gap: .5rem; padding: 1.5rem 1rem; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px; color: #64748b; text-align: center; font-size: .8rem; }
+.tpa-history-empty strong { color: #334155; }
+.tpa-history-empty p { max-width: 26rem; margin: 0; line-height: 1.6; font-size: .75rem; }
+.tpa-form-footer { align-items: center; }
+.tpa-form-footer .retainer-button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
+.tpa-footer-note { margin-right: auto; color: #64748b; font-size: .72rem; line-height: 1.45; }
+.tpa-management--embedded { overflow: hidden; border: 1px solid #d6e0ec; border-radius: 12px; background: #fff; }
+.tpa-management--embedded .retainer-form-section { padding: 1.1rem; }
+.tpa-embedded-heading { margin: 0; padding: 1.1rem; border-bottom: 1px solid #e8eef5; }
+.tpa-management--embedded .tpa-form-footer { position: static; padding: 1rem 1.1rem; }
+.tpa-management--embedded .tpa-feedback { margin: 1rem; }
+.tpa-editor > section:first-child { scroll-margin-top: 9rem; }
+.dark .tpa-management { color: #cbd5e1; }
+.dark .tpa-management--embedded, .dark .tpa-summary-card, .dark .tpa-impact-grid > div { background: #172033; border-color: #3c4d66; }
+.dark .tpa-rate-value, .dark .tpa-empty-rate, .dark .tpa-history-table td:first-child, .dark .tpa-impact-grid strong, .dark .tpa-history-empty strong { color: #f8fafc; }
+.dark .tpa-staff-email, .dark .tpa-summary-heading, .dark .tpa-summary-card p, .dark .tpa-rate-value small, .dark .tpa-effective-note, .dark .tpa-timezone, .dark .tpa-date-shortcuts > span, .dark .tpa-review-message, .dark .tpa-impact-grid span, .dark .tpa-history-type, .dark .tpa-footer-note { color: #b8c7da; }
+.dark .tpa-text-button { color: #93c5fd; }
+.dark .tpa-review { background: #292619; }
+.dark .tpa-badge.is-active, .dark .tpa-feedback.is-success { background: #103a30; border-color: #206d56; color: #a7f3d0; }
+.dark .tpa-badge.is-scheduled { background: #42331b; border-color: #78622c; color: #fde68a; }
+.dark .tpa-badge.is-inactive, .dark .tpa-history-count { background: #223149; border-color: #3c4d66; color: #cbd5e1; }
+.dark .tpa-feedback.is-error { background: #421f2a; border-color: #834252; color: #fecdd3; }
+.dark .tpa-history-table, .dark .tpa-history-table td, .dark .tpa-embedded-heading { border-color: #34445b; }
+.dark .tpa-history-table th, .dark .tpa-history-empty { background: #111d30; color: #b8c7da; border-color: #475a75; }
+@media (max-width: 640px) {
+  .tpa-management-dialog .retainer-form-header { padding: 1rem; }
+  .tpa-management .retainer-form-section { padding: 1rem; }
+  .tpa-management .retainer-form-grid, .tpa-management .retainer-model-grid, .tpa-summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .tpa-management .retainer-model-option { min-height: 0; }
+  .tpa-impact-grid { grid-template-columns: minmax(0, 1fr); }
+  .tpa-impact-grid > div { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }
+  .tpa-impact-grid strong { margin: 0; }
+  .tpa-timezone { width: 100%; margin-left: 0; }
+  .tpa-feedback { margin: .8rem 1rem; }
+  .tpa-form-footer { flex-wrap: wrap; padding: .85rem 1rem; gap: .5rem; }
+  .tpa-footer-note { flex-basis: 100%; }
+  .tpa-form-footer .retainer-button { flex: 1; min-width: 0; }
+}
