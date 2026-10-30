@@ -1,7 +1,8 @@
 # Delegated Independent Tasks: how it works and how to test
 
-Delegated Independent Tasks operate on a matter's existing Key Actions. They do
-not change its permanent Initiator, Reviewer, or Signer/Approver assignments.
+Delegated Independent Tasks operate on a matter's Key Actions. An Initiator
+creating a task can select existing actions, add case-specific actions, or do
+both. They do not change the permanent Initiator, Reviewer, or Signer/Approver assignments.
 Standard Independent Tasks keep their existing lifecycle.
 
 All active staff, including interns and trainee associates, can select matter
@@ -101,6 +102,34 @@ Creating initiator work does not grant case workspace or management access.
 7. Confirm both substitutes appear under their actual acting roles, with their
    individual contributions, while permanent assignments remain unchanged.
 
+## Test 3: additional Key Actions from an independent task
+
+1. Create a task, link an active matter, and select **Initiator**. Use
+   **Add Key Action** to enter one or more titles, stages, and percentages.
+   You can save with only new actions, or include existing eligible actions.
+2. Check the allocation preview. New actions keep their entered percentages;
+   untouched, unreserved actions share the remaining allocation proportionally.
+   The result totals exactly 100%, including decimal rounding. Started,
+   submitted, completed, reserved, or previously worked actions keep their
+   allocations. An addition that cannot fit safely must show a validation error.
+3. Save and open the linked matter. Each new action must appear in its selected
+   stage with an **Additional Key Action** label and the entered percentage.
+   The workflow template and another matter using it must remain unchanged.
+4. Reload both workspaces and reconcile the matter workflow. The new actions,
+   rebalanced percentages, exclusive reservations, history, and attribution
+   must remain intact. Stage percentages must reflect the case allocation.
+5. Start the task, submit for review, return it for corrections, resubmit,
+   forward to approval, and approve. Confirm the additional actions use the
+   same document sharing, deadlines, status changes, quality, timeliness,
+   progress, and earned-fee calculations as other delegated actions.
+6. Cancel or delete an unstarted task. Its reservations are released; the
+   case-specific actions and the case's allocation remain on the matter.
+   Another eligible task can then claim those actions.
+7. Test blank titles, an unknown stage, zero/negative/over-100 percentages,
+   more than two decimal places, and an allocation larger than the untouched
+   work permits. A failed save must leave no new task, action, or changed
+   percentage. Reviewer and approver tasks must reject new-action payloads.
+
 ## Additional checks
 
 - **Multiple actions:** return one action while another is already approved.
@@ -141,6 +170,7 @@ From `colin-backend`:
 ```powershell
 npm.cmd run verify:independent-tasks
 npm.cmd run build
+node dist/scripts/verifyAdditionalKeyActionAllocation.js
 ```
 
 From the repository root:

@@ -31,6 +31,7 @@ import {
   IndependentTask,
   IndependentTaskCaseRole,
   IndependentTaskKeyActionOption,
+  IndependentTaskAllocationStep,
   IndependentTaskDashboard,
   IndependentTaskStatus,
   listIndependentTasks,
@@ -39,6 +40,7 @@ import {
 } from '../../services/independentTaskService';
 import usePageTitle from '../../hooks/usePageTitle';
 import TableExport from '../ui/TableExport';
+import { rebalanceAdditionalKeyActions } from '../../utils/additionalKeyActionAllocation';
 import {
   formatDeadlineDateTime,
   formatDueCountdown,
@@ -108,6 +110,7 @@ type TaskForm = {
   relatedClient: string;
   caseRole: '' | IndependentTaskCaseRole;
   keyActionKeys: string[];
+  additionalKeyActions: Array<{ id: string; title: string; stageKey: string; percentage: string }>;
   assignee: string;
   supervisor: string;
   startDate: string;
@@ -122,11 +125,13 @@ const emptyForm = (): TaskForm => ({
   relatedClient: '',
   caseRole: '',
   keyActionKeys: [],
+  additionalKeyActions: [],
   assignee: '',
   supervisor: '',
   startDate: new Date().toISOString().slice(0, 10),
   dueDate: '',
 });
+const formatAllocationPercent = (percentage: number) => `${Number(percentage.toFixed(6))}%`;
 
 interface IndependentTaskModuleProps {
   userRole: UserRole;
@@ -174,6 +179,11 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
   const [caseKeyActions, setCaseKeyActions] = useState<IndependentTaskKeyActionOption[]>([]);
   const [caseKeyActionsLoading, setCaseKeyActionsLoading] = useState(false);
   const [caseKeyActionsError, setCaseKeyActionsError] = useState('');
+  const [caseStages, setCaseStages] = useState<Array<{ key: string; title: string }>>([]);
+  const [caseAllocationSteps, setCaseAllocationSteps] = useState<IndependentTaskAllocationStep[]>([]);
+  const [caseOptionsMatterId, setCaseOptionsMatterId] = useState('');
+  const caseOptionsReady = !!form.relatedMatterId && caseOptionsMatterId === form.relatedMatterId
+    && !caseKeyActionsLoading && !caseKeyActionsError;
 
   const deferredSearch = useDeferredValue(search);
 
@@ -243,18 +253,30 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     if (!showModal || !form.relatedMatterId) {
       setCaseKeyActions([]);
       setCaseKeyActionsError('');
+      setCaseStages([]);
+      setCaseAllocationSteps([]);
+      setCaseOptionsMatterId('');
+      setCaseKeyActionsLoading(false);
       return;
     }
     let cancelled = false;
     const loadCaseKeyActions = async () => {
       setCaseKeyActionsLoading(true);
       setCaseKeyActionsError('');
+      setCaseOptionsMatterId('');
       try {
         const data = await getIndependentTaskCaseKeyActions(form.relatedMatterId);
-        if (!cancelled) setCaseKeyActions(data.keyActions || []);
+        if (!cancelled) {
+          setCaseKeyActions(data.keyActions || []);
+          setCaseStages(data.stages || []);
+          setCaseAllocationSteps(data.allocationSteps || []);
+          setCaseOptionsMatterId(form.relatedMatterId);
+        }
       } catch (err: any) {
         if (!cancelled) {
           setCaseKeyActions([]);
+          setCaseStages([]);
+          setCaseAllocationSteps([]);
           setCaseKeyActionsError(err.message || 'Unable to load open Key Actions for this matter.');
         }
       } finally {
@@ -359,6 +381,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
       relatedClient: task.relatedClient || '',
       caseRole: task.caseRole || '',
       keyActionKeys: task.keyActionKeys || [],
+      additionalKeyActions: [],
       assignee: task.assigneeUserId || users.find((user) => user.name === task.assignee)?._id || task.assignee || '',
       supervisor: task.supervisorUserId || users.find((user) => user.name === task.supervisor)?._id || task.supervisor || '',
       startDate: task.startDate || new Date().toISOString().slice(0, 10),
@@ -373,6 +396,34 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     setForm(emptyForm());
   };
 
+  const additionalActionPreview = useMemo(() => {
+    if (!form.additionalKeyActions.length) return { allocation: null, error: '', actions: [] };
+    try {
+      if (!caseOptionsReady) throw new Error(caseKeyActionsError || 'Wait for the linked matter workflow to finish loading.');
+      if (form.additionalKeyActions.length > 50) throw new Error('Add up to 50 Key Actions in one task.');
+      const usedTitles = new Set<string>();
+      const actions = form.additionalKeyActions.map((action) => {
+        const title = action.title.trim();
+        if (!title) throw new Error('Enter a title for each additional Key Action.');
+        if (title.length > 300) throw new Error('Key Action titles must be 300 characters or fewer.');
+        if (!caseStages.some((stage) => stage.key === action.stageKey)) throw new Error('Choose a workflow stage for each additional Key Action.');
+        const titleKey = `${action.stageKey}:${title.toLocaleLowerCase()}`;
+        if (usedTitles.has(titleKey)) throw new Error('Use a different title for each additional Key Action in the same stage.');
+        usedTitles.add(titleKey);
+        if (!/^\d+(?:\.\d{1,2})?$/.test(action.percentage) || Number(action.percentage) <= 0 || Number(action.percentage) > 100) {
+          throw new Error('Enter a percentage above 0% and up to 100%, using at most two decimal places.');
+        }
+        return { title, stageKey: action.stageKey, percentage: Number(action.percentage) };
+      });
+      return { allocation: rebalanceAdditionalKeyActions(caseAllocationSteps, actions.map((action) => action.percentage)), error: '', actions };
+    } catch (err: any) {
+      return { allocation: null, error: err.message || 'Unable to allocate additional Key Action percentages.', actions: [] };
+    }
+  }, [form.additionalKeyActions, caseOptionsReady, caseKeyActionsError, caseStages, caseAllocationSteps]);
+
+  const delegationSaveBlocked = !editingTask && !!form.caseRole
+    && (!caseOptionsReady || (form.additionalKeyActions.length > 0 && !additionalActionPreview.allocation));
+
   const saveTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title.trim()) return toast.error('Title is required.');
@@ -380,9 +431,12 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
     if (!form.supervisor.trim()) return toast.error('Supervisor is required.');
     if (!form.dueDate) return toast.error('Due date is required.');
     if (form.startDate && form.dueDate < form.startDate) return toast.error('Due date cannot be earlier than start date.');
-    if ((form.caseRole || form.keyActionKeys.length) && (!form.relatedMatterId || !form.caseRole || !form.keyActionKeys.length)) {
-      return toast.error('Case delegation needs a matter, a role, and at least one open Key Action.');
+    if ((form.caseRole || form.keyActionKeys.length || form.additionalKeyActions.length) && (!form.relatedMatterId || !form.caseRole || (!form.keyActionKeys.length && !form.additionalKeyActions.length))) {
+      return toast.error('Case delegation needs a matter, a role, and at least one selected or additional Key Action.');
     }
+    if (!editingTask && form.caseRole && !caseOptionsReady) return toast.error(caseKeyActionsError || 'Wait for the linked matter workflow to finish loading.');
+    if (form.additionalKeyActions.length && (editingTask || form.caseRole !== 'Initiator')) return toast.error('Additional Key Actions can be added when creating an Initiator task.');
+    if (form.additionalKeyActions.length && additionalActionPreview.error) return toast.error(additionalActionPreview.error);
 
     try {
       setSaving(true);
@@ -397,6 +451,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
         // leave the prior role in place on the server.
         caseRole: form.caseRole || null,
         keyActionKeys: form.keyActionKeys,
+        ...(form.additionalKeyActions.length ? { additionalKeyActions: additionalActionPreview.actions } : {}),
         assignee: users.find((user) => user._id === form.assignee)?.name || form.assignee,
         assigneeUserId: users.find((user) => user._id === form.assignee)?._id,
         supervisor: users.find((user) => user._id === form.supervisor)?.name || form.supervisor,
@@ -1112,7 +1167,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                   <label className="mb-1 block text-sm font-medium text-gray-700">Related Matter</label>
                   <select
                     value={form.relatedMatterId}
-                    onChange={(e) => setForm((prev) => ({ ...prev, relatedMatterId: e.target.value, caseRole: '', keyActionKeys: [] }))}
+                    onChange={(e) => setForm((prev) => ({ ...prev, relatedMatterId: e.target.value, caseRole: '', keyActionKeys: [], additionalKeyActions: [] }))}
                     className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
                     disabled={saving || lookupLoading}
                   >
@@ -1139,9 +1194,9 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                         <button
                           key={role}
                           type="button"
-                          disabled={saving || caseKeyActionsLoading || (role !== 'Initiator' && (!canManage || !isManagerRole((users.find((user) => user._id === form.assignee || user.name === form.assignee)?.role || '') as UserRole)))}
+                          disabled={saving || !caseOptionsReady || (role !== 'Initiator' && (!canManage || !isManagerRole((users.find((user) => user._id === form.assignee || user.name === form.assignee)?.role || '') as UserRole)))}
                           title={role !== 'Initiator' ? 'Reviewer and approver work requires an authorized creator and assignee.' : 'Available to all active staff.'}
-                          onClick={() => setForm((prev) => ({ ...prev, caseRole: prev.caseRole === role ? '' : role, keyActionKeys: [] }))}
+                          onClick={() => setForm((prev) => ({ ...prev, caseRole: prev.caseRole === role ? '' : role, keyActionKeys: [], additionalKeyActions: [] }))}
                           className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${
                             form.caseRole === role
                               ? 'border-blue-700 bg-blue-700 text-white shadow-sm'
@@ -1186,7 +1241,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                                   className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-700"
                                 />
                                 <span className="min-w-0">
-                                  <span className="block text-sm font-medium text-gray-900">{action.title}</span>
+                                  <span className="block text-sm font-medium text-gray-900">{action.title}{action.additional && <span className="ml-2 inline-block rounded bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Additional Key Action</span>}</span>
                                   <span className="mt-0.5 block text-xs text-gray-500">{action.stageTitle} · {action.status}{action.dueAt ? ` · due ${formatDeadlineDateTime(action.dueAt)}` : ''}{typeof action.percentage === 'number' ? ` · ${action.percentage}%` : ''}{action.originalResponsibleRole ? ` · ${action.originalResponsibleRole}` : ''}</span>
                                   {!eligible && <span className="mt-1 block text-xs font-medium text-amber-700">{action.unavailableReason || 'Not eligible for the selected delegated role yet.'}</span>}
                                   {eligible && !nextInSequence && <span className="mt-1 block text-xs text-gray-500">Select the preceding Key Actions first.</span>}
@@ -1196,6 +1251,80 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                           })}
                         </div>
                       </div>
+                    )}
+                    {!editingTask && form.caseRole === 'Initiator' && (
+                      <section className="mt-4 rounded-xl border border-violet-200 bg-white p-3" aria-label="Additional Key Actions">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-sm font-semibold text-gray-900">Additional Key Actions</h4>
+                            <p className="mt-1 text-xs leading-5 text-gray-600">Add work to this matter and include it in this task. Untouched, unreserved actions are rebalanced proportionally to keep the workflow at 100%; started work keeps its allocation. Additional actions use this task’s dates and follow the usual review and approval.</p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={saving || !caseOptionsReady || !caseStages.length || form.additionalKeyActions.length >= 50}
+                            onClick={() => setForm((prev) => ({ ...prev, additionalKeyActions: [...prev.additionalKeyActions, {
+                              id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                              title: '', stageKey: caseStages[0]?.key || '', percentage: '',
+                            }] }))}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                          ><Plus className="h-3.5 w-3.5" />Add Key Action</button>
+                        </div>
+                        {caseOptionsReady && !caseStages.length && <p className="mt-3 text-xs text-amber-700">This matter needs a workflow stage before additional Key Actions can be added.</p>}
+                        <div className="mt-3 space-y-3">
+                          {form.additionalKeyActions.map((action, index) => (
+                            <fieldset key={action.id} className="rounded-lg border border-gray-200 p-3">
+                              <legend className="px-1 text-xs font-semibold text-violet-700">Additional Key Action {index + 1} · included in this task</legend>
+                              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_110px_auto]">
+                                <div className="sm:col-span-3">
+                                  <label htmlFor={`additional-title-${action.id}`} className="mb-1 block text-xs font-medium text-gray-700">Key Action title</label>
+                                  <input id={`additional-title-${action.id}`} value={action.title} required maxLength={300} disabled={saving}
+                                    onChange={(event) => setForm((prev) => ({ ...prev, additionalKeyActions: prev.additionalKeyActions.map((item) => item.id === action.id ? { ...item, title: event.target.value } : item) }))}
+                                    placeholder="Describe the additional work"
+                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                                </div>
+                                <div>
+                                  <label htmlFor={`additional-stage-${action.id}`} className="mb-1 block text-xs font-medium text-gray-700">Workflow stage</label>
+                                  <select id={`additional-stage-${action.id}`} value={action.stageKey} required disabled={saving || !caseOptionsReady}
+                                    onChange={(event) => setForm((prev) => ({ ...prev, additionalKeyActions: prev.additionalKeyActions.map((item) => item.id === action.id ? { ...item, stageKey: event.target.value } : item) }))}
+                                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300">
+                                    {caseStages.map((stage) => <option key={stage.key} value={stage.key}>{stage.title}</option>)}
+                                  </select>
+                                </div>
+                                <div>
+                                  <label htmlFor={`additional-percent-${action.id}`} className="mb-1 block text-xs font-medium text-gray-700">Workflow %</label>
+                                  <input id={`additional-percent-${action.id}`} type="number" inputMode="decimal" min="0.01" max="100" step="0.01" value={action.percentage} required disabled={saving}
+                                    onChange={(event) => setForm((prev) => ({ ...prev, additionalKeyActions: prev.additionalKeyActions.map((item) => item.id === action.id ? { ...item, percentage: event.target.value } : item) }))}
+                                    placeholder="e.g. 5"
+                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                                </div>
+                                <button type="button" disabled={saving} aria-label={`Remove additional Key Action ${index + 1}`}
+                                  onClick={() => setForm((prev) => ({ ...prev, additionalKeyActions: prev.additionalKeyActions.filter((item) => item.id !== action.id) }))}
+                                  className="self-end rounded-lg p-2.5 text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>
+                              </div>
+                            </fieldset>
+                          ))}
+                        </div>
+                        {form.additionalKeyActions.length > 0 && (
+                          <div className="mt-3" aria-live="polite">
+                            {additionalActionPreview.error ? <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{additionalActionPreview.error}</p> : additionalActionPreview.allocation && (
+                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                                <h5 className="text-xs font-semibold text-emerald-900">Allocation after saving</h5>
+                                <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                                  <div><dt className="text-gray-600">Existing actions</dt><dd className="mt-1 font-semibold text-gray-900">{formatAllocationPercent(100 - additionalActionPreview.actions.reduce((sum, action) => sum + action.percentage, 0))}</dd></div>
+                                  <div><dt className="text-gray-600">Additional actions</dt><dd className="mt-1 font-semibold text-gray-900">{formatAllocationPercent(additionalActionPreview.actions.reduce((sum, action) => sum + action.percentage, 0))}</dd></div>
+                                  <div><dt className="text-gray-600">Workflow total</dt><dd className="mt-1 font-semibold text-emerald-800">{formatAllocationPercent(additionalActionPreview.allocation.total)}</dd></div>
+                                </dl>
+                                {additionalActionPreview.allocation.changes.length > 0 && <div className="mt-3 max-h-48 overflow-auto rounded border border-emerald-100 bg-white">
+                                  <table className="w-full text-left text-xs"><caption className="sr-only">Changes to existing Key Action percentages</caption><thead><tr className="border-b border-gray-100"><th scope="col" className="px-2 py-2 font-semibold">Existing Key Action</th><th scope="col" className="px-2 py-2 text-right font-semibold">Current</th><th scope="col" className="px-2 py-2 text-right font-semibold">After saving</th></tr></thead>
+                                    <tbody>{additionalActionPreview.allocation.changes.map((change) => <tr key={change.key} className="border-b border-gray-100 last:border-0"><th scope="row" className="px-2 py-2 font-normal text-gray-700">{caseAllocationSteps.find((step) => step.key === change.key)?.title || change.key}</th><td className="whitespace-nowrap px-2 py-2 text-right text-gray-500">{formatAllocationPercent(change.from)}</td><td className="whitespace-nowrap px-2 py-2 text-right font-semibold text-gray-900">{formatAllocationPercent(change.to)}</td></tr>)}</tbody>
+                                  </table>
+                                </div>}
+                                <p className="mt-2 text-[11px] text-gray-600">Only this matter’s allocation changes when the task is saved.</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </section>
                     )}
                   </section>
                 )}
@@ -1280,7 +1409,7 @@ export default function IndependentTaskModule({ userRole }: IndependentTaskModul
                 </button>
                 <button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || delegationSaveBlocked}
                   className="independent-task-button independent-task-button-primary"
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

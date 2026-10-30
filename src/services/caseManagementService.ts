@@ -22,6 +22,8 @@ export type CaseManagementStep = {
   stageOrder?: number;
   stagePercentage: number;
   percentage: number;
+  addedFromIndependentTask?: boolean;
+  sourceIndependentTaskId?: string;
   order: number;
   status: 'Not Started' | 'In Progress' | 'Done' | 'Awaiting Review' | 'Awaiting Approval' | 'Completed';
   correctionRequest?: { reason: string; requestedBy: string; requestedAt: string; resolvedAt?: string };

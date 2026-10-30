@@ -112,8 +112,13 @@ export const alignInstanceStepsToTemplate = (
       .filter(Boolean)
   );
   const builtSteps = buildInstanceSteps(template, startDate);
+  // Convert hydrated Mongoose subdocuments before copying their values. A
+  // direct spread contains internal state instead of the persisted step data.
+  const previousSteps = (Array.isArray(existingSteps) ? existingSteps : []).map((step: any) =>
+    typeof step?.toObject === 'function' ? step.toObject() : { ...step }
+  );
   const previousByKey = new Map<string, any>(
-    (Array.isArray(existingSteps) ? existingSteps : []).map((step: any) => [String(step?.stepKey || ''), step])
+    previousSteps.map((step: any) => [String(step?.stepKey || ''), step])
   );
   const templateStepByKey = new Map<string, any>(
     (Array.isArray(template?.steps) ? template.steps : []).map((step: any) => [String(step?.key || ''), step])
@@ -176,6 +181,9 @@ export const alignInstanceStepsToTemplate = (
     const overriddenTitle =
       typeof previous?.title === 'string' && previous.title.trim() ? previous.title : templateStep.title;
     return {
+      // Reservations, contributor attribution, TPA snapshots and correction
+      // history belong to the case and must survive template reconciliation.
+      ...previous,
       ...templateStep,
       ...(isOverridden
         ? {
@@ -240,7 +248,7 @@ export const alignInstanceStepsToTemplate = (
   // the checklist.
   const builtKeys = new Set(activeBuiltSteps.map((step: any) => String(step?.stepKey || '')));
   const archivedSteps: any[] = [];
-  for (const step of Array.isArray(existingSteps) ? existingSteps : []) {
+  for (const step of previousSteps) {
     const stepKey = String(step?.stepKey || '');
     if (builtKeys.has(stepKey)) continue;
     // A Key Action deleted on the case only is already gone from `steps`; it

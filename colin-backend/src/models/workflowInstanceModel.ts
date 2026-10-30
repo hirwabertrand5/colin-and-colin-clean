@@ -173,6 +173,9 @@ export interface IInstanceStep {
    * case's active checklist across template reconciliation/alignment.
    */
   custom?: boolean;
+  /** Additional case work created together with an Independent Task. */
+  addedFromIndependentTask?: boolean;
+  sourceIndependentTaskId?: mongoose.Types.ObjectId;
   /**
    * True when a template-defined Key Action was edited on this case only
    * (title / stage / position / percentage). The template is never touched;
@@ -374,6 +377,8 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
 
     // Case-specific Key Action added on the matter itself (never on the template).
     custom: { type: Boolean, default: false },
+    addedFromIndependentTask: { type: Boolean, default: false },
+    sourceIndependentTaskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask' },
     // Template Key Action edited on this case only (title/stage/position/percentage).
     // Never written back to the template; follows the normal lifecycle.
     overridden: { type: Boolean, default: false },

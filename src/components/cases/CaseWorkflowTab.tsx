@@ -472,7 +472,13 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     const unassigned = orphans.length
       ? [{ key: '__unassigned__', title: 'Additional Key Actions', order: Number.MAX_SAFE_INTEGER, percentage: null, steps: orphans }]
       : [];
-    return [...populated, ...unassigned];
+    const groups = [...populated, ...unassigned];
+    if (steps.some((step) => step.addedFromIndependentTask)) {
+      for (const group of groups) {
+        group.percentage = Math.round(group.steps.reduce((sum, step) => sum + (step.percentage || 0), 0) * 100) / 100;
+      }
+    }
+    return groups;
   })();
 
   const totalStages = stageGroups.length;
@@ -1008,7 +1014,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                     className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-700 dark:bg-gray-700 dark:text-gray-300"
                     title="Added on this matter only — not part of the workflow template"
                   >
-                    Case-specific
+                    {s.addedFromIndependentTask ? 'Additional Key Action' : 'Case-specific'}
                   </span>
                 ) : s.overridden === true ? (
                   <span

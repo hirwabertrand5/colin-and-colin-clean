@@ -553,7 +553,7 @@ function KeyActionsList(props: {
         grouped.set(key, {
           key,
           title: step.stageTitle || key,
-          order: step.order ?? 0,
+          order: stageRankOfStep(step),
           percentage: step.stagePercentage || 0,
           steps: [step],
         });
@@ -568,7 +568,13 @@ function KeyActionsList(props: {
     const trailing = unassigned.length
       ? [{ key: '__unassigned__', title: 'Additional Key Actions', order: Number.MAX_SAFE_INTEGER, percentage: 0, steps: unassigned }]
       : [];
-    return [...populated, ...trailing];
+    const groups = [...populated, ...trailing];
+    if (orderedSteps.some((step) => step.addedFromIndependentTask)) {
+      for (const group of groups) {
+        group.percentage = Math.round(group.steps.reduce((sum, step) => sum + (step.percentage || 0), 0) * 100) / 100;
+      }
+    }
+    return groups;
   }, [orderedSteps]);
   const totalStages = stageGroups.length;
 
@@ -710,9 +716,14 @@ function KeyActionsList(props: {
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-gray-900 dark:text-gray-100">{step.title}</span>
+                    {step.addedFromIndependentTask && (
+                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                        Additional Key Action
+                      </span>
+                    )}
                     <span
                       className="inline-flex items-center rounded-full border border-gray-300 bg-gray-50 px-2.5 py-0.5 text-xs font-semibold text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300"
-                      title="Key Action percentage from the workflow template"
+                      title="Key Action percentage for this matter"
                     >
                       {step.percentage}%
                     </span>

@@ -24,6 +24,8 @@ import { independentTaskService } from '../modules/independentTasks/services/ind
 import { computeCaseEarnedFees } from '../utils/caseEarnedFees';
 import { buildRoleByName } from '../utils/workflowPercentages';
 import { serveStoredUpload } from '../services/fileStorageService';
+import { buildUpdatedInstanceSteps } from '../controllers/workflowController';
+import { alignInstanceStepsToTemplate } from '../utils/workflowAlignment';
 
 async function main() {
   console.log('Starting isolated MongoDB replica set...');
@@ -109,6 +111,49 @@ async function main() {
     const start = (name: string, task: any) => ok(name, `/independent-tasks/${task._id}/transition`, { status: 'In Progress' });
     const submit = (name: string, task: any) => ok(name, `/independent-tasks/${task._id}/case-lifecycle`, {});
     const state = (f: { id: string }) => ok('Reviewer', `/case-management/cases/${f.id}`);
+    const serialized = (value: any) => JSON.parse(JSON.stringify(value));
+    const lifecycle = (step: any) => serialized({
+      status: step.status, startAt: step.startAt, dueAt: step.dueAt, doneAt: step.doneAt,
+      completedAt: step.completedAt, submittedAt: step.submittedAt, reviewedAt: step.reviewedAt,
+      delegatedClaim: step.delegatedClaim, independentContributors: step.independentContributors,
+      tpaSnapshots: step.tpaSnapshots, correctionRequest: step.correctionRequest, reviewHistory: step.reviewHistory,
+      extensionHistory: step.extensionHistory, custom: step.custom, addedFromIndependentTask: step.addedFromIndependentTask,
+      sourceIndependentTaskId: step.sourceIndependentTaskId,
+    });
+    const metadataFixture = await fixture(2);
+    const metadataInstance: any = await Workflow.findById(metadataFixture.instance._id);
+    const metadataTaskId = new mongoose.Types.ObjectId();
+    const metadataAt = new Date('2026-10-25T10:00:00.000Z');
+    const metadataFields = {
+      status: 'Awaiting Review', doneAt: metadataAt, submittedAt: metadataAt,
+      delegatedClaim: { taskId: metadataTaskId, role: 'Reviewer', claimantName: 'DelegateReviewer', claimedAt: metadataAt },
+      independentContributors: [{ taskId: metadataTaskId, role: 'Initiator', name: 'Winnie', userId: users.Winnie._id, actedAt: metadataAt }],
+      tpaSnapshots: [{ staffKey: 'winnie', staffName: 'Winnie', assignmentRole: 'Initiator', activityAt: metadataAt, rate: 5, recordedAt: metadataAt }],
+      correctionRequest: { reason: 'Keep this feedback', requestedBy: 'Reviewer', requestedAt: metadataAt, contributorTaskId: metadataTaskId },
+      reviewHistory: [{ action: 'Returned', actorName: 'Reviewer', reason: 'Keep this history', at: metadataAt }],
+      extensionHistory: [{ previousDueAt: metadataAt, newDueAt: metadataInstance.steps[0].dueAt, days: 2, grantedBy: 'Reviewer', grantedAt: metadataAt, mode: 'fixed' }],
+    };
+    Object.assign(metadataInstance.steps[0], metadataFields, { overridden: true, title: 'Case-specific title', percentage: 40 });
+    metadataInstance.steps.push({
+      ...metadataInstance.steps[1].toObject(), ...metadataFields,
+      stepKey: 'CUSTOM_METADATA', title: 'Additional preserved action', order: 3, customOrder: 3,
+      percentage: 10, custom: true, addedFromIndependentTask: true, sourceIndependentTaskId: metadataTaskId,
+    });
+    await metadataInstance.save();
+    const metadataBefore = new Map<string, any>(metadataInstance.steps.map((step: any) => [step.stepKey, lifecycle(step)]));
+    // Exercise hydrated subdocuments through both merge paths, then persist them.
+    metadataInstance.steps = buildUpdatedInstanceSteps(metadataInstance.steps, metadataFixture.template, metadataAt);
+    await metadataInstance.save();
+    let metadataReloaded: any = await Workflow.findById(metadataInstance._id);
+    for (const key of ['action-1', 'CUSTOM_METADATA']) assert.deepEqual(lifecycle(metadataReloaded.steps.find((step: any) => step.stepKey === key)), metadataBefore.get(key));
+    metadataReloaded.steps = alignInstanceStepsToTemplate(metadataReloaded.steps, metadataFixture.template, metadataAt).steps;
+    await metadataReloaded.save();
+    metadataReloaded = await Workflow.findById(metadataInstance._id);
+    for (const key of ['action-1', 'CUSTOM_METADATA']) assert.deepEqual(lifecycle(metadataReloaded.steps.find((step: any) => step.stepKey === key)), metadataBefore.get(key));
+    assert.equal(metadataReloaded.steps[0].title, 'Case-specific title');
+    assert.equal(metadataReloaded.steps[0].percentage, 40);
+    assert.equal(metadataReloaded.steps.find((step: any) => step.stepKey === 'CUSTOM_METADATA').percentage, 10);
+    pass('Hydrated step synchronization and alignment preserve custom actions, overrides, claims, contributors, TPA and correction history');
     for (const contributor of ['Intern', 'Trainee']) {
       const juniorFixture = await fixture();
       const options = await ok(contributor, `/independent-tasks/case-options/${juniorFixture.id}`);
@@ -386,6 +431,143 @@ async function main() {
     assert.equal((await request('Reviewer', `/case-management/cases/${own.id}/return-for-corrections`, { stepKey: 'action-1', reason: '  ' })).status, 400);
     assert.equal((await state(own)).steps[0].status, 'Awaiting Review');
     pass('Self-review and blank correction feedback are rejected without changing workflow state');
+
+    const additionalPayload = (fixtureId: string, additions: any[], overrides: any = {}) => ({
+      title: 'Additional case work verification', assignee: 'Winnie', supervisor: 'Reviewer',
+      startDate: '2026-10-25', dueDate: '2026-11-05', relatedMatterId: fixtureId,
+      caseRole: 'Initiator', keyActionKeys: [], additionalKeyActions: additions, ...overrides,
+    });
+    const exactAllocation = (steps: any[]) => {
+      assert(Math.abs(steps.reduce((sum: number, step: any) => sum + Number(step.percentage), 0) - 100) < 0.00000001,
+        'Effective case allocation must total 100%');
+    };
+    const additionalFixture = await fixture(2);
+    const sameTemplateFixture = await fixture(2);
+    await Workflow.updateOne({ _id: sameTemplateFixture.instance._id }, { $set: { templateId: additionalFixture.template._id } });
+    await Case.updateOne({ _id: sameTemplateFixture.id }, { $set: { workflowTemplateId: additionalFixture.template._id } });
+    const templateBeforeAdditional = serialized(await Template.findById(additionalFixture.template._id).lean());
+    const otherInstanceBeforeAdditional = serialized(await Workflow.findById(sameTemplateFixture.instance._id).lean());
+    const additionalOptions = await ok('Winnie', `/independent-tasks/case-options/${additionalFixture.id}`);
+    assert(additionalOptions.stages.some((stage: any) => stage.key === 'delivery'));
+    assert.equal(additionalOptions.allocationSteps.length, 2);
+    assert(additionalOptions.allocationSteps.every((step: any) => step.adjustable && step.stageKey === 'delivery'));
+    const additionalTask = await ok('Winnie', '/independent-tasks', additionalPayload(additionalFixture.id, [
+      { title: 'Additional evidence analysis', stageKey: 'delivery', percentage: 10 },
+      { title: 'Additional client conference', stageKey: 'delivery', percentage: 5 },
+    ]));
+    let additionalLive: any = await Workflow.findById(additionalFixture.instance._id);
+    const newKeys = additionalTask.keyActionKeys as string[];
+    assert.equal(newKeys.length, 2);
+    const addedSteps = additionalLive.steps.filter((step: any) => newKeys.includes(step.stepKey));
+    assert.equal(addedSteps.length, 2);
+    assert(addedSteps.every((step: any) => step.custom && step.addedFromIndependentTask
+      && String(step.sourceIndependentTaskId) === additionalTask._id
+      && String(step.delegatedClaim.taskId) === additionalTask._id && step.status === 'Not Started'));
+    assert.deepEqual(additionalLive.steps.filter((step: any) => !step.custom).map((step: any) => step.percentage), [42.5, 42.5]);
+    exactAllocation(additionalLive.steps);
+    assert.deepEqual(serialized(await Template.findById(additionalFixture.template._id).lean()), templateBeforeAdditional);
+    assert.deepEqual(serialized(await Workflow.findById(sameTemplateFixture.instance._id).lean()), otherInstanceBeforeAdditional);
+    assert.equal((await Case.findById(additionalFixture.id))!.caseAssignments!.initiator, 'Owner');
+    const addedOptions = await ok('Winnie', `/independent-tasks/case-options/${additionalFixture.id}`);
+    assert(addedOptions.keyActions.filter((step: any) => newKeys.includes(step.key)).every((step: any) => step.additional && step.claimed));
+    pass('Additional-only initiator tasks create claimed case-only actions, rebalance exactly to 100%, and leave shared template and other cases unchanged');
+
+    // Both real reconciliation paths must retain the new action identities and claims.
+    additionalLive.steps = buildUpdatedInstanceSteps(additionalLive.steps, additionalFixture.template, new Date());
+    await additionalLive.save();
+    additionalLive = await Workflow.findById(additionalFixture.instance._id);
+    additionalLive.steps = alignInstanceStepsToTemplate(additionalLive.steps, additionalFixture.template, new Date()).steps;
+    await additionalLive.save();
+    additionalLive = await Workflow.findById(additionalFixture.instance._id);
+    exactAllocation(additionalLive.steps);
+    assert(newKeys.every((key) => additionalLive.steps.some((step: any) => step.stepKey === key && step.custom && String(step.delegatedClaim?.taskId) === additionalTask._id)));
+    await start('Winnie', additionalTask);
+    await submit('Winnie', additionalTask);
+    assert((await state(additionalFixture)).steps.filter((step: any) => newKeys.includes(step.stepKey)).every((step: any) => step.status === 'Awaiting Review'));
+    await ok('Reviewer', `/case-management/cases/${additionalFixture.id}/return-for-corrections`, { stepKey: newKeys[0], reason: 'Clarify this additional analysis.' });
+    assert.equal((await ok('Winnie', `/independent-tasks/${additionalTask._id}`)).caseWork.lifecycleStatus, 'Changes Requested');
+    await submit('Winnie', additionalTask);
+    for (const stepKey of newKeys) {
+      await ok('Reviewer', `/case-management/cases/${additionalFixture.id}/request-approval`, { stepKey });
+      await ok('Approver', `/case-management/cases/${additionalFixture.id}/approve`, { stepKey });
+    }
+    additionalLive = await Workflow.findById(additionalFixture.instance._id);
+    assert(newKeys.every((key) => additionalLive.steps.find((step: any) => step.stepKey === key).status === 'Completed'));
+    assert.deepEqual(additionalLive.steps.find((step: any) => step.stepKey === newKeys[0]).reviewHistory.map((entry: any) => entry.action), ['Returned', 'Resubmitted']);
+    assert(newKeys.every((key) => additionalLive.steps.find((step: any) => step.stepKey === key).independentContributors.some((entry: any) => entry.name === 'Winnie')));
+    assert.equal((await ok('Winnie', `/independent-tasks/${additionalTask._id}`)).status, 'Completed');
+    const additionalEarned = (await state(additionalFixture)).earnedFees;
+    assert.equal(additionalEarned.completedPercent, 15);
+    assert(additionalEarned.team.find((member: any) => member.name === 'Winnie').earnedFee > 0);
+    assert.equal(additionalLive.status, 'Active', 'Untouched original work remains open');
+    pass('Additional actions survive reconciliation and follow start, submission, corrections, review, approval and earned-fee attribution');
+
+    const protectedFixture = await fixture(4);
+    let protectedLive: any = await Workflow.findById(protectedFixture.instance._id);
+    protectedLive.steps[0].status = 'Completed'; protectedLive.steps[0].completedAt = metadataAt;
+    protectedLive.steps[1].status = 'In Progress';
+    await protectedLive.save();
+    const protectedBefore = [lifecycle(protectedLive.steps[0]), lifecycle(protectedLive.steps[1])];
+    const protectedOptions = await ok('Winnie', `/independent-tasks/case-options/${protectedFixture.id}`);
+    assert.equal(protectedOptions.allocationSteps.length, 4);
+    assert.equal(protectedOptions.allocationSteps.filter((step: any) => step.adjustable).length, 2);
+    await ok('Winnie', '/independent-tasks', additionalPayload(protectedFixture.id, [{ title: 'New protected allocation work', stageKey: 'delivery', percentage: 10 }]));
+    protectedLive = await Workflow.findById(protectedFixture.instance._id);
+    assert.deepEqual(protectedLive.steps.filter((step: any) => !step.custom).map((step: any) => step.percentage), [25, 25, 20, 20]);
+    assert.deepEqual([lifecycle(protectedLive.steps[0]), lifecycle(protectedLive.steps[1])], protectedBefore);
+    exactAllocation(protectedLive.steps);
+    const thirdsFixture = await fixture(3);
+    let thirdsLive: any = await Workflow.findById(thirdsFixture.instance._id);
+    thirdsLive.steps[0].status = 'In Progress'; await thirdsLive.save();
+    const protectedThird = thirdsLive.steps[0].percentage;
+    await ok('Winnie', '/independent-tasks', additionalPayload(thirdsFixture.id, [{ title: 'Fractional allocation work', stageKey: 'delivery', percentage: 10 }]));
+    thirdsLive = await Workflow.findById(thirdsFixture.instance._id);
+    assert.equal(thirdsLive.steps[0].percentage, protectedThird);
+    exactAllocation(thirdsLive.steps);
+    pass('Completed and started weights stay fixed while untouched weights rebalance, including legacy fractional thirds');
+
+    const invalidAdditionalFixture = await fixture(2);
+    const invalidBefore = serialized(await Workflow.findById(invalidAdditionalFixture.instance._id).lean());
+    const invalidTemplateBefore = serialized(await Template.findById(invalidAdditionalFixture.template._id).lean());
+    for (const [label, additions, overrides] of [
+      ['reviewer role', [{ title: 'Invalid reviewer addition', stageKey: 'delivery', percentage: 10 }], { caseRole: 'Reviewer', assignee: 'DelegateReviewer' }],
+      ['ordinary task', [{ title: 'Invalid ordinary addition', stageKey: 'delivery', percentage: 10 }], { caseRole: undefined }],
+      ['unknown stage', [{ title: 'Invalid stage', stageKey: 'missing-stage', percentage: 10 }], {}],
+      ['blank title', [{ title: '  ', stageKey: 'delivery', percentage: 10 }], {}],
+      ['zero percentage', [{ title: 'Invalid zero', stageKey: 'delivery', percentage: 0 }], {}],
+      ['negative percentage', [{ title: 'Invalid negative', stageKey: 'delivery', percentage: -1 }], {}],
+      ['nonfinite percentage', [{ title: 'Invalid number', stageKey: 'delivery', percentage: null }], {}],
+      ['excess precision', [{ title: 'Invalid precision', stageKey: 'delivery', percentage: 1.234 }], {}],
+      ['overflow', [{ title: 'Overflow first', stageKey: 'delivery', percentage: 60 }, { title: 'Overflow second', stageKey: 'delivery', percentage: 41 }], {}],
+    ] as Array<[string, any[], any]>) {
+      const result = await request('ManagingPartner', '/independent-tasks', additionalPayload(invalidAdditionalFixture.id, additions, overrides));
+      assert.equal(result.status, 400, label);
+      assert.deepEqual(serialized(await Workflow.findById(invalidAdditionalFixture.instance._id).lean()), invalidBefore, `${label} must not mutate case workflow`);
+      assert.equal(await IndependentTask.countDocuments({ relatedMatterId: invalidAdditionalFixture.id }), 0, `${label} must not create a task`);
+      assert.deepEqual(serialized(await Template.findById(invalidAdditionalFixture.template._id).lean()), invalidTemplateBefore);
+    }
+    const protectedBeforeOverflow = serialized(await Workflow.findById(protectedFixture.instance._id).lean());
+    assert.equal((await request('Winnie', '/independent-tasks', additionalPayload(protectedFixture.id, [{ title: 'Too much protected allocation', stageKey: 'delivery', percentage: 50 }]))).status, 400);
+    assert.deepEqual(serialized(await Workflow.findById(protectedFixture.instance._id).lean()), protectedBeforeOverflow);
+    pass('Invalid roles, stages, titles, percentages and insufficient allocation leave no task, action or percentage mutation');
+
+    const mixedFixture = await fixture(2);
+    const mixedTask = await ok('Winnie', '/independent-tasks', additionalPayload(mixedFixture.id,
+      [{ title: 'Mixed new action', stageKey: 'delivery', percentage: 10 }], { keyActionKeys: ['action-1'] }));
+    assert.equal(mixedTask.keyActionKeys.length, 2);
+    assert(mixedTask.keyActionKeys.includes('action-1'));
+    await start('Winnie', mixedTask); await submit('Winnie', mixedTask);
+    assert((await state(mixedFixture)).steps.filter((step: any) => mixedTask.keyActionKeys.includes(step.stepKey)).every((step: any) => step.status === 'Awaiting Review'));
+    const additionalRace = await fixture(2);
+    const racingAdditions = await Promise.all(['Winnie', 'Other'].map((name) => request(name, '/independent-tasks', additionalPayload(additionalRace.id,
+      [{ title: `Concurrent addition ${name}`, stageKey: 'delivery', percentage: 10 }], { assignee: name, keyActionKeys: ['action-1'] }))));
+    assert.equal(racingAdditions.filter((result) => result.status === 201).length, 1);
+    assert.equal(await IndependentTask.countDocuments({ relatedMatterId: additionalRace.id }), 1);
+    const additionalRaceLive: any = await Workflow.findById(additionalRace.instance._id);
+    assert.equal(additionalRaceLive.steps.filter((step: any) => step.addedFromIndependentTask).length, 1);
+    exactAllocation(additionalRaceLive.steps);
+    pass('Mixed existing/additional work follows lifecycle and concurrent conflicting creation rolls back every losing addition');
+
     const identityTask = await ok('Winnie', '/independent-tasks', { title: 'Creator identity regression', assignee: 'Other', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05' });
     await User.findByIdAndUpdate(users.Other._id, { $set: { name: 'Winnie' } });
     assert.equal((await request('Other', `/independent-tasks/${identityTask._id}`, undefined, 'DELETE')).status, 403);

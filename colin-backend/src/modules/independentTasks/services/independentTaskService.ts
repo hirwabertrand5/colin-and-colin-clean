@@ -25,12 +25,14 @@ import IndependentTaskHistory, {
 } from '../models/independentTaskHistoryModel';
 import { caseMatchesAssignee } from '../../../utils/caseAssignments';
 import { deleteStoredFile, storeUploadedFile } from '../../../services/fileStorageService';
-import { buildUpdatedInstanceSteps, completeStepForCase } from '../../../controllers/workflowController';
+import { buildUpdatedInstanceSteps, completeStepForCase, updateCaseWorkflowProgress } from '../../../controllers/workflowController';
 import { orderWorkflowSteps } from '../../../utils/workflowSchedule';
 import { computeCaseEarnedFees, computeStepTimelinessAt, normalizeEffectiveWorkflowSteps } from '../../../utils/caseEarnedFees';
 import { allocateCollectedValueAcrossKeyActions, calculateCollectedKeyActionEarnings } from '../../../utils/keyActionEarnings';
 import { buildRoleByName, resolveMemberTpa, computeEarnedFee } from '../../../utils/workflowPercentages';
 import { returnCaseWorkForCorrections } from '../../../services/caseWorkCorrectionService';
+import { isUntouchedKeyAction, rebalanceAdditionalKeyActions } from '../../../utils/additionalKeyActionAllocation';
+import { resolveDeadlineDateTime } from '../../../utils/deadlineUtils';
 
 export type IndependentTaskListQuery = {
   q?: string;
@@ -158,12 +160,12 @@ const toDateMs = (value?: string) => {
 };
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-const loadCaseTaskContext = async (caseId: string) => {
-  const caseDoc: any = await Case.findById(caseId);
+const loadCaseTaskContext = async (caseId: string, session?: mongoose.ClientSession) => {
+  const caseDoc: any = await Case.findById(caseId).session(session || null);
   if (!caseDoc) throw new Error('Selected matter was not found.');
-  const inst: any = await WorkflowInstance.findOne({ caseId: caseDoc._id });
+  const inst: any = await WorkflowInstance.findOne({ caseId: caseDoc._id }).session(session || null);
   if (!inst) throw new Error('This matter does not have an active Key Action workflow.');
-  const template: any = await WorkflowTemplate.findById(inst.templateId).lean();
+  const template: any = await WorkflowTemplate.findById(inst.templateId).session(session || null).lean();
   if (!template) throw new Error('The workflow template for this matter was not found.');
   // Older instances can contain only part of a stage. Materialize missing
   // template actions using the same merge as the case workspace, preserving
@@ -172,7 +174,7 @@ const loadCaseTaskContext = async (caseId: string) => {
   const existingKeys = new Set(inst.steps.map((step: any) => String(step.stepKey)));
   if (merged.some((step: any) => !existingKeys.has(String(step.stepKey)))) {
     inst.steps = merged;
-    await inst.save();
+    await inst.save(session ? { session } : undefined);
   }
   return { caseDoc, inst, template };
 };
@@ -186,6 +188,7 @@ const publicKeyActions = (inst: any, template: any) => {
     status: cleanString(step?.status) || 'Not Started',
     dueAt: step?.dueAt || null,
     percentage: Number(step?.percentage) || 0,
+    additional: step?.addedFromIndependentTask === true,
   })).filter((step) => Boolean(step.key));
 };
 
@@ -219,6 +222,7 @@ const delegatedKeyActionOptions = (inst: any, template: any) => {
         status,
         dueAt: step?.dueAt || null,
         percentage: Number(step?.percentage) || 0,
+        additional: step?.addedFromIndependentTask === true,
         originalResponsibleRole: cleanString(step?.responsibleRole) || undefined,
         claimed,
         eligibility: eligibleRoles,
@@ -226,6 +230,51 @@ const delegatedKeyActionOptions = (inst: any, template: any) => {
       };
     })
     .filter((step) => Boolean(step.key));
+};
+
+const caseAllocationSteps = (inst: any, template: any) =>
+  orderWorkflowSteps<any>(normalizeEffectiveWorkflowSteps(inst, template), template).map((step: any) => ({
+    key: cleanString(step.stepKey),
+    title: cleanString(step.title) || cleanString(step.stepKey),
+    stageKey: cleanString(step.stageKey),
+    percentage: Number(step.percentage) || 0,
+    adjustable: isUntouchedKeyAction(step),
+  }));
+
+const caseWorkflowStages = (inst: any, template: any) => {
+  const stages = new Map<string, { key: string; title: string }>();
+  for (const stage of (template.stages || []).slice().sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0))) {
+    const key = cleanString(stage.key);
+    if (key) stages.set(key, { key, title: cleanString(stage.title) || key });
+  }
+  for (const step of orderWorkflowSteps<any>(inst.steps || [], template)) {
+    const key = cleanString(step.stageKey);
+    if (key && !stages.has(key)) stages.set(key, { key, title: cleanString(step.stageTitle) || key });
+  }
+  return [...stages.values()];
+};
+
+type AdditionalKeyAction = { title: string; stageKey: string; percentage: number };
+const additionalKeyActionsFrom = (value: unknown): AdditionalKeyAction[] => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error('Additional Key Actions must be a list.');
+  if (value.length > 50) throw new Error('Add no more than 50 Key Actions in one task.');
+  const seen = new Set<string>();
+  return value.map((raw: any) => {
+    const title = cleanString(raw?.title);
+    const stageKey = cleanString(raw?.stageKey);
+    const percentage = Number(raw?.percentage);
+    if (!title || title.length > 300) throw new Error('Each additional Key Action needs a title of up to 300 characters.');
+    if (!stageKey) throw new Error('Select a workflow stage for every additional Key Action.');
+    if (raw?.percentage === null || typeof raw?.percentage === 'boolean' || !Number.isFinite(percentage)
+      || percentage <= 0 || percentage > 100 || Math.abs(percentage * 100 - Math.round(percentage * 100)) > 0.0000001) {
+      throw new Error('Additional Key Action percentages must be above 0%, at most 100%, and use up to two decimal places.');
+    }
+    const identity = `${stageKey}:${title.toLocaleLowerCase()}`;
+    if (seen.has(identity)) throw new Error('Use a distinct title for each additional Key Action in the same stage.');
+    seen.add(identity);
+    return { title, stageKey, percentage };
+  });
 };
 
 const assertSequentialSelection = (options: ReturnType<typeof delegatedKeyActionOptions>, role: IndependentTaskCaseRole, keys: string[]) => {
@@ -402,6 +451,7 @@ const buildCaseTaskMetrics = async (task: any, knownMatter?: any) => {
         status: cleanString(step?.status) || 'Not Started',
         dueAt: step?.dueAt || null,
         percentage: Number(step?.percentage) || 0,
+        additional: step?.addedFromIndependentTask === true,
         originalResponsibleRole: cleanString(step?.responsibleRole) || undefined,
         completed: cleanString(step?.status) === 'Completed',
         contributedByTask: contributedSteps.includes(step),
@@ -707,6 +757,8 @@ export const independentTaskService = {
         reviewer: cleanString(caseDoc.caseAssignments?.reviewer),
         approver: cleanString(caseDoc.caseAssignments?.signerApprover),
       },
+      stages: caseWorkflowStages(inst, template),
+      allocationSteps: caseAllocationSteps(inst, template),
       // Return the live instance actions, including locked or reserved rows,
       // so the form can explain why a future action cannot be selected rather
       // than silently bypassing the established workflow sequence.
@@ -748,7 +800,8 @@ export const independentTaskService = {
 
     const requestedCaseRole = cleanString(payload.caseRole);
     const keyActionKeys = keyActionKeysFrom(payload.keyActionKeys);
-    if (requestedCaseRole || keyActionKeys.length) {
+    const additionalKeyActions = additionalKeyActionsFrom(payload.additionalKeyActions);
+    if (requestedCaseRole || keyActionKeys.length || additionalKeyActions.length) {
       if (!canDelegateRole(req.user?.role)) {
         throw new Error('You are not authorized to create delegated case work.');
       }
@@ -759,24 +812,13 @@ export const independentTaskService = {
       if (requestedCaseRole !== 'Initiator' && !canReviewRole(req.user?.role)) {
         throw new Error('You are not authorized to delegate reviewer or approver work.');
       }
-      if (!keyActionKeys.length) throw new Error('Select at least one open Key Action for this case delegation.');
+      if (additionalKeyActions.length && requestedCaseRole !== 'Initiator') {
+        throw new Error('Only delegated Initiator tasks can add additional Key Actions.');
+      }
+      if (!keyActionKeys.length && !additionalKeyActions.length) throw new Error('Select an open Key Action or add an additional Key Action for this case delegation.');
       if (requestedCaseRole !== 'Initiator' && !canReviewRole(assigneeUser.role)) {
         throw new Error('Select a staff member authorized to review or approve case work.');
       }
-      const { caseDoc, inst, template } = await loadCaseTaskContext(relatedMatterId);
-      if (['Closed', 'Temporarily Closed', 'Returned to Intake'].includes(cleanString(caseDoc.status))) {
-        throw new Error('Delegated case work is unavailable for this matter status.');
-      }
-      const selectable = new Map(
-        delegatedKeyActionOptions(inst, template)
-          .filter((step) => step.status !== 'Completed')
-          .map((step) => [step.key, step])
-      );
-      const invalid = keyActionKeys.find((key) => !selectable.has(key));
-      if (invalid) throw new Error('One or more selected Key Actions are already completed or no longer available. Refresh the matter selection and try again.');
-      const incompatible = keyActionKeys.find((key) => !selectable.get(key)?.eligibility?.[requestedCaseRole as IndependentTaskCaseRole]);
-      if (incompatible) throw new Error('One or more selected Key Actions are not ready for the chosen lifecycle role.');
-      assertSequentialSelection(delegatedKeyActionOptions(inst, template), requestedCaseRole as IndependentTaskCaseRole, keyActionKeys);
     }
 
     const taskNumber = cleanString(payload.taskNumber) || (await generateTaskNumber());
@@ -787,7 +829,92 @@ export const independentTaskService = {
     try {
       let created: any;
       await session.withTransaction(async () => {
+        // Re-read the workflow inside the transaction. A competing claim or
+        // workflow edit retries this entire validation/allocation against the
+        // latest state, rather than writing an old preview over current work.
+        const context = requestedCaseRole ? await loadCaseTaskContext(relatedMatterId, session) : null;
+        if (context) {
+          if (['Closed', 'Temporarily Closed', 'Returned to Intake'].includes(cleanString(context.caseDoc.status))) {
+            throw new Error('Delegated case work is unavailable for this matter status.');
+          }
+          const options = delegatedKeyActionOptions(context.inst, context.template);
+          const selectable = new Map(options.map((step) => [step.key, step]));
+          if (keyActionKeys.some((key) => !selectable.has(key))) {
+            throw new Error('One or more selected Key Actions are already completed or no longer available. Refresh the matter selection and try again.');
+          }
+          if (keyActionKeys.some((key) => !selectable.get(key)?.eligibility?.[requestedCaseRole as IndependentTaskCaseRole])) {
+            throw new Error('One or more selected Key Actions are not ready for the chosen lifecycle role.');
+          }
+          // New work is independent of the existing prefix. Existing actions
+          // selected alongside it continue to follow the established sequence.
+          assertSequentialSelection(options, requestedCaseRole as IndependentTaskCaseRole, keyActionKeys);
+        }
+        const taskId = new mongoose.Types.ObjectId();
+        const newKeys: string[] = [];
+        let allocationDetail = '';
+        if (context && additionalKeyActions.length) {
+          if (context.inst.status === 'Completed') throw new Error('Reopen this completed workflow before adding Key Actions.');
+          const stages = caseWorkflowStages(context.inst, context.template);
+          const stageMap = new Map(stages.map((stage) => [stage.key, stage]));
+          if (additionalKeyActions.some((action) => !stageMap.has(action.stageKey))) {
+            throw new Error('An additional Key Action refers to an unavailable workflow stage. Refresh the matter and choose a listed stage.');
+          }
+          const effectiveSteps = orderWorkflowSteps<any>(normalizeEffectiveWorkflowSteps(context.inst, context.template), context.template)
+            .map((step: any) => typeof step.toObject === 'function' ? step.toObject() : { ...step });
+          const allocation = rebalanceAdditionalKeyActions(caseAllocationSteps(context.inst, context.template), additionalKeyActions.map((action) => action.percentage));
+          for (const step of effectiveSteps) {
+            const percentage = allocation.percentages.get(cleanString(step.stepKey)) ?? 0;
+            if (Math.abs(percentage - Number(step.percentage || 0)) > 0.00000001) {
+              step.percentage = percentage;
+              if (!step.custom) step.overridden = true;
+            }
+          }
+          const actionStart = resolveDeadlineDateTime(startDate)!;
+          const actionDue = resolveDeadlineDateTime(dueDate)!;
+          for (const [index, action] of additionalKeyActions.entries()) {
+            const siblings = effectiveSteps.filter((step: any) => cleanString(step.stageKey) === action.stageKey);
+            const sibling = siblings[0];
+            const templateStage = (context.template.stages || []).find((stage: any) => cleanString(stage.key) === action.stageKey);
+            const order = siblings.length ? Math.max(...siblings.map((step: any) => Number(step.order) || 0)) + 1 : 1;
+            const key = `ADDITIONAL_${taskId.toHexString()}_${index + 1}`;
+            newKeys.push(key);
+            effectiveSteps.push({
+              stepKey: key,
+              title: action.title,
+              stageKey: action.stageKey,
+              stageTitle: stageMap.get(action.stageKey)!.title,
+              stageOrder: sibling?.stageOrder ?? Number(templateStage?.order ?? stages.findIndex((stage) => stage.key === action.stageKey)),
+              percentage: action.percentage,
+              order,
+              customOrder: order,
+              custom: true,
+              addedFromIndependentTask: true,
+              sourceIndependentTaskId: taskId,
+              responsibleRole: 'Initiator',
+              status: 'Not Started',
+              startAt: actionStart,
+              dueAt: actionDue,
+              slaMinutes: Math.max(0, (actionDue.getTime() - actionStart.getTime()) / 60000),
+              actions: [],
+              outputs: [],
+            });
+          }
+          const stageTotals = new Map<string, number>();
+          for (const step of effectiveSteps) {
+            const key = cleanString(step.stageKey);
+            stageTotals.set(key, (stageTotals.get(key) || 0) + Number(step.percentage || 0));
+          }
+          for (const step of effectiveSteps) {
+            const stagePercentage = Math.round((stageTotals.get(cleanString(step.stageKey)) || 0) * 100000000) / 100000000;
+            if (Math.abs(stagePercentage - Number(step.stagePercentage || 0)) > 0.00000001 && !step.custom) step.overridden = true;
+            step.stagePercentage = stagePercentage;
+          }
+          context.inst.steps = effectiveSteps;
+          allocationDetail = allocation.changes.map((change) => `${change.key}: ${change.from}% -> ${change.to}%`).join('; ');
+        }
+        const allKeyActionKeys = [...keyActionKeys, ...newKeys];
         const taskDoc: any = {
+          _id: taskId,
           taskNumber,
           title,
           relatedMatterId: relatedMatterId ? new mongoose.Types.ObjectId(relatedMatterId) : null,
@@ -806,9 +933,9 @@ export const independentTaskService = {
         if (description) taskDoc.description = description;
         if (matterLabel) taskDoc.relatedMatterLabel = matterLabel;
         if (relatedClient) taskDoc.relatedClient = relatedClient;
-        if (requestedCaseRole && keyActionKeys.length) {
+        if (requestedCaseRole && allKeyActionKeys.length) {
           taskDoc.caseRole = requestedCaseRole;
-          taskDoc.keyActionKeys = keyActionKeys;
+          taskDoc.keyActionKeys = allKeyActionKeys;
           taskDoc.caseLifecycleStatus = 'Ready';
         }
         if (req.user?.id) {
@@ -819,10 +946,25 @@ export const independentTaskService = {
         }
 
         created = await new IndependentTask(taskDoc).save({ session });
-        if (requestedCaseRole && keyActionKeys.length) {
-          const { inst } = await loadCaseTaskContext(relatedMatterId);
+        if (context && additionalKeyActions.length) {
+          for (const key of allKeyActionKeys) {
+            const step = context.inst.steps.find((item: any) => cleanString(item.stepKey) === key);
+            step.delegatedClaim = { taskId: created._id, role: 'Initiator', claimantName: assignee, claimedAt: new Date() };
+          }
+          await context.inst.save({ session });
+          await updateCaseWorkflowProgress(context.caseDoc, context.inst, session);
+          await AuditLog.insertMany([{
+            caseId: context.caseDoc._id,
+            independentTaskId: created._id,
+            actorName: req.user?.name || 'System',
+            ...(req.user?.id ? { actorUserId: new mongoose.Types.ObjectId(req.user.id) } : {}),
+            action: 'WORKFLOW_STEP_ADDED',
+            message: 'Added Independent Task Key Actions and rebalanced case allocation to 100%',
+            detail: `${taskNumber}: ${additionalKeyActions.map((action) => `${action.title} (${action.percentage}%)`).join('; ')}. Adjustments: ${allocationDetail || 'none'}`,
+          }], { session, ordered: true });
+        } else if (context && requestedCaseRole && keyActionKeys.length) {
           await reserveDelegatedKeyActions({
-            instanceId: inst._id,
+            instanceId: context.inst._id,
             task: created,
             role: requestedCaseRole as IndependentTaskCaseRole,
             keyActionKeys,
@@ -1003,6 +1145,9 @@ export const independentTaskService = {
   async updateTask(taskId: string, payload: any, req: AuthRequest) {
     const task = await assertTaskExists(taskId);
     await assertCanEdit(req, task);
+    if (additionalKeyActionsFrom(payload.additionalKeyActions).length) {
+      throw new Error('Add additional Key Actions when creating a new delegated Initiator task. Existing task edits do not add case work.');
+    }
 
     const updates: any = {};
 
@@ -1444,10 +1589,22 @@ export const independentTaskService = {
           { $unset: { 'steps.$[step].correctionRequest.contributorTaskId': '' } },
           { arrayFilters: [{ 'step.correctionRequest.contributorTaskId': task._id }], session: cleanupSession }
         );
+        // Keep the additional case work while removing the link to its deleted task.
+        await WorkflowInstance.updateMany(
+          { 'steps.sourceIndependentTaskId': task._id },
+          { $unset: { 'steps.$[step].sourceIndependentTaskId': '' } },
+          { arrayFilters: [{ 'step.sourceIndependentTaskId': task._id }], session: cleanupSession }
+        );
         await IndependentTaskComment.deleteMany({ taskId: task._id }, { session: cleanupSession });
         await IndependentTaskAttachment.deleteMany({ taskId: task._id }, { session: cleanupSession });
         await IndependentTaskHistory.deleteMany({ taskId: task._id }, { session: cleanupSession });
         await Notification.deleteMany({ taskId: task._id }, { session: cleanupSession });
+        // Allocation changes remain case history even after the private task is removed.
+        await AuditLog.updateMany(
+          { independentTaskId: task._id, action: 'WORKFLOW_STEP_ADDED' },
+          { $unset: { independentTaskId: '' } },
+          { session: cleanupSession }
+        );
         await AuditLog.deleteMany({ $or: [
           { independentTaskId: task._id },
           { independentTaskId: { $exists: false }, action: { $in: auditActions }, detail: legacyReference },

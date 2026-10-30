@@ -65,6 +65,7 @@ export interface IndependentTaskKeyActionOption {
   status: string;
   dueAt?: string | null;
   percentage?: number;
+  additional?: boolean;
   originalResponsibleRole?: string;
   claimed?: boolean;
   eligibility?: Partial<Record<IndependentTaskCaseRole, boolean>>;
@@ -73,6 +74,20 @@ export interface IndependentTaskKeyActionOption {
   requirements?: Array<{ name: string; required: boolean }>;
   correctionRequest?: { reason: string; requestedBy: string; requestedAt: string; contributorTaskId?: string; resolvedAt?: string };
   reviewHistory?: Array<{ action: 'Returned' | 'Resubmitted'; actorName: string; reason?: string; at: string }>;
+}
+
+export interface IndependentTaskAllocationStep {
+  key: string;
+  title: string;
+  stageKey: string;
+  percentage: number;
+  adjustable: boolean;
+}
+
+export interface IndependentTaskAdditionalKeyAction {
+  title: string;
+  stageKey: string;
+  percentage: number;
 }
 
 export interface IndependentTaskCaseWork {
@@ -212,6 +227,8 @@ export const getIndependentTaskCaseKeyActions = async (caseId: string): Promise<
   parties: string;
   assignments: { initiator?: string; reviewer?: string; approver?: string };
   keyActions: IndependentTaskKeyActionOption[];
+  stages: Array<{ key: string; title: string }>;
+  allocationSteps: IndependentTaskAllocationStep[];
 }> => {
   const res = await fetch(`${API_URL}/independent-tasks/case-options/${caseId}`, { headers: authHeaders() });
   return json(res);

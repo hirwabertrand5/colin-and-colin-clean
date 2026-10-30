@@ -20,6 +20,8 @@ export type WorkflowInstance = {
      * only on the case, never on the template.
      */
     custom?: boolean;
+    addedFromIndependentTask?: boolean;
+    sourceIndependentTaskId?: string;
     /**
      * True when a template-defined Key Action was edited on this case only
      * (title / stage / position / percentage). The template is never touched;

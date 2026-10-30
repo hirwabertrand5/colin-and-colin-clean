@@ -524,7 +524,7 @@ export const normalizeEffectiveWorkflowSteps = (inst: any, template: any): any[]
     const stageKey = String(step?.stageKey || '');
     const stage = stagePercentages.get(stageKey);
     return {
-      ...step,
+      ...(typeof step?.toObject === 'function' ? step.toObject() : step),
       percentage: parsePercentage(templateStepsByKey.get(String(step?.stepKey || ''))?.percentage) ?? 0,
       stagePercentage: typeof stage?.percentage === 'number' ? stage.percentage : 0,
       stageTitle: String(stage?.title || step?.stageTitle || stageKey || 'Stage'),

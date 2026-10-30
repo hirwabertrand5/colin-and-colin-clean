@@ -154,6 +154,8 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
     ...(typeof step?.stageOrder === 'number' ? { stageOrder: Number(step.stageOrder) } : {}),
     stagePercentage: Number(step?.stagePercentage) || 0,
     percentage: Number(step?.percentage) || 0,
+    addedFromIndependentTask: step?.addedFromIndependentTask === true,
+    ...(step?.sourceIndependentTaskId ? { sourceIndependentTaskId: String(step.sourceIndependentTaskId) } : {}),
     order: Number(step?.order) || 0,
     status: String(step?.status || 'Not Started'),
     startAt: step?.startAt,

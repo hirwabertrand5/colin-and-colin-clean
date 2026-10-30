@@ -184,7 +184,12 @@ const isClosedCaseWorkflow = (caseDoc: any, inst?: any) =>
  */
 export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, template: any, startDate: Date, existingDeletedStepKeys?: unknown) => {
   const builtSteps = buildInstanceSteps(template, startDate);
-  const existingByKey = new Map((existingSteps || []).map((step: any) => [String(step.stepKey), step]));
+  // Mongoose subdocuments expose their schema values through toObject(); a
+  // shallow spread copies internal fields instead and can erase custom work.
+  const previousSteps = (existingSteps || []).map((step: any) =>
+    typeof step?.toObject === 'function' ? step.toObject() : { ...step }
+  );
+  const existingByKey = new Map(previousSteps.map((step: any) => [String(step.stepKey), step]));
   const deletedKeys = new Set(
     (Array.isArray(existingDeletedStepKeys) ? existingDeletedStepKeys : []).map((key: any) => String(key || '').trim()).filter(Boolean)
   );
@@ -225,6 +230,10 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
         ? previous.stagePercentage
         : undefined;
     return {
+      // Keep case lifecycle data that the template does not define: claims,
+      // contributors, applied TPA snapshots, corrections and review history.
+      // Template-controlled fields are refreshed below; recorded work survives.
+      ...previous,
       ...nextStep,
       ...(isOverridden
         ? {
@@ -276,7 +285,7 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
   // Steps the template no longer defines stay on the case with their progress.
   // A Key Action deleted on the case only is never restored here.
   const builtKeys = new Set(builtSteps.map((step: any) => String(step?.stepKey)));
-  const removedFromTemplate = (existingSteps || [])
+  const removedFromTemplate = previousSteps
     .filter((step: any) => !builtKeys.has(String(step?.stepKey)) && !deletedKeys.has(String(step?.stepKey || '')))
     .map((step: any) => ({ ...step }));
 

@@ -457,7 +457,7 @@ export default function IndependentTaskDetail({ userRole }: IndependentTaskDetai
       const open = expandedAction === action.key;
       const canReturn = contributorCanAct && Boolean(task && ['In Progress', 'Awaiting Review'].includes(task.status)) && ((task?.caseRole === 'Reviewer' && action.status === 'Awaiting Review') || (task?.caseRole === 'Signer/Approver' && action.status === 'Awaiting Approval'));
       return <article className="it-action" key={action.key}>
-        <div className="it-action-title"><span className="it-action-number">{index + 1}</span><h3>{action.title}</h3><div className="it-row-actions">
+        <div className="it-action-title"><span className="it-action-number">{index + 1}</span><h3>{action.title}</h3>{action.additional && <span className="it-badge" data-tone="blue">Additional Key Action</span>}<div className="it-row-actions">
           {canReturn && <button className="it-button it-button-small" disabled={busy} onClick={() => { setReturnStepKey(action.key); setReturnReason(''); }}>Return for corrections</button>}
           {contributorCanAct && <button className="it-button it-primary it-button-small" disabled={busy} onClick={() => { if (canStart) void startDelegatedWork(); else setExpandedAction(open ? null : action.key); }}>{canStart ? 'Start Work' : action.completed ? 'View Work' : 'Continue Work'}</button>}
           <button className="it-icon-button" aria-label={(open ? 'Collapse ' : 'Expand ') + action.title} aria-expanded={open} aria-controls={'it-action-' + index} onClick={() => setExpandedAction(open ? null : action.key)}><ChevronDown className={open ? 'it-rotate' : ''} /></button>

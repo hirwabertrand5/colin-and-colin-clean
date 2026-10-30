@@ -271,10 +271,12 @@ const buildCollectedKeyActionRows = ({
       const templateStep = Array.isArray(template?.steps)
         ? template.steps.find((step: any) => String(step?.key || '') === action.key)
         : null;
+      const instanceStep = effectiveSteps.find((step: any) => String(step?.stepKey || '') === action.key);
+      const stageKey = String(instanceStep?.stageKey || templateStep?.stageKey || '');
       const workflowStage = Array.isArray(template?.stages)
-        ? template.stages.find((stage: any) => String(stage?.key || '') === String(templateStep?.stageKey || ''))
+        ? template.stages.find((stage: any) => String(stage?.key || '') === stageKey)
         : null;
-      return { action, completedAt, templateStep, workflowStage, value: actionValueByKey.get(action.key) || 0 };
+      return { action, completedAt, templateStep, instanceStep, workflowStage, value: actionValueByKey.get(action.key) || 0 };
     }).filter((item: any) => inSelectedWindow(item.completedAt));
 
     for (const member of team) {
@@ -333,8 +335,8 @@ const buildCollectedKeyActionRows = ({
           keyActionsTotal: 1,
           taskProgressPercent: item.action.percentage,
           keyActionPercent: item.action.percentage,
-          workflowStage: String(item.workflowStage?.title || item.templateStep?.stageKey || 'Workflow stage not linked'),
-          workflowStagePercent: Number(item.workflowStage?.percentage) || null,
+          workflowStage: String(item.instanceStep?.stageTitle || item.workflowStage?.title || item.instanceStep?.stageKey || item.templateStep?.stageKey || 'Workflow stage not linked'),
+          workflowStagePercent: Number(item.instanceStep?.stagePercentage ?? item.workflowStage?.percentage) || null,
           timelinessStatus,
           collectedAmount: earnings.collectedAmount,
           eligibleCollectedValue: earnings.eligibleCollectedValue,
