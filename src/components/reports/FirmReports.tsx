@@ -33,6 +33,32 @@ const REPORT_TABS: readonly {
 
 const ALL_REPORT_TABS: readonly FirmReportTab[] = REPORT_TABS.map((t) => t.id);
 
+const RANGE_LABELS: Record<FirmReportRange, string> = {
+  daily: 'Today',
+  weekly: 'Last 7 Days',
+  monthly: 'This Month',
+  quarterly: 'Last Quarter',
+  yearly: 'Last Year',
+  ytd: 'Year to Date',
+  custom: 'Custom Range',
+};
+const DATE_BASIS_LABELS: Record<FirmReportDateBasis, string> = {
+  invoiceDate: 'Invoice Date',
+  paymentDate: 'Payment Date',
+  taskDate: 'Task Completion Date',
+};
+const PRODUCTIVITY_SORT_LABELS: Record<string, string> = {
+  datetime: 'Date / Time',
+  staff: 'Staff',
+  matter: 'Matter',
+  task: 'Key Action',
+  taskFeeCollected: 'Collected Key Action Base',
+  tpa: 'TPA',
+  timeliness: 'Timeliness Score',
+  quality: 'Quality Score',
+  feeEarned: 'Fee Earned',
+};
+
 interface FirmReportsProps {
   userRole: UserRole;
   /** Page title shown in the browser tab (defaults to 'Firm Reports'). */
@@ -116,6 +142,17 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
   const [data, setData] = useState<FirmReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [loadedReportKey, setLoadedReportKey] = useState<string | null>(null);
+  const reportFilterKey = JSON.stringify([
+    dateRange,
+    dateBasis,
+    selectedMemberId || '',
+    dateRange === 'custom' ? customFrom : '',
+    dateRange === 'custom' ? customTo : '',
+  ]);
+  // Keep newly selected filters from being attached to the previous response.
+  const canExportReport = !!data && !loading && loadedReportKey === reportFilterKey
+    && (!selectedMemberId || !!data.selectedMember);
 
   const reportTypes = REPORT_TABS.filter((type) => allowedTabs.includes(type.id));
 
@@ -144,6 +181,8 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
 
     if (dateRange === 'custom' && (!customFrom || !customTo)) {
       setData(null);
+      setLoadedReportKey(null);
+      setLoading(false);
       return;
     }
 
@@ -161,6 +200,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
         });
         if (!mounted) return;
         setData(resp);
+        setLoadedReportKey(reportFilterKey);
       } catch (e: any) {
         if (!mounted) return;
         setError(e?.message || 'Failed to load firm reports.');
@@ -174,7 +214,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
     return () => {
       mounted = false;
     };
-  }, [userRole, dateRange, dateBasis, selectedMemberId, customFrom, customTo, refreshToken]);
+  }, [userRole, dateRange, dateBasis, selectedMemberId, customFrom, customTo, refreshToken, reportFilterKey]);
 
   // New period/report/member/data → back to page 1 of the metrics table.
   useEffect(() => {
@@ -493,7 +533,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
   );
 
   const exportWorkbook = async () => {
-    if (!data) return;
+    if (!data || !canExportReport) return;
 
     const orderedTeamRows = (data.team || [])
       .slice()
@@ -509,9 +549,8 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
         return (b.activeCases || 0) - (a.activeCases || 0);
       });
 
-    const productivityRows = [...(data.productivityRows || [])].sort((a, b) =>
-      String(b.completedAt || '').localeCompare(String(a.completedAt || ''))
-    );
+    // Export every matching row in the same order as the table, across pages.
+    const productivityRows = sortedProductivityRows;
     const productivitySummary = data.productivitySummary;
     const productivitySummaryRows = withRowNumbers([
       ['Tasks Completed (Whole Cases)', String(productivitySummary?.completedTasks ?? 0)],
@@ -614,6 +653,42 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
           return {
             title: 'Productivity Report',
             sections: [
+              {
+                title: 'Report Details and Filters',
+                headers: ['#', 'Report Detail', 'Value'],
+                rows: withRowNumbers([
+                  ['Firm', 'Colin & Colin'],
+                  ['Report', 'Productivity Report'],
+                  ['Selected Period', RANGE_LABELS[dateRange]],
+                  ['Period From', data.range.from],
+                  ['Period To', data.range.to],
+                  ['Selected Staff Member', data.selectedMember?.name || 'All team members'],
+                  ['Staff Role', data.selectedMember?.role?.replace(/_/g, ' ') || 'All roles'],
+                  ['Selected Date Basis', DATE_BASIS_LABELS[data.dateBasis]],
+                  ['Productivity Date Basis', 'Key Action Completion Date'],
+                  ['Collected Fee Basis', 'Historical paid collections (all time)'],
+                  ['Currency', 'RWF'],
+                  ['Rows Exported', productivityRows.length],
+                  ['Export Scope', 'All matching rows across all pages'],
+                  ['Sort Order', productivitySortKey
+                    ? `${PRODUCTIVITY_SORT_LABELS[productivitySortKey]} (${productivitySortDir === 'asc' ? 'ascending' : 'descending'})`
+                    : 'Default report order'],
+                  ['Exported At', new Date().toLocaleString('en-GB', {
+                    timeZone: 'Africa/Kigali',
+                    year: 'numeric', month: 'short', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+                  })],
+                  ['Export Time Zone', 'Africa/Kigali (UTC+02:00)'],
+                  ['Exported By', (() => {
+                    try {
+                      const user = JSON.parse(localStorage.getItem('user') || 'null');
+                      return typeof user?.name === 'string' && user.name.trim() ? user.name.trim() : 'Unavailable';
+                    } catch {
+                      return 'Unavailable';
+                    }
+                  })()],
+                ]),
+              },
               {
                 title: 'Productivity Summary',
                 headers: ['#', 'Metric', 'Value'],
@@ -803,7 +878,12 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
       }
     })();
 
-    const filename = `${exportConfig.title.toLowerCase().replace(/\s+/g, '-')}_${data.range.from}_to_${data.range.to}`;
+    const staffSuffix = selectedReport === 'productivity'
+      ? `_${data.selectedMember
+        ? data.selectedMember.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'selected-staff'
+        : 'all-team-members'}`
+      : '';
+    const filename = `${exportConfig.title.toLowerCase().replace(/\s+/g, '-')}_${data.range.from}_to_${data.range.to}${staffSuffix}`;
     await downloadWorkbook(filename, [exportConfig]);
   };
 
@@ -838,13 +918,9 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
               onChange={(e) => setDateRange(e.target.value as FirmReportRange)}
               className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
-              <option value="daily">Today</option>
-              <option value="weekly">Last 7 Days</option>
-              <option value="monthly">This Month</option>
-              <option value="quarterly">Last Quarter</option>
-              <option value="yearly">Last Year</option>
-              <option value="ytd">Year to Date</option>
-              <option value="custom">Custom Range</option>
+              {Object.entries(RANGE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </select>
 
             <select
@@ -852,9 +928,9 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
               onChange={(e) => setDateBasis(e.target.value as FirmReportDateBasis)}
               className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
-              <option value="invoiceDate">Invoice Date</option>
-              <option value="paymentDate">Payment Date</option>
-              <option value="taskDate">Task Completion Date</option>
+              {Object.entries(DATE_BASIS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </select>
 
             <select
@@ -872,7 +948,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
 
             <button
               onClick={() => void exportWorkbook()}
-              disabled={!data || loading}
+              disabled={!canExportReport}
               className="inline-flex items-center px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-60"
             >
               <Download className="w-4 h-4 mr-2" />
