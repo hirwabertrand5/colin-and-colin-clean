@@ -47,18 +47,6 @@ const DATE_BASIS_LABELS: Record<FirmReportDateBasis, string> = {
   paymentDate: 'Payment Date',
   taskDate: 'Task Completion Date',
 };
-const PRODUCTIVITY_SORT_LABELS: Record<string, string> = {
-  datetime: 'Date / Time',
-  staff: 'Staff',
-  matter: 'Matter',
-  task: 'Key Action',
-  taskFeeCollected: 'Collected Key Action Base',
-  tpa: 'TPA',
-  timeliness: 'Timeliness Score',
-  quality: 'Quality Score',
-  feeEarned: 'Fee Earned',
-};
-
 interface FirmReportsProps {
   userRole: UserRole;
   /** Page title shown in the browser tab (defaults to 'Firm Reports'). */
@@ -654,39 +642,11 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
             title: 'Productivity Report',
             sections: [
               {
-                title: 'Report Details and Filters',
-                headers: ['#', 'Report Detail', 'Value'],
+                title: 'Selected Filters',
+                headers: ['#', 'Filter', 'Value'],
                 rows: withRowNumbers([
-                  ['Firm', 'Colin & Colin'],
-                  ['Report', 'Productivity Report'],
-                  ['Selected Period', RANGE_LABELS[dateRange]],
-                  ['Period From', data.range.from],
-                  ['Period To', data.range.to],
                   ['Selected Staff Member', data.selectedMember?.name || 'All team members'],
-                  ['Staff Role', data.selectedMember?.role?.replace(/_/g, ' ') || 'All roles'],
-                  ['Selected Date Basis', DATE_BASIS_LABELS[data.dateBasis]],
-                  ['Productivity Date Basis', 'Key Action Completion Date'],
-                  ['Collected Fee Basis', 'Historical paid collections (all time)'],
-                  ['Currency', 'RWF'],
-                  ['Rows Exported', productivityRows.length],
-                  ['Export Scope', 'All matching rows across all pages'],
-                  ['Sort Order', productivitySortKey
-                    ? `${PRODUCTIVITY_SORT_LABELS[productivitySortKey]} (${productivitySortDir === 'asc' ? 'ascending' : 'descending'})`
-                    : 'Default report order'],
-                  ['Exported At', new Date().toLocaleString('en-GB', {
-                    timeZone: 'Africa/Kigali',
-                    year: 'numeric', month: 'short', day: '2-digit',
-                    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-                  })],
-                  ['Export Time Zone', 'Africa/Kigali (UTC+02:00)'],
-                  ['Exported By', (() => {
-                    try {
-                      const user = JSON.parse(localStorage.getItem('user') || 'null');
-                      return typeof user?.name === 'string' && user.name.trim() ? user.name.trim() : 'Unavailable';
-                    } catch {
-                      return 'Unavailable';
-                    }
-                  })()],
+                  ['Selected Period', `${RANGE_LABELS[dateRange]} (${data.range.from} to ${data.range.to})`],
                 ]),
               },
               {
