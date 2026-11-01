@@ -9,29 +9,15 @@
 .intake-public .intake-brand { max-width: none; padding: 0 32px; margin: 0; border: 0; background: #111c31; min-height: 108px; }
 .intake-brand-inner { width: 100%; max-width: 1056px; margin: auto; display: flex; align-items: center; gap: 28px; }
 .intake-public .intake-brand img { width: 222px; height: auto; max-height: 62px; object-fit: contain; background: transparent; }
-.intake-brand-divider { height: 36px; width: 1px; background: #ffffff28; }
-.intake-brand-caption { font-size: 11px; color: #a7b0c0; line-height: 1.9; letter-spacing: .02em; }
-.intake-brand-caption strong { font-size: 11px; color: #e2d0aa; font-weight: 450; }
-.intake-brand-secure { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; color: #d5dbe5; border: 1px solid #ffffff20; border-radius: 50px; padding: 9px 14px; font-size: 11px; }
-.intake-brand-secure svg { color: #d1b375; }
 .intake-public .intake-public-main { max-width: 1120px; padding: 53px 32px 0; }
-.intake-public .intake-intro { max-width: none; display: grid; grid-template-columns: minmax(0, 1fr) 292px; align-items: center; gap: 58px; margin: 0 0 39px; }
+.intake-public .intake-intro { max-width: none; display: grid; grid-template-columns: 1fr; gap: 0; margin: 0 0 39px; }
 .intake-public .intake-eyebrow { color: #967339; font-size: 10px; font-weight: 700; letter-spacing: .16em; line-height: 1.6; text-transform: uppercase; margin: 0 0 9px; }
-.intake-intro-copy > .intake-eyebrow { display: flex; align-items: center; gap: 10px; }
-.intake-intro-copy > .intake-eyebrow > span { width: 23px; height: 1px; background: #ba985a; }
 .intake-public h1 { color: var(--client-navy); font-family: Georgia, 'Times New Roman', serif; font-size: clamp(34px, 4vw, 49px); line-height: 1.16; letter-spacing: -.045em; font-weight: 400; margin: 12px 0 17px; }
 .intake-intro-copy h1 > span { color: #bb9655; }
 .intake-public .intake-intro-copy > p:not(.intake-eyebrow) { max-width: 580px; font-size: 14px; color: #66707e; line-height: 1.9; margin: 0; }
 .intake-intro-meta { display: flex; gap: 23px; flex-wrap: wrap; margin-top: 23px; color: #6c7480; font-size: 11px; }
 .intake-intro-meta > span { display: inline-flex; align-items: center; gap: 7px; }
 .intake-intro-meta svg { color: #927c50; }
-.intake-before { padding: 20px 21px; border: 1px solid #e5e3da; border-radius: 11px; background: #f0f0e9; }
-.intake-before > div { display: flex; align-items: center; gap: 9px; }
-.intake-before svg { flex-shrink: 0; color: #987a43; }
-.intake-public .intake-before h2 { font-size: 13px; font-weight: 650; margin: 0; }
-.intake-public .intake-before p { font-size: 12px; line-height: 1.8; color: #6e716c; margin: 10px 0 15px; }
-.intake-before > span { display: flex; align-items: center; gap: 6px; padding-top: 12px; border-top: 1px solid #dedfd4; font-size: 11px; color: #6f6e60; }
-.intake-before > small { display: block; font-size: 11px; line-height: 1.7; margin-top: 5px; color: #828173; }
 .intake-public .intake-progress { margin: 0 0 25px; }
 .intake-progress-heading { display: flex; justify-content: space-between; align-items: center; font-size: 10px; text-transform: uppercase; letter-spacing: .11em; font-weight: 650; color: #79808b; margin-bottom: 13px; }
 .intake-progress-heading > span:last-child { color: #364156; }
@@ -184,13 +170,8 @@
 .intake-notice > small { font-size: 10px; color: #7c7056; }
 .intake-public .intake-acknowledgment { padding: 17px; border: 1px solid #e5e8e7; background: #fafbf9; border-radius: 8px; margin: 15px 0 0; font-size: 12px; }
 .intake-public .intake-error { font-size: 12px; padding: 13px 16px; border-radius: 7px; margin-top: 20px; }
-.intake-help { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 22px 0 30px; color: #a1a7ad; }
-.intake-public .intake-help p { font-size: 11px; margin: 0; color: #717c88; }
-.intake-help a { display: inline-flex; align-items: center; gap: 3px; color: #957a47; margin-left: 5px; }
-.intake-help > span { font-size: 11px; color: #747e8c; border-left: 1px solid #dbdee1; padding-left: 13px; margin-left: 8px; }
 .intake-public .intake-public-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 28px 0; border-top: 1px solid #e0e3e4; color: #6d7785; }
 .intake-public-footer strong { display: block; font-size: 11px; font-weight: 600; color: #768090; }
-.intake-public-footer > div:first-child > span { display: block; font-size: 10px; color: #aa9a79; margin-top: 5px; }
 .intake-firm-contact { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 18px; font-size: 10px; }
 .intake-firm-contact a, .intake-firm-contact span { display: inline-flex; align-items: center; gap: 6px; }
 .intake-firm-contact a:hover { color: #967339; }
@@ -219,7 +200,7 @@
 .intake-skip-link:focus { top: 16px; }
 @media (max-width: 1000px) {
   .intake-public .intake-progress button { flex-direction: column; justify-content: center; text-align: center; gap: 7px; min-height: 83px; }
-  .intake-public .intake-intro { gap: 30px; grid-template-columns: minmax(0, 1fr) 255px; }
+  .intake-public .intake-intro { gap: 0; }
   .intake-public .intake-card { padding-left: 30px; padding-right: 30px; }
   .intake-firm-contact { gap: 12px; }
 }
@@ -227,20 +208,12 @@
   .intake-public .intake-brand { min-height: 84px; padding: 18px 20px; }
   .intake-brand-inner { gap: 0; }
   .intake-public .intake-brand img { width: 170px; max-height: 48px; }
-  .intake-brand-caption, .intake-brand-divider { display: none; }
-  .intake-brand-secure { font-size: 9px; padding: 8px 10px; gap: 6px; }
-  .intake-brand-secure svg { width: 11px; }
   .intake-public .intake-public-main { padding: 29px 17px 0; }
   .intake-public .intake-intro { grid-template-columns: 1fr; gap: 23px; margin-bottom: 25px; }
   .intake-public h1 { font-size: 35px; margin-bottom: 13px; }
   .intake-public .intake-intro-copy > p:not(.intake-eyebrow) { font-size: 13px; line-height: 1.9; }
   .intake-public .intake-eyebrow { font-size: 9px; }
   .intake-intro-meta { font-size: 10px; gap: 17px; margin-top: 17px; }
-  .intake-before { padding: 14px 16px; }
-  .intake-public .intake-before h2 { font-size: 12px; }
-  .intake-public .intake-before p { font-size: 11px; margin: 8px 0; line-height: 1.8; }
-  .intake-before > span { display: inline-flex; padding: 0; border: 0; font-size: 10px; }
-  .intake-before > small { display: inline; margin: 0 0 0 7px; font-size: 10px; }
   .intake-public .intake-progress { margin-bottom: 17px; }
   .intake-progress-heading { font-size: 9px; margin-bottom: 10px; }
   .intake-public .intake-progress ol { gap: 4px; }
@@ -295,8 +268,6 @@
   .intake-public .intake-notice { padding: 17px; }
   .intake-privacy-meta { grid-template-columns: 1fr; gap: 0; }
   .intake-public .intake-acknowledgment { padding: 13px; font-size: 11px; }
-  .intake-help { padding: 20px 0 25px; }
-  .intake-help > span { display: none; }
   .intake-public .intake-public-footer { align-items: flex-start; padding: 23px 0; gap: 17px; flex-direction: column; }
   .intake-firm-contact { justify-content: flex-start; gap: 9px 14px; }
   .intake-public .intake-message { padding: 36px 22px; margin: 10px auto 40px; }
