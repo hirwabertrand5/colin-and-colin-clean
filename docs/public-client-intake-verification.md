@@ -45,6 +45,10 @@ This change adds no database models, migrations or API endpoints. It reuses the 
 
 ## PDF comparison
 
+The public form now uses a navy, gold and ivory presentation with the transparent white-lettered logo. `src/assets/logo-colin-dark-mode.png` is byte-identical to the supplied `build/assets/logo-colin-dark-mode-CNpmP22t.png`; importing the source asset preserves it across builds. The six-step navigation, grouped identity/contact/address fields, numbered questionnaire accordions, document drop zone, section edit controls, notice and receipt all remain part of the existing native form. Styles are scoped to `.intake-public`, so staff intake screens retain their existing theme.
+
+The browser checks cover 320px, 390px, tablet and desktop widths, verify the logo's transparent background, and fill every questionnaire field through the real API. All six PDF pages were re-read for the restyle. The existing approved notice, staff-only official-use fields and prospect acceptance workflow are retained.
+
 The supplied six-page PDF was read directly from the user-provided file. Its sample identity, contact details, company name, engagement narrative, dates and signature were not copied into code or seed data. The PDF's information structure is represented as blank reusable fields:
 
 | PDF section | Existing native form coverage |

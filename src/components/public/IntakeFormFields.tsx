@@ -1,15 +1,16 @@
 import { IntakeQuestion } from '../../services/digitalIntakeService';
 
-export function IntakeField({ question, value, onChange, prefix = 'intake', required, disabled }: {
-  question: IntakeQuestion; value: unknown; onChange: (value: string | number) => void; prefix?: string; required?: boolean; disabled?: boolean;
+export function IntakeField({ question, value, onChange, prefix = 'intake', required, disabled, hint, showOptional = false }: {
+  question: IntakeQuestion; value: unknown; onChange: (value: string | number) => void; prefix?: string; required?: boolean; disabled?: boolean; hint?: string; showOptional?: boolean;
 }) {
   const id = `${prefix}-${question.key}`;
   const className = 'intake-input';
-  const props = { id, className, value: value == null ? '' : String(value), required: required ?? question.required, disabled,
+  const props = { id, className, value: value == null ? '' : String(value), required: required ?? question.required, disabled, 'aria-describedby': hint ? `${id}-hint` : undefined,
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(question.type === 'number' && e.target.value !== '' ? Number(e.target.value) : e.target.value) };
   return <div className={question.type === 'textarea' ? 'intake-field intake-field-wide' : 'intake-field'}>
-    <label htmlFor={id}>{question.label}{props.required ? <span aria-label="required"> *</span> : null}</label>
+    <label htmlFor={id}>{question.label}{props.required ? <span aria-label="required"> *</span> : showOptional ? <span className="intake-field-optional">Optional</span> : null}</label>
     {question.type === 'textarea' ? <textarea {...props} rows={4} maxLength={15000} /> : <input {...props} type={question.type || 'text'} min={question.type === 'number' ? 0 : undefined} max={question.max} step={question.type === 'number' ? 'any' : undefined} maxLength={question.type === 'email' ? 254 : question.type === 'tel' ? 40 : 500} />}
+    {hint && <small className="intake-field-hint" id={`${id}-hint`}>{hint}</small>}
   </div>;
 }
 

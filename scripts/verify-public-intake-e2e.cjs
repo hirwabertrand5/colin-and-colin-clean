@@ -79,6 +79,18 @@ async function main() {
     assert.equal(await page.getByRole('button', { name: /log in|sign in/i }).count(), 0);
     const layout = async name => { assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Overflow: ${name}`); };
     const shot = name => page.screenshot({ path: path.join(directory, name + '.png'), fullPage: true });
+    for (const width of [320, 390, 768, 1024, 1440]) {
+      await page.setViewportSize({ width, height: width < 700 ? 844 : 1000 }); await layout('identification at ' + width);
+    }
+    await shot('public-desktop-identification');
+    await page.screenshot({ path: path.join(directory, 'public-desktop-first-screen.png') });
+    const logoAlpha = await page.locator('.intake-brand img').evaluate(async image => {
+      await image.decode(); const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); return context.getImageData(0, 0, 1, 1).data[3];
+    });
+    assert.equal(logoAlpha, 0, 'The supplied header logo must have a transparent background.');
+    assert.equal(await page.locator('.intake-client-form > .intake-field-section').count(), 3);
+    await page.setViewportSize({ width: 390, height: 844 });
     await layout('client identification'); await shot('public-mobile-identification');
     assert.equal(await page.locator('#intake-identification').count(), 1);
     await page.getByRole('radio', { name: 'Company / Organization', exact: true }).check();
@@ -97,6 +109,10 @@ async function main() {
     for (const [key, value] of Object.entries(matter)) await page.locator('#intake-' + key).fill(value);
     await next('Supporting information');
     await page.getByLabel('My enquiry includes preparing Articles of Association').check();
+    await page.locator('.intake-question-group').evaluateAll(items => items.forEach((item, index) => item.open = index === 0));
+    await shot('public-mobile-questionnaire');
+    await page.setViewportSize({ width: 1440, height: 1000 }); await shot('public-desktop-questionnaire');
+    await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('.intake-question-group').count(), 10);
     await page.locator('.intake-question-group').evaluateAll(items => items.forEach(item => item.open = true));
     await page.getByLabel('We intend to appoint a Company Secretary').check();

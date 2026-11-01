@@ -88,6 +88,12 @@ async function main() {
     }
     console.log('PASS: HTML fallback, malformed public configuration and network failures show branded recovery screens');
     await goto('/intake/form/' + 'S'.repeat(43)); await step('Your details');
+    for (const [width, height, name] of [[1440, 1000, 'redesign-desktop'], [390, 844, 'redesign-mobile']]) {
+      await cdp('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 700 });
+      await delay(150); assert(await evaluate('document.documentElement.scrollWidth <= innerWidth + 1'));
+      fs.writeFileSync(path.join(directory, name + '.png'), Buffer.from((await cdp('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+    }
+    await cdp('Emulation.clearDeviceMetricsOverride');
     assert(await evaluate("!!document.getElementById('intake-identification') && !document.getElementById('intake-tin')"));
     await click('Next'); assert(await evaluate("document.querySelector('.intake-card h2').textContent === 'Your details'"));
     await evaluate("Array.from(document.querySelectorAll('input[type=radio]'))[1].click()");
