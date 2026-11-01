@@ -403,9 +403,6 @@ export default function IntakeProspects() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Intake & Prospects</h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">
-              Manage incoming prospects with a simplified workflow. Capture only essential intake details and convert clients to Active Matters at the right stage.
-            </p>
           </div>
           <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => { setIntakeTab('links'); setGenerateRequested(value => value + 1); }} className="inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700">

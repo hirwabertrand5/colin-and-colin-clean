@@ -18,11 +18,10 @@ type Props = {
   configurationLoading: boolean; configurationError: string;
   staff: User[]; staffLoading: boolean; staffError: string;
   invitation: IntakeInvitation; generated: any; busy: boolean; error: string;
-  hidden?: boolean;
   onChange: (patch: Partial<IntakeInvitation>) => void;
   onGenerate: () => void; onClose: () => void; onCopy: () => Promise<boolean>;
   onSend: () => void; onCreateAnother: () => void;
-  onReviewNotice: () => void; onReloadConfiguration: () => void; onReloadStaff: () => void;
+  onReloadConfiguration: () => void; onReloadStaff: () => void;
 };
 const STAFF_FIELDS = [
   ['responsiblePartner', 'Responsible partner'],
@@ -45,11 +44,9 @@ export default function GenerateIntakeLinkDialog(props: Props) {
   const emailConfigured = configuration?.delivery?.email.configured !== false;
   const emailSent = generated?.link.emailStatus === 'Sent';
   const publicAddressError = configuration?.delivery?.publicUrl.configured === false ? configuration.delivery.publicUrl.message : '';
-  const noticeReady = configuration?.settings.noticeApproved === true;
-  const ready = !!configuration && noticeReady && !configurationLoading && !configurationError && !publicAddressError;
+  const ready = !!configuration && !configurationLoading && !configurationError && !publicAddressError;
   const expiry = Number(invitation.expiryDays);
   const expiryValid = Number.isInteger(expiry) && expiry >= 1 && expiry <= 30;
-  const expiresOn = expiryValid ? new Date(Date.now() + expiry * 86400000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'Choose a valid duration';
   const update = (patch: Partial<IntakeInvitation>) => {
     props.onChange(patch);
     setFieldErrors(current => Object.fromEntries(Object.entries(current).filter(([key]) => !(key in patch))));
@@ -75,7 +72,7 @@ export default function GenerateIntakeLinkDialog(props: Props) {
     groupedServices.set(group, [...(groupedServices.get(group) || []), item]);
   }
 
-  return <div className="intake-modal-backdrop intake-invite-backdrop" style={props.hidden ? { display: 'none' } : undefined}>
+  return <div className="intake-modal-backdrop intake-invite-backdrop">
     <section className={`intake-modal intake-invite-dialog${generated ? ' intake-invite-created' : ''}`} role="dialog" aria-modal="true" aria-labelledby="intake-generate-title" aria-describedby="intake-generate-description">
       <header className="intake-invite-heading">
         <div className="intake-invite-title"><span className={`intake-invite-heading-icon${generated ? ' is-success' : ''}`}>{generated ? <CheckCircle2 size={23} /> : <Link2 size={23} />}</span><div><p className="intake-eyebrow">Client intake</p><h2 id="intake-generate-title">{generated ? 'Your invitation is ready' : 'Generate intake link'}</h2><p id="intake-generate-description">{generated ? 'Copy the secure link or email it directly to your client.' : 'Create a private invitation for your client’s first enquiry.'}</p></div></div>
@@ -101,7 +98,6 @@ export default function GenerateIntakeLinkDialog(props: Props) {
             {configurationLoading && <div className="intake-invite-status" role="status"><Loader2 size={18} className="animate-spin" /><span>Loading invitation settings. You can start filling in the client details.</span></div>}
             {publicAddressError && <div className="intake-error intake-invite-blocker" role="alert"><AlertCircle size={19} /><div><strong>The public intake address needs attention</strong><p>{publicAddressError}</p><button type="button" className="intake-text-button" onClick={props.onReloadConfiguration}><RefreshCw size={14} /> Recheck address</button></div></div>}
             {configurationError && <div className="intake-error intake-invite-blocker" role="alert"><AlertCircle size={19} /><div><strong>Invitation settings could not load</strong><p>{configurationError}</p><button type="button" className="intake-text-button" onClick={props.onReloadConfiguration}><RefreshCw size={14} /> Retry settings</button></div></div>}
-            {configuration && !noticeReady && <div className="intake-warning intake-invite-blocker" role="status"><ShieldCheck size={21} /><div><strong>Privacy approval is needed before generating a link</strong><p>{configuration.canManage ? 'Review the firm’s privacy notice, contact and retention statement. Your invitation details will stay here while you complete setup.' : 'Ask a managing partner or authorized manager to approve the intake privacy notice. Your invitation details can stay here while setup is completed.'}</p><button type="button" className="intake-button secondary" onClick={configuration.canManage ? props.onReviewNotice : props.onReloadConfiguration}>{configuration.canManage ? <ShieldCheck size={15} /> : <RefreshCw size={15} />}{configuration.canManage ? 'Review privacy notice' : 'Check approval status'}</button></div></div>}
 
             <section className="intake-invite-section" aria-labelledby="invite-client-heading">
               <div className="intake-invite-section-heading"><span><UserRound size={18} /></span><div><h3 id="invite-client-heading">Client & enquiry</h3><p>Personalize the invitation, or let the client provide these details.</p></div><small>Optional</small></div>
@@ -127,15 +123,10 @@ export default function GenerateIntakeLinkDialog(props: Props) {
             </section>
           </div>
 
-          <aside className="intake-invite-summary" aria-label="Invitation summary">
-            <span className="intake-invite-summary-icon"><Mail size={24} /></span><p className="intake-eyebrow">Invitation summary</p><h3>{invitation.clientName.trim() || 'Your next client starts here'}</h3><p>A simple, secure first step. Your client can complete the form from any device.</p>
-            <dl><div><dt>Legal service</dt><dd>{service?.path.slice(-1)[0]?.label || 'Client chooses'}</dd></div><div><dt>Available until</dt><dd>{expiresOn}{expiryValid && <small>{expiry} {expiry === 1 ? 'day' : 'days'} from generation</small>}</dd></div><div><dt>Share by</dt><dd>{invitation.clientEmail.trim() ? <><Mail size={14} /> Email or copied link</> : <><Copy size={14} /> Copied link</>}</dd></div><div><dt>Internal team</dt><dd>{STAFF_FIELDS.filter(([key]) => invitation[key]).length ? `${STAFF_FIELDS.filter(([key]) => invitation[key]).length} team assignments` : 'Confirm during review'}</dd></div></dl>
-            <div className="intake-invite-summary-note"><LockKeyhole size={17} /><span>Private invitation<br /><small>No client account required</small></span></div>
-          </aside>
         </div>
 
         <footer className="intake-invite-footer">
-          <div className="intake-invite-footer-status">{configurationLoading ? <><Loader2 size={16} className="animate-spin" /><span>Loading settings…</span></> : ready ? <><ShieldCheck size={16} /><span>Ready to generate and share</span></> : <><AlertCircle size={16} /><span>{configurationError ? 'Reload settings to continue' : publicAddressError ? 'Public intake address needs attention' : 'Privacy approval required'}</span></>}</div>
+          <div className="intake-invite-footer-status">{configurationLoading ? <><Loader2 size={16} className="animate-spin" /><span>Loading settings…</span></> : ready ? <><ShieldCheck size={16} /><span>Ready to generate and share</span></> : <><AlertCircle size={16} /><span>{configurationError ? 'Reload settings to continue' : publicAddressError ? 'Public intake address needs attention' : 'Reload settings to continue'}</span></>}</div>
           {error && <div ref={errorRef} tabIndex={-1} role="alert" className="intake-error intake-invite-submit-error"><AlertCircle size={17} /><span>{error}</span></div>}
           <div className="intake-invite-footer-actions"><button type="button" className="intake-button secondary" onClick={props.onClose} disabled={busy}>Cancel</button><button type="submit" className="intake-button" disabled={busy || !ready} aria-busy={busy}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}{busy ? 'Generating…' : 'Generate secure link'}{!busy && <ArrowRight size={15} />}</button></div>
         </footer>

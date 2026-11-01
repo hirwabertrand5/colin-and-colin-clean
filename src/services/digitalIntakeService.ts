@@ -1,6 +1,6 @@
 import { API_URL } from './apiConfig';
 const API = `${API_URL}/digital-intake`;
-export { CLIENT_FIELDS, PARTY_EXTRA_FIELDS, MATTER_FIELDS, ARTICLES_GROUPS, SHAREHOLDER_FIELDS, OFFICIAL_USE_FIELDS } from '../../colin-backend/src/config/digitalIntakeSchema';
+export { CLIENT_FIELDS, PARTY_EXTRA_FIELDS, MATTER_FIELDS, ARTICLES_GROUPS, SHAREHOLDER_FIELDS, OFFICIAL_USE_FIELDS, INTAKE_CONFIRMATION } from '../../colin-backend/src/config/digitalIntakeSchema';
 export type { IntakeQuestion } from '../../colin-backend/src/config/digitalIntakeSchema';
 export const intakeRequest = async (path: string, method = 'GET', body?: unknown, token?: string): Promise<any> => {
   const controller = new AbortController();

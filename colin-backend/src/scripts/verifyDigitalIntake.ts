@@ -16,7 +16,7 @@ import Document from '../models/documentModel';
 import Notification from '../models/notificationModel';
 import AuditLog from '../models/auditLogModel';
 import { ClientIntakeLink as Link, ClientIntakeSubmission as Submission, ClientIntakeAttachment as Attachment, ClientIntakeRate as Rate } from '../models/digitalIntakeModel';
-import { INTAKE_SERVICES, ARTICLES_GROUPS } from '../config/digitalIntakeSchema';
+import { INTAKE_SERVICES, ARTICLES_GROUPS, INTAKE_CONFIRMATION } from '../config/digitalIntakeSchema';
 import { getStageConfig, stageChecklistKey } from '../utils/prospectStageConfig';
 import { publicClientOrigin } from '../services/digitalIntakeService';
 import { classifyEmailFailure, getEmailConfiguration } from '../services/emailResendService';
@@ -131,6 +131,9 @@ async function main() {
     assert.equal((await pub('/form', 'invalid')).status, 404);
     pass('Expired/revoked links blocked and regenerated tokens invalidate old URLs');
     assert.equal((await pub('/submit', first.token, form({ acknowledged: false }))).status, 400);
+    const noConfirmation = await pub('/submit', first.token, form({ confirmationVersion: INTAKE_CONFIRMATION.version, acknowledged: false }));
+    assert.equal(noConfirmation.status, 400); assert.match(noConfirmation.data.message, /Confirm your details/);
+    assert.equal((await pub('/submit', first.token, form({ confirmationVersion: 'unknown-confirmation' }))).status, 400);
     assert.equal((await pub('/submit', first.token, form({ client: { type: 'Company', name: 'Incomplete' } }))).status, 400);
     assert.equal((await pub('/submit', first.token, form({ documentIds: [new mongoose.Types.ObjectId().toString()] }))).status, 400);
     assert.equal((await pub('/submit', first.token, form({ questionnaireId: 'not-a-questionnaire' }))).status, 400);
@@ -179,8 +182,12 @@ async function main() {
     const answers: Record<string, any> = Object.fromEntries(ARTICLES_GROUPS.flatMap(g => g.questions).map(q => [q.key, q.type === 'number' ? 2 : `Synthetic ${q.key}`])); answers.appointSecretary = true;
     const company = form({ client: { type: 'Company', name: 'Synthetic Company', tin: 'TEST-TIN-002', representativeName: 'Synthetic Representative', representativeIdentification: 'TEST-REP-ID', email: 'client@test.invalid', phone: '+250700000002', country: 'Rwanda' }, questionnaireId: 'articles-of-association-v1', answers, shareholders: [{ name: 'Synthetic Shareholder', identification: 'TEST-SH-ID', shares: 20, percentage: 40, contribution: 200 }] });
     assert.equal((await pub('/submit', companyLink.token, { ...company, shareholders: [{ name: 'Invalid', percentage: 101 }] })).status, 400);
-    assert.equal((await pub('/submit', companyLink.token, company)).status, 200);
+    assert.equal((await pub('/submit', companyLink.token, { ...company, confirmationVersion: INTAKE_CONFIRMATION.version })).status, 200);
     const companySubmission: any = await Submission.findOne({ linkId: companyLink.link._id });
+    assert.equal(companySubmission.noticeAcknowledgment.kind, 'enquiry-confirmation');
+    assert.equal(companySubmission.noticeAcknowledgment.version, INTAKE_CONFIRMATION.version);
+    assert.equal(companySubmission.noticeAcknowledgment.text, INTAKE_CONFIRMATION.text);
+    assert(!companySubmission.noticeAcknowledgment.contact); assert(!companySubmission.noticeAcknowledgment.retention);
     for (const [key, value] of Object.entries(answers)) assert.equal(companySubmission.form.answers[key], value);
     assert.equal(companySubmission.form.shareholders[0].percentage, 40);
     const matches = await ok(staff(`/submissions/${companySubmission._id}`)); assert(matches.duplicates.some((m: any) => m.type === 'Prospect'));
@@ -219,6 +226,64 @@ async function main() {
     const temporaryMatter = await ok(`/api/prospects/${temporary._id}/move-to-temporary-matter`, { reason: 'Awaiting instructions' }); assert(temporaryMatter); assert.equal((await Case.findById(temporaryMatter.matterId || temporaryMatter.caseId || temporaryMatter.matter?._id || temporaryMatter._id))?.caseType, 'Litigation Cases');
     const ordinary = await storeUploadedFile({ buffer: Buffer.from('ordinary fixture'), originalname: 'ordinary.txt', mimetype: 'text/plain', size: 16 } as Express.Multer.File); assert.equal((await fetch(base + ordinary)).status, 200);
     pass('Non-conversion, temporary closure and existing ordinary document storage still work');
+    const deleteLink = await generate();
+    const deleteRoute = staff(`/links/${deleteLink.link._id}`);
+    assert.equal((await req(deleteRoute, undefined, null, 'DELETE')).status, 401);
+    assert.equal((await req(deleteRoute, undefined, other, 'DELETE')).status, 404);
+    await ok(deleteRoute, undefined, owner, 'DELETE');
+    assert.equal((await pub('/form', deleteLink.token)).status, 404);
+    assert.equal((await pub('/submit', deleteLink.token, form())).status, 404);
+    assert(!(await ok(staff('/links'))).some((row: any) => row._id === deleteLink.link._id));
+    assert.equal((await req(deleteRoute + '/regenerate', {})).status, 404);
+    assert.equal((await req(deleteRoute + '/send', { token: deleteLink.token })).status, 404);
+    const removedLink: any = await Link.findById(deleteLink.link._id);
+    assert(removedLink.deletedAt); assert.equal(String(removedLink.deletedBy), String(owner._id));
+    assert(await AuditLog.exists({ intakeLinkId: removedLink._id, action: 'INTAKE_LINK_DELETED' }));
+    // Removing a used invitation leaves its submitted source and matter documents available.
+    await ok(staff(`/links/${first.link._id}`), undefined, manager, 'DELETE');
+    assert((await ok(staff('/submissions'))).some((row: any) => row._id === String(submission._id)));
+    assert.equal((await req(staff(`/submissions/${submission._id}`), undefined, owner)).status, 200);
+    const retainedDownload = await fetch(base + staff(`/files/${file.data._id}`), { headers: { Authorization: `Bearer ${jwt.sign({ id: String(owner._id) }, process.env.JWT_SECRET!)}` } });
+    assert.equal(retainedDownload.status, 200); assert.match(await retainedDownload.text(), /^%PDF-/);
+    assert.equal((await req(staff(`/submissions/${submission._id}`), undefined, manager, 'DELETE')).status, 409);
+    assert(await Prospect.exists({ _id: prospect._id })); assert(await Attachment.exists({ _id: file.data._id }));
+    pass('Scoped invitation deletion disables URLs, records an audit and preserves accepted source records and private documents');
+
+    const removeSubmissionLink = await generate(); await pub('/submit', removeSubmissionLink.token, form());
+    const removable: any = await Submission.findOne({ linkId: removeSubmissionLink.link._id });
+    const reply = await ok(staff(`/submissions/${removable._id}/request-information`), { message: 'Synthetic clarification before deletion' });
+    const submissionRoute = staff(`/submissions/${removable._id}`);
+    assert.equal((await req(submissionRoute, undefined, other, 'DELETE')).status, 404);
+    await ok(submissionRoute, undefined, owner, 'DELETE');
+    assert.equal((await req(submissionRoute)).status, 404);
+    assert.equal((await req(submissionRoute + '/accept', { ...review, duplicatesReviewed: true })).status, 404);
+    assert.equal((await pub('/submit', removeSubmissionLink.token, form())).status, 404);
+    assert.equal((await pub('/clarification/reply', reply.url.split('/').pop(), { response: 'Too late' })).status, 410);
+    assert(!(await ok(staff('/submissions'))).some((row: any) => row._id === String(removable._id)));
+    assert(!(await ok(staff('/links'))).some((row: any) => row._id === removeSubmissionLink.link._id));
+    assert(!(await ok(staff(`/submissions/${companySubmission._id}`))).duplicates.some((row: any) => row.reference === removable.reference));
+    assert((await Submission.findById(removable._id))!.deletedAt);
+    assert(await AuditLog.exists({ intakeSubmissionId: removable._id, action: 'INTAKE_SUBMISSION_DELETED' }));
+    pass('Submission deletion removes its invitation, invalidates clarification and prevents later review, duplicates or acceptance');
+
+    const racingLink = await generate(); await pub('/submit', racingLink.token, form());
+    const racing: any = await Submission.findOne({ linkId: racingLink.link._id });
+    const [acceptRace, deleteRace] = await Promise.all([
+      req(staff(`/submissions/${racing._id}/accept`), { ...review, duplicatesReviewed: true }),
+      req(staff(`/submissions/${racing._id}`), undefined, manager, 'DELETE'),
+    ]);
+    if (acceptRace.status === 200) { assert.equal(deleteRace.status, 409); assert(!(await Submission.findById(racing._id))!.deletedAt); }
+    else { assert.equal(deleteRace.status, 200); assert([404, 409].includes(acceptRace.status)); assert(!await Prospect.exists({ intakeSubmissionId: racing._id })); }
+    pass('Concurrent acceptance and deletion cannot remove an accepted source or create a prospect from a deleted submission');
+
+    const bulkLinks = await Link.insertMany(Array.from({ length: 501 }, (_, index) => ({
+      reference: `INL-PAGING-${index}`, tokenHash: `paging-fixture-${index}`, createdBy: owner._id,
+      expiresAt: new Date(Date.now() + 86400000), notice: stored.notice,
+    })));
+    const allLinks = await ok(staff('/links'), undefined, owner);
+    assert(allLinks.length > 500); assert(allLinks.some((row: any) => row._id === String(bulkLinks[0]!._id)));
+    await Link.updateMany({ _id: { $in: bulkLinks.map(row => row._id) } }, { deletedAt: new Date(), deletedBy: owner._id });
+    pass('Intake pagination can reach all matching records beyond the former 500-link limit');
     assert(await AuditLog.exists({ intakeSubmissionId: submission._id, action: 'INTAKE_SUBMISSION_ACCEPTED' }));
     assert(!JSON.stringify(await AuditLog.find({ intakeLinkId: first.link._id }).lean()).includes(first.token));
     // Allow crossing one fixed-window boundary while exercising the real limiter.

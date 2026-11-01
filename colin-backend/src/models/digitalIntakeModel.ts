@@ -11,6 +11,7 @@ const linkSchema = new Schema({
   serviceId: String, questionnaireId: String, introduction: { type: String, maxlength: 2000 },
   expiresAt: { type: Date, required: true, index: true }, revokedAt: Date, openedAt: Date, submittedAt: Date,
   submissionId: { type: Schema.Types.ObjectId, ref: 'ClientIntakeSubmission' },
+  deletedAt: Date, deletedBy: staff,
   sentAt: Date, emailStatus: String, emailFailureCode: String, sentTokenVersion: Number, uploadCount: { type: Number, default: 0 }, uploadBytes: { type: Number, default: 0 },
   notice: { version: String, text: String, contact: String, retention: String, approvedBy: staff, approvedAt: Date },
 }, { timestamps: true, optimisticConcurrency: true });
@@ -25,8 +26,9 @@ const submissionSchema = new Schema({
   form: { type: Schema.Types.Mixed, required: true },
   status: { type: String, enum: ['Awaiting Review', 'Under Review', 'Additional Information Requested', 'Accepted', 'Rejected'], default: 'Awaiting Review', index: true },
   submittedAt: { type: Date, default: Date.now }, reviewedBy: staff, reviewedAt: Date,
-  noticeAcknowledgment: { version: String, text: String, contact: String, retention: String, at: Date },
+  noticeAcknowledgment: { kind: { type: String, enum: ['notice', 'enquiry-confirmation'] }, version: String, text: String, contact: String, retention: String, at: Date },
   prospectId: { type: Schema.Types.ObjectId, ref: 'Prospect', default: null, index: true },
+  deletedAt: Date, deletedBy: staff,
   internalNotes: { type: String, default: '', maxlength: 20000 }, missingInformation: { type: String, maxlength: 5000 },
   administration: { serviceId: String, responsiblePartner: staff, responsibleAssociate: staff, assignedTo: staff, consultationDate: String, attendingCounsel: String, previousClientStatus: String, referredBy: String, officialClientName: String, signatureRecord: String, recordDate: String },
   rejectionReason: { type: String, maxlength: 5000 },

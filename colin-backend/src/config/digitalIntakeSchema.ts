@@ -1,5 +1,10 @@
 import { LEGAL_SERVICES_TREE, ServiceNode } from './legalServicesTree';
 
+export const INTAKE_CONFIRMATION = {
+  version: 'enquiry-confirmation-v1',
+  text: 'I confirm these details are accurate and ask Colin & Colin to review my enquiry.',
+} as const;
+
 export type IntakeQuestion = { key: string; label: string; type?: 'text' | 'textarea' | 'number' | 'email' | 'tel' | 'date'; required?: boolean; max?: number };
 export type IntakeQuestionGroup = { key: string; title: string; questions: IntakeQuestion[]; condition?: string };
 const q = (key: string, label: string, type: IntakeQuestion['type'] = 'textarea'): IntakeQuestion => ({ key, label, type });

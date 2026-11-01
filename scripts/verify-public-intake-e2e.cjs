@@ -34,7 +34,7 @@ async function main() {
     const Case = require('../colin-backend/dist/models/caseModel').default;
     const Notification = require('../colin-backend/dist/models/notificationModel').default;
     const { ClientIntakeSubmission: Submission, ClientIntakeAttachment: Attachment } = require('../colin-backend/dist/models/digitalIntakeModel');
-    const { ARTICLES_GROUPS, MATTER_FIELDS, SHAREHOLDER_FIELDS } = require('../colin-backend/dist/config/digitalIntakeSchema');
+    const { ARTICLES_GROUPS, MATTER_FIELDS, SHAREHOLDER_FIELDS, INTAKE_CONFIRMATION } = require('../colin-backend/dist/config/digitalIntakeSchema');
     await Promise.all(Object.values(mongoose.models).map(model => model.init()));
     const manager = await User.create({ name: 'Synthetic Intake Manager', email: 'manager@test.invalid', role: 'managing_partner', passwordHash: 'fixture' });
     const associate = await User.create({ name: 'Synthetic Intake Associate', email: 'associate@test.invalid', role: 'associate', passwordHash: 'fixture' });
@@ -77,6 +77,8 @@ async function main() {
     await page.reload(); await page.getByRole('heading', { name: 'Your details', exact: true }).waitFor();
     assert.equal(await page.locator('.intake-public').count(), 1); assert.equal(await page.locator('.dashboard-layout, .sidebar, aside').count(), 0); assert.equal(staffChunks.length, 0);
     assert.equal(await page.getByRole('button', { name: /log in|sign in/i }).count(), 0);
+    await page.getByText('Share your details and tell us how we can help.', { exact: true }).waitFor();
+    assert.equal(await page.locator('.intake-intro-meta').count(), 0);
     const layout = async name => { assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Overflow: ${name}`); };
     const shot = name => page.screenshot({ path: path.join(directory, name + '.png'), fullPage: true });
     for (const width of [320, 390, 768, 1024, 1440]) {
@@ -131,6 +133,9 @@ async function main() {
     await page.locator('input[type=file]').setInputFiles({ name: 'synthetic-support.pdf', mimeType: 'application/pdf', buffer: pdf });
     await page.getByText('Uploaded securely', { exact: true }).waitFor();
     await next('Review & submit'); await layout('complete review'); await shot('public-mobile-review');
+    assert.equal(await page.locator('.intake-notice').count(), 0);
+    assert(!/Please read before submitting|Privacy and client notice|Privacy contact|Notice version/.test(await page.locator('.intake-client-form').innerText()));
+    await page.getByLabel(INTAKE_CONFIRMATION.text, { exact: true }).waitFor();
     await page.setViewportSize({ width: 1440, height: 1000 }); await layout('desktop review'); await shot('public-desktop-review');
     await page.locator('.intake-checkbox input').check();
     let interruptSubmit = true;
@@ -145,12 +150,17 @@ async function main() {
     await page.getByRole('button', { name: 'Submit intake form' }).click();
     const submitted = await submittedResponse; assert.equal(submitted.status(), 200);
     const receipt = await submitted.json(); await page.getByText(receipt.reference, { exact: true }).waitFor(); await shot('public-confirmation');
+    assert.equal(await page.locator('.intake-next-steps, .intake-confirmation a').count(), 0);
+    assert(!/Information received|Team review|Next steps|This confirmation is not an engagement letter/.test(await page.locator('.intake-confirmation').innerText()));
     const stored = await Submission.findOne({ linkId: invitation.link._id }); assert(stored); assert.equal(stored.status, 'Awaiting Review');
     for (const [key, value] of Object.entries(client)) assert.equal(stored.form.client[key], value);
     assert.equal(stored.form.parties.length, 2); assert.equal(stored.form.shareholders.length, 2); assert.equal(stored.form.answers.appointSecretary, true);
     for (const [key, value] of Object.entries(answers)) assert.equal(stored.form.answers[key], value);
     for (const [key, value] of Object.entries(matter)) assert.equal(stored.form.matter[key], value);
-    assert(stored.noticeAcknowledgment.at); assert.equal(await Prospect.countDocuments({}), 0); assert.equal(await Case.countDocuments({}), 0);
+    assert(stored.noticeAcknowledgment.at); assert.equal(stored.noticeAcknowledgment.kind, 'enquiry-confirmation');
+    assert.equal(stored.noticeAcknowledgment.text, INTAKE_CONFIRMATION.text); assert.equal(stored.noticeAcknowledgment.version, INTAKE_CONFIRMATION.version);
+    assert(!stored.noticeAcknowledgment.contact); assert(!stored.noticeAcknowledgment.retention);
+    assert.equal(await Prospect.countDocuments({}), 0); assert.equal(await Case.countDocuments({}), 0);
     assert.equal(await Attachment.countDocuments({ submissionId: stored._id }), 1);
     assert(await Notification.countDocuments({ dedupeKey: 'intake:' + stored._id }) >= 1);
     assert(publicRequests.every(request => !request.headers().authorization && !request.url().includes(invitation.token)));
@@ -159,6 +169,7 @@ async function main() {
     await page.goto(base + '/matters/intake-prospects'); await page.getByRole('button', { name: 'Client Submissions', exact: true }).click();
     const row = page.getByRole('row').filter({ hasText: receipt.reference }); await row.waitFor();
     await row.getByRole('button', { name: 'Review submission' }).click(); await page.getByRole('heading', { name: client.name, exact: true }).waitFor();
+    await page.getByText('Client confirmation', { exact: false }).waitFor();
     await page.getByText('synthetic-support.pdf', { exact: true }).waitFor(); await shot('staff-submission-review');
     page.on('dialog', dialog => dialog.accept());
     const acceptedResponse = page.waitForResponse(response => response.url().endsWith(`/submissions/${stored._id}/accept`) && response.request().method() === 'POST');

@@ -1,4 +1,4 @@
-import { ARTICLES_GROUPS, CLIENT_FIELDS, INTAKE_SERVICES, MATTER_FIELDS, PARTY_EXTRA_FIELDS, SHAREHOLDER_FIELDS, IntakeQuestion } from '../config/digitalIntakeSchema';
+import { ARTICLES_GROUPS, CLIENT_FIELDS, INTAKE_SERVICES, MATTER_FIELDS, PARTY_EXTRA_FIELDS, SHAREHOLDER_FIELDS, INTAKE_CONFIRMATION, IntakeQuestion } from '../config/digitalIntakeSchema';
 
 export class IntakeError extends Error {
   constructor(public status: number, message: string, public code = 'INVALID_REQUEST') { super(message); }
@@ -71,6 +71,7 @@ export const validateIntakeForm = (raw: any, link: any) => {
       return row;
     });
   }
-  if (raw.acknowledged !== true || raw.noticeVersion !== link.notice.version) throw new IntakeError(400, 'Read and acknowledge the current privacy notice before submitting.');
+  if (raw.confirmationVersion !== undefined && raw.confirmationVersion !== INTAKE_CONFIRMATION.version) throw new IntakeError(400, 'Refresh the form and confirm your details before submitting.');
+  if (raw.acknowledged !== true || raw.noticeVersion !== link.notice.version) throw new IntakeError(400, raw.confirmationVersion ? 'Confirm your details and request a review before submitting.' : 'Read and acknowledge the current privacy notice before submitting.');
   return { client, parties, matter, serviceId: service.id, questionnaireId, answers, shareholders };
 };

@@ -6,7 +6,7 @@ import User from '../models/userModel';
 import Prospect from '../models/prospectModel';
 import Case from '../models/caseModel';
 import AuditLog from '../models/auditLogModel';
-import { INTAKE_SERVICES, DEFAULT_NOTICE, QUESTIONNAIRES, OFFICIAL_USE_FIELDS } from '../config/digitalIntakeSchema';
+import { INTAKE_SERVICES, DEFAULT_NOTICE, QUESTIONNAIRES, OFFICIAL_USE_FIELDS, INTAKE_CONFIRMATION } from '../config/digitalIntakeSchema';
 import { IntakeError, textValue, validateEmail, serviceById, validateIntakeForm } from './digitalIntakeValidation';
 import { createProspectRecord } from '../controllers/prospectController';
 import { notifyUsersById } from './notifyService';
@@ -46,8 +46,8 @@ export const publicClientOrigin = () => {
 const publicUrl = (token: string, correction = false) => `${publicClientOrigin()}/intake/${correction ? 'clarification' : 'form'}/${token}`;
 const reference = (prefix: string) => `${prefix}-${new Date().getUTCFullYear()}-${randomBytes(6).toString('hex').toUpperCase()}`;
 const scope = (req: AuthRequest): any => canManageIntake(req) ? {} : { $or: ['createdBy', 'responsiblePartner', 'responsibleAssociate', 'assignedTo'].map(field => ({ [field]: req.user!.id })) };
-export const authorizedIntakeLink = async (id: unknown, req: AuthRequest, session: mongoose.ClientSession | null = null) => {
-  const link = await Link.findOne({ _id: idValue(id), ...scope(req) }).session(session);
+export const authorizedIntakeLink = async (id: unknown, req: AuthRequest, session: mongoose.ClientSession | null = null, includeDeleted = false) => {
+  const link = await Link.findOne({ _id: idValue(id), ...scope(req), ...(includeDeleted ? {} : { deletedAt: null }) }).session(session);
   if (!link) throw new IntakeError(404, 'Intake record not found.');
   return link;
 };
@@ -127,8 +127,19 @@ export const generateIntakeLink = async (payload: any, req: AuthRequest) => {
   return { link: safeLink(link), url, token };
 };
 export const listIntakeLinks = async (req: AuthRequest) => {
-  const links = await Link.find(scope(req)).sort({ createdAt: -1 }).limit(500).populate('assignedTo responsiblePartner responsibleAssociate', 'name').lean();
+  const links = await Link.find({ ...scope(req), deletedAt: null }).sort({ createdAt: -1, _id: -1 }).populate('assignedTo responsiblePartner responsibleAssociate', 'name').lean();
   return links.map(safeLink);
+};
+export const deleteIntakeLink = async (id: unknown, req: AuthRequest) => {
+  const session = await mongoose.startSession();
+  try { await session.withTransaction(async () => {
+    const link = await authorizedIntakeLink(id, req, session);
+    link.deletedAt = new Date(); link.deletedBy = req.user!.id; link.revokedAt = new Date();
+    await link.save({ session });
+    // Keep received submissions, attachments and prospect relationships intact.
+    await audit(req, 'INTAKE_LINK_DELETED', link, undefined, '', session);
+  }); } finally { await session.endSession(); }
+  return { deleted: true };
 };
 export const changeIntakeLink = async (id: unknown, action: 'revoke' | 'regenerate', req: AuthRequest) => {
   const link = await authorizedIntakeLink(id, req);
@@ -162,7 +173,7 @@ export const sendIntakeInvitation = async (id: unknown, rawToken: unknown, req: 
 };
 export const resolvePublicIntakeLink = async (token: string, session: mongoose.ClientSession | null = null) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new IntakeError(404, 'This intake link is invalid.', 'INVALID_LINK');
-  const link = await Link.findOne({ tokenHash: intakeHash(token) }).session(session);
+  const link = await Link.findOne({ tokenHash: intakeHash(token), deletedAt: null }).session(session);
   if (!link) throw new IntakeError(404, 'This intake link is invalid.', 'INVALID_LINK');
   if (link.revokedAt) throw new IntakeError(410, 'This intake link has been revoked. Please contact the firm.', 'REVOKED_LINK');
   if (+new Date(link.expiresAt) <= Date.now()) throw new IntakeError(410, 'This intake link has expired. Please request a new link.', 'EXPIRED_LINK');
@@ -232,7 +243,9 @@ export const submitIntakeForm = async (token: string, body: any) => {
     const files = await Attachment.find({ _id: { $in: ids }, linkId: link._id, tokenVersion: link.tokenVersion, submissionId: null }).session(session);
     if (files.length !== ids.length) throw new IntakeError(400, 'A document does not belong to this invitation.');
     const submission = new Submission({ reference: reference('INT'), linkId: link._id, form, submittedAt: new Date(),
-      noticeAcknowledgment: { version: link.notice.version, text: link.notice.text, contact: link.notice.contact, retention: link.notice.retention, at: new Date() }, reviewHistory: [{ action: 'Submitted', actorName: 'Client', at: new Date() }] });
+      noticeAcknowledgment: body.confirmationVersion === INTAKE_CONFIRMATION.version
+        ? { kind: 'enquiry-confirmation', ...INTAKE_CONFIRMATION, at: new Date() }
+        : { kind: 'notice', version: link.notice.version, text: link.notice.text, contact: link.notice.contact, retention: link.notice.retention, at: new Date() }, reviewHistory: [{ action: 'Submitted', actorName: 'Client', at: new Date() }] });
     await submission.save({ session });
     // The invitation write is the concurrency boundary for uploads and final submit.
     link.submittedAt = submission.submittedAt; link.submissionId = submission._id; await link.save({ session });
@@ -248,15 +261,15 @@ export const submitIntakeForm = async (token: string, body: any) => {
 };
 export const listIntakeSubmissions = async (req: AuthRequest) => {
   const links = await Link.find(scope(req)).select('_id assignedTo responsiblePartner responsibleAssociate').lean<any[]>();
-  const items = await Submission.find({ linkId: { $in: links.map(l => l._id) } }).sort({ submittedAt: -1 }).limit(500).select('reference status submittedAt prospectId linkId form.client.name form.serviceId administration.serviceId').lean<any[]>();
+  const items = await Submission.find({ linkId: { $in: links.map(l => l._id) }, deletedAt: null }).sort({ submittedAt: -1, _id: -1 }).select('reference status submittedAt prospectId linkId form.client.name form.serviceId administration.serviceId').lean<any[]>();
   const staff = await User.find({ _id: { $in: links.map(l => l.assignedTo).filter(Boolean) } }).select('name').lean();
   return items.map(item => ({ ...item, clientName: item.form?.client?.name, service: INTAKE_SERVICES.find(s => s.id === (item.administration?.serviceId || item.form?.serviceId))?.label || '', assignedStaff: staff.find(u => String(u._id) === String(links.find(l => String(l._id) === String(item.linkId))?.assignedTo))?.name || 'Unassigned', form: undefined }));
 };
 export const authorizedSubmission = async (id: unknown, req: AuthRequest, session: mongoose.ClientSession | null = null) => {
-  const submission = await Submission.findById(idValue(id)).session(session);
+  const submission = await Submission.findOne({ _id: idValue(id), deletedAt: null }).session(session);
   if (!submission) throw new IntakeError(404, 'Submission not found.');
   let link: any;
-  try { link = await authorizedIntakeLink(String(submission.linkId), req, session); }
+  try { link = await authorizedIntakeLink(String(submission.linkId), req, session, true); }
   catch (error) {
     const matters = await Case.find({ intakeSubmissionId: submission._id }).select('assignedTo caseAssignments').session(session).lean();
     if (!matters.some(matter => caseMatchesAssignee(matter, req.user!.name) || caseMatchesAssignee(matter, req.user!.email))) throw error;
@@ -264,6 +277,23 @@ export const authorizedSubmission = async (id: unknown, req: AuthRequest, sessio
     if (!link) throw new IntakeError(404, 'Intake record not found.');
   }
   return { submission, link };
+};
+export const deleteIntakeSubmission = async (id: unknown, req: AuthRequest) => {
+  const session = await mongoose.startSession();
+  try { await session.withTransaction(async () => {
+    const { submission, link } = await authorizedSubmission(id, req, session);
+    if (submission.status === 'Accepted' || submission.prospectId) throw new IntakeError(409, 'Accepted submissions are retained with their linked prospect and cannot be deleted.');
+    // Use invitation permissions, rather than the later matter-team read permission.
+    await authorizedIntakeLink(String(link._id), req, session, true);
+    submission.deletedAt = new Date(); submission.deletedBy = req.user!.id;
+    submission.clarificationHash = undefined; submission.clarificationExpiresAt = undefined;
+    submission.reviewHistory.push({ action: 'Deleted', actorName: req.user!.name, at: new Date() });
+    await submission.save({ session });
+    link.deletedAt ||= new Date(); link.deletedBy ||= req.user!.id; link.revokedAt = new Date();
+    await link.save({ session });
+    await audit(req, 'INTAKE_SUBMISSION_DELETED', link, submission, '', session);
+  }); } finally { await session.endSession(); }
+  return { deleted: true };
 };
 const duplicateCandidates = async (submission: any, req: AuthRequest) => {
   const client = submission.form.client;
@@ -274,7 +304,7 @@ const duplicateCandidates = async (submission: any, req: AuthRequest) => {
   const identities: any[] = [];
   for (const key of ['email', 'phone', 'tin', 'identification']) if (client[key]) identities.push({ [`form.client.${key}`]: client[key] });
   const allowedLinks = await Link.find(scope(req)).select('_id').lean();
-  const submissions = identities.length ? await Submission.find({ _id: { $ne: submission._id }, linkId: { $in: allowedLinks.map(l => l._id) }, $or: identities }).select('reference form.client.name').limit(20).lean<any[]>() : [];
+  const submissions = identities.length ? await Submission.find({ _id: { $ne: submission._id }, deletedAt: null, linkId: { $in: allowedLinks.map(l => l._id) }, $or: identities }).select('reference form.client.name').limit(20).lean<any[]>() : [];
   const caseContacts: any[] = [];
   if (client.email) caseContacts.push({ 'clientContacts.email': client.email });
   if (client.phone) caseContacts.push({ 'clientContacts.phone': client.phone });
@@ -361,7 +391,7 @@ export const requestIntakeInformation = async (id: unknown, body: any, req: Auth
 };
 export const publicClarification = async (token: string, body?: any) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new IntakeError(404, 'This clarification link is invalid.');
-  const submission = await Submission.findOne({ clarificationHash: intakeHash(token), clarificationExpiresAt: { $gt: new Date() }, status: 'Additional Information Requested' });
+  const submission = await Submission.findOne({ clarificationHash: intakeHash(token), clarificationExpiresAt: { $gt: new Date() }, status: 'Additional Information Requested', deletedAt: null });
   if (!submission) throw new IntakeError(410, 'This clarification link has expired or is no longer available.');
   const request = submission.clarifications[submission.clarifications.length - 1];
   if (!body) return { reference: submission.reference, message: request.message };

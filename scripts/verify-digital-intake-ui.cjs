@@ -38,6 +38,10 @@ async function main() {
       window.__emailConfigured = scenario !== 'email-setup'; window.__emailRejected = scenario === 'email-retry'; window.__sentEmails = 0;
       window.__failStaff = scenario === 'staff-failure'; window.__failConfiguration = scenario === 'configuration-failure'; window.__rejectGeneration = scenario === 'generation-failure';
       let noticeSettings = { noticeApproved: scenario !== 'privacy-setup', noticeVersion: 'test-v1', noticeText: fixtures.notice.text, privacyContact: fixtures.notice.contact, retentionPolicy: fixtures.notice.retention, defaultExpiryDays: 7 };
+      window.__confirmationAccepted = true; window.__confirmations = []; window.__deletedIntakeRecords = []; window.__failDelete = false;
+      window.confirm = message => { window.__confirmations.push(message); return window.__confirmationAccepted; };
+      const tableRows = kind => Array.from({ length: 21 }, (_, index) => ({ _id: kind + '-' + (index + 1), reference: (kind === 'links' ? 'INL' : 'INT') + '-PAGING-' + (index + 1), clientName: 'Table client ' + (index + 1), clientEmail: 'table@test.invalid', service: 'Company incorporation', serviceId: 'company_incorporation', assignedStaff: 'Synthetic Associate', expiresAt: fixtures.expiresAt, submittedAt: fixtures.expiresAt, status: kind === 'links' ? (index % 2 ? 'Opened' : 'Pending') : (index === 0 ? 'Accepted' : 'Awaiting Review') }));
+      const tables = { links: scenario === 'tables' ? tableRows('links') : [], submissions: scenario === 'tables' ? tableRows('submissions') : [] };
       const original = window.fetch.bind(window);
       window.fetch = async (url, options = {}) => {
         const location = String(url); if (!location.includes('/api/')) return original(url, options);
@@ -68,6 +72,13 @@ async function main() {
           return result({ link: { _id: '111111111111111111111111', expiresAt: fixtures.expiresAt, clientName: body.clientName || '', clientEmail: body.clientEmail || '' }, token: 'synthetic-token', url: window.location.origin + '/intake/form/synthetic-token' });
         }
         if (location.includes('/digital-intake/links/') && location.endsWith('/send')) { if (window.__emailRejected) return result({ sent: false, code: 'EMAIL_DOMAIN_UNVERIFIED', message: 'The sender domain is not verified. Verify it in Resend and correct EMAIL_FROM.' }); window.__sentEmails++; return result({ sent: true, message: 'Invitation accepted by the email provider.' }); }
+        const record = location.includes('/digital-intake/') ? location.split('/digital-intake/')[1].split('/') : [];
+        if (tables[record[0]] && record[1] && options.method === 'DELETE') {
+          if (window.__failDelete) return new Response(JSON.stringify({ message: 'Deletion temporarily unavailable. Please retry.' }), { status: 503 });
+          tables[record[0]] = tables[record[0]].filter(row => row._id !== record[1]); window.__deletedIntakeRecords.push(record[1]); return result({ deleted: true });
+        }
+        if (location.endsWith('/digital-intake/links')) return result(tables.links);
+        if (location.endsWith('/digital-intake/submissions')) return result(tables.submissions);
         if (location.includes('notifications')) return result({ items: [], unreadCount: 0 });
         return result([]);
       };
@@ -155,12 +166,11 @@ async function main() {
     await openInvitation('configuration-failure'); await until(async () => (await text()).includes('Invitation settings could not load'), 'settings error'); assert.equal(await generateButtonDisabled(), true);
     await input('invite-name', 'Draft preserved after reload'); await evaluate('window.__failConfiguration = false'); await click('Retry settings'); await until(async () => !(await generateButtonDisabled()), 'settings recovery'); assert.equal(await evaluate('document.getElementById("invite-name").value'), 'Draft preserved after reload');
     console.log('PASS: optional staff failures do not block generation; settings failures explain recovery and preserve entries');
-    await openInvitation('privacy-setup'); await until(async () => (await text()).includes('Privacy approval is needed'), 'privacy blocker'); await input('invite-name', 'Privacy setup draft'); assert.equal(await generateButtonDisabled(), true);
-    await click('Review privacy notice'); await until(() => evaluate('!!document.getElementById("notice-settings-title")'), 'notice settings');
-    await evaluate('document.querySelector("#notice-settings-title").closest("section").querySelector("input[type=checkbox]").click()'); await click('Save notice settings');
-    await until(() => evaluate('!document.getElementById("notice-settings-title")'), 'notice settings saved'); assert.equal(await evaluate('document.getElementById("invite-name").value'), 'Privacy setup draft'); assert.equal(await generateButtonDisabled(), false);
-    await click('Generate secure link'); await until(() => evaluate('!!document.getElementById("generated-intake-url")'), 'generation after approval');
-    console.log('PASS: manager can resolve privacy setup inside the dialog without losing invitation details');
+    await openInvitation('privacy-setup'); await until(async () => !(await generateButtonDisabled()), 'simplified invitation ready');
+    assert(!/Privacy notice|Privacy approval|Invitation summary/.test(await text())); assert(await evaluate('!document.querySelector(".intake-invite-summary")'));
+    await input('invite-name', 'Preserved draft'); await click('Generate secure link'); await until(async () => (await text()).includes('Intake configuration requires administrator approval'), 'backend configuration gate');
+    assert.equal(await evaluate('document.getElementById("invite-name").value'), 'Preserved draft');
+    console.log('PASS: privacy controls and invitation summary removed; server configuration errors preserve the invitation draft');
     await openInvitation(); await until(async () => !(await generateButtonDisabled()), 'validation form ready');
     await input('invite-email', 'invalid'); await click('Generate secure link'); await until(() => evaluate('!!document.getElementById("invite-email-error")'), 'inline email error'); assert.equal(await evaluate('window.__invitationRequests.length'), 0);
     await input('invite-email', ''); await evaluate('document.querySelector("input[name=invite-validity][value=custom]").click()'); await input('invite-expiry', '0'); await click('Generate secure link'); assert.match(await text(), /whole number between 1 and 30/); assert.equal(await evaluate('window.__invitationRequests.length'), 0);
@@ -168,6 +178,49 @@ async function main() {
     await openInvitation('generation-failure'); await until(async () => !(await generateButtonDisabled()), 'retry form ready'); await input('invite-name', 'Retry draft'); await click('Generate secure link'); await until(async () => (await text()).includes('Generation temporarily unavailable'), 'generation error'); assert.equal(await evaluate('document.getElementById("invite-name").value'), 'Retry draft');
     await evaluate('window.__rejectGeneration = false'); await click('Generate secure link'); await until(() => evaluate('!!document.getElementById("generated-intake-url")'), 'generation retry');
     console.log('PASS: inline email/expiry validation and generation errors support a successful retry');
+    const tableNumbers = () => evaluate("Array.from(document.querySelectorAll('.intake-table tbody tr')).map(row => Number(row.cells[0].textContent))");
+    const deleteTableRow = reference => evaluate(`document.querySelector('button[aria-label="Delete ${reference}"]').click()`);
+    const filterTable = async (selector, value) => {
+      const id = selector.includes('select') ? 'table-test-status' : 'table-test-search';
+      await evaluate(`document.querySelector(${JSON.stringify(selector)}).id = ${JSON.stringify(id)}`);
+      await input(id, value);
+    };
+    for (const theme of ['light', 'dark']) {
+      await evaluate(`localStorage.setItem('theme', '${theme}')`); await layout(1440, 1000, false);
+      await openInvitation('tables'); await click('Cancel');
+      assert(!/Privacy notice|Secure URLs are shown only|Manage incoming prospects with a simplified workflow|submissions shown\./.test(await text()));
+      for (const view of ['links', 'submissions']) {
+        if (view === 'submissions') await click('Client Submissions');
+        const prefix = view === 'links' ? 'INL' : 'INT';
+        await until(async () => (await text()).includes('Showing 1-10 of 21'), 'first table page');
+        assert.deepEqual(await tableNumbers(), [1,2,3,4,5,6,7,8,9,10]);
+        if (view === 'submissions') assert.equal(await evaluate('document.querySelector(\'button[aria-label="Delete INT-PAGING-1"]\').disabled'), true);
+        await click('Next'); await until(async () => (await text()).includes('Showing 11-20 of 21'), 'second table page');
+        assert.deepEqual(await tableNumbers(), [11,12,13,14,15,16,17,18,19,20]);
+        await click('Next'); await until(async () => (await text()).includes('Showing 21-21 of 21'), 'last table page');
+        assert.deepEqual(await tableNumbers(), [21]);
+        await evaluate('window.__confirmationAccepted = false'); await deleteTableRow(prefix + '-PAGING-21');
+        assert(!(await evaluate('window.__deletedIntakeRecords')).includes(view + '-21'));
+        await evaluate('window.__confirmationAccepted = true; window.__failDelete = true'); await deleteTableRow(prefix + '-PAGING-21');
+        await until(async () => (await text()).includes('Deletion temporarily unavailable'), 'delete error preserves row');
+        assert.deepEqual(await tableNumbers(), [21]);
+        await evaluate('window.__failDelete = false'); await deleteTableRow(prefix + '-PAGING-21');
+        await until(async () => (await text()).includes('Showing 11-20 of 20'), 'last page clamps after deletion');
+        assert((await evaluate('window.__deletedIntakeRecords')).includes(view + '-21'));
+        await filterTable('.intake-table-filters input', 'Table client 20');
+        await until(async () => (await text()).includes('Showing 1-1 of 1'), 'search resets table page');
+        assert.deepEqual(await tableNumbers(), [1]);
+        await filterTable('.intake-table-filters input', '');
+        await filterTable('.intake-table-filters select', view === 'links' ? 'Opened' : 'Awaiting Review');
+        await until(async () => (await text()).includes(view === 'links' ? 'Showing 1-10 of 10' : 'Showing 1-10 of 19'), 'status filter count');
+        assert.equal((await tableNumbers())[0], 1);
+        await filterTable('.intake-table-filters select', '');
+        await layout(390, 844, true); assert.equal((await tableNumbers()).length, 10);
+        fs.writeFileSync(path.join(directory, `table-${view}-${theme}.png`), Buffer.from((await cdp('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+        await layout(1440, 1000, false);
+      }
+    }
+    console.log('PASS: both intake tables paginate and number rows, reset filters, confirm deletions, recover errors and clamp empty pages in both themes and mobile layouts');
     await openInvitation('email-setup'); await until(async () => !(await generateButtonDisabled()), 'email setup form'); await input('invite-email', 'client@test.invalid'); await click('Generate secure link'); await until(() => evaluate('!!document.getElementById("generated-intake-url")'), 'copy while email disabled');
     assert.match(await text(), /Email setup required/); assert.match(await text(), /RESEND_API_KEY and EMAIL_FROM/); assert.match(await text(), /Email unavailable/); assert(await evaluate('!!document.querySelector("a.intake-invite-open-link[target=_blank]")'));
     await evaluate('window.__emailConfigured = true'); await click('Recheck email setup'); await until(async () => (await text()).includes('Send via email'), 'email setup reload'); await click('Send via email'); await until(async () => (await text()).includes('Email sent'), 'confirmed email send'); assert.equal(await evaluate('window.__sentEmails'), 1);
