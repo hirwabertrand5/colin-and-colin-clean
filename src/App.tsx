@@ -14,6 +14,7 @@ import ProspectWorkspace from './components/cases/ProspectWorkspace';
 import IndependentTaskModule from './components/independentTasks/IndependentTaskModule';
 import IndependentTaskDetail from './components/independentTasks/IndependentTaskDetail';
 import PublicFeedbackForm from './components/public/PublicFeedbackForm';
+import PublicIntakeForm from './components/public/PublicIntakeForm';
 import TaskBoard from './components/tasks/TaskBoard';
 import TaskDetail from './components/tasks/TaskDetail';
 import TaskManagementPage from './components/tasks/TaskManagementPage';
@@ -137,6 +138,8 @@ function App() {
         {/* Public */}
         <Route path="/login" element={user ? <Navigate to="/" /> : <Login onLogin={handleLogin} />} />
         <Route path="/public/feedback/:prospectId" element={<PublicFeedbackForm />} />
+        <Route path="/intake/form/:token" element={<PublicIntakeForm />} />
+        <Route path="/intake/clarification/:token" element={<PublicIntakeForm clarification />} />
 
         {/* Protected */}
         <Route

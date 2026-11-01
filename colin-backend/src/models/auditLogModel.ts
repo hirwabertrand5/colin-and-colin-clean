@@ -63,6 +63,8 @@ export type AuditAction =
   | 'CASE_MANAGEMENT_RETURNED_FOR_CORRECTIONS';
 
 export interface IAuditLog extends Document {
+  intakeLinkId?: mongoose.Types.ObjectId;
+  intakeSubmissionId?: mongoose.Types.ObjectId;
   caseId: mongoose.Types.ObjectId;
   /** Links independent-task activity without overloading the sentinel case id. */
   independentTaskId?: mongoose.Types.ObjectId;
@@ -76,6 +78,8 @@ export interface IAuditLog extends Document {
 
 const AuditLogSchema = new Schema<IAuditLog>(
   {
+    intakeLinkId: { type: Schema.Types.ObjectId, ref: 'ClientIntakeLink', index: true },
+    intakeSubmissionId: { type: Schema.Types.ObjectId, ref: 'ClientIntakeSubmission', index: true },
     caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true, index: true },
     independentTaskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask', index: true },
     actorUserId: { type: Schema.Types.ObjectId, ref: 'User' },

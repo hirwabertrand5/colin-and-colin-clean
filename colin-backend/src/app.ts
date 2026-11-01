@@ -27,13 +27,17 @@ import prospectRoutes from './routes/prospect';
 import clientExperienceRoutes from './routes/clientExperience';
 import independentTaskRoutes from './routes/independentTasks';
 import retainerRoutes from './routes/retainer';
+import digitalIntakeRoutes from './routes/digitalIntake';
 import { getLegacyUploadsDirectory, serveStoredUpload } from './services/fileStorageService';
 const app = express();
+// Render terminates HTTPS at its proxy; keep the hop count explicit and configurable.
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? Number(process.env.TRUST_PROXY_HOPS || 1) : false);
 
 // ✅ Allow multiple dev origins + configurable CLIENT_URL
 const allowedOrigins = new Set(
   [
     process.env.CLIENT_URL,
+    process.env.PUBLIC_CLIENT_URL,
     'http://localhost:3000',
     'http://localhost:5173',
     'https://app.colinandcolin.com', // Production frontend
@@ -68,6 +72,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/cases', caseRoutes);
 app.use('/api/prospects', prospectRoutes);
+app.use('/api/digital-intake', digitalIntakeRoutes);
 
 app.use('/api', taskRoutes);
 app.use('/api', eventRoutes);

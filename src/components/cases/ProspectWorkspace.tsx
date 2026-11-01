@@ -530,6 +530,7 @@ export default function ProspectWorkspace() {
                   </div>
 
                   <div className="space-y-6">
+                    {prospect.intakeSubmissionId && <Link to={`/matters/intake-prospects?submission=${prospect.intakeSubmissionId}`} className="block rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm font-semibold text-emerald-900">View original digital intake submission, answers and documents →</Link>}
                     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
                       <div className="flex items-center gap-3">
                         <div className="rounded-xl bg-amber-100 p-2 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">

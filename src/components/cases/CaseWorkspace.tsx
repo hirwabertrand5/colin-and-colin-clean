@@ -100,7 +100,7 @@ import {
   resolveDeadlineDateTime,
   getUrgencyColorForDueDate,
 } from '../../utils/workflowDeadline';
-import { uploadedFileUrl } from '../../services/apiConfig';
+import { uploadedFileUrl, handleRestrictedIntakeDownload } from '../../services/apiConfig';
 
 const getToken = () => localStorage.getItem('token');
 
@@ -1838,6 +1838,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
           <div className="bg-white border border-gray-200 rounded-lg p-6 lg:col-span-2">
             <h2 className="font-semibold text-gray-900 mb-3">Case Summary</h2>
             <p className="text-sm text-gray-600 whitespace-pre-line">{caseData.description}</p>
+            {caseData.intakeSubmissionId && <button type="button" onClick={() => navigate(`/matters/intake-prospects?submission=${caseData.intakeSubmissionId}`)} className="mt-4 text-sm font-semibold text-emerald-800">View original client intake, answers and documents</button>}
           </div>
         </div>
       )}
@@ -3051,6 +3052,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                     <div className="flex items-center gap-2 shrink-0">
                       <a
                         href={fileUrl}
+                        onClick={event => handleRestrictedIntakeDownload(event, doc.url, doc.name, setDocsError)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
@@ -3061,6 +3063,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
                       <a
                         href={fileUrl}
+                        onClick={event => handleRestrictedIntakeDownload(event, doc.url, doc.name, setDocsError)}
                         download
                         className="inline-flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
                       >

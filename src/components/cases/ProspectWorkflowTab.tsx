@@ -61,6 +61,7 @@ const STAGE_GLYPH: Record<string, string> = {
 
 export default function ProspectWorkflowTab({ prospect, currentUser, onChanged }: Props) {
   const [busy, setBusy] = useState(false);
+  const [controlError, setControlError] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpOutcome, setFollowUpOutcome] = useState('');
   const [savingField, setSavingField] = useState<string>('');
@@ -80,12 +81,13 @@ export default function ProspectWorkflowTab({ prospect, currentUser, onChanged }
 
   const patchProspect = async (payload: Record<string, unknown>, field: string) => {
     setBusy(true);
+    setControlError('');
     setSavingField(field);
     try {
       await updateProspect(prospect._id, payload as any);
       await onChanged?.();
-    } catch (err) {
-      console.error('Failed to update prospect workflow control', err);
+    } catch (err: any) {
+      setControlError(err.response?.data?.message || err.message || 'Could not save this change.');
     } finally {
       setBusy(false);
       setSavingField('');
@@ -141,6 +143,7 @@ export default function ProspectWorkflowTab({ prospect, currentUser, onChanged }
 
   return (
     <div className="space-y-6">
+      {controlError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{controlError}</p>}
       {/* Workflow-control summary (mirrors the Case Workspace overview header) */}
       <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -169,6 +172,7 @@ export default function ProspectWorkflowTab({ prospect, currentUser, onChanged }
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <ControlTile label="Current Stage" value={wf.currentStage} hint={wf.docStage} />
+          <ControlTile label="Conflict decision" value={<select aria-label="Conflict decision" value={prospect.conflictCheckStatus || 'Pending'} disabled={busy || terminal} onChange={e => patchProspect({ conflictCheckStatus: e.target.value }, 'conflictCheckStatus')} className="w-full rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 dark:bg-gray-800 dark:text-gray-100">{['Pending', 'Cleared', 'Flagged'].map(value => <option key={value}>{value}</option>)}</select>} />
           <ControlTile
             label="Stage Status"
             value={

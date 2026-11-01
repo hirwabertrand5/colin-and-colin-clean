@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import DigitalIntakeWorkspace from './DigitalIntakeWorkspace';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getAllProspects, getProspectStats, deleteProspect, Prospect } from '../../services/prospectService';
 import ProspectForm from './ProspectForm';
@@ -123,6 +124,10 @@ const getErrorMessage = (error: any, fallback: string) =>
 export default function IntakeProspects() {
   usePageTitle('Intake & Prospects');
   const navigate = useNavigate();
+  const [urlParams] = useSearchParams();
+  const [intakeTab, setIntakeTab] = useState<'prospects' | 'submissions' | 'links'>(() => urlParams.get('submission') ? 'submissions' : 'prospects');
+  useEffect(() => { if (urlParams.get('submission')) setIntakeTab('submissions'); }, [urlParams]);
+  const [generateRequested, setGenerateRequested] = useState(0);
   const PROSPECTS_PER_PAGE = 10;
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -402,6 +407,10 @@ export default function IntakeProspects() {
               Manage incoming prospects with a simplified workflow. Capture only essential intake details and convert clients to Active Matters at the right stage.
             </p>
           </div>
+          <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => { setIntakeTab('links'); setGenerateRequested(value => value + 1); }} className="inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-gray-800 rounded-lg hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700">
+            Generate Intake Link
+          </button>
           <button
             onClick={() => {
               setSelectedProspect(null);
@@ -412,7 +421,13 @@ export default function IntakeProspects() {
             <Plus className="w-5 h-5 mr-2" />
             New Prospect
           </button>
+          </div>
         </div>
+
+        <nav className="intake-tabs" aria-label="Intake views">
+          {([['prospects', 'Prospects'], ['submissions', 'Client Submissions'], ['links', 'Intake Links']] as const).map(([tab, label]) => <button key={tab} type="button" className={intakeTab === tab ? 'active' : ''} aria-current={intakeTab === tab ? 'page' : undefined} onClick={() => { setGenerateRequested(0); setIntakeTab(tab); }}>{label}</button>)}
+        </nav>
+        {intakeTab !== 'prospects' ? <DigitalIntakeWorkspace view={intakeTab} generateRequested={generateRequested} initialSubmission={urlParams.get('submission') || undefined} onAccepted={() => void loadData()} /> : <>
 
         {/* Error Message */}
         {error && (
@@ -669,6 +684,7 @@ export default function IntakeProspects() {
             </div>
           )}
         </div>
+        </>}
       </div>
 
       {/* Prospect Form Modal */}

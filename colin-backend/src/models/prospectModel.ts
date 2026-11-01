@@ -22,6 +22,9 @@ export interface IProspectContact {
 }
 
 export interface IProspect extends Document {
+  intakeSubmissionId?: mongoose.Types.ObjectId;
+  conversionRequirementsVerifiedAt?: Date;
+  conversionRequirementsVerifiedBy?: string;
   prospectNo: string;
   clientName: string;
   parties?: string;
@@ -167,6 +170,9 @@ const ProspectContactSchema = new Schema<IProspectContact>(
 
 const ProspectSchema = new Schema<IProspect>(
   {
+    intakeSubmissionId: { type: Schema.Types.ObjectId, ref: 'ClientIntakeSubmission', index: true, unique: true, sparse: true },
+    conversionRequirementsVerifiedAt: Date,
+    conversionRequirementsVerifiedBy: String,
     prospectNo: {
       type: String,
       required: true,

@@ -82,6 +82,28 @@ export const storeUploadedFile = async (file: Express.Multer.File) => {
   return `/uploads/${id}`;
 };
 
+/** Same persistent storage, explicitly excluded from the public upload handler. */
+export const storeRestrictedUpload = async (file: Express.Multer.File, linkId: string) => uploadBuffer(
+  file.buffer, file.originalname,
+  { restricted: true, intakeLinkId: linkId, originalName: safeFilename(file.originalname), mimeType: file.mimetype, uploadedAt: new Date() }, file.mimetype
+);
+export const deleteRestrictedUpload = async (id: string) => getGridFsBucket().delete(new ObjectId(id));
+/** Call only after the owning intake/case access check. */
+export const streamRestrictedUpload = async (id: string, res: Response) => {
+  const bucket = getGridFsBucket();
+  const file = await bucket.find({ _id: new ObjectId(id), 'metadata.restricted': true }).next();
+  if (!file) return res.status(404).json({ message: 'Document unavailable.' });
+  const filename = safeFilename(file.filename).replace(/["\r\n]/g, '_');
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.setHeader('Content-Length', String(file.length));
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  const stream = bucket.openDownloadStream(file._id);
+  stream.on('error', () => { if (!res.headersSent) res.status(500).end(); else res.destroy(); });
+  stream.pipe(res);
+};
+
 const fileKeyFromUrl = (url: string) => {
   const prefix = '/uploads/';
   if (!url.startsWith(prefix)) return undefined;
@@ -113,6 +135,8 @@ export const serveStoredUpload = async (req: Request, res: Response) => {
       message: 'The uploaded file is unavailable. It may have been removed before persistent storage was enabled.',
     });
   }
+
+  if (file.metadata?.restricted === true) return res.status(404).json({ message: 'File unavailable.' });
 
   const metadata = (file.metadata || {}) as { originalName?: unknown; mimeType?: unknown };
   const downloadName = safeFilename(

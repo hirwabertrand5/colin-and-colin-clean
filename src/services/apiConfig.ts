@@ -19,3 +19,14 @@ export const uploadedFileUrl = (storedUrl?: string) => {
   if (/^https?:\/\//i.test(storedUrl)) return storedUrl;
   return `${BACKEND_URL}${storedUrl.startsWith('/') ? storedUrl : `/${storedUrl}`}`;
 };
+
+/** Keep restricted intake documents behind bearer authorization in existing document lists. */
+export const handleRestrictedIntakeDownload = (event: { preventDefault(): void }, storedUrl: string, name: string, onError?: (message: string) => void) => {
+  if (!/^\/api\/digital-intake\/files\/[a-f0-9]{24}$/i.test(storedUrl)) return;
+  event.preventDefault();
+  void fetch(`${BACKEND_URL}${storedUrl}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }, cache: 'no-store', referrerPolicy: 'no-referrer' }).then(async response => {
+    if (!response.ok) throw new Error('You cannot access this document, or it is no longer available.');
+    const url = URL.createObjectURL(await response.blob());
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }).catch(error => { if (onError) onError(error.message); else window.alert(error.message); });
+};

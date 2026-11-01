@@ -63,6 +63,7 @@ export interface CaseData {
   caseNo: string;
   parties: string;
   intakeProspectId?: string;
+  intakeSubmissionId?: string;
   caseType: CaseType;
   status: string;
   priority: string;

@@ -13,7 +13,7 @@ import {
 } from '../../services/caseManagementService';
 import { getDocumentsForCase, addDocumentToCase, deleteDocument, CaseDocument } from '../../services/documentService';
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
-import { uploadedFileUrl } from '../../services/apiConfig';
+import { uploadedFileUrl, handleRestrictedIntakeDownload } from '../../services/apiConfig';
 
 type Props = {
   caseId: string;
@@ -917,6 +917,7 @@ function DocumentsSection(props: {
                     <td className="px-3 py-2">
                       <a
                         href={doc.url ? uploadedFileUrl(doc.url) : '#'}
+                        onClick={event => handleRestrictedIntakeDownload(event, doc.url, doc.name)}
                         target="_blank"
                         rel="noreferrer"
                         className="font-medium text-gray-900 hover:underline dark:text-gray-100"
@@ -932,6 +933,7 @@ function DocumentsSection(props: {
                       <div className="flex items-center justify-end gap-2">
                         <a
                           href={doc.url ? uploadedFileUrl(doc.url) : '#'}
+                          onClick={event => handleRestrictedIntakeDownload(event, doc.url, doc.name)}
                           target="_blank"
                           rel="noreferrer"
                           className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"

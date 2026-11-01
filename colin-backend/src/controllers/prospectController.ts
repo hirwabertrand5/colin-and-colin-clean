@@ -4,6 +4,8 @@ import Prospect from '../models/prospectModel';
 import Case from '../models/caseModel';
 import User from '../models/userModel';
 import ProspectFeedback from '../models/prospectFeedbackModel';
+import { LEGAL_SERVICES_TREE } from '../config/legalServicesTree';
+import { linkIntakeDocumentsToMatter } from '../services/intakeDocumentService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { buildYearlySequence } from '../utils/counter';
 import { sendEmailResend } from '../services/emailResendService';
@@ -211,7 +213,7 @@ const applyStageTransition = (prospect: any, nextStage: string, wf: ReturnType<t
   prospect.stageDueAt = slaHours > 0 ? addSlaToDate(startedAt, slaHours) : undefined;
   prospect.stageCompletedAt = undefined;
   prospect.stageCompletedBy = undefined;
-  if (wf.stageChecklist) prospect.stageChecklist = wf.stageChecklist;
+  prospect.stageChecklist = (getStageConfig(nextStage)?.checklist || []).map(label => ({ key: stageChecklistKey(label), label, done: false }));
   if (wf.waitingOn) prospect.waitingOn = wf.waitingOn;
   if (isTerminalStage(nextStage)) {
     prospect.stageStatus = wf.stageStatus || 'Completed';
@@ -277,6 +279,9 @@ const getProspectPayload = (body: any, fallbackUserId?: string) => {
     inquiryDescription: cleanString(body.inquiryDescription),
     stage,
     engagementNotes: cleanString(body.engagementNotes),
+    ...(body.conflictCheckStatus !== undefined ? { conflictCheckStatus: toEnum(body.conflictCheckStatus, ['Pending', 'Cleared', 'Flagged'] as const) || 'Pending' } : {}),
+    ...(body.conflictCheckNotes !== undefined ? { conflictCheckNotes: cleanString(body.conflictCheckNotes) } : {}),
+    ...(body.conflictCheckStatus === 'Cleared' ? { conflictCheckDate: new Date() } : {}),
     conversionOutcome: conversionOutcome || undefined,
     conversionReason: cleanString(body.conversionReason) || conversionOutcome || undefined,
     assignedTo,
@@ -342,6 +347,14 @@ const validateProspectPayload = async (payload: ReturnType<typeof getProspectPay
 
 const generateProspectNo = () => buildYearlySequence('prospect', 'PROS');
 
+const conversionReadinessError = (prospect: any) => {
+  if (prospect.conflictCheckStatus !== 'Cleared') return 'Record conflict clearance before converting this prospect.';
+  if (prospect.stage !== 'Engagement') return 'Complete the Engagement stage before converting this prospect.';
+  const required = getStageConfig('Engagement')!.checklist;
+  if (!required.every(label => (prospect.stageChecklist || []).some((item: any) => item.key === stageChecklistKey(label) && item.done))) return 'Complete every Engagement checklist item, including signed engagement and onboarding verification, before conversion.';
+  return '';
+};
+
 const buildFeedbackEmailHtml = (prospectId: string) => {
   const publicUrl = `${process.env.CLIENT_URL || 'http://localhost:5173'}/public/feedback/${prospectId}`;
   return `
@@ -404,6 +417,7 @@ const createMatterFromProspect = async (
   }
 
   const assigneeSource = prospect.responsibleAssociate || prospect.assignedTo;
+  if (matterStatus === 'Active' && !prospect.conversionRequirementsVerifiedAt) throw new Error('Conversion requirements must be verified in Engagement before creating an Active Matter.');
   const assignee = await User.findById(assigneeSource).select('name').lean();
   const assigneeName = assignee?.name || actorName || 'Unassigned';
   const caseNo = await buildYearlySequence('case', 'CASE');
@@ -427,6 +441,14 @@ const createMatterFromProspect = async (
     signerName ? `Signer/Approver: ${signerName}` : '',
   ].filter(Boolean).join(' | ') || assigneeName;
 
+  let sourceCaseType: 'Transactional Cases' | 'Litigation Cases' | 'Labor Cases' = 'Transactional Cases';
+  let serviceNodes = LEGAL_SERVICES_TREE;
+  for (const segment of prospect.legalServicePath || []) {
+    const node = serviceNodes.find(item => item.id === segment.id);
+    if (!node) break;
+    if (node.caseType) sourceCaseType = node.caseType;
+    serviceNodes = node.children || [];
+  }
   const newCase = new Case({
     caseNo,
     parties: prospect.parties || prospect.clientName,
@@ -443,9 +465,10 @@ const createMatterFromProspect = async (
     assignedTo: assignedToDisplay,
     ...(Object.keys(caseAssignments).length ? { caseAssignments } : {}),
     ...(isTemporaryMatter ? { intakeProspectId: prospect._id } : {}),
+    ...(prospect.intakeSubmissionId ? { intakeSubmissionId: prospect.intakeSubmissionId } : {}),
     status: matterStatus,
     priority: 'Medium',
-    caseType: 'Transactional Cases',
+    caseType: sourceCaseType,
     billingSettings: {
       paymentMode: 'postpaid',
       currency: SINGLE_CURRENCY,
@@ -459,6 +482,7 @@ const createMatterFromProspect = async (
   });
 
   const savedCase = await newCase.save();
+  await linkIntakeDocumentsToMatter(prospect.intakeSubmissionId, savedCase._id);
 
   // Attach a workflow so the matter behaves like a normal Active Matter:
   // resolve the canonical template from the prospect's legal-service path,
@@ -471,7 +495,7 @@ const createMatterFromProspect = async (
       const template = resolveCanonicalTemplateForCase(templates, {
         matterType: leafLabel || prospect.enquiryNature,
         name: leafLabel || prospect.enquiryNature,
-        caseType: 'Transactional Cases',
+        caseType: sourceCaseType,
       }) || templates.find((t) => normalizeTemplateMatchValue(t?.matterType) && normalizeTemplateMatchValue(leafLabel || prospect.enquiryNature || '').includes(normalizeTemplateMatchValue(t?.matterType)));
       if (template) {
         const startDate = resolveDeadlineDateTime(new Date()) || new Date();
@@ -704,23 +728,17 @@ export const getProspectById = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const createProspect = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!canManageProspects(req.user?.role)) {
-      return res.status(403).json({ message: 'You do not have permission to create prospects.' });
-    }
-
-    const payload = getProspectPayload(req.body, req.user?.id);
-    const validationMessage = await validateProspectPayload(payload, req.body);
-    if (validationMessage) {
-      return res.status(400).json({ message: validationMessage });
-    }
-
+/** Shared creation path for manual entry and accepted digital submissions. */
+export const createProspectRecord = async (body: any, actor: { id: string; name: string }, session?: mongoose.ClientSession) => {
+    const payload = getProspectPayload(body, actor.id);
+    if (payload.stage === 'Converted') throw Object.assign(new Error('Create the prospect first, then complete conflict clearance and the Engagement checklist before conversion.'), { status: 400 });
+    const validationMessage = await validateProspectPayload(payload, body);
+    if (validationMessage) throw Object.assign(new Error(validationMessage), { status: 400 });
     const prospectNo = await generateProspectNo();
     const prospect = new Prospect({
       ...payload,
       prospectNo,
-      createdBy: req.user?.id,
+      createdBy: actor.id,
       dateReceived: new Date(),
       isActive: true,
     });
@@ -728,6 +746,7 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
     // Seed the workflow-control layer: timing for the opening stage + its first
     // stage-history audit entry.
     const openingStage = prospect.stage;
+    if (!prospect.stageChecklist?.length) prospect.stageChecklist = (getStageConfig(openingStage)?.checklist || []).map(label => ({ key: stageChecklistKey(label), label, done: false }));
     const openingStart = prospect.stageStartedAt || new Date();
     prospect.stageStartedAt = openingStart;
     prospect.stageStatus = prospect.stageStatus || (terminalStages.includes(openingStage as any) ? 'Completed' : 'In Progress');
@@ -746,7 +765,13 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
       waitingOn: prospect.waitingOn,
     });
 
-    const saved = await prospect.save();
+    return prospect.save(session ? { session } : undefined);
+};
+
+export const createProspect = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!canManageProspects(req.user?.role)) return res.status(403).json({ message: 'You do not have permission to create prospects.' });
+    const saved = await createProspectRecord(req.body, req.user!);
     if (terminalStages.includes(saved.stage as any)) {
       await createMatterFromProspect(
         saved,
@@ -762,6 +787,7 @@ export const createProspect = async (req: AuthRequest, res: Response) => {
 
     return res.status(201).json(populated);
   } catch (error: any) {
+    if (error?.status === 400) return res.status(400).json({ message: error.message });
     console.error('createProspect error:', error);
     if (error?.name === 'ValidationError') {
       const messages = Object.values(error.errors)
@@ -792,11 +818,35 @@ export const updateProspect = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Prospect not found.' });
     }
 
-    const updates = getProspectPayload(req.body, String(prospect.assignedTo));
-    const validationMessage = await validateProspectPayload(updates, req.body);
+    const current = prospect.toObject();
+    const mergedBody = { ...current, ...req.body, contact: { ...current.contact, ...req.body.contact },
+      assignedTo: req.body.assignedTo ?? String(prospect.assignedTo || ''),
+      responsiblePartner: req.body.responsiblePartner ?? String(prospect.responsiblePartner || ''),
+      responsibleAssociate: req.body.responsibleAssociate ?? String(prospect.responsibleAssociate || '') };
+    const updates = getProspectPayload(mergedBody, String(prospect.assignedTo));
+    const validationMessage = await validateProspectPayload(updates, mergedBody);
     if (validationMessage) {
       return res.status(400).json({ message: validationMessage });
     }
+    const currentStage = getStageConfig(prospect.stage);
+    const nextStage = getStageConfig(updates.stage);
+    if (updates.stage !== prospect.stage && !isTerminalStage(prospect.stage) && updates.stage !== 'Non-Converted' && currentStage && nextStage && nextStage.order >= currentStage.order) {
+      if (nextStage.order > currentStage.order + 1) return res.status(400).json({ message: 'Complete the intervening prospect stages before advancing.' });
+      if (!currentStage.checklist.every(label => (prospect.stageChecklist || []).some(item => item.key === stageChecklistKey(label) && item.done))) return res.status(400).json({ message: 'Complete the current stage mandatory key actions before advancing.' });
+      if (prospect.stage === 'Conflict Check' && prospect.conflictCheckStatus !== 'Cleared') return res.status(400).json({ message: 'Record conflict clearance before advancing.' });
+    }
+    if (updates.stage === 'Converted' && prospect.stage !== 'Converted') {
+      const readiness = conversionReadinessError(prospect);
+      if (readiness) return res.status(400).json({ message: readiness });
+      prospect.conversionRequirementsVerifiedAt = new Date();
+      prospect.conversionRequirementsVerifiedBy = req.user?.name || 'System';
+    }
+    if (prospect.stage === 'Converted' && updates.stage !== 'Converted') {
+      prospect.set('conversionRequirementsVerifiedAt', undefined);
+      prospect.set('conversionRequirementsVerifiedBy', undefined);
+    }
+
+    if (!('conflictCheckStatus' in req.body)) delete (updates as any).conflictCheckDate;
 
     // A prospect/intake handover changes only the person accountable for the
     // live stage. Its checklist ticks, SLA clock, follow-ups and stage history
@@ -1119,6 +1169,7 @@ export const convertProspectToMatter = async (req: AuthRequest, res: Response) =
     if (!String((prospect as any).conversionOutcome || '').trim()) {
       return res.status(400).json({ message: 'Please record a conversion outcome before converting this prospect.' });
     }
+    if (!prospect.conversionRequirementsVerifiedAt) return res.status(400).json({ message: 'Return to Engagement and verify the required checklist and conflict clearance before conversion.' });
 
     const savedCase = await createMatterFromProspect(prospect, req.user?.name || 'System', 'Active');
 

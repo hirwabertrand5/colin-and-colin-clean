@@ -1,31 +1,43 @@
-import { Resend } from 'resend';
+﻿import { Resend } from 'resend';
 
-export type SendEmailResult =
-  | { ok: true; id?: string }
-  | { ok: false; error: string };
+export type EmailFailureCode = 'EMAIL_NOT_CONFIGURED' | 'EMAIL_SENDER_INVALID' | 'EMAIL_CREDENTIALS_INVALID' | 'EMAIL_DOMAIN_UNVERIFIED' | 'EMAIL_TEST_MODE' | 'EMAIL_RATE_LIMITED' | 'EMAIL_RECIPIENT_INVALID' | 'EMAIL_PROVIDER_UNAVAILABLE' | 'EMAIL_REJECTED';
+export type SendEmailResult = { ok: true; id: string } | { ok: false; code: EmailFailureCode; error: string; retryable: boolean };
+const failure = (code: EmailFailureCode, error: string, retryable = false): Extract<SendEmailResult, { ok: false }> => ({ ok: false, code, error, retryable });
+const senderAddress = (from: string) => from.match(/<([^<>]+)>\s*$/)?.[1]?.trim() || from;
+const validEmail = (value: string) => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value);
 
-export const sendEmailResend = async (to: string[], subject: string, html: string): Promise<SendEmailResult> => {
+/** Staff diagnostics contain no credentials, recipient contents or provider response bodies. */
+export const getEmailConfiguration = () => {
+  const apiKey = String(process.env.RESEND_API_KEY || '').trim();
+  const from = String(process.env.EMAIL_FROM || '').trim();
+  const missing = [!apiKey ? 'RESEND_API_KEY' : '', !from ? 'EMAIL_FROM' : ''].filter(Boolean);
+  if (missing.length) return { configured: false as const, code: 'EMAIL_NOT_CONFIGURED' as const, message: `Email sending is not configured. An administrator must set ${missing.join(' and ')} on the backend service. You can still copy and share the link.` };
+  if (!validEmail(senderAddress(from))) return { configured: false as const, code: 'EMAIL_SENDER_INVALID' as const, message: 'The configured sender address is invalid. An administrator must correct EMAIL_FROM on the backend service.' };
+  return { configured: true as const, code: null, message: 'Email service configured. The sending domain must be verified with Resend.' };
+};
+
+export const classifyEmailFailure = (error: { name?: string; message?: string; statusCode?: number | null }): Extract<SendEmailResult, { ok: false }> => {
+  const name = String(error?.name || '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  if (name === 'invalid_api_key' || name === 'missing_api_key' || error.statusCode === 401 || /api key.*(invalid|expired|revoked)|invalid.*api.?key/.test(message)) return failure('EMAIL_CREDENTIALS_INVALID', 'The email service rejected its credentials. An administrator must update RESEND_API_KEY on the backend service.');
+  if (/only.*(send|testing).*own|testing emails|test mode|resend\.dev/.test(message)) return failure('EMAIL_TEST_MODE', 'The email service is restricted to test recipients. Verify the firm’s sending domain in Resend and use an address from that domain in EMAIL_FROM.');
+  if (/domain.*(not verified|unverified|not found)|verify.*domain/.test(message)) return failure('EMAIL_DOMAIN_UNVERIFIED', 'The sender domain is not verified. An administrator must verify it in Resend and set EMAIL_FROM to an address on that domain.');
+  if (error.statusCode === 429 || /rate_limit|quota|daily_quota|monthly_quota/.test(name) || /quota|rate limit/.test(message)) return failure('EMAIL_RATE_LIMITED', 'The email service has reached its sending limit. Retry later or ask an administrator to check the sending quota.', true);
+  if (/recipient|invalid.*to|to.*invalid/.test(message)) return failure('EMAIL_RECIPIENT_INVALID', 'The email service rejected the recipient address. Check the client’s email address or copy the link to share it directly.');
+  if (/from.*(invalid|required)|sender.*invalid/.test(message)) return failure('EMAIL_SENDER_INVALID', 'The email service rejected the sender address. An administrator must correct EMAIL_FROM and verify its domain.');
+  if ((error.statusCode || 0) >= 500 || /application_error|internal_server_error|timeout|fetch|network/.test(name + ' ' + message)) return failure('EMAIL_PROVIDER_UNAVAILABLE', 'The email provider could not be reached or is temporarily unavailable. Retry sending; the link remains available to copy.', true);
+  return failure('EMAIL_REJECTED', 'The email provider rejected this invitation. Ask an administrator to check Resend delivery logs. You can still copy and share the link.');
+};
+
+export const sendEmailResend = async (to: string[], subject: string, html: string, options?: { idempotencyKey?: string }): Promise<SendEmailResult> => {
+  const configuration = getEmailConfiguration();
+  if (!configuration.configured) return failure(configuration.code, configuration.message);
+  if (!to.length || to.some(address => !validEmail(address.trim()))) return failure('EMAIL_RECIPIENT_INVALID', 'Enter a valid recipient email address before sending.');
   try {
-    const apiKey = String(process.env.RESEND_API_KEY || '').trim();
-    const from = String(process.env.EMAIL_FROM || '').trim();
-
-    if (!apiKey) return { ok: false, error: 'Missing RESEND_API_KEY' };
-    if (!from) return { ok: false, error: 'Missing EMAIL_FROM' };
-
-    const resend = new Resend(apiKey);
-
-    const resp = await resend.emails.send({
-      from,
-      to,
-      subject,
-      html,
-    });
-
-    const anyResp: any = resp;
-    if (anyResp?.error) return { ok: false, error: anyResp.error.message || 'Resend send failed' };
-
-    return { ok: true, id: anyResp?.data?.id };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'Resend send failed' };
-  }
+    const resend = new Resend(String(process.env.RESEND_API_KEY).trim());
+    const response = await resend.emails.send({ from: String(process.env.EMAIL_FROM).trim(), to: to.map(address => address.trim()), subject, html }, options);
+    if (response.error) return classifyEmailFailure(response.error);
+    if (!response.data?.id) return failure('EMAIL_PROVIDER_UNAVAILABLE', 'The email provider did not confirm the send. Please retry; the same invitation link remains available.', true);
+    return { ok: true, id: response.data.id };
+  } catch (error: any) { return classifyEmailFailure(error); }
 };

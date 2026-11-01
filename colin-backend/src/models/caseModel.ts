@@ -58,6 +58,7 @@ export interface ICase extends Document {
   caseType: CaseType;
   /** Source intake record for a matter that was temporarily closed before conversion. */
   intakeProspectId?: mongoose.Types.ObjectId;
+  intakeSubmissionId?: mongoose.Types.ObjectId;
 
   status: string;
   priority: string;
@@ -232,6 +233,7 @@ const CaseSchema = new Schema<ICase>(
     caseNo: { type: String, required: true, trim: true },
     parties: { type: String, required: true, trim: true },
     intakeProspectId: { type: Schema.Types.ObjectId, ref: 'Prospect', index: true },
+    intakeSubmissionId: { type: Schema.Types.ObjectId, ref: 'ClientIntakeSubmission', index: true },
 
     caseType: {
       type: String,

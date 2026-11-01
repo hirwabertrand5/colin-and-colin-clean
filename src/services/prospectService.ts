@@ -30,6 +30,7 @@ export type ProspectStage =
   | 'Non-Converted';
 
 export interface Prospect {
+  intakeSubmissionId?: string;
   _id: string;
   prospectNo: string;
   clientName: string;

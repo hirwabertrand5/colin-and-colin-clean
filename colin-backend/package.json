@@ -44,7 +44,8 @@
     "audit:currency": "tsx src/scripts/auditRwfCurrency.ts",
     "normalize:currency": "tsx src/scripts/normalizeRwfCurrency.ts",
     "normalize:currency:apply": "tsx src/scripts/normalizeRwfCurrency.ts --apply",
-    "reset:password": "tsx src/scripts/resetUserPassword.ts"
+    "reset:password": "tsx src/scripts/resetUserPassword.ts",
+    "verify:digital-intake": "npm run build && node dist/scripts/verifyDigitalIntake.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

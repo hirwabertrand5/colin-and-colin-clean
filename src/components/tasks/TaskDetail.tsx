@@ -49,7 +49,7 @@ import {
 } from '../../services/taskAttachmentService';
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
-import { uploadedFileUrl } from '../../services/apiConfig';
+import { uploadedFileUrl, handleRestrictedIntakeDownload } from '../../services/apiConfig';
 
 interface TaskDetailProps {
   userRole: UserRole;
@@ -1273,6 +1273,7 @@ export default function TaskDetail({ userRole }: TaskDetailProps) {
                     </div>
                     <a
                       href={uploadedFileUrl(doc.url)}
+                      onClick={event => handleRestrictedIntakeDownload(event, doc.url, doc.name)}
                       className="text-xs text-gray-600 hover:text-gray-900"
                       target="_blank"
                       rel="noopener noreferrer"
