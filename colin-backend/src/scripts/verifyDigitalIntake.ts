@@ -28,7 +28,12 @@ async function main() {
   delete process.env.PUBLIC_CLIENT_URL;
   const previousMode = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production'; process.env.CLIENT_URL = 'https://obsolete-preview.vercel.app';
-  assert.equal(publicClientOrigin(), 'https://app.colinandcolin.com');
+  assert.equal(publicClientOrigin(), 'https://colin-and-colin.vercel.app');
+  process.env.CLIENT_URL = 'https://app.colinandcolin.com'; assert.equal(publicClientOrigin(), 'https://colin-and-colin.vercel.app');
+  process.env.CLIENT_URL = 'https://colin-and-colin-t62y.vercel.app'; assert.equal(publicClientOrigin(), 'https://colin-and-colin.vercel.app');
+  process.env.CLIENT_URL = 'https://colin-and-colin.vercel.app/login'; assert.equal(publicClientOrigin(), 'https://colin-and-colin.vercel.app');
+  delete process.env.CLIENT_URL; assert.equal(publicClientOrigin(), 'https://colin-and-colin.vercel.app');
+  process.env.PUBLIC_CLIENT_URL = 'https://colin-and-colin.vercel.app/login'; assert.equal(publicClientOrigin(), 'https://colin-and-colin.vercel.app');
   process.env.PUBLIC_CLIENT_URL = 'https://frontend.test.invalid/'; assert.equal(publicClientOrigin(), 'https://frontend.test.invalid');
   process.env.PUBLIC_CLIENT_URL = 'http://unsafe.test.invalid'; assert.throws(publicClientOrigin, /HTTPS/);
   process.env.PUBLIC_CLIENT_URL = 'invalid-url'; assert.throws(publicClientOrigin, /invalid/);

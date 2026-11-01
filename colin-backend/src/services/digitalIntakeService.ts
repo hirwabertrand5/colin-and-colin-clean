@@ -25,9 +25,10 @@ const idValue = (value: unknown) => {
   return id;
 };
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+export const DEFAULT_PUBLIC_CLIENT_ORIGIN = 'https://colin-and-colin.vercel.app';
 export const publicClientOrigin = () => {
-  // CLIENT_URL may still identify an obsolete preview deployment. Public client
-  // invitations use the stable firm domain unless explicitly configured.
+  // Use the frontend address confirmed by the firm. Explicit configuration may
+  // override it; an older custom domain or preview must not replace the default.
   const explicit = String(process.env.PUBLIC_CLIENT_URL || '').trim();
   let url: URL;
   try {
@@ -35,9 +36,9 @@ export const publicClientOrigin = () => {
     let useLegacy = false;
     if (!explicit && legacy) {
       const candidate = new URL(legacy);
-      useLegacy = candidate.hostname === 'app.colinandcolin.com' || (process.env.NODE_ENV !== 'production' && ['localhost', '127.0.0.1'].includes(candidate.hostname));
+      useLegacy = candidate.origin === DEFAULT_PUBLIC_CLIENT_ORIGIN || (process.env.NODE_ENV !== 'production' && ['localhost', '127.0.0.1'].includes(candidate.hostname));
     }
-    url = new URL(explicit || (useLegacy ? legacy : 'https://app.colinandcolin.com'));
+    url = new URL(explicit || (useLegacy ? legacy : DEFAULT_PUBLIC_CLIENT_ORIGIN));
   } catch { throw new IntakeError(503, 'The public intake address is invalid. An administrator must set PUBLIC_CLIENT_URL to the frontend HTTPS address.', 'PUBLIC_URL_INVALID'); }
   if (url.username || url.password || (url.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' && url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))) throw new IntakeError(503, 'The public intake address must use HTTPS. An administrator must correct PUBLIC_CLIENT_URL.', 'PUBLIC_URL_INVALID');
   return url.origin;

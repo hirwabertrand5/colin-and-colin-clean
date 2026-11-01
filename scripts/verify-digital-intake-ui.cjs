@@ -43,6 +43,9 @@ async function main() {
         const location = String(url); if (!location.includes('/api/')) return original(url, options);
         const result = data => Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
         if (location.endsWith('/public/form')) {
+          if (scenario === 'public-html') return new Response('<html>Old frontend fallback</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+          if (scenario === 'public-malformed') return result({ services: [] });
+          if (scenario === 'public-network') throw new TypeError('Failed to fetch');
           if (window.location.pathname.includes('expired')) return new Response(JSON.stringify({ code: 'EXPIRED_LINK', message: 'This intake link has expired. Please request a new link.' }), { status: 410 });
           return result(fixtures);
         }
@@ -78,6 +81,12 @@ async function main() {
     const click = label => evaluate(`(() => { const b = Array.from(document.querySelectorAll('button')).find(e => e.innerText.trim() === ${JSON.stringify(label)}); if (!b) throw Error('Button missing: ' + ${JSON.stringify(label)}); b.click(); })()`);
     const input = (id, value) => evaluate(`(() => { const e = document.getElementById(${JSON.stringify(id)}); if (!e) throw Error('Input missing: ' + ${JSON.stringify(id)}); const proto = e.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : e.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto,'value').set.call(e, ${JSON.stringify(value)}); e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
     const step = title => until(() => evaluate(`document.querySelector('.intake-card h2')?.textContent === ${JSON.stringify(title)}`), title);
+    for (const [scenario, message] of [['public-html', 'unexpected response'], ['public-malformed', 'public intake form could not be loaded'], ['public-network', 'service could not be reached']]) {
+      await goto('/intake/form/' + 'S'.repeat(43) + '?intakeTest=' + scenario);
+      await until(async () => (await text()).includes(message), 'public API recovery: ' + scenario);
+      assert(await evaluate('!!document.querySelector(".intake-brand img") && !document.querySelector("aside,.sidebar,.dashboard-layout")'));
+    }
+    console.log('PASS: HTML fallback, malformed public configuration and network failures show branded recovery screens');
     await goto('/intake/form/' + 'S'.repeat(43)); await step('Your details');
     assert(await evaluate("!!document.getElementById('intake-identification') && !document.getElementById('intake-tin')"));
     await click('Next'); assert(await evaluate("document.querySelector('.intake-card h2').textContent === 'Your details'"));

@@ -9,7 +9,7 @@ export function IntakeField({ question, value, onChange, prefix = 'intake', requ
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(question.type === 'number' && e.target.value !== '' ? Number(e.target.value) : e.target.value) };
   return <div className={question.type === 'textarea' ? 'intake-field intake-field-wide' : 'intake-field'}>
     <label htmlFor={id}>{question.label}{props.required ? <span aria-label="required"> *</span> : null}</label>
-    {question.type === 'textarea' ? <textarea {...props} rows={4} maxLength={15000} /> : <input {...props} type={question.type || 'text'} min={question.type === 'number' ? 0 : undefined} max={question.max} step={question.type === 'number' ? 'any' : undefined} maxLength={500} />}
+    {question.type === 'textarea' ? <textarea {...props} rows={4} maxLength={15000} /> : <input {...props} type={question.type || 'text'} min={question.type === 'number' ? 0 : undefined} max={question.max} step={question.type === 'number' ? 'any' : undefined} maxLength={question.type === 'email' ? 254 : question.type === 'tel' ? 40 : 500} />}
   </div>;
 }
 

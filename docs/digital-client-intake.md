@@ -1,5 +1,7 @@
 # Digital client intake portal
 
+For the current native public-form audit, six-page PDF comparison and production deployment findings, see [Public client intake verification](public-client-intake-verification.md). The user-confirmed production address is https://colin-and-colin.vercel.app. Local verification must not be treated as production completion.
+
 ## Delivered behavior
 
 The existing **Client Intake & Prospects** page now has **Prospects**, **Client Submissions**, and **Intake Links** tabs. Authorized staff can generate an invitation, copy its secure URL, send it through the existing Resend integration, check its status, revoke it, or regenerate it. Raw tokens are shown only when generated and remain in page memory. Regeneration is necessary to obtain a new copy after leaving the page; it invalidates the previous token.
@@ -87,7 +89,7 @@ Public tokens travel in `X-Intake-Token`, not API URL query parameters. Staff re
 
 No deployment, production environment changes, or live client data changes were performed.
 
-1. Set backend `PUBLIC_CLIENT_URL=https://app.colinandcolin.com` explicitly. Otherwise public URLs default to the canonical firm domain; an obsolete Vercel preview in CLIENT_URL is ignored. Localhost CLIENT_URL remains available for development. Existing local configuration pointed at an older Vercel address, so do not rely on that fallback. HTTPS is required outside localhost development. The same public origin is allowed by the backend CORS configuration.
+1. Set backend `PUBLIC_CLIENT_URL=https://colin-and-colin.vercel.app` and `CLIENT_URL=https://colin-and-colin.vercel.app`. This is the production frontend confirmed by the user. Without an explicit PUBLIC_CLIENT_URL, invitations default to that same Vercel origin; an older custom domain or preview in CLIENT_URL does not replace it. Localhost CLIENT_URL remains available for development. HTTPS is required outside localhost development. Both invitation and clarification paths are built from the origin, so a configured /login suffix is removed.
 2. Retain existing frontend API configuration (`VITE_API_URL`, or the application's existing backend URL fallback), JWT configuration, MongoDB Atlas connection and Resend `RESEND_API_KEY` / `EMAIL_FROM`. Intake reuses them. MongoDB transactions require a replica set, as provided by Atlas.
 3. Confirm Render `TRUST_PROXY_HOPS` matches the actual trusted proxy chain (default 1 in production); incorrect configuration affects IP rate limits. Keep ingress and API HTTPS enabled.
 4. Open Intake Links → Privacy notice. Authorized management must supply and approve the notice, contact and retention statement before any new client link can be generated. Update the notice version when approved wording changes. Existing invitations retain the exact notice they originally presented.
@@ -119,7 +121,7 @@ cd colin-backend
 npm.cmd run verify:digital-intake
 ```
 
-Verified result: **16 backend verification groups passed**, the backend production build and focused frontend TypeScript check passed, and the frontend production build passed. The frontend build retains the existing large-chunk warning. **Eight local browser verification groups passed** for the flows described below.
+Verified result: **16 backend verification groups passed**, the backend production build and focused frontend TypeScript check passed, and the frontend production build passed. The frontend build retains the existing large-chunk warning. **Nine local browser verification groups passed**, including branded recovery screens for invalid HTML, incomplete configuration and network failures. The separate real-API browser flow is documented in [Public client intake verification](public-client-intake-verification.md).
 
 The 16 verification groups cover public URL fallback and HTTPS validation; Resend setup, error classification, confirmed send and retry deduplication; staff/notice permissions; unpredictable hashed tokens; expired/revoked/regenerated/invalid links; Individual/Company validation; document ownership and size limits; upload signatures and public storage denial; simultaneous final submissions; scoped review and download access; notification delivery with email disabled; administrative review and single-use clarification; simultaneous acceptance; complete questionnaire answer preservation and duplicate review; rejection; manual prospect editing/follow-up/reassignment; all configured stages and conversion guards; private file linking; non-conversion/temporary closure; ordinary file regression; audit token exclusion; and persistent rate limits.
 
@@ -135,15 +137,15 @@ The local browser script uses installed Edge (or `INTAKE_TEST_BROWSER`) with syn
 
 ## Public-link and email troubleshooting
 
-The reported old Vercel link was generated from the legacy CLIENT_URL fallback. Public links now use PUBLIC_CLIENT_URL explicitly, or the stable https://app.colinandcolin.com domain. An old preview address is not selected implicitly. An already-copied old hostname cannot be repaired by changing the database; after deploying the routing changes, generate or regenerate the invitation and copy its new URL.
+The user confirmed https://colin-and-colin.vercel.app/login as the staff application address. Public links now use PUBLIC_CLIENT_URL explicitly, or https://colin-and-colin.vercel.app by default. Client forms use /intake/form/:token at that origin, outside /login. The earlier app.colinandcolin.com recommendation was incorrect for this firm and is no longer the default. Already-copied URLs do not change when configuration changes; regenerate an invitation after the backend correction is released.
 
-The frontend Vercel configuration explicitly sets framework vite, the build command, outputDirectory build (matching vite.config.ts), and the standard /(.*) rewrite to /index.html. This lets direct /intake/form/:token and /intake/clarification/:token visits reach React, including refresh and anonymous visits. Existing asset files are served normally by Vercel. This follows [Vercel's Vite guidance](https://vercel.com/docs/frameworks/frontend/vite). A removed/unassigned hostname still requires a valid deployment/domain assignment in Vercel; a source-code rewrite cannot restore a deleted deployment. Requests to the two public hosts from this environment timed out or failed DNS, so the existing live routing could not be independently confirmed.
+The frontend Vercel configuration explicitly sets framework vite, the build command, outputDirectory build (matching vite.config.ts), and the standard /(.*) rewrite to /index.html. This lets direct /intake/form/:token and /intake/clarification/:token visits reach React, including refresh and anonymous visits. Existing asset files are served normally by Vercel. This follows [Vercel's Vite guidance](https://vercel.com/docs/frameworks/frontend/vite). A removed/unassigned hostname still requires a valid deployment/domain assignment in Vercel; a source-code rewrite cannot restore a deleted deployment. The current read-only audit confirms that the user-confirmed Vercel deployment serves the native public route and the live API permits its origin. A complete production submission remains unverified until explicitly authorized.
 
 The available backend .env contains neither RESEND_API_KEY nor EMAIL_FROM. This proves local email setup is incomplete; it does not establish which variables exist on the separate live Render service. The previous generic failure hid this distinction. The authenticated configuration response now includes safe delivery readiness (no secret values), and invitation sends report a specific code and corrective message for missing configuration, invalid sender/credentials, unverified domain, test-recipient restrictions, sending limits, provider errors and invalid recipients. Clarification requests expose the same safe diagnostics. Only a provider response with an email ID counts as a successful send; provider acceptance does not guarantee inbox delivery. Successful invitation sends record their token version, and provider idempotency keys protect retries from duplicate invitations.
 
 For live use, the administrator must deploy this frontend configuration to the correct Vercel project, deploy the backend changes to Render, and configure the existing Render service:
 
-- PUBLIC_CLIENT_URL=https://app.colinandcolin.com (or an explicitly chosen active frontend domain).
+- PUBLIC_CLIENT_URL=https://colin-and-colin.vercel.app and CLIENT_URL=https://colin-and-colin.vercel.app.
 - RESEND_API_KEY: a sending API key from the firm's Resend account.
 - EMAIL_FROM: a valid sender on a domain verified in that same Resend account, in mailbox or Display Name <mailbox> form.
 

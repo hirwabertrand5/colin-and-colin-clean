@@ -40,8 +40,9 @@ const allowedOrigins = new Set(
     process.env.PUBLIC_CLIENT_URL,
     'http://localhost:3000',
     'http://localhost:5173',
-    'https://app.colinandcolin.com', // Production frontend
-    'https://colin-and-colin.vercel.app', // Vercel deployment
+    'https://app.colinandcolin.com', // Legacy address retained for compatibility
+    'https://colin-and-colin.vercel.app', // User-confirmed production frontend
+    'https://colin-and-colin-t62y.vercel.app', // Existing production project alias
   ].filter(Boolean) as string[]
 );
 

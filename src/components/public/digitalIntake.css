@@ -216,3 +216,13 @@
 }
 
 .intake-invite-open-link{margin-top:18px}
+
+/* Public form touch targets and visible mobile actions. */
+.intake-public .intake-input { min-height: 44px; }
+.intake-public .intake-button { min-height: 44px; }
+.intake-public .intake-card { min-width: 0; }
+.intake-public h2 { scroll-margin-top: 20px; }
+@media(max-width:760px) {
+  .intake-public .intake-input { font-size: 16px; }
+  .intake-public .intake-form-footer { position: sticky; bottom: 0; z-index: 2; background: #fff; padding: 14px 0 max(14px, env(safe-area-inset-bottom)); box-shadow: 0 -10px 16px #fff; }
+}
