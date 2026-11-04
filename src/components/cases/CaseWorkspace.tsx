@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import CaseClientReportsTab from '../reports/CaseClientReportsTab';
 import CaseWorkflowTab from './CaseWorkflowTab';
 import CaseManagementTab from './CaseManagementTab';
+import EditCaseDialog from './EditCaseDialog';
 import {
   FileText,
   Upload,
@@ -76,13 +77,9 @@ import { getAssignmentUsers } from '../../services/userService';
 import { listExpensesForCase, PettyCashExpense } from '../../services/pettyCashService';
 import { getWorkflowForCase, WorkflowInstance, completeWorkflowStep } from '../../services/workflowInstanceService';
 import {
-  findMatchingWorkflowTemplate,
   getWorkflowTemplateById,
-  listActiveWorkflowTemplates,
   WorkflowTemplate,
 } from '../../services/workflowService';
-import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
-import { getRoleSuggestions } from '../../constants/partyRoles';
 import { getCasePracticePath } from '../../utils/caseLabels';
 import {
   CASE_WORKSPACE_TAB_SLUG,
@@ -93,7 +90,6 @@ import {
   caseMatchesAssigneeCanonical,
   formatCaseAssignedTo,
   getCaseAssignments,
-  setCaseAssignmentSlot,
 } from '../../utils/caseAssignments';
 import {
   formatDeadlineDateTime,
@@ -199,14 +195,6 @@ const getServicePathAccent = (caseType?: CaseData['caseType']) => {
   return 'bg-blue-50 text-blue-700 border-blue-200';
 };
 
-const CASE_ASSIGNMENT_ROLE_OPTIONS: Record<'initiator' | 'reviewer' | 'signerApprover', string[]> = {
-  initiator: ['intern', 'trainee_associate', 'associate'],
-  reviewer: ['associate', 'senior_associate'],
-  signerApprover: ['managing_partner', 'executive_managing_partner'],
-};
-
-const SERVICE_LEVEL_LABELS = ['Legal Service', 'Category', 'Practice Area', 'Service Line', 'Sub-category', 'Detail'];
-
 const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -239,18 +227,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       return {};
     }
   }, []);
-
-  const updateEditAssignmentSlot = (slot: 'initiator' | 'reviewer' | 'signerApprover', value: string) => {
-    setEditCaseData((prev) => {
-      if (!prev) return prev;
-      const caseAssignments = setCaseAssignmentSlot(prev.caseAssignments, slot, value);
-      return {
-        ...prev,
-        caseAssignments,
-        assignedTo: formatCaseAssignedTo({ caseAssignments, assignedTo: prev.assignedTo }),
-      };
-    });
-  };
 
   // Case data
   const [caseData, setCaseData] = useState<CaseData | null>(null);
@@ -480,16 +456,8 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   // Edit case modal
   const [showEditCase, setShowEditCase] = useState(false);
-  const [editCaseData, setEditCaseData] = useState<CaseData | null>(null);
-  const [partiesStructured, setPartiesStructured] = useState(false);
-  const [partiesList, setPartiesList] = useState<Array<{ name: string; role: string }>>([]);
-  const [editServicePath, setEditServicePath] = useState<string[]>([]);
-  const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplate[]>([]);
-  const [workflowTemplatesLoading, setWorkflowTemplatesLoading] = useState(false);
-  const [workflowTemplatesError, setWorkflowTemplatesError] = useState('');
   /** Template the case workflow instance actually follows (drives the checklist). */
   const [linkedWorkflowTemplate, setLinkedWorkflowTemplate] = useState<WorkflowTemplate | null>(null);
-  const editModalInitializedRef = useRef(false);
 
   // Billing
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -584,81 +552,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       .finally(() => setTemplateLoading(false));
   }, [caseData?.workflowTemplateId]);
 
-  // Edit modal bootstrapping: templates + decision-tree path.
-  // Initialized once per opening so typing in the form never resets the tree.
-  useEffect(() => {
-    if (!showEditCase) {
-      editModalInitializedRef.current = false;
-      return;
-    }
-
-    if (!editModalInitializedRef.current) {
-      editModalInitializedRef.current = true;
-
-      setWorkflowTemplatesLoading(true);
-      setWorkflowTemplatesError('');
-      listActiveWorkflowTemplates()
-        .then((data) => setWorkflowTemplates(Array.isArray(data) ? data : []))
-        .catch((e: any) => {
-          setWorkflowTemplates([]);
-          setWorkflowTemplatesError(e?.message || 'Failed to load workflow templates');
-        })
-        .finally(() => setWorkflowTemplatesLoading(false));
-
-      const ids = (editCaseData?.legalServicePath || []).map((x) => x.id).filter(Boolean);
-      setEditServicePath(ids);
-      // initialize parties structured state from editCaseData
-      setPartiesStructured(false);
-      setPartiesList(editCaseData?.parties ? [{ name: editCaseData.parties, role: '' }] : []);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showEditCase]);
-
-  // Keep the saved Legal Service classification in sync with the decision-tree
-  // edits. Previously the tree selection lived only in `editServicePath` and was
-  // never written back into `editCaseData`, so classification changes were
-  // silently dropped on save. The Case Type only follows the tree when it
-  // actually changed (so a manually chosen template is never overridden).
-  useEffect(() => {
-    if (!showEditCase || !editModalInitializedRef.current) return;
-    const nodes: ServiceNode[] = [];
-    let currentNodes = LEGAL_SERVICES_TREE;
-    for (const id of editServicePath) {
-      const match = currentNodes.find((node) => node.id === id);
-      if (!match) break;
-      nodes.push(match);
-      currentNodes = match.children || [];
-    }
-    const legalServicePath = nodes.map((node) => ({ id: node.id, label: node.label }));
-    let derivedCaseType: CaseData['caseType'] | null = null;
-    for (let i = nodes.length - 1; i >= 0; i -= 1) {
-      if (nodes[i].caseType) {
-        derivedCaseType = nodes[i].caseType as CaseData['caseType'];
-        break;
-      }
-    }
-    // The workflow/template dropdown is manual. Only suggest the derived case
-    // type while the user has not picked a template for this edit session; once
-    // a template is set, the template (not the tree) owns caseType/workflow.
-    const templateSelected = Boolean(editCaseData?.workflowTemplateId);
-    setEditCaseData((prev) => {
-      if (!prev) return prev;
-      const prevPath = prev.legalServicePath || [];
-      const samePath =
-        prevPath.length === legalServicePath.length &&
-        prevPath.every((item, index) => item.id === legalServicePath[index]?.id);
-      const sameCaseType = !derivedCaseType || prev.caseType === derivedCaseType || templateSelected;
-      if (samePath && sameCaseType) return prev;
-      return {
-        ...prev,
-        legalServicePath,
-        ...(!templateSelected && derivedCaseType && prev.caseType !== derivedCaseType
-          ? { caseType: derivedCaseType }
-          : {}),
-      };
-    });
-  }, [showEditCase, editServicePath, editCaseData?.workflowTemplateId]);
-
   const stageChecklistItems = useMemo(() => {
     if (!workflowInstance) return [];
     const stages = new Map<string, typeof workflowInstance.steps>();
@@ -673,139 +566,6 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       return { stageKey, steps, allCompleted, completedCount };
     });
   }, [workflowInstance]);
-
-  // ----------------------------
-  // Edit Case: decision tree + template suggestion
-  // ----------------------------
-  const findServiceNode = (nodes: ServiceNode[], id: string) => nodes.find((node) => node.id === id);
-
-  const selectedEditServiceNodes = useMemo(() => {
-    const nodes: ServiceNode[] = [];
-    let currentNodes = LEGAL_SERVICES_TREE;
-
-    for (const id of editServicePath) {
-      const match = findServiceNode(currentNodes, id);
-      if (!match) break;
-      nodes.push(match);
-      currentNodes = match.children || [];
-    }
-
-    return nodes;
-  }, [editServicePath]);
-
-  const resolveCaseTypeFromSelection = (nodes: ServiceNode[]): CaseData['caseType'] | null => {
-    for (let i = nodes.length - 1; i >= 0; i -= 1) {
-      if ((nodes[i] as any).caseType) return (nodes[i] as any).caseType as CaseData['caseType'];
-    }
-    return null;
-  };
-
-  const resolveSuggestedMatterType = (nodes: ServiceNode[]): string | null => {
-    for (let i = nodes.length - 1; i >= 0; i -= 1) {
-      const suggested = (nodes[i] as any).suggestedMatterTypes?.[0];
-      if (suggested) return suggested;
-    }
-    return null;
-  };
-
-  const editServiceLevels = useMemo(() => {
-    const levels: Array<{
-      label: string;
-      options: ServiceNode[];
-      value: string;
-      placeholder: string;
-    }> = [];
-
-    let currentOptions = LEGAL_SERVICES_TREE;
-    let depth = 0;
-
-    while (currentOptions.length > 0) {
-      levels.push({
-        label: SERVICE_LEVEL_LABELS[depth] || `Level ${depth + 1}`,
-        options: currentOptions,
-        value: editServicePath[depth] || '',
-        placeholder: depth === 0 ? 'Select...' : `Select ${SERVICE_LEVEL_LABELS[depth - 1].toLowerCase()} first`,
-      });
-
-      const selectedNode = editServicePath[depth] ? findServiceNode(currentOptions, editServicePath[depth]) : undefined;
-      if (!selectedNode?.children?.length) break;
-
-      currentOptions = selectedNode.children;
-      depth += 1;
-    }
-
-    return levels;
-  }, [editServicePath]);
-
-  const updateEditServicePathAtLevel = (levelIndex: number, value: string) => {
-    setEditServicePath((prev) => {
-      const next = prev.slice(0, levelIndex);
-      if (value) next[levelIndex] = value;
-      return next;
-    });
-  };
-
-  useEffect(() => {
-    if (!showEditCase) return;
-    if (!editCaseData) return;
-
-    const ct = resolveCaseTypeFromSelection(selectedEditServiceNodes);
-    const suggested = resolveSuggestedMatterType(selectedEditServiceNodes);
-    const legalServicePath = selectedEditServiceNodes.map((node) => ({ id: node.id, label: node.label }));
-
-    setEditCaseData((prev) => {
-      if (!prev) return prev;
-
-      const prevIds = (prev.legalServicePath || []).map((x) => x.id);
-      const nextIds = legalServicePath.map((x) => x.id);
-      const samePath = prevIds.length === nextIds.length && prevIds.every((id, i) => id === nextIds[i]);
-
-      const nextCaseType = ct || prev.caseType;
-      const nextWorkflow = suggested || prev.workflow;
-
-      if (samePath && nextCaseType === prev.caseType && nextWorkflow === prev.workflow) return prev;
-
-      return {
-        ...prev,
-        ...(ct ? { caseType: ct } : {}),
-        ...(samePath ? {} : { legalServicePath }),
-        ...(suggested ? { workflow: suggested } : {}),
-      };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEditServiceNodes, showEditCase]);
-
-  useEffect(() => {
-    if (!showEditCase) return;
-    if (!editCaseData) return;
-    if (workflowTemplatesLoading) return;
-
-    const suggested = resolveSuggestedMatterType(selectedEditServiceNodes);
-    const ct = resolveCaseTypeFromSelection(selectedEditServiceNodes);
-    if (!suggested || !ct) return;
-
-    // Keep the case on the canonical template for the suggested matter type
-    // (published, newest version, most recently updated). This also replaces an
-    // older duplicate, so the checklist always matches Templates settings.
-    const match = findMatchingWorkflowTemplate(workflowTemplates, suggested, ct);
-    if (!match) return;
-
-    const currentTemplate = workflowTemplates.find((t) => t._id === editCaseData.workflowTemplateId);
-    if (currentTemplate && currentTemplate._id === match._id) return;
-
-    setEditCaseData((prev) => {
-      if (!prev) return prev;
-      if (prev.workflowTemplateId === match._id && prev.caseType === match.caseType && prev.workflow === match.matterType)
-        return prev;
-      return {
-        ...prev,
-        workflowTemplateId: match._id,
-        caseType: match.caseType,
-        workflow: match.matterType,
-      };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEditServiceNodes, workflowTemplates, workflowTemplatesLoading, showEditCase]);
 
   // ----------------------------
   // Fetch staff list for task coordination actions.
@@ -1098,53 +858,11 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   // ----------------------------
   // Edit case
   // ----------------------------
-  const handleEditCase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editCaseData?._id) return;
-
-    if (!canManageCase) return;
-
-    try {
-      const finalParties = partiesStructured ? partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') : editCaseData.parties;
-      // Never send server-owned fields back: a stale _id / timestamps /
-      // workflow state / take-request lock either throws ("Modifying path
-      // `_id` is not allowed") or silently clobbers live workflow data, which
-      // is exactly why saves looked like they did nothing.
-      const {
-        _id: _ignoredEditId,
-        createdAt: _ignoredEditCreatedAt,
-        updatedAt: _ignoredEditUpdatedAt,
-        __v: _ignoredEditVersion,
-        workflowProgress: _ignoredEditProgress,
-        workflowInstanceId: _ignoredEditInstanceId,
-        takeRequestState: _ignoredEditTakeState,
-        ...editableFields
-      } = editCaseData as CaseData & { createdAt?: unknown; updatedAt?: unknown; __v?: unknown };
-      void _ignoredEditId;
-      void _ignoredEditCreatedAt;
-      void _ignoredEditUpdatedAt;
-      void _ignoredEditVersion;
-      void _ignoredEditProgress;
-      void _ignoredEditInstanceId;
-      void _ignoredEditTakeState;
-      // The Contract Value input only feeds the planned amount. The backend
-      // applies it through its own workflow-progress flow, so send just that
-      // slice (a full stale workflowProgress object is ignored by design).
-      const plannedAmount = Number(String(editCaseData.budget ?? '').replace(/[^\d.]/g, ''));
-      const payload = {
-        ...editableFields,
-        parties: finalParties,
-        ...(Number.isFinite(plannedAmount) && plannedAmount > 0
-          ? { workflowProgress: { plannedValue: { amount: plannedAmount, currency: 'RWF' as const } } }
-          : {}),
-      } as CaseData;
-      await updateCase(editCaseData._id, payload);
-      setShowEditCase(false);
-      const updated = await getCaseById(editCaseData._id);
-      setCaseData(updated);
-    } catch (err: any) {
-      alert(err.message || 'Failed to update case');
-    }
+  const handleEditCase = async (payload: Partial<CaseData>) => {
+    if (!caseData?._id || !canManageCase) return;
+    const updated = await updateCase(caseData._id, payload);
+    setCaseData(updated);
+    setShowEditCase(false);
   };
 
   const handleDeleteCase = async () => {
@@ -1563,22 +1281,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
               <button
                 className="px-5 py-2 border border-gray-300 rounded-lg text-base text-gray-700 hover:bg-gray-50 font-medium"
-                onClick={() => {
-                  setEditCaseData(
-                    caseData
-                      ? {
-                          ...caseData,
-                          caseAssignments: {
-                            initiator: caseData.caseAssignments?.initiator || caseData.assignedTo || '',
-                            reviewer: caseData.caseAssignments?.reviewer || '',
-                            signerApprover: caseData.caseAssignments?.signerApprover || '',
-                          },
-                          assignedTo: formatCaseAssignedTo(caseData),
-                        }
-                      : caseData
-                  );
-                  setShowEditCase(true);
-                }}
+                onClick={() => setShowEditCase(true)}
               >
                 Edit Case
               </button>
@@ -3547,318 +3250,17 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* Edit Case Modal (MD/Exec only) */}
-      {showEditCase && editCaseData && canManageCase && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-lg w-full flex flex-col" style={{ maxHeight: '90vh' }}>
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-semibold text-gray-900">Edit Case</h3>
-            </div>
-
-            <form onSubmit={handleEditCase} className="flex-1 overflow-y-auto space-y-4 p-6">
-              <div>
-                {/* Hide case number for transactional cases */}
-                {editCaseData.caseType !== 'Transactional Cases' && (
-                  <>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Case No.</label>
-                    <input
-                      type="text"
-                      value={editCaseData.caseNo}
-                      onChange={(e) => setEditCaseData((c) => (c ? { ...c, caseNo: e.target.value } : c))}
-                      required
-                      className="w-full px-3 py-2 border border-gray-300 rounded"
-                    />
-                  </>
-                )}
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700">Parties</label>
-                  <div className="text-xs text-gray-500">
-                    <label className="inline-flex items-center gap-2">
-                      <input type="checkbox" className="form-checkbox" checked={partiesStructured} onChange={(e) => setPartiesStructured(e.target.checked)} />
-                      <span>Structured</span>
-                    </label>
-                  </div>
-                </div>
-
-                {!partiesStructured ? (
-                  <input
-                    type="text"
-                    value={editCaseData.parties}
-                    onChange={(e) => setEditCaseData((c) => (c ? { ...c, parties: e.target.value } : c))}
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded"
-                  />
-                ) : (
-                  <div className="space-y-3">
-                    {partiesList.map((p, idx) => (
-                      <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                        <input
-                          className="col-span-6 px-3 py-2 border border-gray-300 rounded"
-                          placeholder="Party name"
-                          value={p.name}
-                          onChange={(e) => setPartiesList((prev) => prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)))}
-                        />
-                        <select
-                          value={p.role}
-                          onChange={(e) => setPartiesList((prev) => prev.map((x, i) => (i === idx ? { ...x, role: e.target.value } : x)))}
-                          className="col-span-5 px-3 py-2 border border-gray-300 rounded bg-white"
-                        >
-                          <option value="">Select role...</option>
-                          {getRoleSuggestions({ caseType: resolveCaseTypeFromSelection(selectedEditServiceNodes), sectorLabel: selectedEditServiceNodes[0]?.label, matterType: editCaseData.workflow }).map((r) => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
-                        <div className="col-span-1">
-                          <button type="button" onClick={() => setPartiesList((prev) => prev.filter((_, i) => i !== idx))} className="px-2 py-1 border rounded text-sm text-red-600">Remove</button>
-                        </div>
-                      </div>
-                    ))}
-
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => setPartiesList((prev) => [...prev, { name: '', role: '' }])} className="px-3 py-2 border rounded text-sm bg-gray-50">Add party</button>
-                      <button type="button" onClick={() => setEditCaseData((c) => (c ? { ...c, parties: partiesList.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(' ; ') } : c))} className="px-3 py-2 border rounded text-sm bg-gray-50">Save as text</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Case Type</label>
-                <select
-                  value={editCaseData.caseType}
-                  onChange={(e) =>
-                    setEditCaseData((c) =>
-                      c ? { ...c, caseType: e.target.value as CaseData['caseType'] } : c
-                    )
-                  }
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                >
-                  <option value="Transactional Cases">Transactional Cases</option>
-                  <option value="Litigation Cases">Litigation Cases</option>
-                  <option value="Labor Cases">Labor Cases</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-2">Auto-updates when you change the Legal Service classification.</p>
-              </div>
-
-              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-                <div className="text-sm font-semibold text-gray-900 mb-3">Legal Service Classification</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {editServiceLevels.map((level, index) => (
-                    <div key={`${level.label}-${index}`}>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">{level.label}</label>
-                      <select
-                        value={level.value}
-                        onChange={(e) => updateEditServicePathAtLevel(index, e.target.value)}
-                        disabled={index > 0 && !editServicePath[index - 1]}
-                        className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 disabled:opacity-60"
-                      >
-                        <option value="">
-                          {index === 0 || editServicePath[index - 1] ? 'Select...' : level.placeholder}
-                        </option>
-                        {level.options.map((node) => (
-                          <option key={node.id} value={node.id}>
-                            {node.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <div className="text-sm font-semibold text-gray-900">Assigned To</div>
-                <p className="text-xs text-gray-500 mt-1">Choose the initiator, reviewer, and signer/approver for this case.</p>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {[
-                    {
-                      key: 'initiator' as const,
-                      label: 'Initiator',
-                      hint: 'Intern / Junior',
-                      roles: CASE_ASSIGNMENT_ROLE_OPTIONS.initiator,
-                    },
-                    {
-                      key: 'reviewer' as const,
-                      label: 'Reviewer',
-                      hint: 'Associate / Senior Associate',
-                      roles: CASE_ASSIGNMENT_ROLE_OPTIONS.reviewer,
-                    },
-                    {
-                      key: 'signerApprover' as const,
-                      label: 'Signer / Approver',
-                      hint: 'Managing Partner',
-                      roles: CASE_ASSIGNMENT_ROLE_OPTIONS.signerApprover,
-                    },
-                  ].map((field) => {
-                    const currentValue = editCaseData.caseAssignments?.[field.key] || '';
-                    const usersToRender = staffUsers;
-                    return (
-                      <div key={field.key}>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>
-                        <div className="mb-2 text-xs text-gray-500">{field.hint}</div>
-                        <select
-                          value={currentValue}
-                          onChange={(e) => updateEditAssignmentSlot(field.key, e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
-                          disabled={staffLoading}
-                          required
-                        >
-                          <option value="">{staffLoading ? 'Loading staff...' : 'Select staff'}</option>
-                          {usersToRender.map((u) => (
-                            <option key={u._id} value={u.name}>
-                              {u.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="mt-3 text-xs text-gray-500">{editCaseData.assignedTo || 'No assignees selected yet.'}</div>
-                {staffError && <p className="text-xs text-red-600 mt-2">{staffError}</p>}
-              </div>
-
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="text-sm font-semibold text-gray-900">Workflow status</div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {editCaseData.workflowProgress?.status === 'Completed'
-                    ? 'Completed'
-                    : editCaseData.workflowProgress?.currentStepTitle || 'In Progress'}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Contract Value (RWF)</label>
-                <input
-                  value={String(editCaseData.workflowProgress?.plannedValue?.amount ?? editCaseData.budget ?? '')}
-                  onChange={(e) => {
-                    const amount = Number(String(e.target.value).replace(/[^\d.]/g, ''));
-                    setEditCaseData((c) =>
-                      c
-                        ? {
-                            ...c,
-                            budget: e.target.value,
-                            workflowProgress: {
-                              ...(c.workflowProgress || {}),
-                              plannedValue: {
-                                amount: Number.isFinite(amount) ? amount : 0,
-                                currency: 'RWF' as const,
-                              },
-                            },
-                            billingSettings: {
-                              ...(c.billingSettings || {}),
-                              currency: 'RWF' as const,
-                              prepaidTotal: 0,
-                              prepaidRemaining: 0,
-                            },
-                          }
-                        : c
-                    );
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                  placeholder="1000000"
-                />
-              </div>
-
-              <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-4">
-                <div>
-                  <div className="text-sm font-semibold text-gray-900">Workflow template</div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {editCaseData.workflowTemplateId
-                      ? 'The workflow template is locked after the matter is created. Changing the start date will re-schedule the existing workflow steps.'
-                      : 'Select a workflow template for this matter.'}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Workflow Start Date</label>
-                    <input
-                      type="date"
-                      value={
-                        editCaseData.workflowStartDate
-                          ? new Date(editCaseData.workflowStartDate).toISOString().slice(0, 10)
-                          : ''
-                      }
-                      onChange={(e) =>
-                        setEditCaseData((c) =>
-                          c ? { ...c, workflowStartDate: e.target.value } : c
-                        )
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Workflow Template</label>
-                    <select
-                      value={editCaseData.workflowTemplateId || ''}
-                      onChange={(e) => {
-                        const templateId = e.target.value;
-                        const t = workflowTemplates.find((x) => x._id === templateId);
-                        setEditCaseData((c) =>
-                          c
-                            ? {
-                                ...c,
-                                workflowTemplateId: templateId,
-                                ...(t ? { caseType: t.caseType, workflow: t.matterType } : {}),
-                              }
-                            : c
-                        );
-                      }}
-                      disabled={workflowTemplatesLoading || Boolean(editCaseData.workflowTemplateId)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded bg-white disabled:bg-gray-100 disabled:text-gray-500"
-                      title={
-                        editCaseData.workflowTemplateId
-                          ? 'The workflow template is locked after the matter is created.'
-                          : undefined
-                      }
-                    >
-                      <option value="">
-                        {workflowTemplatesLoading ? 'Loading templates...' : 'Select workflow template'}
-                      </option>
-                      {workflowTemplates.map((t) => (
-                        <option key={t._id} value={t._id}>
-                          {t.matterType}
-                        </option>
-                      ))}
-                    </select>
-                    {workflowTemplatesError ? (
-                      <p className="text-xs text-red-600 mt-2">{workflowTemplatesError}</p>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Case Summary</label>
-                <textarea
-                  value={editCaseData.description}
-                  onChange={(e) => setEditCaseData((c) => (c ? { ...c, description: e.target.value } : c))}
-                  rows={2}
-                  className="w-full px-3 py-2 border border-gray-300 rounded"
-                />
-              </div>
-
-              <div className="flex gap-3 mt-6 sticky bottom-0 bg-white pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowEditCase(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="flex-1 px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700">
-                  Save Changes
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {showEditCase && caseData && canManageCase && (
+        <EditCaseDialog
+          key={caseData._id}
+          matter={caseData}
+          templateName={linkedWorkflowTemplate?.matterType || workflowTemplate?.matterType}
+          staffUsers={staffUsers}
+          staffLoading={staffLoading}
+          staffError={staffError}
+          onClose={() => setShowEditCase(false)}
+          onSave={handleEditCase}
+        />
       )}
     </div>
   );

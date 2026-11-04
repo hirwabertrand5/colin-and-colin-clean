@@ -1204,6 +1204,23 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     const before: any = await Case.findById(req.params.id);
     if (!before) return res.status(404).json({ message: 'Case not found.' });
 
+    // Case updates accept plain fields, not MongoDB operators or dotted paths.
+    // This also prevents bypassing the classification lock through $set/$unset.
+    if (Object.keys(req.body).some(key => key.startsWith('$') || key.includes('.'))) {
+      return res.status(400).json({ message: 'Case updates must use plain field names.' });
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'legalServicePath')) {
+      const savedPath = (before.legalServicePath || []).map((item: any) => ({ id: item.id, label: item.label }));
+      const requestedPath = Array.isArray(req.body.legalServicePath)
+        ? req.body.legalServicePath.map((item: any) => ({ id: item?.id, label: item?.label }))
+        : null;
+      if (JSON.stringify(savedPath) !== JSON.stringify(requestedPath)) {
+        return res.status(400).json({
+          message: 'Legal Service Classification is locked after matter creation and cannot be changed.',
+        });
+      }
+    }
+
     const beforeTemplateId = before.workflowTemplateId ? String(before.workflowTemplateId) : '';
     const nextTemplateId = (req.body as any)?.workflowTemplateId ? String((req.body as any).workflowTemplateId) : '';
     const didChangeTemplate = Boolean(nextTemplateId && nextTemplateId !== beforeTemplateId);
@@ -1252,6 +1269,8 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     delete updatePayload.updatedAt;
     delete updatePayload.__v;
     delete updatePayload.workflowInstanceId;
+    // Keep the original creation-time labels and IDs, including retired services.
+    delete updatePayload.legalServicePath;
     // Retainer linkage is changed only by /retainers/cases/:caseId/link so a
     // stale Edit Case form can never bypass balance validation or overwrite a
     // retainer snapshot.
@@ -1413,7 +1432,6 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
       if (req.body.parties && req.body.parties !== before.parties) changes.push(`Parties changed`);
       if (req.body.caseType && req.body.caseType !== before.caseType) changes.push(`Case type changed`);
       if (req.body.matterType && req.body.matterType !== before.matterType) changes.push(`Matter type changed`);
-      if (req.body.legalServicePath) changes.push(`Legal service classification updated`);
       if ((req.body as any)?.workflowTemplateId && String((req.body as any).workflowTemplateId) !== beforeTemplateId)
         changes.push(`Workflow template updated`);
       if ((req.body as any)?.workflowStartDate) changes.push(`Workflow start date updated`);

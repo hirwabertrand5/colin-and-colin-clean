@@ -2614,6 +2614,92 @@ html {
   color: #c3d5ee;
 }
 
+/* Case editing shares the retainer form system and keeps saved values legible. */
+.case-edit-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 1001;
+  width: min(calc(100% - 3rem), 56rem);
+  margin: 0;
+  transform: translate(-50%, -50%);
+}
+
+.case-edit-dialog .case-edit-readonly {
+  background: #f1f5f9;
+  border-color: #d5dfeb;
+  color: #334155;
+}
+
+.case-edit-assignment-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.case-edit-parties {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.case-edit-structured-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.8rem;
+}
+
+.case-edit-party-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.case-edit-locked-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.case-edit-locked-heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: #64748b;
+  font-size: 0.73rem;
+  font-weight: 600;
+}
+
+.case-edit-error {
+  margin-top: 0.75rem;
+  color: #b91c1c;
+  font-size: 0.84rem;
+}
+
+.case-edit-save-error {
+  margin: 1rem 1.75rem;
+}
+
+.dark .case-edit-dialog .case-edit-readonly {
+  background: #223149;
+  border-color: #475a75;
+  color: #e2e8f0;
+}
+
+.dark .case-edit-locked-heading > span { color: #b8c7da; }
+.dark .case-edit-error { color: #fca5a5; }
+
+@media (max-width: 640px) {
+  .case-edit-dialog { width: calc(100% - 1.5rem); }
+  .case-edit-dialog .retainer-form-header,
+  .case-edit-dialog .retainer-form-section,
+  .case-edit-dialog .retainer-form-footer { padding: 1rem; }
+  .case-edit-dialog .retainer-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .case-edit-party-row { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Retainer portfolio page */
 .retainer-page {
   max-width: 1500px;

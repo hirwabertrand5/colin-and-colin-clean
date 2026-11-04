@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 
-/** Shared fields and option cards used by the retainer and staff TPA forms. */
+/** Shared fields and option cards used by the matter, retainer, and staff TPA forms. */
 export function StructuredFormField({ label, children, required = false, hint, wide = false }: {
   label: string; children: ReactNode; required?: boolean; hint?: string; wide?: boolean;
 }) {
