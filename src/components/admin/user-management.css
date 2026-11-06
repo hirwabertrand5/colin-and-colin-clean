@@ -1,0 +1,34 @@
+.user-account-edit-dialog {
+  width: min(100%, 30rem);
+  outline: none;
+}
+
+.user-account-edit-dialog .user-account-edit-fields {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.user-account-edit-error {
+  padding: .75rem 1rem;
+  border: 1px solid #fecaca;
+  border-radius: .5rem;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: .875rem;
+  overflow-wrap: anywhere;
+}
+
+.dark .user-account-edit-error {
+  border-color: #834252;
+  background: #421f2a;
+  color: #fecdd3;
+}
+
+@media (max-width: 640px) {
+  .user-account-edit-dialog .retainer-form-header,
+  .user-account-edit-dialog .retainer-form-section,
+  .user-account-edit-dialog .retainer-form-footer {
+    padding: 1rem;
+  }
+}

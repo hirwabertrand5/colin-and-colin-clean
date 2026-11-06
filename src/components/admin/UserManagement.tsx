@@ -1,6 +1,7 @@
-import TpaManagement, { TpaManagementDialog } from './TpaManagement';
+import { TpaManagementDialog } from './TpaManagement';
+import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { Search, Plus, Edit, UserPlus, Power, PowerOff, Key, Trash2 } from 'lucide-react';
+import { Search, Plus, Edit, UserPlus, Power, PowerOff, Key, Trash2, X } from 'lucide-react';
 import usePageTitle from '../../hooks/usePageTitle';
 import {
   getAllUsers,
@@ -15,6 +16,8 @@ import {
 import SortableHeader from '../ui/SortableHeader';
 import TableExport from '../ui/TableExport';
 import { sortRows, SortDir } from '../../utils/tableSort';
+import { StructuredFormField } from '../ui/StructuredForm';
+import './user-management.css';
 
 const ROLE_OPTIONS = [
   { value: 'intern', label: 'Intern' },
@@ -64,9 +67,9 @@ export default function UserManagement() {
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [tpaUser, setTpaUser] = useState<User | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showResetModal, setShowResetModal] = useState(false);
+  const [accountModal, setAccountModal] = useState<'add' | 'edit' | 'reset' | null>(null);
+  const [savingUser, setSavingUser] = useState(false);
+  const editTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -98,6 +101,16 @@ export default function UserManagement() {
 
   // ✅ Now Executive Assistant has full access like Managing Director
   const canManageUsers = currentRole === 'managing_director' || currentRole === 'executive_assistant';
+
+  const openAccountModal = (kind: 'add' | 'edit' | 'reset', user?: User) => {
+    setTpaUser(null);
+    setError('');
+    setSuccess('');
+    setSelectedUser(user || null);
+    if (kind === 'edit' && user) setEditForm({ name: user.name, email: user.email, role: user.role });
+    if (kind === 'reset') setResetPassword('');
+    setAccountModal(kind);
+  };
 
   // Fetch users on mount
   useEffect(() => {
@@ -149,7 +162,7 @@ export default function UserManagement() {
       setSuccess('User created successfully!');
       setUsers([...users, newUser]);
       setForm({ name: '', email: '', role: 'managing_director', password: '' });
-      setShowAddModal(false);
+      setAccountModal(null);
     } catch (err: any) {
       setError(err.message);
     }
@@ -159,16 +172,22 @@ export default function UserManagement() {
     e.preventDefault();
     if (!canManageUsers) return;
     if (!selectedUser) return;
+    if (savingUser) return;
 
     setError('');
     setSuccess('');
+    setSavingUser(true);
     try {
-      await editUser(selectedUser._id, editForm);
-      setUsers(users.map(u => (u._id === selectedUser._id ? { ...u, ...editForm } as any : u)));
+      const updatedUser = await editUser(selectedUser._id, {
+        name: editForm.name || '', email: editForm.email || '', role: editForm.role || '',
+      });
+      setUsers(current => current.map(user => user._id === updatedUser._id ? updatedUser : user));
       setSuccess('User updated successfully!');
-      setShowEditModal(false);
+      setAccountModal(null);
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setSavingUser(false);
     }
   };
 
@@ -182,7 +201,7 @@ export default function UserManagement() {
     try {
       await resetUserPassword(selectedUser._id, resetPassword);
       setSuccess('Password reset successfully!');
-      setShowResetModal(false);
+      setAccountModal(null);
       setResetPassword('');
     } catch (err: any) {
       setError(err.message);
@@ -333,10 +352,15 @@ export default function UserManagement() {
             <p className="text-gray-600">Manage firm user accounts and system access</p>
           </div>
 
-          {['managing_partner', 'managing_director', 'executive_assistant'].includes(currentRole || '') && <select aria-label="Manage staff TPA" className="border rounded p-2" value="" onChange={e => setTpaUser(users.find(u => u._id === e.target.value) || null)}><option value="">Manage Staff TPA...</option>{users.map(u => <option key={u._id} value={u._id}>{u.name}</option>)}</select>}
+          {['managing_partner', 'managing_director', 'executive_assistant'].includes(currentRole || '') && <select aria-label="Manage staff TPA" className="border rounded p-2" value="" onChange={e => {
+            setAccountModal(null);
+            setSelectedUser(null);
+            setError('');
+            setTpaUser(users.find(u => u._id === e.target.value) || null);
+          }}><option value="">Manage Staff TPA...</option>{users.map(u => <option key={u._id} value={u._id}>{u.name}</option>)}</select>}
           {canManageUsers && (
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => openAccountModal('add')}
               className="inline-flex items-center px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700"
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -441,7 +465,7 @@ export default function UserManagement() {
                           <button
                             className="p-1 text-gray-600 hover:text-blue-600"
                             title="Reset Password"
-                            onClick={() => { setSelectedUser(u); setShowResetModal(true); }}
+                            onClick={() => openAccountModal('reset', u)}
                           >
                             <Key className="w-4 h-4" />
                           </button>
@@ -449,10 +473,9 @@ export default function UserManagement() {
                           <button
                             className="p-1 text-gray-600 hover:text-gray-900"
                             title="Edit"
-                            onClick={() => {
-                              setSelectedUser(u);
-                              setEditForm({ name: u.name, email: u.email, role: u.role });
-                              setShowEditModal(true);
+                            onClick={event => {
+                              editTriggerRef.current = event.currentTarget;
+                              openAccountModal('edit', u);
                             }}
                           >
                             <Edit className="w-4 h-4" />
@@ -524,7 +547,7 @@ export default function UserManagement() {
       </div>
 
       {/* Add User Modal */}
-      {canManageUsers && showAddModal && (
+      {canManageUsers && accountModal === 'add' && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <div className="flex items-center mb-4">
@@ -592,7 +615,7 @@ export default function UserManagement() {
               <div className="flex gap-3 mt-6">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => setAccountModal(null)}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
                 >
                   Cancel
@@ -610,73 +633,52 @@ export default function UserManagement() {
       )}
 
       {/* Edit User Modal */}
-      {canManageUsers && showEditModal && selectedUser && (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex items-center mb-4">
-              <Edit className="w-6 h-6 text-gray-700 mr-2" />
-              <h3 className="text-lg font-semibold text-gray-900">Edit User</h3>
-            </div>
-
-            <form onSubmit={handleEditUser} className="space-y-4">
-              <TpaManagement userId={selectedUser._id} />
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                <input
-                  type="text"
-                  value={editForm.name || ''}
-                  onChange={(e) => setEditForm(f => ({ ...f, name: e.target.value }))}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-                <input
-                  type="email"
-                  value={editForm.email || ''}
-                  onChange={(e) => setEditForm(f => ({ ...f, email: e.target.value }))}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <select
-                  value={editForm.role || ''}
-                  onChange={(e) => setEditForm(f => ({ ...f, role: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                >
-                  {ROLE_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {canManageUsers && accountModal === 'edit' && selectedUser && (
+        <Dialog.Root open onOpenChange={open => { if (!open && !savingUser) setAccountModal(null); }}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="retainer-modal-backdrop">
+              <Dialog.Content className="retainer-modal-card retainer-form user-account-edit-dialog"
+                onEscapeKeyDown={event => { if (savingUser) event.preventDefault(); }}
+                onPointerDownOutside={event => { if (savingUser) event.preventDefault(); }}
+                onCloseAutoFocus={event => { event.preventDefault(); editTriggerRef.current?.focus(); }}>
+                <header className="retainer-form-header">
+                  <div>
+                    <Dialog.Title asChild><h2>Edit User</h2></Dialog.Title>
+                    <Dialog.Description asChild><p>Update {selectedUser.name}&apos;s account details.</p></Dialog.Description>
+                  </div>
+                  <Dialog.Close asChild><button type="button" disabled={savingUser} className="retainer-icon-close" aria-label="Close edit user"><X size={18} /></button></Dialog.Close>
+                </header>
+                <form onSubmit={handleEditUser} aria-busy={savingUser}>
+                  <fieldset disabled={savingUser} className="user-account-edit-fields retainer-form-section">
+                    {error && <div role="alert" className="user-account-edit-error">{error}</div>}
+                    <StructuredFormField label="Full Name" required>
+                      <input type="text" autoComplete="name" value={editForm.name || ''} required className="retainer-form-control"
+                        onChange={event => setEditForm(current => ({ ...current, name: event.target.value }))} />
+                    </StructuredFormField>
+                    <StructuredFormField label="Email Address" required>
+                      <input type="email" autoComplete="email" value={editForm.email || ''} required className="retainer-form-control"
+                        onChange={event => setEditForm(current => ({ ...current, email: event.target.value }))} />
+                    </StructuredFormField>
+                    <StructuredFormField label="Role" required>
+                      <select value={editForm.role || ''} required className="retainer-form-control"
+                        onChange={event => setEditForm(current => ({ ...current, role: event.target.value }))}>
+                        {ROLE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </StructuredFormField>
+                  </fieldset>
+                  <footer className="retainer-form-footer">
+                    <Dialog.Close asChild><button type="button" disabled={savingUser} className="retainer-button retainer-button-secondary">Cancel</button></Dialog.Close>
+                    <button type="submit" disabled={savingUser} className="retainer-button retainer-button-primary">{savingUser ? 'Saving…' : 'Save Changes'}</button>
+                  </footer>
+                </form>
+              </Dialog.Content>
+            </Dialog.Overlay>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
 
       {/* Reset Password Modal */}
-      {canManageUsers && showResetModal && selectedUser && (
+      {canManageUsers && accountModal === 'reset' && selectedUser && (
         <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <div className="flex items-center mb-4">
@@ -701,7 +703,7 @@ export default function UserManagement() {
               <div className="flex gap-3 mt-6">
                 <button
                   type="button"
-                  onClick={() => setShowResetModal(false)}
+                  onClick={() => setAccountModal(null)}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
                 >
                   Cancel
