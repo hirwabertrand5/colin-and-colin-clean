@@ -10,6 +10,8 @@ import Task from '../models/taskModel';
 import User from '../models/userModel';
 import { writeAudit } from '../services/auditService';
 import { createNotification, sendSms } from '../services/notifyService';
+import { notifyMatterParticipants } from '../services/activityNotificationService';
+import { formatNotificationTime } from '../utils/notificationTime';
 import { sendEmailResend } from '../services/emailResendService';
 import { buildInstanceSteps, isStepChecklistReadyToAutoComplete } from '../utils/workflowCompute';
 import {
@@ -719,6 +721,10 @@ const completeStepInternal = async (
   await updateCaseWorkflowProgress(c, inst);
 
   // Include stage transition info when available
+  if (finalApproval && previousStepStatus !== 'Completed') await notifyMatterParticipants(c, {
+    type: 'APPROVAL_COMPLETED', title: `Work approved: ${step.title}`, message: `${step.title} has been approved by ${actor.actorName} on ${c.caseNo}.`,
+    link: `/cases/${c._id}`, dedupeKey: `KEY_ACTION_APPROVED:${inst._id}:${stepKey}:${step.completedAt.toISOString()}`,
+  }, (step.independentContributors || []).map((contributor: any) => contributor.name).filter(Boolean));
   const prevStage = (inst.steps || []).find((s: any) => s.stepKey === stepKey)?.stageKey || 'unknown';
   const newStage = (() => {
     if (!inst.currentStepKey) return undefined;
@@ -754,7 +760,7 @@ const completeStepInternal = async (
 
   // Notifications for ownership transfer approval (finalization)
   try {
-    if (String(stepKey).toUpperCase() === 'VOT_12_OWNERSHIP_TRANSFER_APPROVAL') {
+    if (finalApproval && previousStepStatus !== 'Completed' && String(stepKey).toUpperCase() === 'VOT_12_OWNERSHIP_TRANSFER_APPROVAL') {
       // Find buyer & seller contacts on the case
       const contacts: any[] = Array.isArray(c.clientContacts) ? c.clientContacts : [];
       const emails = contacts.map((p: any) => String(p.email || '').trim()).filter(Boolean);
@@ -1521,6 +1527,9 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       message: amendmentMode === 'fixed' ? 'Pinned workflow step deadline (fixed)' : 'Updated workflow step deadline',
       detail: `${stepKey} â€¢ ${dayOffset}d${reason ? ` â€¢ ${String(reason).trim()}` : ''}`,
     });
+    await notifyMatterParticipants(c, { type: 'DEADLINE_CHANGED', title: `Legal deadline amended: ${step.title}`,
+      message: `${step.title}\nPrevious: ${formatNotificationTime(oldDue)}\nNew deadline: ${formatNotificationTime(newDue)}${reason ? `\nReason: ${String(reason).trim()}` : ''}`,
+      severity: 'critical', link: `/cases/${c._id}`, dedupeKey: `LEGAL_DEADLINE:${inst._id}:${stepKey}:${inst.updatedAt.toISOString()}` });
 
     res.json(inst);
   } catch (e: any) {
@@ -1637,6 +1646,9 @@ export const revokeStepDeadlineAmendment = async (req: AuthRequest, res: Respons
       message: 'Revoked workflow step deadline amendment',
       detail: `${stepKey} #${recordIndex} (${revokedMode})`,
     });
+    await notifyMatterParticipants(c, { type: 'DEADLINE_CHANGED', title: `Legal deadline amendment revoked: ${step.title}`,
+      message: `An amendment for ${step.title} was revoked. Current deadline: ${formatNotificationTime(new Date(step.dueAt))}.`,
+      severity: 'critical', link: `/cases/${c._id}`, dedupeKey: `LEGAL_DEADLINE_REVOKED:${inst._id}:${stepKey}:${recordIndex}` });
 
     res.json(inst);
   } catch (e: any) {

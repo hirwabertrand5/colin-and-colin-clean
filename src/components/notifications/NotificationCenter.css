@@ -1,0 +1,21 @@
+.notification-center .notification-item {
+  overflow-wrap: anywhere;
+}
+
+.dark .notification-center .notification-unread {
+  background: #14283e;
+}
+
+.dark .notification-center .notification-unread:hover {
+  background: #1b3552;
+}
+
+.dark .notification-center .notification-icon-high {
+  color: #fca5a5;
+  background: #482636;
+}
+
+.dark .notification-center .notification-icon-medium {
+  color: #fde68a;
+  background: #403725;
+}

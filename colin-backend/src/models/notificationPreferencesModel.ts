@@ -10,6 +10,11 @@ export interface INotificationPreferences extends Document {
   taskAssignmentsEnabled: boolean;
   approvalsEnabled: boolean;
   pettyCashLowEnabled: boolean;
+  mattersEnabled: boolean;
+  pettyCashCreatedEnabled: boolean;
+  pettyCashExpensesEnabled: boolean;
+  pettyCashExpenseMode: 'daily' | 'immediate' | 'off';
+  overdueEscalationHours: number;
 
   // reminder schedule configuration (simple defaults)
   taskDueReminderHours: number;      // default 24
@@ -29,6 +34,11 @@ const NotificationPreferencesSchema = new Schema<INotificationPreferences>(
     taskAssignmentsEnabled: { type: Boolean, default: true },
     approvalsEnabled: { type: Boolean, default: true },
     pettyCashLowEnabled: { type: Boolean, default: true },
+    mattersEnabled: { type: Boolean, default: true },
+    pettyCashCreatedEnabled: { type: Boolean, default: true },
+    pettyCashExpensesEnabled: { type: Boolean, default: true },
+    pettyCashExpenseMode: { type: String, enum: ['daily', 'immediate', 'off'], default: 'daily' },
+    overdueEscalationHours: { type: Number, default: 24, min: 1, max: 168 },
 
     taskDueReminderHours: { type: Number, default: 24, min: 1, max: 168 },
     eventReminderHours: { type: [Number], default: [24, 2] },

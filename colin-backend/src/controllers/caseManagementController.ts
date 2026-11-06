@@ -290,20 +290,12 @@ export const requestReview = async (req: AuthRequest, res: Response) => {
     const assignments = getCaseAssignments(ctx.caseDoc);
     if (assignments.reviewer) {
       const reviewerIds = await findAssignedUserIds([assignments.reviewer]);
-      await createNotification({
-        type: 'CASE_MANAGEMENT_REVIEW_REQUESTED',
-        title: 'Review requested',
-        message: `${assignments.initiator || actor.actorName} submitted "${step.title || stepKey}" for your review on ${ctx.caseDoc.caseNo}.`,
-        severity: 'warning',
-        caseId: String(ctx.caseDoc._id),
-        link: `/cases/${ctx.caseDoc._id}`,
-        ...(reviewerIds.length ? { audienceUserIds: reviewerIds } : {}),
-      });
       await notifyUsersById({
         userIds: reviewerIds,
         category: 'approvals',
         notification: {
           type: 'CASE_MANAGEMENT_REVIEW_REQUESTED',
+          dedupeKey: `CASE_REVIEW:${ctx.inst._id}:${stepKey}:${step.submittedAt.toISOString()}`,
           title: 'Review requested',
           message: `${assignments.initiator || actor.actorName} is waiting for your review of "${step.title || stepKey}".`,
           severity: 'warning',
@@ -362,20 +354,12 @@ export const requestApproval = async (req: AuthRequest, res: Response) => {
     const assignments = getCaseAssignments(ctx.caseDoc);
     if (assignments.approver) {
       const approverIds = await findAssignedUserIds([assignments.approver]);
-      await createNotification({
-        type: 'CASE_MANAGEMENT_APPROVAL_REQUESTED',
-        title: 'Approval requested',
-        message: `${assignments.reviewer || actor.actorName} reviewed "${step.title || stepKey}" and is waiting for your approval on ${ctx.caseDoc.caseNo}.`,
-        severity: 'warning',
-        caseId: String(ctx.caseDoc._id),
-        link: `/cases/${ctx.caseDoc._id}`,
-        ...(approverIds.length ? { audienceUserIds: approverIds } : {}),
-      });
       await notifyUsersById({
         userIds: approverIds,
         category: 'approvals',
         notification: {
           type: 'CASE_MANAGEMENT_APPROVAL_REQUESTED',
+          dedupeKey: `CASE_APPROVAL:${ctx.inst._id}:${stepKey}:${step.reviewedAt?.toISOString() || ctx.inst.updatedAt.toISOString()}`,
           title: 'Approval requested',
           message: `${assignments.reviewer || actor.actorName} is waiting for your approval of "${step.title || stepKey}".`,
           severity: 'warning',

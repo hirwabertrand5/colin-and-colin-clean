@@ -7,11 +7,12 @@ import WorkflowInstance from '../models/workflowInstanceModel';
 import User from '../models/userModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { writeAudit } from '../services/auditService';
-import { notifyRoles, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
+import { createNotification, notifyUsersById, findUserByAssigneeString } from '../services/notifyService';
 import { buildYearlySequence } from '../utils/counter';
 import { isPublicYellowCase } from '../utils/caseVisibility';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
+import { notifyTaskChanges } from '../services/activityNotificationService';
 
 const isAssociateLikeRole = (role?: string) =>
   role === 'associate' || role === 'trainee_associate' || role === 'senior_associate' || role === 'intern';
@@ -959,6 +960,7 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
 
     const updated: any = await Task.findByIdAndUpdate(taskId, updates, { new: true });
     if (!updated) return res.status(404).json({ message: 'Task not found.' });
+    await notifyTaskChanges(before, updated);
 
     const changes: string[] = [];
     if (req.body.status && req.body.status !== before.status)
@@ -1035,6 +1037,7 @@ export const submitTaskForApproval = async (req: AuthRequest, res: Response) => 
 
     const task: any = await Task.findById(taskId);
     if (!task) return res.status(404).json({ message: 'Task not found.' });
+    if (!(await canAccessTask(req, task))) return res.status(403).json({ message: 'Forbidden.' });
 
     if (isApprovedLocked(task)) {
       return res.status(400).json({ message: 'This task is locked and cannot be submitted.' });
@@ -1063,48 +1066,19 @@ export const submitTaskForApproval = async (req: AuthRequest, res: Response) => 
       detail: task.title || 'Untitled',
     });
 
-    const assignedByUser: any = await findUserByAssigneeString(task.assignedBy);
+    const assignedByUser: any = await findUserByAssigneeString(task.supervisor || task.assignedBy);
     const directReviewerIds = assignedByUser?._id ? [String(assignedByUser._id)] : [];
 
-    // Notify task coordinators for approvals.
-    await notifyRoles({
-      roles: ['managing_director', 'executive_assistant'],
-      category: 'approvals',
-      notification: {
-        type: 'TASK_APPROVAL_REQUESTED',
-        title: 'Task approval requested',
-        message: `${task.title || 'Task'} is pending approval.`,
-        severity: 'warning',
-        caseId: String(task.caseId),
-        taskId: String(task._id),
-        // Matter work happens in the Case Management tab of the Case Workspace.
-        link: `/cases/${String(task.caseId)}?tab=case-management`,
-      },
-      email: {
-        subject: `Approval needed: ${task.title || 'Task'}`,
-        html: `<div style="font-family: Arial, sans-serif">
-                <p>A task has been submitted for approval.</p>
-                <p><b>${task.title || 'Task'}</b></p>
-              </div>`,
-      },
+    // Preserve the existing coordinator audience and include the actual reviewer
+    // in one event, so a reviewer who is also a coordinator receives one email.
+    await createNotification({
+      type: 'TASK_APPROVAL_REQUESTED', title: 'Task approval requested',
+      message: `${task.title || 'Task'} is pending approval.`, severity: 'warning',
+      audienceRoles: ['managing_director', 'executive_assistant'], audienceUserIds: directReviewerIds,
+      caseId: String(task.caseId), taskId: String(task._id),
+      link: `/cases/${String(task.caseId)}?tab=case-management`,
+      dedupeKey: `TASK_SUBMITTED:${task._id}:${task.submittedAt.toISOString()}`,
     });
-
-    if (directReviewerIds.length) {
-      await notifyUsersById({
-        userIds: directReviewerIds,
-        category: 'approvals',
-        notification: {
-          type: 'TASK_APPROVAL_REQUESTED',
-          title: 'Task approval requested',
-          message: `${task.title || 'Task'} is pending approval.`,
-          severity: 'warning',
-          caseId: String(task.caseId),
-          taskId: String(task._id),
-          // Matter work happens in the Case Management tab of the Case Workspace.
-          link: `/cases/${String(task.caseId)}?tab=case-management`,
-        },
-      });
-    }
 
     res.json(task);
   } catch {
@@ -1141,6 +1115,7 @@ export const approveTask = async (req: AuthRequest, res: Response) => {
     const now = new Date();
 
     task.approvalStatus = 'Approved';
+    const notificationBefore = { ...task.toObject(), approvalStatus: 'Pending', status: 'In Progress' };
     task.status = 'Completed';
     task.workflowStage = 'Completed';
 
@@ -1162,7 +1137,7 @@ export const approveTask = async (req: AuthRequest, res: Response) => {
       message: 'Approved task',
       detail: `${task.title || 'Untitled'} • Marked Completed`,
     });
-
+    await notifyTaskChanges(notificationBefore, task);
     res.json(task);
   } catch {
     res.status(500).json({ message: 'Failed to approve task.' });
@@ -1197,6 +1172,7 @@ export const rejectTask = async (req: AuthRequest, res: Response) => {
 
     const now = new Date();
 
+    const notificationBefore = task.toObject();
     task.approvalStatus = 'Rejected';
     task.rejectedAt = now;
     task.approvedAt = undefined;
@@ -1221,7 +1197,7 @@ export const rejectTask = async (req: AuthRequest, res: Response) => {
       message: 'Rejected task',
       detail: `${task.title || 'Untitled'}${task.approvalComment ? ' • ' + task.approvalComment : ''}`,
     });
-
+    await notifyTaskChanges(notificationBefore, task);
     res.json(task);
   } catch {
     res.status(500).json({ message: 'Failed to reject task.' });

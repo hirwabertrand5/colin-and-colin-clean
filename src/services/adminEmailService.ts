@@ -1,5 +1,18 @@
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
+export type EmailDeliveryStatusData = {
+  configuration: { configured: boolean; message: string };
+  enabled: boolean; webhookConfigured: boolean; queueErrors: number;
+  counts: Array<{ _id: string; count: number }>;
+  recent: Array<{ _id: string; to: string; subject: string; status: string; attempts: number; lastCode?: string; lastError?: string }>;
+};
+export const getEmailDeliveryStatus = async (): Promise<EmailDeliveryStatusData> => {
+  const res = await fetch(`${API_URL}/admin/email/status`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  handleAuth(res);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Failed to load email status.');
+  return data;
+};
 
 const handleAuth = (res: Response) => {
   if (res.status === 401) {

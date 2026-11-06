@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 
 import usePageTitle from '../../hooks/usePageTitle';
+import AdditionalNotificationPreferences from './AdditionalNotificationPreferences';
+import './NotificationCenter.css';
 import {
   Bell,
   AlertTriangle,
@@ -49,14 +51,26 @@ const iconForType = (type: string) => {
     case 'TASK_ASSIGNED':
       return CheckSquare;
     case 'TASK_APPROVAL_REQUESTED':
+    case 'CASE_MANAGEMENT_REVIEW_REQUESTED':
+    case 'CASE_MANAGEMENT_APPROVAL_REQUESTED':
+    case 'APPROVAL_COMPLETED':
       return ClipboardCheck;
+    case 'CASE_MANAGEMENT_CHANGES_REQUESTED':
+    case 'DEADLINE_CHANGED':
+      return AlertTriangle;
     case 'WORKFLOW_NOTIFICATION':
       return Briefcase;
 
     case 'TASK_DUE_REMINDER':
       return Clock;
     case 'EVENT_REMINDER':
+    case 'EVENT_CHANGED':
+    case 'RETAINER_REMINDER':
+    case 'INTAKE_REMINDER':
       return Clock;
+    case 'INTAKE_SUBMISSION':
+    case 'PETTY_CASH_DIGEST':
+      return FileText;
 
     default:
       return SettingsIcon;
@@ -200,7 +214,7 @@ export default function NotificationCenter() {
   };
 
   return (
-    <div>
+    <div className="notification-center">
       {/* Page Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
@@ -226,6 +240,14 @@ export default function NotificationCenter() {
             { id: 'TASK_APPROVAL_REQUESTED', label: 'Approval Requests' },
             { id: 'TASK_DUE_REMINDER', label: 'Task Due Reminders' },
             { id: 'WORKFLOW_NOTIFICATION', label: 'Matter Requests' },
+            { id: 'CASE_MANAGEMENT_CHANGES_REQUESTED', label: 'Returned Work' },
+            { id: 'APPROVAL_COMPLETED', label: 'Completed Approvals' },
+            { id: 'DEADLINE_CHANGED', label: 'Deadline Changes' },
+            { id: 'EVENT_CHANGED', label: 'Event Updates' },
+            { id: 'PETTY_CASH_DIGEST', label: 'Petty Cash Summary' },
+            { id: 'INTAKE_SUBMISSION', label: 'Client Intake' },
+            { id: 'INTAKE_REMINDER', label: 'Prospect Follow-ups' },
+            { id: 'RETAINER_REMINDER', label: 'Retainer Renewals' },
 
             // Events
             { id: 'EVENT_REMINDER', label: 'Event Reminders' },
@@ -271,13 +293,13 @@ export default function NotificationCenter() {
             return (
               <div
                 key={n._id}
-                className={`px-5 py-4 transition-colors ${
-                  !read ? 'bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                className={`notification-item px-5 py-4 transition-colors ${
+                  !read ? 'notification-unread bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700'
                 }`}
               >
                 <div className="flex items-start gap-4">
                   <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${getIconColor(
+                    className={`notification-icon-${priority} w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${getIconColor(
                       priority,
                       read
                     )}`}
@@ -427,7 +449,7 @@ export default function NotificationCenter() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
-                    Task due reminder (hours before due)
+                    First task reminder (hours before due)
                   </label>
                   <input
                     type="number"
@@ -468,6 +490,7 @@ export default function NotificationCenter() {
               </div>
             </div>
 
+            <AdditionalNotificationPreferences prefs={prefs} onChange={updates => setPrefs(current => current ? { ...current, ...updates } : current)} />
             <div className="text-xs text-gray-500 dark:text-gray-400">
               These preferences control email sending. In-app notifications still appear in the center.
             </div>

@@ -28,6 +28,9 @@ export interface INotification extends Document {
   // linking / entities
   link?: string;
   dedupeKey?: string;
+  eventKey?: string;
+  emailQueueState?: 'pending' | 'complete' | 'failed';
+  deliveryContext?: any;
 
   caseId?: mongoose.Types.ObjectId;
   taskId?: mongoose.Types.ObjectId;
@@ -55,6 +58,10 @@ const NotificationSchema = new Schema<INotification>(
 
     link: { type: String },
     dedupeKey: { type: String, index: true },
+    // New records only: legacy dedupe keys can contain duplicates. Preserve them.
+    eventKey: { type: String },
+    emailQueueState: { type: String, enum: ['pending', 'complete', 'failed'], index: true },
+    deliveryContext: { type: Schema.Types.Mixed },
 
     caseId: { type: Schema.Types.ObjectId, ref: 'Case' },
     taskId: { type: Schema.Types.ObjectId, ref: 'Task' },
@@ -70,5 +77,6 @@ const NotificationSchema = new Schema<INotification>(
 
 NotificationSchema.index({ createdAt: -1 });
 NotificationSchema.index({ type: 1, createdAt: -1 });
+NotificationSchema.index({ eventKey: 1 }, { unique: true, partialFilterExpression: { eventKey: { $type: 'string' } } });
 
 export default mongoose.model<INotification>('Notification', NotificationSchema);

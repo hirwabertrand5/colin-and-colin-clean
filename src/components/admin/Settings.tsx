@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Save, Mail, Database, Shield, Bell, GitBranch, ChevronDown } from 'lucide-react';
 import { sendTestEmail } from '../../services/adminEmailService';
+import EmailDeliveryStatus from '../notifications/EmailDeliveryStatus';
+import AdditionalNotificationPreferences from '../notifications/AdditionalNotificationPreferences';
 import usePageTitle from '../../hooks/usePageTitle';
 import {
   getMyNotificationPreferences,
@@ -637,7 +639,8 @@ export default function Settings() {
               </button>
             </div>
 
-            <p className="text-xs text-gray-500">SMTP credentials are read from backend environment variables.</p>
+            <p className="text-xs text-gray-500">Email delivery uses Resend. Sender configuration is managed on the backend service.</p>
+            <EmailDeliveryStatus />
           </div>
         </div>
 
@@ -784,6 +787,7 @@ export default function Settings() {
           )}
         </div>
 
+        {prefs && <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800"><AdditionalNotificationPreferences prefs={prefs} onChange={updates => setPrefs(current => current ? { ...current, ...updates } : current)} /></div>}
         {/* Save */}
         <div className="flex justify-end gap-3">
           <button

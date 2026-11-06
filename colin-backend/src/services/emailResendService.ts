@@ -4,7 +4,7 @@ export type EmailFailureCode = 'EMAIL_NOT_CONFIGURED' | 'EMAIL_SENDER_INVALID' |
 export type SendEmailResult = { ok: true; id: string } | { ok: false; code: EmailFailureCode; error: string; retryable: boolean };
 const failure = (code: EmailFailureCode, error: string, retryable = false): Extract<SendEmailResult, { ok: false }> => ({ ok: false, code, error, retryable });
 const senderAddress = (from: string) => from.match(/<([^<>]+)>\s*$/)?.[1]?.trim() || from;
-const validEmail = (value: string) => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value);
+export const validEmail = (value: string) => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value);
 
 /** Staff diagnostics contain no credentials, recipient contents or provider response bodies. */
 export const getEmailConfiguration = () => {
@@ -12,7 +12,9 @@ export const getEmailConfiguration = () => {
   const from = String(process.env.EMAIL_FROM || '').trim();
   const missing = [!apiKey ? 'RESEND_API_KEY' : '', !from ? 'EMAIL_FROM' : ''].filter(Boolean);
   if (missing.length) return { configured: false as const, code: 'EMAIL_NOT_CONFIGURED' as const, message: `Email sending is not configured. An administrator must set ${missing.join(' and ')} on the backend service. You can still copy and share the link.` };
+  if (apiKey === 'your_private_key' || /^your[_-]|^re_xxx/i.test(apiKey)) return { configured: false as const, code: 'EMAIL_NOT_CONFIGURED' as const, message: 'Replace the placeholder RESEND_API_KEY on the backend service with a real Resend sending key.' };
   if (!validEmail(senderAddress(from))) return { configured: false as const, code: 'EMAIL_SENDER_INVALID' as const, message: 'The configured sender address is invalid. An administrator must correct EMAIL_FROM on the backend service.' };
+  if (process.env.EMAIL_REPLY_TO && !validEmail(process.env.EMAIL_REPLY_TO.trim())) return { configured: false as const, code: 'EMAIL_SENDER_INVALID' as const, message: 'Correct EMAIL_REPLY_TO on the backend service.' };
   return { configured: true as const, code: null, message: 'Email service configured. The sending domain must be verified with Resend.' };
 };
 
@@ -35,7 +37,7 @@ export const sendEmailResend = async (to: string[], subject: string, html: strin
   if (!to.length || to.some(address => !validEmail(address.trim()))) return failure('EMAIL_RECIPIENT_INVALID', 'Enter a valid recipient email address before sending.');
   try {
     const resend = new Resend(String(process.env.RESEND_API_KEY).trim());
-    const response = await resend.emails.send({ from: String(process.env.EMAIL_FROM).trim(), to: to.map(address => address.trim()), subject, html }, options);
+    const response = await resend.emails.send({ from: String(process.env.EMAIL_FROM).trim(), to: to.map(address => address.trim()), subject, html, ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO.trim() } : {}) }, options);
     if (response.error) return classifyEmailFailure(response.error);
     if (!response.data?.id) return failure('EMAIL_PROVIDER_UNAVAILABLE', 'The email provider did not confirm the send. Please retry; the same invitation link remains available.', true);
     return { ok: true, id: response.data.id };

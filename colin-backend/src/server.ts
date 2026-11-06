@@ -9,10 +9,15 @@ import { seedAllWorkflowTemplates } from './seed';
 import { reconcileTerminalProspects } from './controllers/prospectController';
 import { migrateLegacyUploadsToGridFs } from './services/fileStorageService';
 import { migrateLegacyRetainerSubscriptions } from './services/retainerService';
+import Notification from './models/notificationModel';
+import EmailDelivery from './models/emailDeliveryModel';
+import EmailWebhook from './models/emailWebhookModel';
 
 const PORT = process.env.PORT || 5000;
 
 connectDB().then(async () => {
+  // Do not start concurrent scanners/delivery workers before their unique guards exist.
+  await Promise.all([Notification.init(), EmailDelivery.init(), EmailWebhook.init()]);
   try {
     const legacyUploads = await migrateLegacyUploadsToGridFs();
     if (legacyUploads.migrated > 0) {

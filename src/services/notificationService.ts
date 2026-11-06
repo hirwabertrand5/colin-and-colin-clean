@@ -12,10 +12,12 @@ export type NotificationType =
   | 'TASK_DUE_REMINDER'
   | 'EVENT_REMINDER'
   | 'WORKFLOW_NOTIFICATION';
+// Additional categories reuse the backend's existing workflow event identifiers.
+type WorkflowNotificationType = 'CASE_MANAGEMENT_REVIEW_REQUESTED' | 'CASE_MANAGEMENT_APPROVAL_REQUESTED' | 'CASE_MANAGEMENT_CHANGES_REQUESTED' | 'APPROVAL_COMPLETED' | 'DEADLINE_CHANGED' | 'EVENT_CHANGED' | 'PETTY_CASH_DIGEST' | 'PETTY_CASH_REFUND' | 'INTAKE_SUBMISSION' | 'INTAKE_REMINDER' | 'RETAINER_REMINDER';
 
 export interface AppNotification {
   _id: string;
-  type: NotificationType;
+  type: NotificationType | WorkflowNotificationType;
   title: string;
   message: string;
   severity: NotificationSeverity;

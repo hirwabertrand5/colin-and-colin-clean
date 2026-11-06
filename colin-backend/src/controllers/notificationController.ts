@@ -19,7 +19,11 @@ export const listMyNotifications = async (req: AuthRequest, res: Response) => {
     }
 
     if (filter && filter !== 'all' && filter !== 'unread') {
-      q.type = String(filter);
+      const groups: Record<string, string[]> = {
+        TASK_APPROVAL_REQUESTED: ['TASK_APPROVAL_REQUESTED', 'CASE_MANAGEMENT_REVIEW_REQUESTED', 'CASE_MANAGEMENT_APPROVAL_REQUESTED'],
+        PETTY_CASH_EXPENSE: ['PETTY_CASH_EXPENSE', 'PETTY_CASH_REFUND'],
+      };
+      q.type = groups[String(filter)] ? { $in: groups[String(filter)] } : String(filter);
     }
 
     const items = await Notification.find(q).sort({ createdAt: -1 }).limit(200).lean();
@@ -56,8 +60,9 @@ export const markOneAsRead = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const me = new mongoose.Types.ObjectId(req.user.id);
 
-    const updated = await Notification.findByIdAndUpdate(
-      id,
+    if (typeof id !== 'string' || !mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Invalid notification ID.' });
+    const updated = await Notification.findOneAndUpdate(
+      { _id: id, $or: [{ audienceUserIds: me }, { audienceRoles: req.user.role }] },
       { $addToSet: { isReadBy: me } },
       { new: true }
     ).lean();

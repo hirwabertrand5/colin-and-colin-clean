@@ -11,6 +11,11 @@ export type NotificationPreferences = {
   taskAssignmentsEnabled: boolean;
   approvalsEnabled: boolean;
   pettyCashLowEnabled: boolean;
+  mattersEnabled?: boolean;
+  pettyCashCreatedEnabled?: boolean;
+  pettyCashExpensesEnabled?: boolean;
+  pettyCashExpenseMode?: 'daily' | 'immediate' | 'off';
+  overdueEscalationHours?: number;
 
   taskDueReminderHours: number;
   eventReminderHours: number[];

@@ -41,6 +41,8 @@ async function main() {
   console.log('Temporary replica set ready; connecting test database.');
   let server: ReturnType<express.Express['listen']> | undefined;
   let passed = 0;
+  // Keep on-time earning fixtures on time as the calendar advances.
+  const futureDueDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
   try {
     await mongoose.connect(replica.getUri(), { dbName: 'independent_task_verification' });
     const users: Record<string, any> = {};
@@ -105,7 +107,7 @@ async function main() {
       return { id: String(matter._id), template, matter, instance };
     };
     const create = (f: { id: string }, name = 'Winnie', role = 'Initiator', keys = ['action-1']) => ok(name, '/independent-tasks', {
-      title: `${role} verification`, assignee: name, supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05',
+      title: `${role} verification`, assignee: name, supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: futureDueDate,
       relatedMatterId: f.id, caseRole: role, keyActionKeys: keys,
     });
     const start = (name: string, task: any) => ok(name, `/independent-tasks/${task._id}/transition`, { status: 'In Progress' });
@@ -164,12 +166,12 @@ async function main() {
       assert.equal((await state(juniorFixture)).steps[0].status, 'Awaiting Review');
       assert.equal((await request(contributor, '/independent-tasks', {
         title: 'Cannot self authorize review', assignee: contributor, supervisor: 'Reviewer',
-        startDate: '2026-10-25', dueDate: '2026-11-05', relatedMatterId: juniorFixture.id,
+        startDate: '2026-10-25', dueDate: futureDueDate, relatedMatterId: juniorFixture.id,
         caseRole: 'Reviewer', keyActionKeys: ['action-1'],
       })).status, 400);
       assert.equal((await request('Reviewer', '/independent-tasks', {
         title: 'Cannot assign unauthorized reviewer', assignee: contributor, supervisor: 'Reviewer',
-        startDate: '2026-10-25', dueDate: '2026-11-05', relatedMatterId: juniorFixture.id,
+        startDate: '2026-10-25', dueDate: futureDueDate, relatedMatterId: juniorFixture.id,
         caseRole: 'Reviewer', keyActionKeys: ['action-1'],
       })).status, 400);
     }
@@ -184,7 +186,7 @@ async function main() {
       assert(options.keyActions.every((action: any) => action.eligibility.Initiator));
       const ownTask = await ok('Winnie', '/independent-tasks', {
         title: 'Self assigned batch ' + role, assignee: 'stale display name', assigneeUserId: String(users.Winnie._id),
-        supervisorUserId: String(users.Reviewer._id), startDate: '2026-10-25', dueDate: '2026-11-05',
+        supervisorUserId: String(users.Reviewer._id), startDate: '2026-10-25', dueDate: futureDueDate,
         relatedMatterId: ownFixture.id, caseRole: 'Initiator', keyActionKeys: ['action-1', 'action-2', 'action-3'],
       });
       assert.equal(ownTask.assignee, 'Winnie');
@@ -194,7 +196,7 @@ async function main() {
       const seniorFixture = await fixture();
       const seniorAssigned = await ok('ManagingPartner', '/independent-tasks', {
         title: 'Senior assigned ' + role, assigneeUserId: String(users.Winnie._id), supervisorUserId: String(users.Reviewer._id),
-        startDate: '2026-10-25', dueDate: '2026-11-05', relatedMatterId: seniorFixture.id,
+        startDate: '2026-10-25', dueDate: futureDueDate, relatedMatterId: seniorFixture.id,
         caseRole: 'Initiator', keyActionKeys: ['action-1'],
       });
       await start('Winnie', seniorAssigned);
@@ -205,7 +207,7 @@ async function main() {
     await User.updateOne({ _id: users.Intern._id }, { $set: { isActive: false } });
     const inactiveResult = await request('ManagingPartner', '/independent-tasks', {
       title: 'Inactive assignee', assigneeUserId: String(users.Intern._id), supervisorUserId: String(users.Reviewer._id),
-      startDate: '2026-10-25', dueDate: '2026-11-05',
+      startDate: '2026-10-25', dueDate: futureDueDate,
     });
     assert.equal(inactiveResult.status, 400);
     assert.match(inactiveResult.data.message, /inactive/);
@@ -228,7 +230,7 @@ async function main() {
     assert.equal((await Workflow.findById(sparse._id))!.steps.length, 4);
     for (const keys of [['action-2'], ['action-2', 'action-1'], ['action-1', 'action-3']]) {
       const result = await request('Winnie', '/independent-tasks', {
-        title: 'Skipped selection', assignee: 'Winnie', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05',
+        title: 'Skipped selection', assignee: 'Winnie', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: futureDueDate,
         relatedMatterId: sequenceFixture.id, caseRole: 'Initiator', keyActionKeys: keys,
       });
       assert.equal(result.status, 400);
@@ -334,15 +336,15 @@ async function main() {
 
     const race = await fixture();
     const attempts = await Promise.all(['Winnie', 'Other'].map((name) => request(name, '/independent-tasks', {
-      title: 'Concurrent claim', assignee: name, supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05',
+      title: 'Concurrent claim', assignee: name, supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: futureDueDate,
       relatedMatterId: race.id, caseRole: 'Initiator', keyActionKeys: ['action-1'],
     })));
     assert.equal(attempts.filter((result) => result.status === 201).length, 1);
     assert.equal(await IndependentTask.countDocuments({ relatedMatterId: race.id }), 1);
     pass('Two concurrent exclusive claims create exactly one task and reservation');
 
-    const standard = await ok('Winnie', '/independent-tasks', { title: 'Standard task', assignee: 'Winnie', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05' });
-    const unrelated = await ok('Winnie', '/independent-tasks', { title: 'Standard task', assignee: 'Winnie', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05' });
+    const standard = await ok('Winnie', '/independent-tasks', { title: 'Standard task', assignee: 'Winnie', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: futureDueDate });
+    const unrelated = await ok('Winnie', '/independent-tasks', { title: 'Standard task', assignee: 'Winnie', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: futureDueDate });
     await ok('Winnie', `/independent-tasks/${standard._id}/comments`, { body: 'Shared comment wording' });
     await ok('Winnie', `/independent-tasks/${unrelated._id}/comments`, { body: 'Shared comment wording' });
     const privateFilesBefore = await mongoose.connection.db!.collection('uploads.files').countDocuments({});
@@ -387,7 +389,7 @@ async function main() {
     const locked = await fixture(2);
     const options = await ok('Winnie', `/independent-tasks/case-options/${locked.id}`);
     assert.equal(options.keyActions[1].eligibility.Initiator, true);
-    assert.equal((await request('Intern', '/independent-tasks', { title: 'Invalid', assignee: 'Intern', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05', relatedMatterId: locked.id, caseRole: 'Reviewer', keyActionKeys: ['action-1'] })).status, 400);
+    assert.equal((await request('Intern', '/independent-tasks', { title: 'Invalid', assignee: 'Intern', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: futureDueDate, relatedMatterId: locked.id, caseRole: 'Reviewer', keyActionKeys: ['action-1'] })).status, 400);
     assert.equal((await request('Approver', `/case-management/cases/${locked.id}/approve`, { stepKey: 'action-1' })).status, 400);
     pass('Multiple initiator actions are selectable; unauthorized reviewers cannot bypass mandatory review');
 
@@ -434,7 +436,7 @@ async function main() {
 
     const additionalPayload = (fixtureId: string, additions: any[], overrides: any = {}) => ({
       title: 'Additional case work verification', assignee: 'Winnie', supervisor: 'Reviewer',
-      startDate: '2026-10-25', dueDate: '2026-11-05', relatedMatterId: fixtureId,
+      startDate: '2026-10-25', dueDate: futureDueDate, relatedMatterId: fixtureId,
       caseRole: 'Initiator', keyActionKeys: [], additionalKeyActions: additions, ...overrides,
     });
     const exactAllocation = (steps: any[]) => {
@@ -568,7 +570,7 @@ async function main() {
     exactAllocation(additionalRaceLive.steps);
     pass('Mixed existing/additional work follows lifecycle and concurrent conflicting creation rolls back every losing addition');
 
-    const identityTask = await ok('Winnie', '/independent-tasks', { title: 'Creator identity regression', assignee: 'Other', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: '2026-11-05' });
+    const identityTask = await ok('Winnie', '/independent-tasks', { title: 'Creator identity regression', assignee: 'Other', supervisor: 'Reviewer', startDate: '2026-10-25', dueDate: futureDueDate });
     await User.findByIdAndUpdate(users.Other._id, { $set: { name: 'Winnie' } });
     assert.equal((await request('Other', `/independent-tasks/${identityTask._id}`, undefined, 'DELETE')).status, 403);
     assert(await IndependentTask.exists({ _id: identityTask._id }));
@@ -580,7 +582,7 @@ async function main() {
     assert.equal(await IndependentTask.findById(identityTask._id), null);
     pass('Creator ID authorizes deletion after a name change and rejects a different user with the same name');
     for (const senior of ['ManagingPartner', 'ExecutiveAssistant', 'SeniorExecutiveAssistant', 'Reviewer', 'Approver']) {
-      const managedTask = await ok('Other', '/independent-tasks', { title: 'Senior deletion permission ' + senior, assignee: 'Other', supervisor: 'Other', startDate: '2026-10-25', dueDate: '2026-11-05' });
+      const managedTask = await ok('Other', '/independent-tasks', { title: 'Senior deletion permission ' + senior, assignee: 'Other', supervisor: 'Other', startDate: '2026-10-25', dueDate: futureDueDate });
       assert.equal((await ok(senior, `/independent-tasks/${managedTask._id}`)).canDelete, true);
       assert((await ok(senior, '/independent-tasks?limit=100')).items.some((item: any) => item._id === managedTask._id));
       assert.equal((await request('Winnie', `/independent-tasks/${managedTask._id}`, undefined, 'DELETE')).status, 403);

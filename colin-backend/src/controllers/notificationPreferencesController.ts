@@ -13,7 +13,9 @@ const isAllowed = (role?: string) =>
   role === 'senior_associate' ||
   role === 'associate' ||
   role === 'trainee_associate' ||
-  role === 'intern';
+  role === 'intern' ||
+  role === 'executive_managing_partner' || role === 'executive_partner' ||
+  role === 'executive_associate_partner' || role === 'senior_executive_assistant' || role === 'originating_attorney';
 
 export const getMyNotificationPreferences = async (req: AuthRequest, res: Response) => {
   try {
@@ -47,13 +49,20 @@ export const updateMyNotificationPreferences = async (req: AuthRequest, res: Res
       'taskAssignmentsEnabled',
       'approvalsEnabled',
       'pettyCashLowEnabled',
+      'mattersEnabled', 'pettyCashCreatedEnabled', 'pettyCashExpensesEnabled', 'pettyCashExpenseMode', 'overdueEscalationHours',
       'taskDueReminderHours',
       'eventReminderHours',
     ] as const;
 
     const updates: any = {};
     for (const k of allowedFields) {
-      if (k in req.body) updates[k] = (req.body as any)[k];
+      if (!(k in req.body)) continue;
+      const value = req.body[k];
+      if (k.endsWith('Enabled') && typeof value !== 'boolean') return res.status(400).json({ message: `${k} must be a boolean.` });
+      if (['taskDueReminderHours', 'overdueEscalationHours'].includes(k) && (!Number.isInteger(value) || value < 1 || value > 168)) return res.status(400).json({ message: `${k} must be between 1 and 168 hours.` });
+      if (k === 'pettyCashExpenseMode' && !['daily', 'immediate', 'off'].includes(value)) return res.status(400).json({ message: 'Choose daily, immediate or off for petty cash expenses.' });
+      if (k === 'eventReminderHours' && (!Array.isArray(value) || !value.length || value.length > 10 || value.some((n: any) => typeof n !== 'number' || !Number.isFinite(n) || n <= 0 || n > 168))) return res.status(400).json({ message: 'Provide 1 to 10 event reminder hours between 0 and 168.' });
+      updates[k] = value;
     }
 
     // normalize
@@ -67,7 +76,7 @@ export const updateMyNotificationPreferences = async (req: AuthRequest, res: Res
     const pref = await NotificationPreferences.findOneAndUpdate(
       { userId },
       { $set: updates },
-      { new: true, upsert: true }
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     ).lean();
 
     res.json(pref);

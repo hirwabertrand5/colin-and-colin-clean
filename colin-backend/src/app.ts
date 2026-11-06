@@ -29,6 +29,7 @@ import independentTaskRoutes from './routes/independentTasks';
 import retainerRoutes from './routes/retainer';
 import digitalIntakeRoutes from './routes/digitalIntake';
 import { getLegacyUploadsDirectory, serveStoredUpload } from './services/fileStorageService';
+import { receiveEmailWebhook } from './controllers/emailDeliveryController';
 const app = express();
 // Render terminates HTTPS at its proxy; keep the hop count explicit and configurable.
 app.set('trust proxy', process.env.NODE_ENV === 'production' ? Number(process.env.TRUST_PROXY_HOPS || 1) : false);
@@ -62,6 +63,7 @@ app.use(
 );
 
 // 2) Body parsers
+app.post('/api/webhooks/resend', express.raw({ type: 'application/json', limit: '256kb' }), receiveEmailWebhook);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 

@@ -12,6 +12,7 @@ import WorkflowTemplate from '../../../models/workflowTemplateModel';
 import { AuthRequest } from '../../../middleware/authMiddleware';
 import { writeAudit } from '../../../services/auditService';
 import { notifyRoles, notifyUsersById } from '../../../services/notifyService';
+import { notifyTaskChanges, notifyWorkflowHandoff } from '../../../services/activityNotificationService';
 import { buildYearlySequence } from '../../../utils/counter';
 import IndependentTask, {
   IndependentTaskCaseRole,
@@ -644,6 +645,7 @@ const notifyAssigned = async (task: any, req: AuthRequest) => {
     category: 'taskAssignments',
     notification: {
       type: 'TASK_ASSIGNED',
+      dedupeKey: `INDEPENDENT_ASSIGNED:${task._id}:${new Date(task.updatedAt || task.createdAt).toISOString()}`,
       title: 'Independent task assigned',
       message: `${task.taskNumber} • ${task.title}`,
       severity: 'info',
@@ -666,6 +668,7 @@ const notifyReview = async (task: any, req: AuthRequest) => {
       category: 'approvals',
       notification: {
         type: 'TASK_APPROVAL_REQUESTED',
+        dedupeKey: `INDEPENDENT_REVIEW:${task._id}:${new Date(task.updatedAt || task.createdAt).toISOString()}`,
         title: 'Independent task awaiting review',
         message: `${task.taskNumber} • ${task.title}`,
         severity: 'warning',
@@ -690,7 +693,7 @@ const notifyCompleted = async (task: any, req: AuthRequest) => {
       userIds,
       category: 'approvals',
       notification: {
-        type: 'TASK_APPROVAL_REQUESTED',
+        type: 'APPROVAL_COMPLETED',
         title: 'Independent task completed',
         message: `${task.taskNumber} • ${task.title}`,
         severity: 'info',
@@ -1144,6 +1147,7 @@ export const independentTaskService = {
 
   async updateTask(taskId: string, payload: any, req: AuthRequest) {
     const task = await assertTaskExists(taskId);
+    const notificationBefore = task.toObject();
     await assertCanEdit(req, task);
     if (additionalKeyActionsFrom(payload.additionalKeyActions).length) {
       throw new Error('Add additional Key Actions when creating a new delegated Initiator task. Existing task edits do not add case work.');
@@ -1319,7 +1323,6 @@ export const independentTaskService = {
           await buildHistory(String(task._id), 'TASK_REASSIGNED', 'Assignee reassigned — progress preserved', req, `${beforeAssignee} → ${updates.assignee}`, {
             role: 'Assignee', previousAssignee: beforeAssignee, nextAssignee: updates.assignee,
           });
-          await notifyAssigned(task, req);
         }
         if (updates.supervisor && updates.supervisor !== beforeSupervisor) {
           await buildHistory(String(task._id), 'TASK_REASSIGNED', 'Supervisor reassigned — progress preserved', req, `${beforeSupervisor} → ${updates.supervisor}`, {
@@ -1327,6 +1330,7 @@ export const independentTaskService = {
           });
         }
       });
+      await notifyTaskChanges(notificationBefore, task, true);
       await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_UPDATED', 'Independent task updated', task.title, String(task._id)));
       hydrated = await this.getTaskById(String(task._id), req);
       return hydrated;
@@ -1379,6 +1383,7 @@ export const independentTaskService = {
       if (nextStatus === 'Completed') await buildHistory(String(task._id), 'TASK_COMPLETED', 'Task completed', req, task.title);
       if (nextStatus === 'Closed') await buildHistory(String(task._id), 'TASK_CLOSED', 'Task closed', req, task.title);
       if (nextStatus === 'Awaiting Review') await notifyReview(task, req);
+      if (nextStatus === 'Completed') await notifyCompleted(task, req);
       await writeAudit(buildAudit(req, 'INDEPENDENT_TASK_STATUS_CHANGED', 'Independent task status changed', `${task.title} • ${nextStatus}`, String(task._id)));
       return this.getTaskById(taskId, req);
     } finally {
@@ -1514,6 +1519,9 @@ export const independentTaskService = {
     await task.save();
 
     const actionTitles = selected.map((step: any) => step.title || step.stepKey).join(', ');
+    if (role === 'Initiator' || role === 'Reviewer') {
+      for (const step of selected as any[]) await notifyWorkflowHandoff(caseDoc, step, role === 'Initiator' ? 'Reviewer' : 'Signer/Approver', now);
+    }
     await buildHistory(String(task._id), 'TASK_CASE_LIFECYCLE_UPDATED', lifecycleLabel, req, actionTitles, { role, keyActionKeys: keys });
     if (allApproved) {
       await buildHistory(String(task._id), 'TASK_COMPLETED', 'Task completed through case lifecycle', req, lifecycleLabel);

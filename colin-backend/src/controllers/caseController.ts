@@ -8,7 +8,7 @@ import CaseTakeRequest from '../models/caseTakeRequestModel';
 import { writeAudit } from '../services/auditService';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { createNotification, findUserByAssigneeString } from '../services/notifyService';
-import { sendEmailResend } from '../services/emailResendService';
+import { notifyMatterParticipants } from '../services/activityNotificationService';
 
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
@@ -174,31 +174,6 @@ const calculateActionProgress = (steps: any[], plannedAmount: number) => {
 
 const generateCaseNo = () => buildYearlySequence('case', 'CASE');
 
-const buildTakeRequestNotificationHtml = (opts: {
-  requestNo: string;
-  caseNo: string;
-  parties: string;
-  requesterName: string;
-  currentStepTitle?: string;
-  dueDate?: Date | string;
-  reviewUrl: string;
-}) => {
-  const dueText = opts.dueDate ? resolveDeadlineDateTime(opts.dueDate)?.toLocaleString() || 'Not set' : 'Not set';
-  return `
-    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">
-      <p>A yellow urgency matter has been requested.</p>
-      <p><strong>Request:</strong> ${opts.requestNo}</p>
-      <p><strong>Matter:</strong> ${opts.caseNo} • ${opts.parties}</p>
-      <p><strong>Requested by:</strong> ${opts.requesterName}</p>
-      <p><strong>Current step:</strong> ${opts.currentStepTitle || '—'}<br /><strong>Due:</strong> ${dueText}</p>
-      <p>
-        <a href="${opts.reviewUrl}" style="display:inline-block;padding:12px 18px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;margin-right:8px;">Approve / Deny</a>
-        <a href="${opts.reviewUrl}" style="display:inline-block;padding:12px 18px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:999px;font-weight:700;border:1px solid #cbd5e1;">Open Matter</a>
-      </p>
-    </div>
-  `;
-};
-
 const gatherTakeRequestRecipients = async (opts: {
   assignedUserName?: string;
   requesterId?: string;
@@ -215,22 +190,18 @@ const gatherTakeRequestRecipients = async (opts: {
     : null;
 
   const ids = new Set<string>();
-  const emails = new Set<string>();
 
   for (const user of audienceUsers as any[]) {
     if (String(user._id) === String(opts.requesterId || '')) continue;
     ids.add(String(user._id));
-    if (user.email) emails.add(String(user.email).trim().toLowerCase());
   }
 
   if (assignedUser?._id && String(assignedUser._id) !== String(opts.requesterId || '')) {
     ids.add(String(assignedUser._id));
-    if (assignedUser.email) emails.add(String(assignedUser.email).trim().toLowerCase());
   }
 
   return {
     userIds: Array.from(ids),
-    emails: Array.from(emails),
   };
 };
 
@@ -856,15 +827,6 @@ export const requestTakeCase = async (req: AuthRequest, res: Response) => {
     });
 
     const reviewUrl = `/cases/${caseId}?takeRequest=${requestId.toString()}`;
-    const reviewHtml = buildTakeRequestNotificationHtml({
-      requestNo,
-      caseNo: existingCase.caseNo,
-      parties: existingCase.parties,
-      requesterName,
-      currentStepTitle: existingCase.workflowProgress?.currentStepTitle,
-      dueDate: existingCase.workflowProgress?.currentStepDueAt || existingCase.workflowProgress?.nextDueAt,
-      reviewUrl,
-    });
 
     const recipients = await gatherTakeRequestRecipients({
       assignedUserName: String(existingCase.assignedTo || '').trim(),
@@ -873,7 +835,7 @@ export const requestTakeCase = async (req: AuthRequest, res: Response) => {
     const notificationPayload = {
       type: 'WORKFLOW_NOTIFICATION',
       title: 'Yellow matter request pending',
-      message: `${requesterName} requested to take ${existingCase.caseNo || 'a matter'} (${existingCase.parties || 'No parties'}).`,
+      message: `${requesterName} requested to take ${existingCase.caseNo || 'a matter'} (${existingCase.parties || 'No parties'}).\nRequest: ${requestNo}.\nCurrent step: ${existingCase.workflowProgress?.currentStepTitle || 'Not set'}.`,
       severity: 'warning' as const,
       link: reviewUrl,
       caseId,
@@ -883,16 +845,10 @@ export const requestTakeCase = async (req: AuthRequest, res: Response) => {
       await createNotification({
         ...notificationPayload,
         audienceUserIds: recipients.userIds,
+        dedupeKey: `MATTER_TAKE_REQUEST:${requestId}`,
       });
     }
 
-    if (recipients.emails.length) {
-      await sendEmailResend(
-        recipients.emails,
-        `Matter take request pending: ${existingCase.caseNo || 'Matter'}`,
-        reviewHtml
-      );
-    }
 
     return res.status(201).json({
       request: createdRequest,
@@ -1028,37 +984,25 @@ const resolveTakeRequestDecision = async (req: AuthRequest, res: Response, decis
     });
 
     const requesterId = String(existingRequest.requestedByUserId || '');
-    const requesterName = String(existingRequest.requestedByName || 'Requester');
     const reviewUrl = `/cases/${caseId}?takeRequest=${requestId}`;
     const outcomeTitle = decision === 'Approved' ? 'Take request approved' : 'Take request denied';
     const outcomeMessage =
       decision === 'Approved'
         ? `Your request to take ${updatedCase?.caseNo || 'the matter'} was approved.`
         : `Your request to take ${updatedCase?.caseNo || 'the matter'} was denied.`;
-    const emailHtml = `
-      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a">
-        <p>${outcomeMessage}</p>
-        <p><strong>Matter:</strong> ${updatedCase?.caseNo || '—'} • ${updatedCase?.parties || '—'}</p>
-        ${decisionReason ? `<p><strong>Reason:</strong> ${decisionReason}</p>` : ''}
-        <p><a href="${reviewUrl}" style="display:inline-block;padding:12px 18px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;">Open Matter</a></p>
-      </div>
-    `;
 
     if (requesterId) {
       await createNotification({
         type: 'WORKFLOW_NOTIFICATION',
         title: outcomeTitle,
-        message: outcomeMessage,
+        message: `${outcomeMessage}${decisionReason ? `\nReason: ${decisionReason}` : ''}`,
         severity: decision === 'Approved' ? 'info' : 'warning',
         link: reviewUrl,
         caseId,
         audienceUserIds: [requesterId],
+        dedupeKey: `MATTER_TAKE_DECISION:${requestId}:${decision}`,
       });
 
-      const requesterUser = await User.findById(requesterId).select('email').lean();
-      if (requesterUser?.email) {
-        await sendEmailResend([String(requesterUser.email).trim().toLowerCase()], outcomeTitle, emailHtml);
-      }
     }
 
     return res.json({
@@ -1449,6 +1393,11 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
       detail: changes.length ? changes.join(' • ') : `${updated.caseNo || ''}`.trim(),
     });
 
+    if (before && (before.status !== updated.status || JSON.stringify(before.caseAssignments || {}) !== JSON.stringify(updated.caseAssignments || {}) || before.assignedTo !== updated.assignedTo)) {
+      await notifyMatterParticipants(updated, { type: 'WORKFLOW_NOTIFICATION', title: `Matter responsibilities updated: ${updated.caseNo}`,
+        message: `${updated.caseNo} (${updated.parties}) has been updated.\nStatus: ${updated.status}. Open the matter to review current responsibilities.`,
+        link: `/cases/${updated._id}`, dedupeKey: `MATTER_CHANGED:${updated._id}:${updated.updatedAt.toISOString()}` });
+    }
     return res.json(updated);
   } catch {
     return res.status(500).json({ message: 'Failed to update case.' });
