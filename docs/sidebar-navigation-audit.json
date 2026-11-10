@@ -1,0 +1,1755 @@
+{
+  "apiDelayMs": 60,
+  "preparationMs": 220,
+  "menuGroups": [
+    {
+      "role": "managing_director",
+      "href": "/tasks",
+      "ms": 50
+    },
+    {
+      "role": "managing_director",
+      "href": "/calendar",
+      "ms": 25
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing",
+      "ms": 47
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/all-staff",
+      "ms": 22
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=portfolio",
+      "ms": 47
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=prospect-intake",
+      "ms": 16
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=lost-prospect-feedback",
+      "ms": 14
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=risk-overview",
+      "ms": 13
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=critical-matters",
+      "ms": 20
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=reporting",
+      "ms": 21
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=firm-trends",
+      "ms": 20
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=period-comparison",
+      "ms": 17
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=historical-analysis",
+      "ms": 22
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=matter-practice",
+      "ms": 15
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-business-development",
+      "ms": 13
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-experience",
+      "ms": 19
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=people-productivity",
+      "ms": 19
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=operational-reporting",
+      "ms": 19
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=forecast",
+      "ms": 19
+    }
+  ],
+  "destinations": [
+    {
+      "role": "managing_director",
+      "href": "/",
+      "label": "Dashboard",
+      "parents": [],
+      "ms": 64
+    },
+    {
+      "role": "managing_director",
+      "href": "/matters/intake-prospects",
+      "label": "Intake & Prospects",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 76
+    },
+    {
+      "role": "managing_director",
+      "href": "/matters",
+      "label": "Active Matters",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 77
+    },
+    {
+      "role": "managing_director",
+      "href": "/matters/temporarily-closed",
+      "label": "Temporarily Closed Matters",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 78
+    },
+    {
+      "role": "managing_director",
+      "href": "/matters/closed",
+      "label": "Closed Matters",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 65
+    },
+    {
+      "role": "managing_director",
+      "href": "/matters/independent-tasks",
+      "label": "Independent Tasks",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 55
+    },
+    {
+      "role": "managing_director",
+      "href": "/matters/retainers",
+      "label": "Retainers",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 87
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/financial-status",
+      "label": "Matter Financial Status",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 47
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/contract-value",
+      "label": "Contract Value",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 58
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/amount-billed",
+      "label": "Amount Billed",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 60
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/amount-collected",
+      "label": "Amount Collected",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 61
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/outstanding-balance",
+      "label": "Outstanding Matter Balance",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 61
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/direct-cost",
+      "label": "Matter Direct Cost",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 61
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/gross-profit",
+      "label": "Matter Gross Profit",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 47
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/net-profit",
+      "label": "Matter Net Profit",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 60
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/gross-profit-margin",
+      "label": "Matter Gross Profit Margin",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 57
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/profitability",
+      "label": "Matter Profitability",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 47
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/direct-cost-workload",
+      "label": "Matter Direct Cost Workload",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 60
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/matters/timeliness",
+      "label": "Matter Gross Profit Matter Timeliness",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 60
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/all",
+      "label": "All Tasks",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 61
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/my",
+      "label": "My Tasks",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 55
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/unassigned",
+      "label": "Unassigned Tasks",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 65
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/due-today",
+      "label": "Due Today",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 64
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/due-this-week",
+      "label": "Due This Week",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 67
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/overdue",
+      "label": "Overdue Tasks",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 47
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/awaiting-review",
+      "label": "Awaiting Review",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 53
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/awaiting-external-action",
+      "label": "Awaiting External Action",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 55
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/completed",
+      "label": "Completed Tasks",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 49
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/closed",
+      "label": "Closed Tasks",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 53
+    },
+    {
+      "role": "managing_director",
+      "href": "/tasks/performance",
+      "label": "Task Performance",
+      "parents": [
+        "/tasks"
+      ],
+      "ms": 63
+    },
+    {
+      "role": "managing_director",
+      "href": "/calendar",
+      "label": "Calendar",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 157
+    },
+    {
+      "role": "managing_director",
+      "href": "/deadlines",
+      "label": "All Deadlines",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 154
+    },
+    {
+      "role": "managing_director",
+      "href": "/deadlines/litigation",
+      "label": "Litigation Deadlines",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 78
+    },
+    {
+      "role": "managing_director",
+      "href": "/deadlines/transaction",
+      "label": "Transaction Deadlines",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 54
+    },
+    {
+      "role": "managing_director",
+      "href": "/deadlines/regulatory",
+      "label": "Regulatory Deadlines",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 52
+    },
+    {
+      "role": "managing_director",
+      "href": "/deadlines/internal",
+      "label": "Internal Deadlines",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 46
+    },
+    {
+      "role": "managing_director",
+      "href": "/deadlines/upcoming",
+      "label": "Upcoming Deadlines",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 107
+    },
+    {
+      "role": "managing_director",
+      "href": "/deadlines/missed",
+      "label": "Missed Deadlines",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 62
+    },
+    {
+      "role": "managing_director",
+      "href": "/deadlines/compliance",
+      "label": "Deadline Compliance",
+      "parents": [
+        "/calendar"
+      ],
+      "ms": 51
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing/finance/financial-dashboard",
+      "label": "Financial Dashboard",
+      "parents": [
+        "/billing"
+      ],
+      "ms": 173
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing/finance/invoicing",
+      "label": "Billing & Invoicing",
+      "parents": [
+        "/billing"
+      ],
+      "ms": 81
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing/finance/collections",
+      "label": "Collections & Receivables",
+      "parents": [
+        "/billing"
+      ],
+      "ms": 77
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing/finance/profitability",
+      "label": "Profitability",
+      "parents": [
+        "/billing"
+      ],
+      "ms": 172
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing/finance/cash-flow",
+      "label": "Cash & Cash Flow",
+      "parents": [
+        "/billing"
+      ],
+      "ms": 136
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing/finance/expenses",
+      "label": "Expenses & Procurement",
+      "parents": [
+        "/billing"
+      ],
+      "ms": 48
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing/finance/remuneration",
+      "label": "Firm Remuneration",
+      "parents": [
+        "/billing"
+      ],
+      "ms": 86
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/all-staff",
+      "label": "All Staff",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 83
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/headcount",
+      "label": "Headcount",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 69
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/capacity",
+      "label": "Capacity",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 76
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/utilisation",
+      "label": "Utilisation",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 62
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/timeliness",
+      "label": "Timeliness",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 79
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/performance-quality",
+      "label": "Performance & Quality",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 78
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/staff-contribution",
+      "label": "Staff Contribution",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 77
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/staff-cost",
+      "label": "Staff Cost",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 77
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/remuneration",
+      "label": "Remuneration",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 63
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/training-development",
+      "label": "Training & Development",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 64
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/people/recruitment-retention",
+      "label": "Recruitment & Retention",
+      "parents": [
+        "/management/people/all-staff"
+      ],
+      "ms": 72
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=client-0",
+      "label": "Client Portfolio",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=portfolio"
+      ],
+      "ms": 157
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=client-1",
+      "label": "Client Financials",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=portfolio"
+      ],
+      "ms": 51
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=client-2",
+      "label": "Client Profitability",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=portfolio"
+      ],
+      "ms": 77
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=client-3",
+      "label": "Client Relationship",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=portfolio"
+      ],
+      "ms": 94
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=client-4",
+      "label": "Client Risk",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=portfolio"
+      ],
+      "ms": 170
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=client-5",
+      "label": "Client Experience",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=portfolio"
+      ],
+      "ms": 46
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=business-0",
+      "label": "Prospect & Intake",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=prospect-intake"
+      ],
+      "ms": 156
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=business-1",
+      "label": "Pipeline",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=prospect-intake"
+      ],
+      "ms": 83
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=business-2",
+      "label": "Opportunities",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=prospect-intake"
+      ],
+      "ms": 94
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=business-3",
+      "label": "Proposals & Quotations",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=prospect-intake"
+      ],
+      "ms": 57
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=business-4",
+      "label": "Conversion",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=prospect-intake"
+      ],
+      "ms": 70
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=business-5",
+      "label": "Lost Opportunities",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=prospect-intake"
+      ],
+      "ms": 65
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=business-6",
+      "label": "Referral Sources",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=prospect-intake"
+      ],
+      "ms": 90
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=business-7",
+      "label": "Revenue Forecast",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=prospect-intake"
+      ],
+      "ms": 65
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=experience-0",
+      "label": "Lost Prospect Feedback",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=lost-prospect-feedback"
+      ],
+      "ms": 138
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=experience-1",
+      "label": "Mid-Matter Feedback",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=lost-prospect-feedback"
+      ],
+      "ms": 79
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=experience-2",
+      "label": "Matter Completion Feedback",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=lost-prospect-feedback"
+      ],
+      "ms": 67
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=experience-3",
+      "label": "Client Satisfaction",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=lost-prospect-feedback"
+      ],
+      "ms": 51
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=experience-4",
+      "label": "Complaints",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=lost-prospect-feedback"
+      ],
+      "ms": 81
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=experience-5",
+      "label": "Red Flags",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=lost-prospect-feedback"
+      ],
+      "ms": 67
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=experience-6",
+      "label": "Follow-Up Actions",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=lost-prospect-feedback"
+      ],
+      "ms": 62
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/clients-business-development?view=experience-7",
+      "label": "Client Experience Analytics",
+      "parents": [
+        "/management/clients-business-development?view=portfolio",
+        "/management/clients-business-development?view=lost-prospect-feedback"
+      ],
+      "ms": 58
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=risk-overview",
+      "label": "Risk Overview",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 159
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=matter-risk",
+      "label": "Matter Risk",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 65
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=financial-risk",
+      "label": "Financial Risk",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 86
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=operational-risk",
+      "label": "Operational Risk",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 77
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=client-issues",
+      "label": "Client Issues",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 74
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=complaints",
+      "label": "Complaints",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 74
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=conflicts",
+      "label": "Conflicts",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 77
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=red-flags",
+      "label": "Red Flags",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 63
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=management-alerts",
+      "label": "Management Alerts",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview"
+      ],
+      "ms": 82
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=litigation-deadlines",
+      "label": "Litigation Deadlines",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview",
+        "/management/risk-compliance?view=critical-matters"
+      ],
+      "ms": 84
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=regulatory-deadlines",
+      "label": "Regulatory Deadlines",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview",
+        "/management/risk-compliance?view=critical-matters"
+      ],
+      "ms": 73
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=compliance",
+      "label": "Compliance",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview",
+        "/management/risk-compliance?view=critical-matters"
+      ],
+      "ms": 82
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/risk-compliance?view=firm-risk",
+      "label": "Firm Risk",
+      "parents": [
+        "/management/risk-compliance?view=risk-overview",
+        "/management/risk-compliance?view=critical-matters"
+      ],
+      "ms": 72
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=report-0",
+      "label": "Weekly Transaction Reports",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=reporting"
+      ],
+      "ms": 171
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=report-1",
+      "label": "Monthly Litigation Reports",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=reporting"
+      ],
+      "ms": 60
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=report-2",
+      "label": "Significant Updates",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=reporting"
+      ],
+      "ms": 74
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=report-3",
+      "label": "Reporting Compliance",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=reporting"
+      ],
+      "ms": 63
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=report-4",
+      "label": "Reporting Triggers",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=reporting"
+      ],
+      "ms": 60
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=firm-trend-0",
+      "label": "Revenue Trend",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=firm-trends"
+      ],
+      "ms": 65
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=firm-trend-1",
+      "label": "Collections Trend",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=firm-trends"
+      ],
+      "ms": 58
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=firm-trend-2",
+      "label": "Profitability Trend",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=firm-trends"
+      ],
+      "ms": 47
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=firm-trend-3",
+      "label": "Matter Volume Trend",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=firm-trends"
+      ],
+      "ms": 71
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=firm-trend-4",
+      "label": "New Client Trend",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=firm-trends"
+      ],
+      "ms": 49
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=firm-trend-5",
+      "label": "Staff Productivity Trend",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=firm-trends"
+      ],
+      "ms": 49
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=period-0",
+      "label": "Current vs Previous Period",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=period-comparison"
+      ],
+      "ms": 48
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=period-1",
+      "label": "Month-on-Month",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=period-comparison"
+      ],
+      "ms": 74
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=period-2",
+      "label": "Quarter-on-Quarter",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=period-comparison"
+      ],
+      "ms": 56
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=period-3",
+      "label": "Year-on-Year",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=period-comparison"
+      ],
+      "ms": 48
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=period-4",
+      "label": "Budget / Target vs Actual",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=period-comparison"
+      ],
+      "ms": 70
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=history-0",
+      "label": "Revenue History",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=historical-analysis"
+      ],
+      "ms": 103
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=history-1",
+      "label": "Collections History",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=historical-analysis"
+      ],
+      "ms": 72
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=history-2",
+      "label": "Profit History",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=historical-analysis"
+      ],
+      "ms": 54
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=history-3",
+      "label": "Matter History",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=historical-analysis"
+      ],
+      "ms": 72
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=history-4",
+      "label": "Client Growth History",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=historical-analysis"
+      ],
+      "ms": 75
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=history-5",
+      "label": "Staff Performance History",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=historical-analysis"
+      ],
+      "ms": 69
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=matter-0",
+      "label": "Matter Growth / Decline",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=matter-practice"
+      ],
+      "ms": 93
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=matter-1",
+      "label": "Practice Area Growth",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=matter-practice"
+      ],
+      "ms": 74
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=matter-2",
+      "label": "Practice Area Revenue Trend",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=matter-practice"
+      ],
+      "ms": 58
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=matter-3",
+      "label": "Matter Success / Closure Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=matter-practice"
+      ],
+      "ms": 58
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=matter-4",
+      "label": "Matter Cycle-Time Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=matter-practice"
+      ],
+      "ms": 80
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-0",
+      "label": "Client Growth & Retention",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-business-development"
+      ],
+      "ms": 81
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-1",
+      "label": "New vs Existing Client Revenue",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-business-development"
+      ],
+      "ms": 58
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-2",
+      "label": "Client Revenue Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-business-development"
+      ],
+      "ms": 88
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-3",
+      "label": "Referral / Source Performance",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-business-development"
+      ],
+      "ms": 70
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-4",
+      "label": "Prospect Pipeline",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-business-development"
+      ],
+      "ms": 70
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-5",
+      "label": "Lost Opportunity Analysis",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-business-development"
+      ],
+      "ms": 59
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=client-6",
+      "label": "Conversion Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-business-development"
+      ],
+      "ms": 76
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=experience-0",
+      "label": "Client Satisfaction Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-experience"
+      ],
+      "ms": 89
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=experience-1",
+      "label": "Repeat Instruction Rate",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-experience"
+      ],
+      "ms": 79
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=experience-2",
+      "label": "Recommendation Rate",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-experience"
+      ],
+      "ms": 83
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=experience-3",
+      "label": "Complaint Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-experience"
+      ],
+      "ms": 57
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=experience-4",
+      "label": "Red Flag Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-experience"
+      ],
+      "ms": 117
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=experience-5",
+      "label": "Feedback Response Rate",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=client-experience"
+      ],
+      "ms": 66
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=people-0",
+      "label": "Productivity Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=people-productivity"
+      ],
+      "ms": 44
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=people-1",
+      "label": "Workload Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=people-productivity"
+      ],
+      "ms": 68
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=people-2",
+      "label": "Timeliness Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=people-productivity"
+      ],
+      "ms": 78
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=people-3",
+      "label": "Revenue Contribution Trends",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=people-productivity"
+      ],
+      "ms": 66
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=people-4",
+      "label": "Performance vs Target",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=people-productivity"
+      ],
+      "ms": 75
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=operations-0",
+      "label": "Task Completion",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=operational-reporting"
+      ],
+      "ms": 68
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=operations-1",
+      "label": "Deadline Compliance",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=operational-reporting"
+      ],
+      "ms": 78
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=operations-2",
+      "label": "Matter Timeliness",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=operational-reporting"
+      ],
+      "ms": 83
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=operations-3",
+      "label": "Reporting Compliance",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=operational-reporting"
+      ],
+      "ms": 72
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=operations-4",
+      "label": "Significant Update Compliance",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=operational-reporting"
+      ],
+      "ms": 73
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=forecast-0",
+      "label": "Revenue Forecast",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=forecast"
+      ],
+      "ms": 96
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=forecast-1",
+      "label": "Collection Forecast",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=forecast"
+      ],
+      "ms": 67
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=forecast-2",
+      "label": "Matter Pipeline Forecast",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=forecast"
+      ],
+      "ms": 64
+    },
+    {
+      "role": "managing_director",
+      "href": "/management/reports-analytics?view=forecast-3",
+      "label": "Profit Forecast",
+      "parents": [
+        "/management/reports-analytics?view=reporting",
+        "/management/reports-analytics?view=forecast"
+      ],
+      "ms": 61
+    },
+    {
+      "role": "managing_director",
+      "href": "/matters/new",
+      "label": "New Matter",
+      "parents": [],
+      "ms": 49
+    },
+    {
+      "role": "managing_director",
+      "href": "/billing/invoices",
+      "label": "New Invoice",
+      "parents": [],
+      "ms": 77
+    },
+    {
+      "role": "managing_director",
+      "href": "/admin/users",
+      "label": "Users",
+      "parents": [],
+      "ms": 44
+    },
+    {
+      "role": "managing_director",
+      "href": "/petty-cash",
+      "label": "Petty Cash",
+      "parents": [],
+      "ms": 83
+    },
+    {
+      "role": "managing_director",
+      "href": "/admin/settings",
+      "label": "Settings",
+      "parents": [],
+      "ms": 158
+    },
+    {
+      "role": "managing_director",
+      "href": "/notifications",
+      "label": "Notifications",
+      "parents": [],
+      "ms": 187
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/",
+      "label": "Dashboard",
+      "parents": [],
+      "ms": 87
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/matters/intake-prospects",
+      "label": "Intake & Prospects",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 185
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/matters",
+      "label": "Active Matters",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 82
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/matters/temporarily-closed",
+      "label": "Temporarily Closed",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 63
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/matters/closed",
+      "label": "Closed Matters",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 84
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/matters/independent-tasks",
+      "label": "Independent Tasks",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 99
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/tasks",
+      "label": "Task Management",
+      "parents": [],
+      "ms": 97
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/calendar",
+      "label": "Calendar & Deadlines",
+      "parents": [],
+      "ms": 72
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/billing",
+      "label": "Billing & Margins",
+      "parents": [],
+      "ms": 173
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/reports",
+      "label": "Firm Reports",
+      "parents": [],
+      "ms": 156
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/matters/new",
+      "label": "New Matter",
+      "parents": [],
+      "ms": 89
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/billing/invoices",
+      "label": "New Invoice",
+      "parents": [],
+      "ms": 54
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/admin/users",
+      "label": "Users",
+      "parents": [],
+      "ms": 80
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/petty-cash",
+      "label": "Petty Cash",
+      "parents": [],
+      "ms": 60
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/admin/settings",
+      "label": "Settings",
+      "parents": [],
+      "ms": 161
+    },
+    {
+      "role": "executive_assistant",
+      "href": "/notifications",
+      "label": "Notifications",
+      "parents": [],
+      "ms": 152
+    },
+    {
+      "role": "associate",
+      "href": "/",
+      "label": "Dashboard",
+      "parents": [],
+      "ms": 303
+    },
+    {
+      "role": "associate",
+      "href": "/matters/intake-prospects",
+      "label": "Intake & Prospects",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 79
+    },
+    {
+      "role": "associate",
+      "href": "/matters",
+      "label": "Active Matters",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 59
+    },
+    {
+      "role": "associate",
+      "href": "/matters/temporarily-closed",
+      "label": "Temporarily Closed",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 74
+    },
+    {
+      "role": "associate",
+      "href": "/matters/closed",
+      "label": "Closed Matters",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 75
+    },
+    {
+      "role": "associate",
+      "href": "/matters/independent-tasks",
+      "label": "Independent Tasks",
+      "parents": [
+        "/matters"
+      ],
+      "ms": 44
+    },
+    {
+      "role": "associate",
+      "href": "/tasks",
+      "label": "Task Management",
+      "parents": [],
+      "ms": 100
+    },
+    {
+      "role": "associate",
+      "href": "/calendar",
+      "label": "Calendar & Deadlines",
+      "parents": [],
+      "ms": 171
+    },
+    {
+      "role": "associate",
+      "href": "/performance",
+      "label": "Performance",
+      "parents": [],
+      "ms": 118
+    },
+    {
+      "role": "associate",
+      "href": "/notifications",
+      "label": "Notifications",
+      "parents": [],
+      "ms": 154
+    },
+    {
+      "role": "associate",
+      "href": "/billing/invoices",
+      "label": "Invoices",
+      "parents": [],
+      "ms": 62
+    },
+    {
+      "role": "associate",
+      "href": "/matters/new",
+      "label": "New matter",
+      "parents": [],
+      "ms": 190,
+      "redirectedTo": "/matters"
+    }
+  ],
+  "failures": []
+}

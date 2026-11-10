@@ -1,3 +1,5 @@
+import { pageModules } from './navigation/pageModules';
+import { clearNavigationRequests } from './services/navigationRequest';
 import { lazy, Suspense, useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/auth/Login';
@@ -7,39 +9,39 @@ import { Toaster } from './components/ui/sonner';
 
 // Download each workspace when it is opened, so sign-in does not wait for
 // reporting, billing, charts, and every other staff screen.
-const ManagingPartnerDashboard = lazy(() => import('./components/dashboards/ManagingPartnerDashboard'));
-const AssociateDashboard = lazy(() => import('./components/dashboards/AssociateDashboard'));
-const ExecutiveAssistantDashboard = lazy(() => import('./components/dashboards/ExecutiveAssistantDashboard'));
-const CaseList = lazy(() => import('./components/cases/CaseList'));
-const ClosedCases = lazy(() => import('./components/cases/ClosedCases'));
-const CreateCase = lazy(() => import('./components/cases/CreateCase'));
-const CaseWorkspace = lazy(() => import('./components/cases/CaseWorkspace'));
-const IntakeProspects = lazy(() => import('./components/cases/IntakeProspects'));
-const ProspectWorkspace = lazy(() => import('./components/cases/ProspectWorkspace'));
-const IndependentTaskModule = lazy(() => import('./components/independentTasks/IndependentTaskModule'));
-const IndependentTaskDetail = lazy(() => import('./components/independentTasks/IndependentTaskDetail'));
-const TaskBoard = lazy(() => import('./components/tasks/TaskBoard'));
-const TaskDetail = lazy(() => import('./components/tasks/TaskDetail'));
-const TaskManagementPage = lazy(() => import('./components/tasks/TaskManagementPage'));
-const Calendar = lazy(() => import('./components/calendar/Calendar'));
-const DeadlineManagementPage = lazy(() => import('./components/calendar/DeadlineManagementPage'));
-const NotificationCenter = lazy(() => import('./components/notifications/NotificationCenter'));
-const BillingDashboard = lazy(() => import('./components/billing/BillingDashboard'));
-const InvoiceManagement = lazy(() => import('./components/billing/InvoiceManagement'));
-const BillingFinancePage = lazy(() => import('./components/billing/BillingFinancePage'));
-const ProfitabilityPage = lazy(() => import('./components/billing/ProfitabilityPage'));
-const RetainerManagement = lazy(() => import('./components/billing/RetainerManagement'));
-const RetainerDetail = lazy(() => import('./components/billing/RetainerDetail'));
-const PerformanceDashboard = lazy(() => import('./components/reports/PerformanceDashboard'));
-const FirmReports = lazy(() => import('./components/reports/FirmReports'));
-const MatterFinancialStatusPage = lazy(() => import('./components/reports/MatterFinancialStatusPage'));
-const PeopleCapacityPage = lazy(() => import('./components/reports/PeopleCapacityPage'));
-const ClientsBusinessDevelopmentPage = lazy(() => import('./components/reports/ClientsBusinessDevelopmentPage'));
-const RiskCompliancePage = lazy(() => import('./components/reports/RiskCompliancePage'));
-const ReportsAnalyticsPage = lazy(() => import('./components/reports/ReportsAnalyticsPage'));
-const UserManagement = lazy(() => import('./components/admin/UserManagement'));
-const Settings = lazy(() => import('./components/admin/Settings'));
-const PettyCashDashboard = lazy(() => import('./components/pettyCash/PettyCashDashboard'));
+const ManagingPartnerDashboard = lazy(pageModules.ManagingPartnerDashboard);
+const AssociateDashboard = lazy(pageModules.AssociateDashboard);
+const ExecutiveAssistantDashboard = lazy(pageModules.ExecutiveAssistantDashboard);
+const CaseList = lazy(pageModules.CaseList);
+const ClosedCases = lazy(pageModules.ClosedCases);
+const CreateCase = lazy(pageModules.CreateCase);
+const CaseWorkspace = lazy(pageModules.CaseWorkspace);
+const IntakeProspects = lazy(pageModules.IntakeProspects);
+const ProspectWorkspace = lazy(pageModules.ProspectWorkspace);
+const IndependentTaskModule = lazy(pageModules.IndependentTaskModule);
+const IndependentTaskDetail = lazy(pageModules.IndependentTaskDetail);
+const TaskBoard = lazy(pageModules.TaskBoard);
+const TaskDetail = lazy(pageModules.TaskDetail);
+const TaskManagementPage = lazy(pageModules.TaskManagementPage);
+const Calendar = lazy(pageModules.Calendar);
+const DeadlineManagementPage = lazy(pageModules.DeadlineManagementPage);
+const NotificationCenter = lazy(pageModules.NotificationCenter);
+const BillingDashboard = lazy(pageModules.BillingDashboard);
+const InvoiceManagement = lazy(pageModules.InvoiceManagement);
+const BillingFinancePage = lazy(pageModules.BillingFinancePage);
+const ProfitabilityPage = lazy(pageModules.ProfitabilityPage);
+const RetainerManagement = lazy(pageModules.RetainerManagement);
+const RetainerDetail = lazy(pageModules.RetainerDetail);
+const PerformanceDashboard = lazy(pageModules.PerformanceDashboard);
+const FirmReports = lazy(pageModules.FirmReports);
+const MatterFinancialStatusPage = lazy(pageModules.MatterFinancialStatusPage);
+const PeopleCapacityPage = lazy(pageModules.PeopleCapacityPage);
+const ClientsBusinessDevelopmentPage = lazy(pageModules.ClientsBusinessDevelopmentPage);
+const RiskCompliancePage = lazy(pageModules.RiskCompliancePage);
+const ReportsAnalyticsPage = lazy(pageModules.ReportsAnalyticsPage);
+const UserManagement = lazy(pageModules.UserManagement);
+const Settings = lazy(pageModules.Settings);
+const PettyCashDashboard = lazy(pageModules.PettyCashDashboard);
 
 export type UserRole =
   | 'managing_director'
@@ -91,6 +93,7 @@ function StaffApp() {
   };
 
   const handleLogout = () => {
+    clearNavigationRequests();
     setUser(null);
     localStorage.removeItem('user');
     localStorage.removeItem('token');

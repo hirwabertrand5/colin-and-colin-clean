@@ -427,13 +427,11 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       ]),
     ]);
 
-    const casesForInvoices = await Case.find({ _id: { $in: Array.from(new Set([...invoicesByInvoiceDate, ...invoicesByPaymentDate].map((inv: any) => String(inv.caseId || '')).filter(Boolean))) } })
-      .select('_id assignedTo workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
-      .lean();
-
     const allCases = await Case.find()
-      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties budget workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel retainerCoveredActionKeys')
+      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties clientName budget createdAt updatedAt workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel retainerCoveredActionKeys')
       .lean();
+    const invoicedCaseIds = new Set([...invoicesByInvoiceDate, ...invoicesByPaymentDate].map((invoice: any) => String(invoice.caseId || '')));
+    const casesForInvoices = allCases.filter(matter => invoicedCaseIds.has(String(matter._id)));
     const caseById = new Map((allCases as any[]).map((c) => [String(c._id), c]));
     const workflowTemplateIds = Array.from(new Set((allCases as any[])
       .map((c) => String(c.workflowTemplateId || '').trim())
@@ -470,13 +468,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const financialMatters = await Case.find(
-      selectedMemberNameNormalized
-        ? { _id: { $in: Array.from(linkedCaseIdsByName.get(selectedMemberNameNormalized) || []) } }
-        : {}
-    )
-      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties budget updatedAt workflowProgress billingSettings caseManagement legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel retainerCoveredActionKeys')
-      .lean();
+    const linkedIds = selectedMemberNameNormalized ? linkedCaseIdsByName.get(selectedMemberNameNormalized) || new Set<string>() : null;
+    const financialMatters = linkedIds ? allCases.filter(matter => linkedIds.has(String(matter._id))) : allCases;
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
     const workflowTemplateById = new Map(
@@ -496,29 +489,25 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       return sum + (Number(inv.amount) || 0);
     }, 0) + retainerCash;
     const totalBilled = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0) + (selectedMemberName ? 0 : retainer.billed);
-    const pendingInvoices = await Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO }, ...ordinaryInvoiceFilter,
-      ...(selectedMemberName ? { caseId: { $in: Array.from(selectedMatterIds) } } : {}) }).select('amount').lean();
+    const [pendingInvoices, directExpenses, operatingExpenses, ageingInvoices] = await Promise.all([
+      Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO }, ...ordinaryInvoiceFilter,
+        ...(selectedMemberName ? { caseId: { $in: Array.from(selectedMatterIds) } } : {}) }).select('amount').lean(),
+      PettyCashExpense.find({ date: { $gte: fromISO, $lte: toISO }, chargeType: 'client', caseId: { $in: Array.from(selectedMatterIds) } })
+        .select('amount refundAmount chargeType caseId').lean(),
+      PettyCashExpense.find({ date: { $gte: fromISO, $lte: toISO }, chargeType: { $ne: 'client' } })
+        .select('amount refundAmount chargeType caseId').lean(),
+      Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO }, ...ordinaryInvoiceFilter }).select('amount date').lean(),
+    ]);
     const outstanding = pendingInvoices.reduce((n, i) => n + i.amount, 0) + (selectedMemberName ? 0 : retainer.outstanding);
-    const totalDirectMatterCosts = (await PettyCashExpense.find({
-      date: { $gte: fromISO, $lte: toISO },
-      chargeType: 'client',
-      caseId: { $in: Array.from(selectedMatterIds) },
-    })
-      .select('amount refundAmount chargeType caseId')
-      .lean()).reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
-    const firmOperatingExpenses = (await PettyCashExpense.find({
-      date: { $gte: fromISO, $lte: toISO },
-      chargeType: { $ne: 'client' },
-    })
-      .select('amount refundAmount chargeType caseId')
-      .lean()).reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
+    const totalDirectMatterCosts = directExpenses.reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
+    const firmOperatingExpenses = operatingExpenses.reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
     const grossProfit = totalCollected - totalDirectMatterCosts;
     const grossProfitMargin = totalCollected > 0 ? Math.round((grossProfit / totalCollected) * 100) : 0;
     const netProfit = grossProfit - firmOperatingExpenses - (selectedMemberName ? 0 : retainer.staffTpa);
     const netProfitMargin = totalCollected > 0 ? Math.round((netProfit / totalCollected) * 100) : 0;
 
     const ageingReport = getAgeingBuckets(
-      [...await Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO }, ...ordinaryInvoiceFilter }).select('amount date').lean(),
+      [...ageingInvoices,
         ...(!selectedMemberName ? retainer.statements.filter((p) => p.dueDate <= toISO && p.allocation.outstanding > 0).map((p) => ({ amount: p.allocation.outstanding, date: p.dueDate })) : [])],
       toDate
     );
@@ -775,9 +764,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .sort((a, b) => b.activeCases - a.activeCases);
 
     const caseAnalyticsByPath = new Map<string, { type: string; active: number; closed: number; durationTotal: number; durationCount: number }>();
-    const casesForAnalytics = await Case.find()
-      .select('caseType caseTypeLabel matterType workflow workflowTemplateId legalServicePath status updatedAt createdAt')
-      .lean();
+    const casesForAnalytics = allCases;
     for (const c of casesForAnalytics as any[]) {
       const type = selectedPathLabel(c, workflowTemplateMatterTypeById);
       const current = caseAnalyticsByPath.get(type) || {
@@ -894,9 +881,12 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       }))
       .sort((a, b) => b.amount - a.amount);
 
-    const clientProfitabilityMatters = await Case.find()
-      .select('_id caseNo parties clientName status budget workflowProgress billingSettings legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
-      .lean();
+    // Preserve this section's original projection as well as its calculations.
+    // Other sections load assignment fields that this section never exposed.
+    const clientProfitabilityFields = new Set('_id caseNo parties clientName status budget workflowProgress billingSettings legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel'.split(' '));
+    const clientProfitabilityMatters = allCases.map(matter => Object.fromEntries(
+      Object.entries(matter).filter(([key]) => clientProfitabilityFields.has(key))
+    ));
     const clientProfitabilityProspects = await Prospect.find({
       $or: [
         { convertedToMatters: null },

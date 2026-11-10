@@ -197,6 +197,32 @@ export const listExpensesForCase = async (req: AuthRequest, res: Response) => {
   }
 };
 
+/** Same per-matter/fund ordering and 500-row limit, with one authenticated read. */
+export const listExpensesBatch = async (req: AuthRequest, res: Response) => {
+  try {
+    const { caseIds, fundIds } = req.query;
+    if ((typeof caseIds === 'string') === (typeof fundIds === 'string')) {
+      return res.status(400).json({ message: 'Provide caseIds or fundIds.' });
+    }
+    const field = typeof caseIds === 'string' ? 'caseId' : 'fundId';
+    const ids = [...new Set(String(caseIds ?? fundIds).split(',').filter(Boolean))];
+    if (!ids.length || ids.length > 100 || ids.some(id => !mongoose.Types.ObjectId.isValid(id))) {
+      return res.status(400).json({ message: 'Provide between 1 and 100 valid IDs.' });
+    }
+    const items: Record<string, any[]> = Object.fromEntries(ids.map(id => [id, []]));
+    const cursor = PettyCashExpense.find({ [field]: { $in: ids.map(id => new mongoose.Types.ObjectId(id)) } })
+      .sort({ date: -1, createdAt: -1 }).cursor();
+    // Stream results rather than retaining all historical expenses in memory.
+    for await (const expense of cursor) {
+      const key = String(expense[field]);
+      if (items[key] && items[key]!.length < 500) items[key]!.push(expense);
+    }
+    return res.json(items);
+  } catch {
+    return res.status(500).json({ message: 'Failed to fetch expenses.' });
+  }
+};
+
 export const createExpense = async (req: AuthRequest, res: Response) => {
   const session = await mongoose.startSession();
   try {

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
+import Link from './NavigationLink';
+import { prepareNavigation } from '../../navigation/prepareNavigation';
 import {
   LayoutDashboard,
   Briefcase,
@@ -309,6 +311,10 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
       return (
         <div key={`${item.name}-${item.href}`} className={depth > 0 ? 'group relative' : undefined}>
           <button
+            aria-expanded={isExpanded}
+            data-menu-path={item.href}
+            onMouseEnter={() => prepareNavigation(item.href, false)}
+            onFocus={() => prepareNavigation(item.href, false)}
             onClick={() => setExpandedManagementMenus(current => isExpanded
               ? current.filter(href => href !== item.href)
               : [...current, item.href])}
@@ -377,7 +383,6 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
 
   // Load once + poll every 30s
   useEffect(() => {
-    refreshUnreadCount();
     const t = window.setInterval(refreshUnreadCount, 30000);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -446,6 +451,10 @@ export default function DashboardLayout({ user, onLogout, children }: DashboardL
                   return (
                     <div key={item.name}>
                       <button
+                        aria-expanded={isExpanded}
+                        data-menu-path={item.href}
+                        onMouseEnter={() => prepareNavigation(item.href, false)}
+                        onFocus={() => prepareNavigation(item.href, false)}
                         onClick={() => setExpandedMenu(isExpanded ? null : item.name)}
                         className={`
                           w-full flex items-center justify-between px-3 py-2 text-sm rounded transition-colors

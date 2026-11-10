@@ -87,6 +87,7 @@ const PettyCashExpenseSchema = new Schema<IPettyCashExpense>(
 );
 
 PettyCashExpenseSchema.index({ fundId: 1, date: -1, createdAt: -1 });
+PettyCashExpenseSchema.index({ caseId: 1, date: -1, createdAt: -1 });
 PettyCashExpenseSchema.index({ chargeType: 1, caseId: 1, date: -1 });
 
 export default mongoose.model<IPettyCashExpense>('PettyCashExpense', PettyCashExpenseSchema);

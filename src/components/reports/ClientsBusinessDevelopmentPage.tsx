@@ -11,6 +11,7 @@ import { listClientExperienceComplaints, listClientExperienceRedFlags, listClien
 import usePageTitle from '../../hooks/usePageTitle';
 import TableExport from '../ui/TableExport';
 import SortableHeader from '../ui/SortableHeader';
+import { sortRows, type SortDir } from '../../utils/tableSort';
 
 const PAGE_SIZE = 10;
 const managementRoles: UserRole[] = ['managing_director', 'managing_partner', 'executive_managing_partner'];
@@ -93,13 +94,13 @@ export default function ClientsBusinessDevelopmentPage({ userRole }: { userRole:
   };
 
   usePageTitle(detail.title);
+  const needsExperience = detail.kind === 'experience';
 
   useEffect(() => {
     if (!permitted) return;
     let mounted = true;
     setLoading(true);
     setError('');
-    const needsExperience = detail.kind === 'experience';
     Promise.all([getAllCases(), listInvoices(), getAllProspects({ includeTerminal: true }), getFirmReports({ range, basis: 'invoiceDate' }), needsExperience ? listClientExperienceRequests().catch(() => []) : Promise.resolve([]), needsExperience ? listClientExperienceResponses().catch(() => []) : Promise.resolve([]), needsExperience ? listClientExperienceComplaints().catch(() => []) : Promise.resolve([]), needsExperience ? listClientExperienceRedFlags().catch(() => []) : Promise.resolve([])])
       .then(([caseData, invoiceData, prospectData, reportData, requests, responses, complaints, redFlags]) => {
         if (!mounted) return;
@@ -109,7 +110,7 @@ export default function ClientsBusinessDevelopmentPage({ userRole }: { userRole:
       .catch((loadError: any) => mounted && setError(loadError?.message || 'Failed to load clients and business development data.'))
       .finally(() => mounted && setLoading(false));
     return () => { mounted = false; };
-  }, [permitted, range]);
+  }, [permitted, range, needsExperience]);
 
   const clients = useMemo<ClientRow[]>(() => {
     const grouped = new Map<string, CaseData[]>();

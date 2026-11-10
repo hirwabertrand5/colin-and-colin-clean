@@ -58,6 +58,8 @@ An existing lifecycle inconsistency was observed: reopening a workflow step on a
 
 ## Reproduce the checks
 
+Additional sidebar/menu work is documented in [Sidebar navigation performance](sidebar-performance-improvements.md).
+
 From the project root:
 
 ```text

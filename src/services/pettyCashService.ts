@@ -1,3 +1,4 @@
+import { navigationFetch as fetch } from './navigationRequest';
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
 
@@ -144,6 +145,32 @@ export const listExpensesForCase = async (caseId: string): Promise<PettyCashExpe
   await handleAuth(res);
   return res.json();
 };
+
+const listExpensesBatch = async (ids: string[], kind: 'caseIds' | 'fundIds'): Promise<Record<string, PettyCashExpense[]>> => {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const groups: Record<string, PettyCashExpense[]> = {};
+  // Bound URL length and response size; large firms still avoid one request per record.
+  for (let offset = 0; offset < unique.length; offset += 100) {
+    const chunk = unique.slice(offset, offset + 100);
+    let res: Response | undefined;
+    try {
+      res = await fetch(`${API_URL}/petty-cash/expenses/batch?${kind}=${chunk.join(',')}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+    } catch { /* Individual reads below retain the existing partial-failure behavior. */ }
+    if (res?.status === 401) await handleAuth(res);
+    if (res?.status === 403) continue; // Same unavailable expense data as the individual reads.
+    if (res?.ok) { Object.assign(groups, await res.json()); continue; }
+    // Keep rolling deployments compatible with a backend that lacks the batch route.
+    const fallback = kind === 'caseIds' ? listExpensesForCase : listExpensesForFund;
+    const results = await Promise.allSettled(chunk.map(async id => [id, await fallback(id)] as const));
+    for (const result of results) if (result.status === 'fulfilled') groups[result.value[0]] = result.value[1];
+  }
+  return groups;
+};
+
+export const listExpensesForCases = (ids: string[]) => listExpensesBatch(ids, 'caseIds');
+export const listExpensesForFunds = (ids: string[]) => listExpensesBatch(ids, 'fundIds');
 
 export const addExpenseToFund = async (
   fundId: string,

@@ -183,7 +183,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
       : c.workflowProgress?.currentStepStartAt || c.workflowStartDate || c.createdAt;
 
     // Logging for diagnostics: deadline, now, remaining ms/hours/days, computed status and color
-    try {
+    if (import.meta.env.DEV) try {
       const now = new Date();
       if (!due) {
         console.log(`[CaseDeadline] caseId=${c._id} caseNo=${c.caseNo || 'N/A'} no current step due date`);

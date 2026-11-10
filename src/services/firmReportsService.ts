@@ -1,3 +1,4 @@
+import { navigationFetch as fetch } from './navigationRequest';
 import type { RetainerPerformance } from './retainerAccountingService';
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');

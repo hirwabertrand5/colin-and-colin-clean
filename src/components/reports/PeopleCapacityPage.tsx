@@ -172,7 +172,7 @@ export default function PeopleCapacityPage({ view, userRole }: { view: PeopleCap
       .catch((loadError: any) => mounted && setError(loadError?.message || 'Failed to load people and capacity data.'))
       .finally(() => mounted && setLoading(false));
     return () => { mounted = false; };
-  }, [permitted, range, customFrom, customTo, view, unsupported]);
+  }, [permitted, range, customFrom, customTo, unsupported]);
 
   // Single pass over all cases, grouped by each assignment identity. This keeps
   // the per-member lookup O(1) instead of re-filtering every case per staff

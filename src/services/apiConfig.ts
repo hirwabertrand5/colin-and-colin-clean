@@ -1,3 +1,4 @@
+import { navigationFetch as fetch } from './navigationRequest';
 /** Shared API/file origin resolution.
  *
  * Stored uploads are paths (for example `/uploads/<id>`), not frontend URLs.

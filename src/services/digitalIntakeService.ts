@@ -1,3 +1,4 @@
+import { navigationFetch as fetch } from './navigationRequest';
 import { API_URL } from './apiConfig';
 const API = `${API_URL}/digital-intake`;
 export { CLIENT_FIELDS, PARTY_EXTRA_FIELDS, MATTER_FIELDS, ARTICLES_GROUPS, SHAREHOLDER_FIELDS, OFFICIAL_USE_FIELDS, INTAKE_CONFIRMATION } from '../../colin-backend/src/config/digitalIntakeSchema';

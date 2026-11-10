@@ -17,7 +17,7 @@ import {
 import { InvoiceWithCase, listInvoices } from "../../services/invoiceService";
 import { getAllCases, CaseData } from "../../services/caseService";
 import {
-  listExpensesForFund,
+  listExpensesForFunds,
   listPettyCashFunds,
   PettyCashExpense,
 } from "../../services/pettyCashService";
@@ -421,26 +421,19 @@ export default function BillingFinancePage({
             setLoading(true);
             setRefreshing(ready);
             setError("");
-            const firmReport = await getFirmReports({
+            const [firmReport, caseData, funds] = await Promise.all([getFirmReports({
               range: dateRange,
               from: dateRange === "custom" ? customFrom : undefined,
               to: dateRange === "custom" ? customTo : undefined,
               basis: "invoiceDate",
-            });
+            }), getAllCases(), listPettyCashFunds().catch(() => [])]);
             const { from, to } = firmReport.range;
-            const [billing, invoiceData, caseData, funds] = await Promise.all([
+            const [billing, invoiceData, expenseGroups] = await Promise.all([
               getBillingSummary({ from, to }),
               listInvoices({ from, to }),
-              getAllCases(),
-              listPettyCashFunds().catch(() => []),
+              listExpensesForFunds(funds.map(fund => fund._id)),
             ]);
-            const expenseData = (
-              await Promise.all(
-                funds.map((fund) =>
-                  listExpensesForFund(fund._id).catch(() => []),
-                ),
-              )
-            ).flat();
+            const expenseData = funds.flatMap(fund => expenseGroups[fund._id] || []);
             if (!mounted) return;
             setSummary(billing);
             setInvoices(invoiceData);

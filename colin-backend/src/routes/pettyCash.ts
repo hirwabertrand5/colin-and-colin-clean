@@ -8,6 +8,7 @@ import {
   topUpActiveFund,
   listExpensesForFund,
   listExpensesForCase,
+  listExpensesBatch,
   createExpense,
   deleteExpense,
   addRefundToExpense,
@@ -26,6 +27,7 @@ router.post('/funds/close', authenticate, authorize(ROLES), closeActiveFund);
 router.post('/funds/top-up', authenticate, authorize(ROLES), topUpActiveFund);
 
 // Expenses
+router.get('/expenses/batch', authenticate, authorize(ROLES), listExpensesBatch);
 router.get('/funds/:fundId/expenses', authenticate, authorize(ROLES), listExpensesForFund);
 router.get('/cases/:caseId/expenses', authenticate, authorize(ROLES), listExpensesForCase);
 

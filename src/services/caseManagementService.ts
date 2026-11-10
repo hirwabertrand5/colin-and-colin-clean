@@ -1,3 +1,4 @@
+import { navigationFetch as fetch } from './navigationRequest';
 import { CaseEarnedFees } from './workflowInstanceService';
 
 const API_URL = import.meta.env.VITE_API_URL;

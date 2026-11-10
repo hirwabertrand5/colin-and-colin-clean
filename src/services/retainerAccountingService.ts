@@ -1,3 +1,4 @@
+import { navigationFetch as fetch } from './navigationRequest';
 import { API_URL } from './apiConfig';
 export type Department = 'Dispute Resolution' | 'Transaction & Advisory';
 export type RetainerContributor = { userId: string; name: string; role: string; share: number; tpaPercent: number; production: number; allocatedRevenue: number; earnedTpa: number };

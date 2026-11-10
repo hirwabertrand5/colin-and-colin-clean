@@ -5,7 +5,7 @@ import { AlertCircle, ArrowLeft, BriefcaseBusiness, CalendarClock, CircleDollarS
 import usePageTitle from '../../hooks/usePageTitle';
 import { CaseData, getAllCases } from '../../services/caseService';
 import { Invoice, listInvoices } from '../../services/invoiceService';
-import { listExpensesForCase, PettyCashExpense } from '../../services/pettyCashService';
+import { listExpensesForCases, PettyCashExpense } from '../../services/pettyCashService';
 import { getAllTasks, TaskData } from '../../services/taskService';
 import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import SortableHeader from '../ui/SortableHeader';
@@ -135,16 +135,8 @@ export default function MatterFinancialStatusPage({ view }: { view: MatterFinanc
 
     Promise.all([getAllCases(), listInvoices(), getAllTasks()])
       .then(async ([matterData, invoiceData, taskData]) => {
-        const expenseResults = await Promise.allSettled(
-          matterData
-            .filter((matter) => matter._id)
-            .map(async (matter) => [matter._id as string, await listExpensesForCase(matter._id as string)] as const)
-        );
+        const nextExpenses = await listExpensesForCases(matterData.map(matter => matter._id).filter((id): id is string => Boolean(id)));
         if (!mounted) return;
-        const nextExpenses: Record<string, PettyCashExpense[]> = {};
-        expenseResults.forEach((result) => {
-          if (result.status === 'fulfilled') nextExpenses[result.value[0]] = result.value[1];
-        });
         setCases(matterData);
         setInvoices(invoiceData);
         setTasks(taskData);

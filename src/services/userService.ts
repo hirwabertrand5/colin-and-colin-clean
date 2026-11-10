@@ -1,3 +1,4 @@
+import { navigationFetch as fetch } from './navigationRequest';
 import { API_URL } from './apiConfig';
   
 export interface User {

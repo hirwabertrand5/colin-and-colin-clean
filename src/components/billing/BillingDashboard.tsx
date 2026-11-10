@@ -5,7 +5,7 @@ import { UserRole } from '../../App';
 import { getBillingSummary, BillingSummary } from '../../services/billingService';
 import { getRecentInvoices, listInvoices, InvoiceWithCase } from '../../services/invoiceService';
 import { getAllCases, CaseData } from '../../services/caseService';
-import { listPettyCashFunds, listExpensesForFund, PettyCashExpense } from '../../services/pettyCashService';
+import { listPettyCashFunds, listExpensesForFunds, PettyCashExpense } from '../../services/pettyCashService';
 import usePageTitle from '../../hooks/usePageTitle';
 
 interface BillingDashboardProps {
@@ -80,9 +80,8 @@ export default function BillingDashboard({ userRole }: BillingDashboardProps) {
           getAllCases(),
           listPettyCashFunds().catch(() => []),
         ]);
-        const expenses = (await Promise.all(
-          funds.map((fund) => listExpensesForFund(fund._id).catch(() => []))
-        )).flat();
+        const expenseGroups = await listExpensesForFunds(funds.map(fund => fund._id));
+        const expenses = funds.flatMap(fund => expenseGroups[fund._id] || []);
 
         if (!mounted) return;
         setSummary(s);
