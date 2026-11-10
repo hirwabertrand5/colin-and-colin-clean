@@ -196,9 +196,11 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
 /** Shared loader for all Case Management handlers. */
 const loadCaseManagementContext = async (req: AuthRequest) => {
   const { caseId } = req.params as any;
-  const caseDoc: any = await Case.findById(caseId);
+  const [caseDoc, inst]: any[] = await Promise.all([
+    Case.findById(caseId),
+    WorkflowInstance.findOne({ caseId: new mongoose.Types.ObjectId(caseId) }),
+  ]);
   if (!caseDoc) return { error: null as any, caseDoc: null as any };
-  const inst: any = await WorkflowInstance.findOne({ caseId: new mongoose.Types.ObjectId(caseId) });
 
   // Same self-heal as the Case Workspace workflow endpoint: keep the matter on
   // its canonical template so Case Management shows the same checklist as the
@@ -211,13 +213,11 @@ const loadCaseManagementContext = async (req: AuthRequest) => {
     }
   }
 
-  const template: any = inst
-    ? await WorkflowTemplate.findById(inst.templateId).lean()
-    : null;
-
-  const [tasks, paidInvoices] = await Promise.all([
+  const [template, tasks, paidInvoices, users] = await Promise.all([
+    inst ? WorkflowTemplate.findById(inst.templateId).lean() : Promise.resolve(null),
     Task.find({ caseId }).lean(),
     Invoice.find({ caseId, status: 'Paid', retainerReceiptId: { $exists: false } }).select('amount').lean(),
+    User.find({}).select('name role tpaHistory').lean(),
   ]);
   const collectedAmount = (paidInvoices || []).reduce(
     (sum: number, invoice: any) => sum + Math.max(0, Number(invoice?.amount) || 0),
@@ -225,7 +225,6 @@ const loadCaseManagementContext = async (req: AuthRequest) => {
   );
   // Loaded whole and keyed case/whitespace-insensitively so every assigned
   // member resolves to their system role (and therefore their TPA).
-  const users: any[] = await User.find({}).select('name role tpaHistory').lean();
   const roleByName = buildRoleByName(users);
   return {
     error: null as any,
@@ -291,6 +290,7 @@ export const requestReview = async (req: AuthRequest, res: Response) => {
     if (assignments.reviewer) {
       const reviewerIds = await findAssignedUserIds([assignments.reviewer]);
       await notifyUsersById({
+        deferEmailQueue: true,
         userIds: reviewerIds,
         category: 'approvals',
         notification: {
@@ -355,6 +355,7 @@ export const requestApproval = async (req: AuthRequest, res: Response) => {
     if (assignments.approver) {
       const approverIds = await findAssignedUserIds([assignments.approver]);
       await notifyUsersById({
+        deferEmailQueue: true,
         userIds: approverIds,
         category: 'approvals',
         notification: {
@@ -402,7 +403,7 @@ export const approveStep = async (req: AuthRequest, res: Response) => {
     }
 
     const actor = actorFromReq(req);
-    await completeStepForCase(actor, ctx.caseDoc, ctx.inst, stepKey, { finalApproval: true });
+    await completeStepForCase(actor, ctx.caseDoc, ctx.inst, stepKey, { finalApproval: true, template: ctx.template || null });
 
     const state = await buildCaseManagementState({ ...ctx, req });
     return res.json(state);

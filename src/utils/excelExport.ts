@@ -1,4 +1,4 @@
-import { Workbook, type Worksheet } from 'exceljs';
+import type { Worksheet } from 'exceljs';
 
 const HEADER_FILL = '#0F172A';
 const HEADER_TEXT = '#FFFFFF';
@@ -130,6 +130,7 @@ const styleSummaryRow = (row: Worksheet['row']) => {
 };
 
 export const createStyledWorkbook = async (sheets: Array<ExcelSheetDefinition>) => {
+  const { Workbook } = await import('exceljs');
   const workbook = new Workbook();
   workbook.properties = {
     title: 'Firm Reports',

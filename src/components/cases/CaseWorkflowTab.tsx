@@ -30,7 +30,7 @@ type Props = {
   canCompleteSteps: boolean;
   canToggleActions: boolean;
   canUpload: boolean;
-  onWorkflowChanged?: () => void | Promise<void>;
+  onWorkflowChanged?: (workflow?: WorkflowInstance) => void | Promise<void>;
   currentUserName?: string;
   currentUserEmail?: string;
   /** Kept for backwards-compatible callers; ticking stays in the Overview. */
@@ -85,6 +85,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     try {
       const data = await getWorkflowForCase(caseId);
       setWf(data);
+      void refreshEarned();
       if (data?.templateId) {
         try {
           const t = await getWorkflowTemplateById(String(data.templateId));
@@ -95,7 +96,6 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       } else {
         setTemplate(null);
       }
-      void refreshEarned();
     } catch (e: any) {
       setErr(e.message || 'Failed to load workflow');
       setWf(null);
@@ -114,8 +114,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     }
   };
 
-  const notifyWorkflowChanged = () => {
-    void onWorkflowChanged?.();
+  const notifyWorkflowChanged = (workflow?: WorkflowInstance) => {
+    void onWorkflowChanged?.(workflow);
     void refreshEarned();
   };
 
@@ -146,7 +146,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   }, [caseId]);
 
   const onCompleteStep = async (stepKey: string) => {
-    if (!canCompleteSteps) return;
+    if (!canCompleteSteps || busyKey) return;
     const snapshot = wf;
     // Optimistic: the tick must feel instant, so the card flips immediately.
     // Optimistically mirror the server's new state: a tick records 'Done'
@@ -159,7 +159,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
             ...current,
             steps: current.steps.map((step) =>
               step.stepKey === stepKey
-                ? { ...step, status: 'Done', completedAt: undefined }
+                ? { ...step, status: 'Done', doneAt: step.doneAt || new Date().toISOString(), completedAt: undefined }
                 : step
             ),
           }
@@ -168,7 +168,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     try {
       const updated = await completeWorkflowStep(caseId, stepKey);
       setWf(updated);
-      notifyWorkflowChanged();
+      notifyWorkflowChanged(updated);
       // Stay on this checklist so staff can tick the rest of the Key Actions
       // without being sent away to Case Management after every action.
     } catch (e: any) {
@@ -180,14 +180,20 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   };
 
   const onReopenStep = async (stepKey: string) => {
-    if (!canCompleteSteps) return;
+    if (!canCompleteSteps || busyKey) return;
+    const snapshot = wf;
+    setWf(current => current ? { ...current, status: 'Active', currentStepKey: stepKey,
+      steps: current.steps.map(step => step.stepKey === stepKey
+        ? { ...step, status: 'In Progress', doneAt: undefined, completedAt: undefined, submittedAt: undefined, reviewedAt: undefined }
+        : step) } : current);
     try {
       setBusyKey(`complete:${stepKey}`);
       setErr('');
       const updated = await reopenWorkflowStep(caseId, stepKey);
       setWf(updated);
-      notifyWorkflowChanged();
+      notifyWorkflowChanged(updated);
     } catch (e: any) {
+      setWf(snapshot);
       setErr(e.message || 'Failed to reopen step');
     } finally {
       setBusyKey('');
@@ -220,7 +226,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await amendWorkflowStepDeadline(caseId, stepKey, selected.toISOString(), amendReason, amendMode);
       setWf(updated);
-      notifyWorkflowChanged();
+      notifyWorkflowChanged(updated);
       setAmendOpenFor('');
       setAmendDate('');
       setAmendReason('');
@@ -239,7 +245,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await revokeWorkflowStepDeadlineAmendment(caseId, stepKey, recordIndex, revokeReason);
       setWf(updated);
-      notifyWorkflowChanged();
+      notifyWorkflowChanged(updated);
       setRevokeReason('');
     } catch (e: any) {
       setErr(e.message || 'Failed to revoke amendment');
@@ -306,7 +312,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         ...(position !== undefined ? { position: position - 1 } : {}),
       });
       setWf(updated);
-      notifyWorkflowChanged();
+      notifyWorkflowChanged(updated);
       resetAddForm();
     } catch (e: any) {
       setErr(e.message || 'Failed to add Key Action.');
@@ -373,7 +379,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         ...(position !== undefined ? { position: position - 1 } : {}),
       });
       setWf(updated);
-      notifyWorkflowChanged();
+      notifyWorkflowChanged(updated);
       resetEditForm();
     } catch (e: any) {
       setErr(e.message || 'Failed to update Key Action.');
@@ -389,7 +395,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('');
       const updated = await deleteWorkflowStep(caseId, stepKey);
       setWf(updated);
-      notifyWorkflowChanged();
+      notifyWorkflowChanged(updated);
       setConfirmDeleteKey('');
       if (editOpenFor === stepKey) resetEditForm();
     } catch (e: any) {
@@ -408,8 +414,8 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     </div>
   );
 
-  if (loading) return <div className="py-8 text-gray-500">Loading workflow...</div>;
-  if (err) return <div className="py-4 text-red-700 bg-red-50 border border-red-100 rounded px-4">{err}</div>;
+  if (loading && !wf) return <div className="py-8 text-gray-500">Loading workflow...</div>;
+  if (err && !wf) return <div role="alert" className="py-4 text-red-700 bg-red-50 border border-red-100 rounded px-4">{err}</div>;
   if (!wf) return <div className="py-8 text-gray-500">No workflow found for this case.</div>;
 
   // The template is the canonical stage sequence. This keeps the checklist's
@@ -505,6 +511,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
   return (
     <div className="space-y-4">
+      {err && <div role="alert" className="py-4 text-red-700 bg-red-50 border border-red-100 rounded px-4">{err}</div>}
       {/* Earned fees — contract value × workflow completion, productivity formula (TPA × timeliness × quality) */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
@@ -941,7 +948,6 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         // in Case Management once the Initiator has recorded the work.
         const isTicked = isStepWorkDone(s);
         const isCompleted = s.status === 'Completed';
-        const isLoading = busyKey === `complete:${s.stepKey}`;
         const blockedBy = !isTicked ? earlierPendingByStepKey.get(s.stepKey) : undefined;
 
         // Deadline clock: ticks down live while the Key Action is open, and
@@ -1118,7 +1124,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
               {canCompleteSteps && (
                 <button
-                  disabled={isLoading || Boolean(blockedBy)}
+                  disabled={Boolean(busyKey) || Boolean(blockedBy)}
                   onClick={() => {
                     // Clicking a ticked Key Action reopens it; clicking an
                     // unticked one records the work as done. The tick state is

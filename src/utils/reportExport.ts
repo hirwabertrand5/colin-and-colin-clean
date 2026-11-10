@@ -1,5 +1,3 @@
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { downloadWorkbook } from './excelExport';
 
 export interface ReportColumn<T> {
@@ -69,6 +67,10 @@ export const exportTableExcel = async <T>(params: TableReportParams<T>): Promise
 };
 
 export const exportTablePdf = async <T>(params: TableReportParams<T>): Promise<void> => {
+  const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
   const { columns, rows } = params;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 

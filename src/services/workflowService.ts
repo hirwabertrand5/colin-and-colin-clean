@@ -1,3 +1,5 @@
+import { shareRequest } from './sharedRequest';
+
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
 
@@ -153,10 +155,13 @@ export const deleteWorkflowTemplate = async (templateId: string): Promise<void> 
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to delete template');
 };
 
-export const getWorkflowTemplateById = async (templateId: string): Promise<WorkflowTemplate> => {
+export const getWorkflowTemplateById = (templateId: string): Promise<WorkflowTemplate> => {
+  const token = getToken();
+  return shareRequest(`template:${templateId}:${token}`, async () => {
   const res = await fetch(`${API_URL}/workflows/templates/${templateId}`, {
-    headers: { Authorization: `Bearer ${getToken()}` },
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to load workflow template');
   return res.json();
+  });
 };

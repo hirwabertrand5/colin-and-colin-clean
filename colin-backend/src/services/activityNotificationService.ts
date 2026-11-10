@@ -3,13 +3,13 @@ import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import { formatNotificationTime } from '../utils/notificationTime';
 import IndependentTask from '../modules/independentTasks/models/independentTaskModel';
 
-export const notifyPeople = async (identities: string[], notification: Omit<Parameters<typeof createNotification>[0], 'audienceUserIds'>) => {
+export const notifyPeople = async (identities: string[], notification: Omit<Parameters<typeof createNotification>[0], 'audienceUserIds'>, options?: { deferEmailQueue?: boolean }) => {
   const ids = new Set<string>();
-  for (const identity of new Set(identities.filter(Boolean))) {
-    const user: any = await findUserByAssigneeString(identity);
+  const users = await Promise.all([...new Set(identities.filter(Boolean))].map(findUserByAssigneeString));
+  for (const user of users) {
     if (user && user.isActive !== false) ids.add(String(user._id));
   }
-  if (ids.size) return createNotification({ ...notification, audienceUserIds: [...ids] });
+  if (ids.size) return createNotification({ ...notification, audienceUserIds: [...ids] }, options);
 };
 
 export const notifyTaskChanges = async (before: any, after: any, independent = false) => {
@@ -39,14 +39,14 @@ export const notifyTaskChanges = async (before: any, after: any, independent = f
     message: `${after.title} has been ${decision}.${after.approvalComment ? `\nFeedback: ${after.approvalComment}` : ''}`, dedupeKey: `TASK_DECISION:${after._id}:${revision}` });
 };
 
-export const notifyMatterParticipants = async (matter: any, notification: Omit<Parameters<typeof createNotification>[0], 'audienceUserIds' | 'caseId'>, contributors: string[] = []) => {
+export const notifyMatterParticipants = async (matter: any, notification: Omit<Parameters<typeof createNotification>[0], 'audienceUserIds' | 'caseId'>, contributors: string[] = [], options?: { deferEmailQueue?: boolean }) => {
   const identities = [matter.assignedTo, matter.caseAssignments?.initiator, matter.caseAssignments?.reviewer, matter.caseAssignments?.signerApprover, ...contributors];
   if (notification.type === 'DEADLINE_CHANGED') {
     // A deadline amendment can shift downstream work held by temporary contributors.
     const delegates = await IndependentTask.find({ relatedMatterId: matter._id, status: { $nin: ['Closed', 'Completed', 'Cancelled'] } }).select('assignee supervisor').lean();
     for (const delegate of delegates) identities.push(delegate.assignee, delegate.supervisor);
   }
-  return notifyPeople(identities, { ...notification, caseId: String(matter._id) });
+  return notifyPeople(identities, { ...notification, caseId: String(matter._id) }, options);
 };
 
 export const notifyWorkflowHandoff = async (matter: any, step: any, role: 'Reviewer' | 'Signer/Approver', at: Date) => {

@@ -17,10 +17,19 @@ export async function captureActivityRates(doc: any, workflow: boolean) {
   if (!doc.caseId) return;
   const session: ClientSession | null = doc.$session();
   // MongoDB transactions must not run parallel operations on one session.
-  const matter = await Case.findById(doc.caseId).session(session).lean();
-  const users = await User.find({}).select('name role tpaHistory').session(session).lean();
-  const stored = await Ledger.find({ caseId: doc.caseId }).session(session).lean();
-  const previous = doc.isNew ? null : await (workflow ? Workflow.findById(doc._id).session(session).lean() : Task.findById(doc._id).session(session).lean());
+  const reads = [
+    () => Case.findById(doc.caseId).session(session).lean(),
+    () => User.find({}).select('name role tpaHistory').session(session).lean(),
+    () => Ledger.find({ caseId: doc.caseId }).session(session).lean(),
+    () => doc.isNew ? Promise.resolve(null) : (workflow ? Workflow.findById(doc._id).session(session).lean() : Task.findById(doc._id).session(session).lean()),
+  ];
+  const values: any[] = [];
+  if (session) {
+    for (const read of reads) values.push(await read());
+  } else {
+    values.push(...await Promise.all(reads.map(read => read())));
+  }
+  const [matter, users, stored, previous] = values;
   if (!matter) return;
   const roles = buildRoleByName(users);
   const steps = workflow ? doc.steps : [undefined];
@@ -35,7 +44,7 @@ export async function captureActivityRates(doc: any, workflow: boolean) {
       if (!attribution.name || !attribution.at) continue;
       if (!workflow && doc.status !== 'Completed') continue;
       if (findAppliedTpa(snapshots, attribution.name, role, attribution.at)) continue;
-      const saved = stored.find(entry => entry.staffKey === baseMemberName(attribution.name) && entry.assignmentRole === role &&
+      const saved = stored.find((entry: any) => entry.staffKey === baseMemberName(attribution.name) && entry.assignmentRole === role &&
         (workflow ? entry.keyActionKey === step.stepKey : entry.keyActionKey === doc.workflowStepKey));
       snapshots.push({ staffKey: baseMemberName(attribution.name), staffName: attribution.name, assignmentRole: role,
         activityAt: attribution.at, rate: saved?.tpaPercent ?? resolveMemberTpa(attribution.name, roles, attribution.at).tpaPercent, recordedAt: new Date() });
@@ -75,10 +84,23 @@ export async function persistEarningSnapshots(rows: any[], recordedBy: string, s
   }
   let created = 0;
   let superseded = 0;
+  const completedRows = rows.filter(row => row.completionAt);
+  // One read for the entire matter instead of a round-trip for each staff
+  // member on every action, even when all existing snapshots are unchanged.
+  const existingRows = completedRows.length
+    ? await Ledger.find({ entryKey: { $in: completedRows.map(buildLedgerEntryKey) } }).session(session).lean()
+    : [];
+  const existingByKey = new Map(existingRows.map(entry => [entry.entryKey, entry]));
+  const seenKeys = new Set<string>();
   for (const row of rows) {
     if (!row.completionAt) continue;
     const entryKey = buildLedgerEntryKey(row);
-    const existing: any = await Ledger.findOne({ entryKey }).session(session).lean();
+    // Repeated identities retain the original sequential read-after-write
+    // behavior; unique rows use the batched snapshot from this transaction.
+    const existing: any = seenKeys.has(entryKey)
+      ? await Ledger.findOne({ entryKey }).session(session).lean()
+      : existingByKey.get(entryKey);
+    seenKeys.add(entryKey);
     const inputs = {
       contractValue: row.contractValue, keyActionPercent: row.keyActionPercent, grossActionValue: row.grossActionValue,
       collectedAmount: row.collectedAmount, eligibleCollectedBase: row.eligibleCollectedBase,

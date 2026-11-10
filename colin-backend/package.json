@@ -2,6 +2,7 @@
   "name": "colin-backend",
   "version": "1.0.0",
   "scripts": {
+    "verify:response-performance": "tsx src/scripts/verifyResponsePerformance.ts",
     "verify:retainers": "npm run build && node dist/scripts/verifyRetainerAccounting.js",
     "verify:notifications": "tsx src/scripts/verifyNotifications.ts",
     "verify:tpa": "npm run build && node dist/scripts/verifyTpaRates.js && node dist/scripts/verifyTpaIntegration.js",

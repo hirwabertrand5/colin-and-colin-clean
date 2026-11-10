@@ -49,7 +49,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
       return res.status(401).json({ message: 'Invalid token payload (missing user id).' });
     }
 
-    const user = await User.findById(userId).select('name email role isActive');
+    const user = await User.findById(userId).select('name email role isActive').lean();
     if (!user) return res.status(401).json({ message: 'User not found.' });
     if (user.isActive === false) return res.status(403).json({ message: 'User is inactive.' });
 

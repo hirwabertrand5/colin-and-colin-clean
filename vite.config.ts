@@ -14,16 +14,8 @@ export default defineConfig({
   build: {
     target: 'esnext',
     outDir: 'build',
-    rollupOptions: {
-      output: {
-        // Splits your 644kB code into smaller pieces to fix the warning
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            return 'vendor';
-          }
-        }
-      }
-    }
+    // Follow lazy imports instead of forcing charts and export libraries
+    // into one vendor download required by the login page.
   },
   server: {
     port: 3000,

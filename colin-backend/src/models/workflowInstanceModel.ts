@@ -426,6 +426,9 @@ WorkflowInstanceSchema.pre('save', async function () {
   if (this.isNew || this.isModified('steps')) await (await import('../services/earningSnapshotService')).captureActivityRates(this, true);
 });
 WorkflowInstanceSchema.post('save', async function (instance) {
+  // Controllers that immediately save case progress take the snapshot in the
+  // case save hook, after both records are persisted, before returning success.
+  if (instance.$locals.caseProgressSavePending) return;
   await (await import('../services/earningSnapshotService')).snapshotCaseEarnings(instance.caseId, instance.$session());
 });
 

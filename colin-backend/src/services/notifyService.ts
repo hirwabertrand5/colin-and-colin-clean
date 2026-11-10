@@ -23,11 +23,11 @@ export const createNotification = async (payload: {
 
   fundId?: string;
   expenseId?: string;
-}, options?: { session?: mongoose.ClientSession }) => {
+}, options?: { session?: mongoose.ClientSession; deferEmailQueue?: boolean }) => {
   if (payload.dedupeKey) {
     const existing = await Notification.findOne({ dedupeKey: payload.dedupeKey }).session(options?.session || null).lean();
     if (existing) {
-      if (!options?.session) await queueNotificationEmail(existing).catch(error => console.error('[notifications] queue failed', String(existing._id), error?.name));
+      if (!options?.session && !options?.deferEmailQueue) await queueNotificationEmail(existing).catch(error => console.error('[notifications] queue failed', String(existing._id), error?.name));
       return existing;
     }
   }
@@ -60,6 +60,9 @@ export const createNotification = async (payload: {
   }
   const notification = typeof doc?.toObject === 'function' ? doc.toObject() : doc;
   if (options?.session) return notification; // Worker sees this only after transaction commit.
+  // The notification itself is the durable outbox. The existing delivery
+  // worker picks up pending records, including after a server restart.
+  if (options?.deferEmailQueue) return notification;
   // Provider outages must never undo a successful business action or in-app alert.
   try {
     await queueNotificationEmail(notification);
@@ -89,6 +92,7 @@ export const sendSms = async (phones: string[], message: string, caseId?: string
 
 export const notifyUsersById = async (opts: {
   session?: mongoose.ClientSession;
+  deferEmailQueue?: boolean;
   userIds: string[];
   category: PrefCategory;
 
@@ -102,7 +106,7 @@ export const notifyUsersById = async (opts: {
   await createNotification({
     ...opts.notification,
     audienceUserIds: ids,
-  }, opts.session ? { session: opts.session } : {});
+  }, { ...(opts.session ? { session: opts.session } : {}), ...(opts.deferEmailQueue ? { deferEmailQueue: true } : {}) });
 
 };
 

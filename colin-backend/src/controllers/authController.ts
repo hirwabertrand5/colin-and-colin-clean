@@ -15,7 +15,8 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'email and password are required.' });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email })
+      .select('name email role passwordHash isActive loginAttempts lockUntil');
 
     if (!user || !user.isActive) {
       return res.status(401).json({ message: 'Invalid credentials.' });

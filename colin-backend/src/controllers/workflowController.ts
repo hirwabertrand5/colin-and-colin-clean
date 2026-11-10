@@ -648,6 +648,19 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
   await c.save(session ? { session } : undefined);
 };
 
+/** Save both records and await one final earnings snapshot via the Case hook. */
+const saveWorkflowWithCaseProgress = async (c: any, inst: any) => {
+  const previous = inst.$locals.caseProgressSavePending;
+  inst.$locals.caseProgressSavePending = true;
+  try {
+    await inst.save();
+    await updateCaseWorkflowProgress(c, inst);
+  } finally {
+    if (previous === undefined) delete inst.$locals.caseProgressSavePending;
+    else inst.$locals.caseProgressSavePending = previous;
+  }
+};
+
 const completeStepInternal = async (
   actor: { actorName: string; actorUserId?: string | undefined; actorEmail?: string | undefined; actorRole?: string | undefined },
   c: any,
@@ -713,18 +726,16 @@ const completeStepInternal = async (
     inst.currentStepKey = stepKey;
   }
 
-  await inst.save();
-
   // Capture previous case workflow status for auditing
   const previousCaseWorkflowStatus = c.workflowProgress?.status;
 
-  await updateCaseWorkflowProgress(c, inst);
+  await saveWorkflowWithCaseProgress(c, inst);
 
   // Include stage transition info when available
   if (finalApproval && previousStepStatus !== 'Completed') await notifyMatterParticipants(c, {
     type: 'APPROVAL_COMPLETED', title: `Work approved: ${step.title}`, message: `${step.title} has been approved by ${actor.actorName} on ${c.caseNo}.`,
     link: `/cases/${c._id}`, dedupeKey: `KEY_ACTION_APPROVED:${inst._id}:${stepKey}:${step.completedAt.toISOString()}`,
-  }, (step.independentContributors || []).map((contributor: any) => contributor.name).filter(Boolean));
+  }, (step.independentContributors || []).map((contributor: any) => contributor.name).filter(Boolean), { deferEmailQueue: true });
   const prevStage = (inst.steps || []).find((s: any) => s.stepKey === stepKey)?.stageKey || 'unknown';
   const newStage = (() => {
     if (!inst.currentStepKey) return undefined;
@@ -1413,11 +1424,10 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
       inst.status = 'Active';
     }
 
-    await inst.save();
     // Reopening a step is the one explicit operation that may reopen a
     // completed matter. All regular template/case saves preserve Closed.
     if (wasCompletedMatter) c.status = 'In Progress';
-    await updateCaseWorkflowProgress(c, inst);
+    await saveWorkflowWithCaseProgress(c, inst);
 
     const actor = actorFromReq(req);
     await writeAudit({
@@ -2354,8 +2364,7 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
+    await saveWorkflowWithCaseProgress(c, inst);
     res.json(inst);
   } catch (e: any) {
     const status = typeof e?.statusCode === 'number' ? e.statusCode : 500;

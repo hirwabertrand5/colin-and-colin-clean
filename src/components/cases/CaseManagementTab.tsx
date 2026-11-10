@@ -1,5 +1,5 @@
 import ContributionBadge from '../ui/ContributionBadge';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Award, CheckCircle2, ClipboardCheck, FileText, Paperclip, Send, Stamp, Trash2, Upload, UserCheck } from 'lucide-react';
 import {
   getCaseManagement,
@@ -62,6 +62,7 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
+  const actionPending = useRef(false);
   const [returnStepKey, setReturnStepKey] = useState('');
   const [returnReason, setReturnReason] = useState('');
   const [qualityDraft, setQualityDraft] = useState('');
@@ -173,44 +174,33 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
     void onWorkflowChanged?.();
   };
 
-  const doRequestReview = async (step: CaseManagementStep) => {
-    if (!canRequestReview(step)) return;
-    setBusy(`review:${step.stepKey}`);
+  const runStepAction = async (step: CaseManagementStep, action: string,
+    status: CaseManagementStep['status'], save: () => Promise<CaseManagementState>, failure: string) => {
+    if (!state || actionPending.current || qualitySaving || busy) return;
+    actionPending.current = true;
+    const snapshot = state;
+    setBusy(`${action}:${step.stepKey}`);
     setErr('');
+    // Show the requested transition immediately. The server still validates
+    // and saves it; a refusal restores the original state and shows the error.
+    setState({ ...state, steps: state.steps.map(item => item.stepKey === step.stepKey ? { ...item, status } : item) });
     try {
-      refresh(await requestReview(caseId, step.stepKey));
+      refresh(await save());
     } catch (e: any) {
-      setErr(e.message || 'Failed to request review.');
+      setState(snapshot);
+      setErr(e.message || failure);
     } finally {
+      actionPending.current = false;
       setBusy('');
     }
   };
 
-  const doRequestApproval = async (step: CaseManagementStep) => {
-    if (!canRequestApproval(step)) return;
-    setBusy(`approval:${step.stepKey}`);
-    setErr('');
-    try {
-      refresh(await requestApproval(caseId, step.stepKey));
-    } catch (e: any) {
-      setErr(e.message || 'Failed to request approval.');
-    } finally {
-      setBusy('');
-    }
-  };
-
-  const doApprove = async (step: CaseManagementStep) => {
-    if (!canApprove(step)) return;
-    setBusy(`approve:${step.stepKey}`);
-    setErr('');
-    try {
-      refresh(await approveKeyAction(caseId, step.stepKey));
-    } catch (e: any) {
-      setErr(e.message || 'Failed to approve key action.');
-    } finally {
-      setBusy('');
-    }
-  };
+  const doRequestReview = (step: CaseManagementStep) => canRequestReview(step)
+    ? runStepAction(step, 'review', 'Awaiting Review', () => requestReview(caseId, step.stepKey), 'Failed to request review.') : undefined;
+  const doRequestApproval = (step: CaseManagementStep) => canRequestApproval(step)
+    ? runStepAction(step, 'approval', 'Awaiting Approval', () => requestApproval(caseId, step.stepKey), 'Failed to request approval.') : undefined;
+  const doApprove = (step: CaseManagementStep) => canApprove(step)
+    ? runStepAction(step, 'approve', 'Completed', () => approveKeyAction(caseId, step.stepKey), 'Failed to approve key action.') : undefined;
 
   const doSaveQualityScore = async () => {
     const score = Number(qualityDraft);
@@ -254,6 +244,7 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
   return (
     <div className="space-y-4">
       {loading ? <div className="text-xs text-gray-500 dark:text-gray-400">Refreshing…</div> : null}
+      {busy ? <div role="status" className="text-xs text-gray-500 dark:text-gray-400">Saving changes…</div> : null}
       {err ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
           {err}
@@ -280,7 +271,7 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
 
       <AssignedMembersCard state={state} />
 
-      <QualityScorePanel state={state} qualityDraft={qualityDraft} onDraft={setQualityDraft} onSave={doSaveQualityScore} saving={qualitySaving} />
+      <QualityScorePanel state={state} qualityDraft={qualityDraft} onDraft={setQualityDraft} onSave={doSaveQualityScore} saving={qualitySaving || Boolean(busy)} />
 
       {returnStepKey && (
         <form onSubmit={doReturn} className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
@@ -294,7 +285,7 @@ export default function CaseManagementTab({ caseId, currentUserName, currentUser
       )}
       <KeyActionsList
         state={state}
-        busy={busy}
+        busy={busy || (qualitySaving ? 'quality' : '')}
         canRequestReview={canRequestReview}
         canRequestApproval={canRequestApproval}
         canApprove={canApprove}
@@ -780,7 +771,7 @@ function KeyActionsList(props: {
                     <button
                       type="button"
                       onClick={() => onRequestReview(step)}
-                      disabled={busy === `review:${step.stepKey}`}
+                      disabled={Boolean(busy)}
                       title="Send the completed work to the Reviewer"
                       className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -791,7 +782,7 @@ function KeyActionsList(props: {
                     <button
                       type="button"
                       onClick={() => onRequestApproval(step)}
-                      disabled={busy === `approval:${step.stepKey}`}
+                      disabled={Boolean(busy)}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
                     >
                       <Send className="h-3.5 w-3.5" /> Send to Signer / Approver
@@ -801,7 +792,7 @@ function KeyActionsList(props: {
                     <button
                       type="button"
                       onClick={() => onApprove(step)}
-                      disabled={busy === `approve:${step.stepKey}`}
+                      disabled={Boolean(busy)}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                     >
                       <Stamp className="h-3.5 w-3.5" /> Approve &amp; Complete

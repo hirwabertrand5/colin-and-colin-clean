@@ -1,44 +1,45 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/auth/Login';
 import DashboardLayout from './components/layout/DashboardLayout';
-import ManagingPartnerDashboard from './components/dashboards/ManagingPartnerDashboard';
-import AssociateDashboard from './components/dashboards/AssociateDashboard';
-import ExecutiveAssistantDashboard from './components/dashboards/ExecutiveAssistantDashboard';
-import CaseList from './components/cases/CaseList';
-import ClosedCases from './components/cases/ClosedCases';
-import CreateCase from './components/cases/CreateCase';
-import CaseWorkspace from './components/cases/CaseWorkspace';
-import IntakeProspects from './components/cases/IntakeProspects';
-import ProspectWorkspace from './components/cases/ProspectWorkspace';
-import IndependentTaskModule from './components/independentTasks/IndependentTaskModule';
-import IndependentTaskDetail from './components/independentTasks/IndependentTaskDetail';
-
-
-import TaskBoard from './components/tasks/TaskBoard';
-import TaskDetail from './components/tasks/TaskDetail';
-import TaskManagementPage from './components/tasks/TaskManagementPage';
-import Calendar from './components/calendar/Calendar';
-import DeadlineManagementPage from './components/calendar/DeadlineManagementPage';
-import NotificationCenter from './components/notifications/NotificationCenter';
-import BillingDashboard from './components/billing/BillingDashboard';
-import InvoiceManagement from './components/billing/InvoiceManagement';
-import BillingFinancePage from './components/billing/BillingFinancePage';
-import ProfitabilityPage from './components/billing/ProfitabilityPage';
-import RetainerManagement from './components/billing/RetainerManagement';
-import RetainerDetail from './components/billing/RetainerDetail';
-import PerformanceDashboard from './components/reports/PerformanceDashboard';
-import FirmReports from './components/reports/FirmReports';
-import MatterFinancialStatusPage from './components/reports/MatterFinancialStatusPage';
-import PeopleCapacityPage from './components/reports/PeopleCapacityPage';
-import ClientsBusinessDevelopmentPage from './components/reports/ClientsBusinessDevelopmentPage';
-import RiskCompliancePage from './components/reports/RiskCompliancePage';
-import ReportsAnalyticsPage from './components/reports/ReportsAnalyticsPage';
-import UserManagement from './components/admin/UserManagement';
-import Settings from './components/admin/Settings';
-import PettyCashDashboard from './components/pettyCash/PettyCashDashboard';
 import { useAutoLogout } from './hooks/useAutoLogout';
 import { Toaster } from './components/ui/sonner';
+
+// Download each workspace when it is opened, so sign-in does not wait for
+// reporting, billing, charts, and every other staff screen.
+const ManagingPartnerDashboard = lazy(() => import('./components/dashboards/ManagingPartnerDashboard'));
+const AssociateDashboard = lazy(() => import('./components/dashboards/AssociateDashboard'));
+const ExecutiveAssistantDashboard = lazy(() => import('./components/dashboards/ExecutiveAssistantDashboard'));
+const CaseList = lazy(() => import('./components/cases/CaseList'));
+const ClosedCases = lazy(() => import('./components/cases/ClosedCases'));
+const CreateCase = lazy(() => import('./components/cases/CreateCase'));
+const CaseWorkspace = lazy(() => import('./components/cases/CaseWorkspace'));
+const IntakeProspects = lazy(() => import('./components/cases/IntakeProspects'));
+const ProspectWorkspace = lazy(() => import('./components/cases/ProspectWorkspace'));
+const IndependentTaskModule = lazy(() => import('./components/independentTasks/IndependentTaskModule'));
+const IndependentTaskDetail = lazy(() => import('./components/independentTasks/IndependentTaskDetail'));
+const TaskBoard = lazy(() => import('./components/tasks/TaskBoard'));
+const TaskDetail = lazy(() => import('./components/tasks/TaskDetail'));
+const TaskManagementPage = lazy(() => import('./components/tasks/TaskManagementPage'));
+const Calendar = lazy(() => import('./components/calendar/Calendar'));
+const DeadlineManagementPage = lazy(() => import('./components/calendar/DeadlineManagementPage'));
+const NotificationCenter = lazy(() => import('./components/notifications/NotificationCenter'));
+const BillingDashboard = lazy(() => import('./components/billing/BillingDashboard'));
+const InvoiceManagement = lazy(() => import('./components/billing/InvoiceManagement'));
+const BillingFinancePage = lazy(() => import('./components/billing/BillingFinancePage'));
+const ProfitabilityPage = lazy(() => import('./components/billing/ProfitabilityPage'));
+const RetainerManagement = lazy(() => import('./components/billing/RetainerManagement'));
+const RetainerDetail = lazy(() => import('./components/billing/RetainerDetail'));
+const PerformanceDashboard = lazy(() => import('./components/reports/PerformanceDashboard'));
+const FirmReports = lazy(() => import('./components/reports/FirmReports'));
+const MatterFinancialStatusPage = lazy(() => import('./components/reports/MatterFinancialStatusPage'));
+const PeopleCapacityPage = lazy(() => import('./components/reports/PeopleCapacityPage'));
+const ClientsBusinessDevelopmentPage = lazy(() => import('./components/reports/ClientsBusinessDevelopmentPage'));
+const RiskCompliancePage = lazy(() => import('./components/reports/RiskCompliancePage'));
+const ReportsAnalyticsPage = lazy(() => import('./components/reports/ReportsAnalyticsPage'));
+const UserManagement = lazy(() => import('./components/admin/UserManagement'));
+const Settings = lazy(() => import('./components/admin/Settings'));
+const PettyCashDashboard = lazy(() => import('./components/pettyCash/PettyCashDashboard'));
 
 export type UserRole =
   | 'managing_director'
@@ -146,6 +147,7 @@ function StaffApp() {
           element={
             user ? (
               <DashboardLayout user={user} onLogout={handleLogout}>
+                <Suspense fallback={<div role="status" className="py-8 text-gray-500">Loading...</div>}>
                 <Routes>
                   {/* Dashboard */}
                   <Route
@@ -384,6 +386,7 @@ function StaffApp() {
                   {(isMD || isExec || user?.role === 'managing_partner') && <Route path="/admin/users" element={<UserManagement />} />}
                   {(isMD || isManagingPartner || isExec) && <Route path="/admin/settings" element={<Settings />} />}
                 </Routes>
+                </Suspense>
               </DashboardLayout>
             ) : (
               <Navigate to="/login" />

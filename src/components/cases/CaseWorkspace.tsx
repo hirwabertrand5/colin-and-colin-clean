@@ -1457,6 +1457,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
             </div>
             {caseData?._id ? (
               <CaseWorkflowTab
+                key={caseData._id}
                 caseId={caseData._id}
                 canCompleteSteps={canWorkOnWorkflowSteps}
                 canToggleActions={canWorkOnWorkflowSteps}
@@ -1464,15 +1465,13 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 currentUserName={currentUser?.name}
                 currentUserEmail={currentUser?.email}
                 onOpenCaseManagement={openCaseManagementFromKeyAction}
-                onWorkflowChanged={async () => {
+                onWorkflowChanged={async (updatedWorkflow) => {
                   if (!caseData?._id) return;
-                  // The workflow endpoints (toggle/complete/reopen/amend) already persist the case's
-                  // workflowProgress and billingSettings server-side, so this callback only needs to
-                  // re-sync local state. Run both fetches in parallel and keep it fire-and-forget so
-                  // the checklist stays instant.
+                  // Mutation responses already contain the saved workflow.
+                  if (updatedWorkflow) setWorkflowInstance(updatedWorkflow);
                   const [caseRes, wfRes] = await Promise.allSettled([
                     getCaseById(caseData._id),
-                    getWorkflowForCase(caseData._id),
+                    updatedWorkflow ? Promise.resolve(updatedWorkflow) : getWorkflowForCase(caseData._id),
                   ]);
                   if (caseRes.status === 'fulfilled' && caseRes.value) setCaseData(caseRes.value);
                   if (wfRes.status === 'fulfilled' && wfRes.value) setWorkflowInstance(wfRes.value);
@@ -1843,16 +1842,18 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       {/* ✅ Case Management — the three assigned members + workflow Key Actions */}
       {activeTab === 'caseManagement' && caseData?._id && (
         <CaseManagementTab
+          key={caseData._id}
           caseId={caseData._id}
           currentUserName={currentUser?.name}
           currentUserEmail={currentUser?.email}
           focusStepKey={cmFocusStep}
-          onWorkflowChanged={() => {
+          onWorkflowChanged={async () => {
             if (!caseData?._id) return;
-            void getCaseById(caseData._id).then((nextCase: any) => {
-              if (nextCase) setCaseData(nextCase);
-            });
-            void getWorkflowForCase(caseData._id).then((nextWorkflow) => setWorkflowInstance(nextWorkflow));
+            const [caseResult, workflowResult] = await Promise.allSettled([
+              getCaseById(caseData._id), getWorkflowForCase(caseData._id),
+            ]);
+            if (caseResult.status === 'fulfilled') setCaseData(caseResult.value);
+            if (workflowResult.status === 'fulfilled') setWorkflowInstance(workflowResult.value);
           }}
           onDocumentsChanged={() => reloadDocuments()}
         />

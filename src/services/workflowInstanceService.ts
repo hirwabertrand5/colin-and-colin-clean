@@ -1,3 +1,5 @@
+import { shareRequest } from './sharedRequest';
+
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
 
@@ -68,12 +70,15 @@ export type WorkflowInstance = {
   }>;
 };
 
-export const getWorkflowForCase = async (caseId: string): Promise<WorkflowInstance> => {
+export const getWorkflowForCase = (caseId: string): Promise<WorkflowInstance> => {
+  const token = getToken();
+  return shareRequest(`workflow:${caseId}:${token}`, async () => {
   const res = await fetch(`${API_URL}/workflows/cases/${caseId}`, {
-    headers: { Authorization: `Bearer ${getToken()}` },
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error((await res.json()).message || 'Failed to load workflow');
   return res.json();
+  });
 };
 
 export type CaseStagePercent = {
