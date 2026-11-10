@@ -110,6 +110,7 @@ export const uploadProof = async (req: Request, res: Response) => {
     // First get invoice (to know caseId + invoiceNo for audit)
     const existing = await Invoice.findById(invoiceId);
     if (!existing) return res.status(404).json({ message: 'Invoice not found.' });
+    if (existing.retainerReceiptId) return res.status(409).json({ message: 'This payment is recorded in a retainer statement. Correct it from that statement.' });
     const proofUrl = await storeUploadedFile(req.file);
 
     const invoice = await Invoice.findByIdAndUpdate(
@@ -187,6 +188,7 @@ export const deleteInvoice = async (req: Request, res: Response) => {
     const existing = await Invoice.findById(invoiceId);
     if (!existing) return res.status(404).json({ message: 'Invoice not found.' });
 
+    if (existing.retainerReceiptId) return res.status(409).json({ message: 'This invoice funds a retainer statement and cannot be deleted. Correct the retainer receipt instead.' });
     await Invoice.findByIdAndDelete(invoiceId);
 
     const actorName = (req as any).user?.name || 'System';

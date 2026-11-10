@@ -919,7 +919,7 @@ export default function CreateCase({
                 </label>
                 <label className="rounded-md border border-blue-200 bg-white p-3 text-sm text-gray-800 dark:border-blue-800 dark:bg-gray-900 dark:text-gray-100">
                   <span className="flex items-center gap-2 font-medium"><input type="radio" checked={formData.billingArrangement === 'retainer'} onChange={() => setFormData((prev) => ({ ...prev, billingArrangement: 'retainer' }))} /> Under a retainer</span>
-                  <span className="mt-1 block text-xs text-gray-500 dark:text-gray-300">The case is linked to an active client subscription and follows the normal lifecycle.</span>
+                  <span className="mt-1 block text-xs text-gray-500 dark:text-gray-300">Link the matter to the retainer client and record approved workflow tasks in the Monthly Retainer Statement.</span>
                 </label>
               </div>
               {formData.billingArrangement === 'retainer' && (
@@ -939,9 +939,9 @@ export default function CreateCase({
                   </select>
                   {selectedRetainer && (
                     <div className="mt-3 rounded-md border border-blue-200 bg-white px-3 py-2 text-xs text-blue-900 dark:border-blue-800 dark:bg-slate-950 dark:text-blue-100">
-                      <span className="font-semibold">Available subscription value:</span>{' '}
-                      {selectedRetainer.billingModel === 'monthly' ? 'Monthly service agreement' : formatCurrency(selectedRetainer.contractValue || selectedRetainer.availableBalance, 'RWF')}.{' '}
-                      <span className="text-blue-700 dark:text-blue-200">It is shared across linked cases and is not reserved or deducted. Enter this case’s own contract value in the next step.</span>
+                      <span className="font-semibold">Fixed monthly fee:</span>{' '}
+                      {selectedRetainer.monthlyFee > 0 ? formatCurrency(selectedRetainer.monthlyFee, 'RWF') : 'Record the fixed monthly fee in the retainer agreement'}.{' '}
+                      <span className="text-blue-700 dark:text-blue-200">The Monthly Retainer Statement distinguishes actual revenue received from the ordinary professional value of services delivered for this matter.</span>
                     </div>
                   )}
                   {!retainersLoading && activeRetainers.length === 0 && (
@@ -1100,7 +1100,7 @@ export default function CreateCase({
                     placeholder="e.g., 790000"
                     inputMode="numeric"
                   />
-                  {formData.billingArrangement === 'retainer' && selectedRetainer && <p className="mt-2 text-xs text-gray-500">This case contract value is tracked independently. It does not reduce the shared retainer subscription contract value.</p>}
+                  {formData.billingArrangement === 'retainer' && selectedRetainer && <p className="mt-2 text-xs text-gray-500">Record the ordinary professional value of services for this matter. The retainer client’s fixed monthly fee is recorded in the retainer agreement.</p>}
                   <p className="text-xs text-gray-500 mt-2">
                     This is the contract value. Progress value is calculated from checked key actions.
                   </p>
@@ -1227,7 +1227,7 @@ export default function CreateCase({
                   ['Next expected deadline', workflowSummary?.nextDueAt ? formatDeadlineDateTime(workflowSummary.nextDueAt) : 'TBD'],
                   ['Estimated completion', workflowSummary?.completionDate ? formatDeadlineDateTime(workflowSummary.completionDate) : 'TBD'],
                   ['Contract value', plannedValueAmount > 0 ? formatCurrency(plannedValueAmount, plannedValueCurrency) : 'Not entered'],
-                  ['Billing arrangement', formData.billingArrangement === 'retainer' ? `${selectedRetainer?.name || 'Selected retainer'} (retainer subscription)` : 'Standard case billing'],
+                  ['Billing arrangement', formData.billingArrangement === 'retainer' ? `${selectedRetainer?.name || 'Selected retainer'} (retainer agreement)` : 'Standard case billing'],
                 ].map(([k, v]) => (
                   <div key={k} className="grid grid-cols-3 gap-4 py-3 border-b border-gray-200">
                     <span className="text-sm text-gray-600">{k}:</span>

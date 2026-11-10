@@ -15,6 +15,10 @@ export interface IRetainer extends Document {
   renewalDate?: string;
   billingDay?: number;
   monthlyFee?: number;
+  excludedServices?: string;
+  additionalWorkChargeable?: boolean;
+  scopeApprovalRequired?: boolean;
+  utilisationThreshold?: number;
   /** The agreed value of the subscription contract, in RWF. */
   contractValue: number;
   /** @deprecated Kept only to preserve data created before contractValue existed. */
@@ -44,6 +48,10 @@ const RetainerSchema = new Schema<IRetainer>(
     renewalDate: { type: String },
     billingDay: { type: Number, min: 1, max: 28 },
     monthlyFee: { type: Number, min: 0, default: 0 },
+    excludedServices: { type: String, trim: true },
+    additionalWorkChargeable: { type: Boolean, default: false },
+    scopeApprovalRequired: { type: Boolean, default: true },
+    utilisationThreshold: { type: Number, min: 100, max: 10000, default: 150 },
     contractValue: { type: Number, min: 0, default: 0 },
     totalFunded: { type: Number, min: 0, default: 0 },
     availableBalance: { type: Number, min: 0, default: 0 },

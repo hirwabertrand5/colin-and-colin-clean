@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IInvoice extends Document {
   caseId: mongoose.Types.ObjectId;
+  retainerReceiptId?: mongoose.Types.ObjectId;
   invoiceNo: string;
 
   year: number;
@@ -26,6 +27,7 @@ export interface IInvoice extends Document {
 const InvoiceSchema = new Schema<IInvoice>(
   {
     caseId: { type: Schema.Types.ObjectId, ref: 'Case', required: true },
+    retainerReceiptId: { type: Schema.Types.ObjectId, ref: 'RetainerReceipt', index: true },
 
     invoiceNo: { type: String, required: true, unique: true, index: true },
 

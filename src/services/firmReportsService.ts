@@ -1,3 +1,4 @@
+import type { RetainerPerformance } from './retainerAccountingService';
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
 
@@ -5,6 +6,7 @@ export type FirmReportRange = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'ye
 export type FirmReportDateBasis = 'invoiceDate' | 'paymentDate' | 'taskDate';
 
 export type FirmReportResponse = {
+  retainer?: RetainerPerformance;
   range: { from: string; to: string };
   dateBasis: FirmReportDateBasis;
   selectedMember: {

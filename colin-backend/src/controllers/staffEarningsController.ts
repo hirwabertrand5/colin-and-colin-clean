@@ -1,4 +1,5 @@
 import { persistEarningSnapshots } from '../services/earningSnapshotService';
+import { retainerEarningsRows, ordinaryInvoiceFilter } from '../services/retainerAccountingService';
 import type { Response } from 'express';
 
 import Case from '../models/caseModel';
@@ -135,7 +136,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
     const [matters, users] = await Promise.all([
       Case.find(matterQuery)
         .select(
-          '_id caseNo parties matterType workflow workflowTemplateId assignedTo caseAssignments assignmentHandoverHistory workflowProgress billingSettings caseManagement'
+          '_id caseNo parties matterType workflow workflowTemplateId assignedTo caseAssignments assignmentHandoverHistory workflowProgress billingSettings caseManagement retainerCoveredActionKeys'
         )
         .lean(),
       User.find({ isActive: { $ne: false } }).select('_id name role isActive tpaHistory').lean(),
@@ -161,7 +162,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
             .lean()
         : Promise.resolve([]),
       matterIds.length
-        ? Invoice.find({ caseId: { $in: matterIds }, status: 'Paid' })
+        ? Invoice.find({ caseId: { $in: matterIds }, status: 'Paid', ...ordinaryInvoiceFilter })
             .select('invoiceNo caseId amount date updatedAt')
             .lean()
         : Promise.resolve([]),
@@ -213,13 +214,14 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
     });
 
-    const rows = filterRowsToPeriod(allRows);
+    const retainerRows = await retainerEarningsRows(workRange.from, workRange.to, { staffKey: staffFilter, role: roleFilter, matterId: matterFilter });
+    const rows = [...filterRowsToPeriod(allRows), ...retainerRows];
     const summary = summarizeStaffEarnings(rows);
 
     // ---- Optional: freeze event-time inputs into the audit ledger ----------
     let ledger = { persisted: 0, created: 0, superseded: 0 };
     if (String(persist || '').toLowerCase() === 'true') {
-      ledger = await persistLedgerEntries(rows, String(req.user?.name || 'System'));
+      ledger = await persistLedgerEntries(rows.filter((row) => row.source !== 'retainer'), String(req.user?.name || 'System'));
     }
 
     // Attach the stored snapshot identity/revision so the UI can show whether a
@@ -236,7 +238,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
     );
     const hydrated = rows.map((row) => {
       const entryKey = buildLedgerEntryKey(row);
-      return { ...row, ledgerEntryKey: entryKey, ledgerRevision: revisionByKey.get(entryKey) ?? null };
+      return { ...row, ledgerEntryKey: row.source === 'retainer' ? row.key : entryKey, ledgerRevision: row.source === 'retainer' ? 1 : revisionByKey.get(entryKey) ?? null };
     });
 
     // Work value, eligible collected base and earned fee are reduced separately so
@@ -283,7 +285,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
       totals,
       counts: {
         rowsInPeriod: rows.length,
-        rowsOutsidePeriod: allRows.length - rows.length,
+        rowsOutsidePeriod: allRows.length - filterRowsToPeriod(allRows).length,
         rowsAwaitingCollection: hydrated.filter((row) => row.status === 'awaiting-collection').length,
         rowsAwaitingInput: hydrated.filter((row) => row.status === 'awaiting-input').length,
         mattersEvaluated: matterIds.length,

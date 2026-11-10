@@ -2,6 +2,7 @@ import { Response } from 'express';
 
 import { AuthRequest } from '../middleware/authMiddleware';
 import Case from '../models/caseModel';
+import { ordinaryInvoiceFilter, retainerFinancials } from '../services/retainerAccountingService';
 import Invoice from '../models/invoiceModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import { getContractValue, getDirectMatterCost } from '../utils/financialMetrics';
@@ -85,7 +86,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
       Case.find({})
         .select('_id caseNo parties status assignedTo legalServicePath budget workflowProgress billingSettings')
         .lean(),
-      Invoice.find(invoiceQuery)
+      Invoice.find({ ...invoiceQuery, ...ordinaryInvoiceFilter })
         .select('caseId invoiceNo date amount status updatedAt')
         .lean(),
       PettyCashExpense.find(expenseQuery)
@@ -145,6 +146,32 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
       }
     }
 
+    const retainer = await retainerFinancials(from, to);
+    totalBilled += retainer.billed;
+    recognisedCollectedRevenue += retainer.collected;
+    totalReceivables += retainer.outstanding;
+    for (const p of retainer.statements) {
+      if ((to && p.dueDate > to) || p.allocation.outstanding <= 0) continue;
+      const age = Math.max(0, Math.floor((referenceDate.getTime() - Date.parse(`${p.dueDate}T00:00:00`)) / 86_400_000));
+      if (age <= 30) ageing.current += p.allocation.outstanding;
+      else if (age <= 60) ageing.days31to60 += p.allocation.outstanding;
+      else if (age <= 90) ageing.days61to90 += p.allocation.outstanding;
+      else ageing.over90 += p.allocation.outstanding;
+    }
+    for (const p of retainer.statements) for (const s of p.cashAllocation.services) {
+      const matter = financialsByMatter.get(String(s.caseId));
+      if (matter) matter.collected += s.allocatedRevenue;
+    }
+    // The fee receivable and unused cash belong to the client agreement,
+    // rather than being fabricated as extra invoices on linked matters.
+    for (const p of retainer.statements) {
+      if (!p.feeInRange && !p.cashInRange && (!p.allocation.outstanding || (to && p.dueDate > to))) continue;
+      const accountId = `retainer:${p._id}`;
+      financialsByMatter.set(accountId, { id: accountId,
+        matterNo: `${p.retainerNo} / ${p.month} (agreement)`, client: p.clientName, practiceArea: 'Retainer — firm level',
+        status: 'Agreement', contractValue: 0, billed: p.feeInRange, collected: p.cashAllocation.firmUnutilisedRevenue,
+        outstanding: !to || p.dueDate <= to ? p.allocation.outstanding : 0, directMatterCosts: 0 });
+    }
     let directMatterCosts = 0;
     let generalOverheads = 0;
     for (const expense of expenses as any[]) {
@@ -183,8 +210,8 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
       for (const matter of matterRows) {
         const label = keyOf(matter);
         const current = rows.get(label) || emptyRollup(label);
-        current.matterCount += 1;
-        if (isOpenMatter(matter.status)) current.activeMatters += 1;
+        if (!matter.id.startsWith('retainer:')) current.matterCount += 1;
+        if (!matter.id.startsWith('retainer:') && isOpenMatter(matter.status)) current.activeMatters += 1;
         current.contractValue += matter.contractValue;
         current.billed += matter.billed;
         current.collected += matter.collected;
@@ -213,9 +240,9 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
     };
 
     const totalContractValue = matterRows.reduce((sum, row) => sum + row.contractValue, 0);
-    const activeMatters = matterRows.filter((row) => isOpenMatter(row.status)).length;
+    const activeMatters = matterRows.filter((row) => !row.id.startsWith('retainer:') && isOpenMatter(row.status)).length;
     const grossContribution = recognisedCollectedRevenue - directMatterCosts;
-    const totalFirmCosts = directMatterCosts + generalOverheads;
+    const totalFirmCosts = directMatterCosts + generalOverheads + retainer.staffTpa;
     const netProfit = recognisedCollectedRevenue - totalFirmCosts;
 
     return res.json({
@@ -223,6 +250,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
         ? { from: range.displayFrom, to: range.displayTo, label: range.label }
         : { from: null, to: null, label: 'All time' },
       currency: 'RWF',
+      retainer,
       dataAvailability: {
         taskFeeRecognition: false,
         staffCostRegister: false,
@@ -238,6 +266,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
         totalReceivables: roundMoney(totalReceivables),
         directMatterCosts: roundMoney(directMatterCosts),
         generalOverheads: roundMoney(generalOverheads),
+        retainerStaffTpa: retainer.staffTpa,
         totalFirmCosts: roundMoney(totalFirmCosts),
         grossContribution: roundMoney(grossContribution),
         grossMargin: percent(grossContribution, recognisedCollectedRevenue),

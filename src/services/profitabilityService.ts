@@ -1,4 +1,5 @@
 import { FirmReportRange } from './firmReportsService';
+import type { RetainerPerformance } from './retainerAccountingService';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
@@ -26,6 +27,7 @@ export type ProfitabilityRow = {
 };
 
 export type ProfitabilityResponse = {
+  retainer?: RetainerPerformance;
   range: { from: string | null; to: string | null; label: string };
   currency: 'RWF';
   dataAvailability: {
@@ -43,6 +45,7 @@ export type ProfitabilityResponse = {
     totalReceivables: number;
     directMatterCosts: number;
     generalOverheads: number;
+    retainerStaffTpa?: number;
     totalFirmCosts: number;
     grossContribution: number;
     grossMargin: number | null;

@@ -11,6 +11,9 @@ export type StaffEarningsRange = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 
  * the calculation exposed so the figure can be defended.
  */
 export type StaffEarningsRow = {
+  source?: 'retainer';
+  retainerId?: string;
+  retainerPeriodId?: string;
   key: string;
   caseId: string;
   matterNo: string;

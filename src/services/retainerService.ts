@@ -26,6 +26,10 @@ export interface Retainer {
   /** Always zero for shared retainer subscriptions. */
   reservedAmount: number;
   scope?: string;
+  excludedServices?: string;
+  additionalWorkChargeable?: boolean;
+  scopeApprovalRequired?: boolean;
+  utilisationThreshold?: number;
   responsiblePartner?: string;
   notes?: string;
   linkedCaseCount?: number;
@@ -122,6 +126,8 @@ export const adjustRetainerContractValue = async (retainerId: string, amount: nu
 };
 
 export type RetainerCase = {
+  ordinaryWorkValue?: number;
+  department?: 'Dispute Resolution' | 'Transaction & Advisory' | null;
   _id: string;
   caseNo: string;
   parties: string;
@@ -137,6 +143,7 @@ export type RetainerCase = {
 };
 
 export type RetainerCaseSummary = {
+  ordinaryWorkValue?: number;
   caseCount: number;
   contractValue: number;
   totalBilled: number;

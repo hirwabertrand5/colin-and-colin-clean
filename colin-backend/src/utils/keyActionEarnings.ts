@@ -156,11 +156,12 @@ const resolveKeyActionProgress = (template: any, workflowInstance: any, complete
  */
 export const calculateCollectedKeyActionEarnings = ({ matter, template, workflowInstance, tasks = [], collectedAmount = 0 }: { matter: any; template: any; workflowInstance?: any; tasks?: any[]; collectedAmount?: number }): KeyActionEarnings => {
   const contractValue = roundMoney(getContractValue(matter));
-  const completedActions = resolveCompletedKeyActions(template, workflowInstance, tasks);
+  const covered = new Set<string>(matter?.retainerCoveredActionKeys || []);
+  const completedActions = resolveCompletedKeyActions(template, workflowInstance, tasks).filter((action) => !covered.has(action.key));
   const completedPercent = Math.min(100, Math.round(completedActions.reduce((sum, action) => sum + action.percentage, 0) * 100) / 100);
   const completedValue = roundMoney(contractValue * (completedPercent / 100));
   const collected = roundMoney(Math.max(0, Number(collectedAmount) || 0));
-  const keyActions = resolveKeyActionProgress(template, workflowInstance, completedActions, contractValue);
+  const keyActions = resolveKeyActionProgress(template, workflowInstance, completedActions, contractValue).filter((action) => !covered.has(action.key));
   return {
     contractValue,
     collectedAmount: collected,

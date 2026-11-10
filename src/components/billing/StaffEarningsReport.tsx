@@ -68,6 +68,7 @@ function KpiCard({
 
 /** The full, step-by-step explanation of one row's calculation. */
 function CalculationDetail({ row }: { row: StaffEarningsRow }) {
+  if (row.source === 'retainer') return <div className="px-4 py-3 text-sm"><strong>Individual monthly production</strong><p>Individual monthly production × applicable TPA %: {row.formula}</p><p>Allocated receipts: {money(row.eligibleCollectedBase)}. Individual TPA uses the ordinary value of approved workflow tasks; actual revenue received is recorded separately.</p></div>;
   const payments = row.paymentTimestamps || [];
   return (
     <div className="space-y-3 bg-gray-50 px-5 py-4 text-sm text-gray-700">
@@ -272,7 +273,7 @@ export default function StaffEarningsReport({ userRole }: { userRole: string }) 
           </td>
           <td className="px-4 py-2.5">
             <div className="font-medium text-gray-900">{row.staffName}</div>
-            <div className="text-xs text-gray-500">{row.assignmentRole}</div>
+            <div className="text-xs text-gray-500">{row.source === 'retainer' ? 'Assigned/contributing staff' : row.assignmentRole}</div>
           </td>
           <td className="px-4 py-2.5 text-gray-600">{row.systemRole || '_'}</td>
           <td className="px-4 py-2.5">
@@ -284,7 +285,7 @@ export default function StaffEarningsReport({ userRole }: { userRole: string }) 
               {row.matterNo || row.matterName || 'Matter'}
             </Link>
           </td>
-          <td className="px-4 py-2.5 text-gray-800">{row.keyActionTitle}</td>
+          <td className="px-4 py-2.5 text-gray-800">{row.keyActionTitle}{row.source === 'retainer' && <div className="mt-1 text-xs font-medium text-indigo-600">Retainer · Individual TPA</div>}</td>
           <td className="px-4 py-2.5 text-gray-600">{row.stageTitle || '_'}</td>
           <td className="px-4 py-2.5">
             <div className="whitespace-nowrap tabular-nums text-gray-800">{row.completionAtLocal || '_'}</div>
@@ -485,7 +486,7 @@ export default function StaffEarningsReport({ userRole }: { userRole: string }) 
           <div className="border-b border-gray-200 px-5 py-3">
             <h3 className="font-semibold text-gray-900">Staff summary</h3>
             <p className="text-xs text-gray-500">
-              Work value, eligible collected base and earned fee are reported as three separate amounts.
+              Work value, eligible collected base and earned fee are reported as three separate amounts. Individual TPA for a retainer is calculated from individual monthly production × applicable TPA %. Actual revenue received is recorded separately.
             </p>
           </div>
           <div className="overflow-x-auto">

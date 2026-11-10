@@ -16,7 +16,8 @@ import WorkflowTemplate from '../models/workflowTemplateModel';
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import { identityMatches } from '../utils/caseAssignments';
-import { buildRoleByName, resolveMemberTpa, getTpaPercent, normalizeMemberName } from '../utils/workflowPercentages';
+import { buildRoleByName, resolveMemberTpa, getTpaPercent, normalizeMemberName, baseMemberName } from '../utils/workflowPercentages';
+import { retainerEarningsRows } from '../services/retainerAccountingService';
 import {
   isWithinReportRange,
   resolveOptionalReportRange,
@@ -420,13 +421,14 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
           .lean()
       : [];
 
-    if (!matters.length) return res.json(emptyStaffSummary(meName, roleTpaPercent, buildStaffPeriod(period)));
+    const monthlyEarnings = await retainerEarningsRows(new Date(0), new Date('9999-12-31'), { staffKey: baseMemberName(meName) });
+    if (!matters.length && !monthlyEarnings.length) return res.json(emptyStaffSummary(meName, roleTpaPercent, buildStaffPeriod(period)));
 
     const caseIds = matters.map((matter) => matter._id);
     const [instances, tasks, paidInvoices] = await Promise.all([
       WorkflowInstance.find({ caseId: { $in: caseIds } }).lean(),
       Task.find({ caseId: { $in: caseIds } }).lean(),
-      Invoice.find({ caseId: { $in: caseIds }, status: 'Paid' })
+      Invoice.find({ caseId: { $in: caseIds }, status: 'Paid', retainerReceiptId: { $exists: false } })
         .select('caseId amount updatedAt')
         .lean(),
     ]);
@@ -852,6 +854,24 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
 
     // One reporting block is ALWAYS returned (All Time when no range) so the
     // dashboard renders the same cards for every period.
+    for (const row of monthlyEarnings) {
+      feesEarnedTotal += row.earnedFee || 0; hasScoredFee = true;
+      collectedBaseTotal += row.eligibleCollectedBase;
+      if (isWithinReportRange(row.completionAt, period)) {
+        periodFeesEarned += row.earnedFee || 0; hasPeriodFee = true;
+        periodCollectedValue += row.eligibleCollectedBase;
+      }
+      const matterRow = rows.find((r) => r.caseId === row.caseId);
+      if (matterRow) {
+        matterRow.earnedFee = (matterRow.earnedFee || 0) + (row.earnedFee || 0);
+        matterRow.collectedBase += row.eligibleCollectedBase;
+        if (period && isWithinReportRange(row.completionAt, period)) {
+          matterRow.earnedFeeInPeriod = (matterRow.earnedFeeInPeriod || 0) + (row.earnedFee || 0);
+          matterRow.collectedBaseInPeriod = (matterRow.collectedBaseInPeriod || 0) + row.eligibleCollectedBase;
+          matterRow.inPeriod = true;
+        }
+      }
+    }
     const periodSummary = buildStaffPeriod(period, {
       feesEarned: hasPeriodFee ? round2(periodFeesEarned) : null,
       collectedValue: round2(periodCollectedValue),
@@ -871,6 +891,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       user: { name: meName },
       tpaPercent: roleTpaPercent,
       currency,
+      retainerEarnings: monthlyEarnings,
       mattersAssigned: currentMattersAssigned,
       mattersOutstanding,
       mattersCompleted,

@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 
 import Case from '../models/caseModel';
+import { ordinaryInvoiceFilter, retainerFinancials, retainerEarningsRows, toProductivityRow } from '../services/retainerAccountingService';
 import Task from '../models/taskModel';
 import Invoice from '../models/invoiceModel';
 import User from '../models/userModel';
@@ -12,7 +13,7 @@ import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { computeRange, normalizeReportBasis } from '../utils/reportRange';
-import { computeEarnedFee, buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages';
+import { computeEarnedFee, buildRoleByName, resolveMemberTpa, baseMemberName } from '../utils/workflowPercentages';
 import { caseMatchesAssigneeCanonical } from '../utils/caseAssignments';
 import {
   allocateCollectedValueAcrossKeyActions,
@@ -404,8 +405,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     // -----------------------------
     let activeCases = 0;
 
-    const invoicesByInvoiceDateQuery = { date: { $gte: fromISO, $lte: toISO } };
-    const invoicesByPaymentDateQuery = { status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } };
+    const invoicesByInvoiceDateQuery = { date: { $gte: fromISO, $lte: toISO }, ...ordinaryInvoiceFilter };
+    const invoicesByPaymentDateQuery = { status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate }, ...ordinaryInvoiceFilter };
     const tasksByDateQuery = { status: 'Completed', completedAt: { $gte: fromDate, $lte: toDate } };
 
     const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, allTaskLinks, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
@@ -431,7 +432,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .lean();
 
     const allCases = await Case.find()
-      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties budget workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties budget workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel retainerCoveredActionKeys')
       .lean();
     const caseById = new Map((allCases as any[]).map((c) => [String(c._id), c]));
     const workflowTemplateIds = Array.from(new Set((allCases as any[])
@@ -474,7 +475,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         ? { _id: { $in: Array.from(linkedCaseIdsByName.get(selectedMemberNameNormalized) || []) } }
         : {}
     )
-      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties budget updatedAt workflowProgress billingSettings caseManagement legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties budget updatedAt workflowProgress billingSettings caseManagement legalServicePath matterType workflow workflowTemplateId caseType caseTypeLabel retainerCoveredActionKeys')
       .lean();
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
@@ -487,13 +488,17 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const totalContractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getContractValue(matter), 0);
     const progressValue = selectedMatters.reduce((sum: number, matter: any) => sum + getCollectedValueFromProgress(matter), 0);
+    const retainer = await retainerFinancials(fromISO, toISO);
+    const retainerCash = selectedMemberName ? 0 : retainer.collected;
     const totalCollected = invoicesByPaymentDate.reduce((sum: number, inv: any) => {
       const caseId = String(inv.caseId || '');
       if (selectedMemberName && !selectedMatterIds.has(caseId)) return sum;
       return sum + (Number(inv.amount) || 0);
-    }, 0);
-    const totalBilled = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
-    const outstanding = Math.max(0, totalContractValue - totalCollected);
+    }, 0) + retainerCash;
+    const totalBilled = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0) + (selectedMemberName ? 0 : retainer.billed);
+    const pendingInvoices = await Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO }, ...ordinaryInvoiceFilter,
+      ...(selectedMemberName ? { caseId: { $in: Array.from(selectedMatterIds) } } : {}) }).select('amount').lean();
+    const outstanding = pendingInvoices.reduce((n, i) => n + i.amount, 0) + (selectedMemberName ? 0 : retainer.outstanding);
     const totalDirectMatterCosts = (await PettyCashExpense.find({
       date: { $gte: fromISO, $lte: toISO },
       chargeType: 'client',
@@ -509,11 +514,12 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       .lean()).reduce((sum, expense: any) => sum + getDirectMatterCost(expense), 0);
     const grossProfit = totalCollected - totalDirectMatterCosts;
     const grossProfitMargin = totalCollected > 0 ? Math.round((grossProfit / totalCollected) * 100) : 0;
-    const netProfit = grossProfit - firmOperatingExpenses;
+    const netProfit = grossProfit - firmOperatingExpenses - (selectedMemberName ? 0 : retainer.staffTpa);
     const netProfitMargin = totalCollected > 0 ? Math.round((netProfit / totalCollected) * 100) : 0;
 
     const ageingReport = getAgeingBuckets(
-      await Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO } }).select('amount date').lean(),
+      [...await Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO }, ...ordinaryInvoiceFilter }).select('amount date').lean(),
+        ...(!selectedMemberName ? retainer.statements.filter((p) => p.dueDate <= toISO && p.allocation.outstanding > 0).map((p) => ({ amount: p.allocation.outstanding, date: p.dueDate })) : [])],
       toDate
     );
 
@@ -612,7 +618,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       historicalCollectedByCaseId.set(String(matter._id), 0);
     }
     const historicalPaidTotals = await Invoice.aggregate([
-      { $match: { status: 'Paid', caseId: { $in: selectedMatters.map((matter: any) => matter._id) } } },
+      { $match: { status: 'Paid', ...ordinaryInvoiceFilter, caseId: { $in: selectedMatters.map((matter: any) => matter._id) } } },
       { $group: { _id: '$caseId', total: { $sum: '$amount' } } },
     ]);
     for (const row of historicalPaidTotals as any[]) {
@@ -645,6 +651,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       toDate,
       selectedMemberName,
     });
+    productivityRows.push(...(await retainerEarningsRows(fromDate, toDate, { staffKey: selectedMemberName ? baseMemberName(selectedMemberName) : null })).map(toProductivityRow));
     const earnedByName = new Map<string, number>();
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
@@ -816,7 +823,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       totalFeeEarned: Math.round(
         productivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0) * 100
       ) / 100,
-      pendingQualityScores: productivityRows.filter((row) => row.qualityScore == null).length,
+      pendingQualityScores: productivityRows.filter((row) => row.source !== 'retainer' && row.qualityScore == null).length,
       averageQualityScore: (() => {
         const scored = productivityRows.filter((row) => row.qualityScore != null);
         if (!scored.length) return null;
@@ -844,6 +851,14 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const item = monthsMap.get(key) || { month: key, billed: 0, collected: 0 };
       item.collected += Number(inv.amount) || 0;
       monthsMap.set(key, item);
+    }
+    if (!selectedMemberName) for (const p of retainer.statements) {
+      const item = monthsMap.get(p.month) || { month: p.month, billed: 0, collected: 0 };
+      item.billed += p.feeInRange; monthsMap.set(p.month, item);
+      for (const r of p.receipts.filter((r: any) => r.receivedOn >= fromISO && r.receivedOn <= toISO)) {
+        const key = r.receivedOn.slice(0, 7); const received = monthsMap.get(key) || { month: key, billed: 0, collected: 0 };
+        received.collected += r.amount; monthsMap.set(key, received);
+      }
     }
     const months = Array.from(monthsMap.values()).sort((a, b) => a.month.localeCompare(b.month));
 
@@ -901,6 +916,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       totalCollected: number;
       directMatterCosts: number;
       retainerValue: number;
+      retainerOutstanding?: number;
+      retainerNetBillings?: number;
       collectionDaysTotal: number;
       collectionDaysCount: number;
       revenueByPracticeArea: Map<string, number>;
@@ -1091,6 +1108,24 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       detail.grossProfitMargin = financials.collected > 0 ? Math.round(((financials.collected - financials.directMatterCosts) / financials.collected) * 100) : 0;
     }
 
+    if (!selectedMemberName) for (const p of retainer.statements) {
+      if (!p.feeInRange && !p.cashInRange && !p.workInRange && !(p.dueDate <= toISO && p.allocation.outstanding)) continue;
+      const key = normalizeName(p.clientName);
+      const current = clientProfitabilityByKey.get(key) || { partyName: p.clientName, matterCount: 0, activeMatters: 0,
+        completedMatters: 0, contractValue: 0, totalBilled: 0, totalCollected: 0, directMatterCosts: 0, retainerValue: 0, retainerOutstanding: 0, retainerNetBillings: 0,
+        collectionDaysTotal: 0, collectionDaysCount: 0, revenueByPracticeArea: new Map<string, number>(), practiceAreaCounts: new Map<string, number>() };
+      current.totalBilled += p.feeInRange; current.totalCollected += p.cashInRange; current.retainerValue += p.feeInRange;
+      current.retainerOutstanding = (current.retainerOutstanding || 0) + (p.dueDate <= toISO ? p.allocation.outstanding : 0);
+      current.retainerNetBillings = (current.retainerNetBillings || 0) + p.feeInRange - p.cashInRange;
+      for (const d of p.cashAllocation.departments) current.revenueByPracticeArea.set(d.department, (current.revenueByPracticeArea.get(d.department) || 0) + d.allocatedRevenue);
+      if (p.cashAllocation.firmUnutilisedRevenue) current.revenueByPracticeArea.set('Retainer — firm level', (current.revenueByPracticeArea.get('Retainer — firm level') || 0) + p.cashAllocation.firmUnutilisedRevenue);
+      clientProfitabilityByKey.set(key, current);
+      clientDetailsByKey.set(key, [...(clientDetailsByKey.get(key) || []), { id: `retainer:${p._id}`, recordType: 'Retainer',
+        recordLabel: `${p.retainerNo} / ${p.month}`, matterNo: p.retainerNo, status: p.status, practiceArea: 'Monthly retainer',
+        contractValue: p.feeInRange, totalBilled: p.feeInRange, collected: p.cashInRange,
+        outstanding: p.dueDate <= toISO ? p.allocation.outstanding : 0, directMatterCosts: 0,
+        grossProfit: p.cashInRange, grossProfitMargin: p.cashInRange ? 100 : 0 }]);
+    }
     const clientProfitability = Array.from(clientProfitabilityByKey.values())
       .map((row) => {
         const grossProfit = row.totalCollected - row.directMatterCosts;
@@ -1114,7 +1149,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           contractValue: roundMoney(row.contractValue),
           totalBilled: roundMoney(row.totalBilled),
           collected: roundMoney(row.totalCollected),
-          outstanding: roundMoney(row.totalBilled - row.totalCollected),
+          outstanding: roundMoney(Math.max(0, row.totalBilled - row.totalCollected - (row.retainerNetBillings || 0)) + (row.retainerOutstanding || 0)),
           directMatterCosts: roundMoney(row.directMatterCosts),
           grossProfit: roundMoney(grossProfit),
           grossProfitMargin,
@@ -1157,6 +1192,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     return res.json({
       range: { from: fromISO, to: toISO },
+      retainer: selectedMemberName ? undefined : retainer,
       dateBasis,
       selectedMember: selectedMemberMetrics,
       kpis: {
@@ -1239,7 +1275,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         { 'assignmentHandoverHistory.nextAssignee': displayName },
       ],
     })
-      .select('_id assignedTo caseAssignments assignmentHandoverHistory caseNo parties budget workflowProgress billingSettings caseManagement matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
+      .select('_id assignedTo caseAssignments assignmentHandoverHistory caseNo parties budget workflowProgress billingSettings caseManagement matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel retainerCoveredActionKeys')
       .lean();
     const memberMatterIds = (memberMatters as any[]).map((matter) => matter._id);
     const [memberWorkflowInstances, memberTasks, paidMemberInvoices] = await Promise.all([
@@ -1252,7 +1288,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
           .lean()
         : [],
       // Payment-date basis, matching the staff dashboard summary exactly.
-      Invoice.find({ status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } }).select('caseId amount').lean(),
+      Invoice.find({ status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate }, ...ordinaryInvoiceFilter }).select('caseId amount').lean(),
     ]);
     const memberTemplates = memberMatterIds.length
       ? await WorkflowTemplate.find({ _id: { $in: Array.from(new Set((memberMatters as any[])
@@ -1276,7 +1312,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
     }
     if (memberMatterIds.length) {
       const memberHistoricalPaidTotals = await Invoice.aggregate([
-        { $match: { status: 'Paid', caseId: { $in: memberMatterIds } } },
+        { $match: { status: 'Paid', ...ordinaryInvoiceFilter, caseId: { $in: memberMatterIds } } },
         { $group: { _id: '$caseId', total: { $sum: '$amount' } } },
       ]);
       for (const row of memberHistoricalPaidTotals as any[]) {
@@ -1296,6 +1332,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       selectedMemberName: displayName,
     });
 
+    rows.push(...(await retainerEarningsRows(fromDate, toDate, { staffKey: baseMemberName(displayName) })).map(toProductivityRow));
     const totalTaskFeeCollected = roundMoney(rows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0));
     const totalFeeEarned = roundMoney(rows.reduce((sum, row) => sum + (row.feeEarned || 0), 0));
     const qualityRows = rows.filter((row) => row.qualityScore != null);
@@ -1322,7 +1359,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         totalTaskFeeCollected,
         totalTaskFee: totalTaskFeeCollected,
         totalFeeEarned,
-        pendingQualityScores: rows.filter((row) => row.qualityScore == null).length,
+        pendingQualityScores: rows.filter((row) => row.source !== 'retainer' && row.qualityScore == null).length,
         averageQualityScore: qualityRows.length
           ? Math.round((qualityRows.reduce((sum, row) => sum + (row.qualityScore || 0), 0) / qualityRows.length) * 10) / 10
           : null,

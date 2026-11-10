@@ -156,6 +156,7 @@ export interface ICase extends Document {
   /** A normal matter can optionally be covered by a client-level retainer. */
   billingArrangement?: 'standard' | 'retainer';
   retainerId?: mongoose.Types.ObjectId;
+  retainerCoveredActionKeys?: string[];
   /** @deprecated Retainers are shared subscriptions; no amount is reserved per case. */
   retainerAllocation?: number;
   retainerSnapshot?: {
@@ -392,6 +393,7 @@ const CaseSchema = new Schema<ICase>(
 
     billingArrangement: { type: String, enum: ['standard', 'retainer'], default: 'standard', index: true },
     retainerId: { type: Schema.Types.ObjectId, ref: 'Retainer', index: true },
+    retainerCoveredActionKeys: { type: [String], default: [] },
     // Legacy records retain this field at zero; new retainer links never use it.
     retainerAllocation: { type: Number, min: 0, default: 0 },
     retainerSnapshot: {

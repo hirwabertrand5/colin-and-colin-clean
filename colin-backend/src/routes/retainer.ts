@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/authMiddleware';
+import { listPeriods, openPeriod, readPeriod, candidates, saveService, saveReceipt, revisePeriod, performance } from '../controllers/retainerAccountingController';
 import {
   createRetainer,
   deleteRetainer,
@@ -16,6 +17,14 @@ import {
 const router = express.Router();
 
 router.get('/active', authenticate, listActiveRetainers);
+router.get('/performance', authenticate, performance);
+router.get('/:id/periods', authenticate, listPeriods);
+router.post('/:id/periods', authenticate, openPeriod);
+router.get('/:id/service-candidates', authenticate, candidates);
+router.get('/:id/periods/:periodId', authenticate, readPeriod);
+router.post('/:id/periods/:periodId/services', authenticate, saveService);
+router.post('/:id/periods/:periodId/receipts', authenticate, saveReceipt);
+router.post('/:id/periods/:periodId/actions/:action', authenticate, revisePeriod);
 router.post('/cases/:caseId/link', authenticate, setCaseRetainer);
 router.get('/', authenticate, listRetainers);
 router.post('/', authenticate, createRetainer);

@@ -217,7 +217,7 @@ const loadCaseManagementContext = async (req: AuthRequest) => {
 
   const [tasks, paidInvoices] = await Promise.all([
     Task.find({ caseId }).lean(),
-    Invoice.find({ caseId, status: 'Paid' }).select('amount').lean(),
+    Invoice.find({ caseId, status: 'Paid', retainerReceiptId: { $exists: false } }).select('amount').lean(),
   ]);
   const collectedAmount = (paidInvoices || []).reduce(
     (sum: number, invoice: any) => sum + Math.max(0, Number(invoice?.amount) || 0),

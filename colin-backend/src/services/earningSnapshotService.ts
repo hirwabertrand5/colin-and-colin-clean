@@ -51,7 +51,7 @@ export async function loadEarningRows(caseIds?: string[], session: ClientSession
   const instances = await Workflow.find({ caseId: { $in: ids } }).session(session).lean();
   const templates = await Template.find({ _id: { $in: matters.map(m => m.workflowTemplateId).filter(Boolean) } }).session(session).lean();
   const tasks = await Task.find({ caseId: { $in: ids } }).session(session).lean();
-  const invoices = await Invoice.find({ caseId: { $in: ids }, status: 'Paid' }).session(session).lean();
+  const invoices = await Invoice.find({ caseId: { $in: ids }, status: 'Paid', retainerReceiptId: { $exists: false } }).session(session).lean();
   const users = await User.find({}).select('name role tpaHistory').session(session).lean();
   const tasksByCaseId = new Map<string, any[]>();
   for (const task of tasks) tasksByCaseId.set(String(task.caseId), [...(tasksByCaseId.get(String(task.caseId)) || []), task]);

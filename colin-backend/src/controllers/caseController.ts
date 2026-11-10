@@ -503,6 +503,7 @@ export const createCase = async (req: AuthRequest, res: Response) => {
     // case exists. A retainer is a shared subscription, so case creation can
     // never reserve or deduct an amount from it.
     delete casePayload.retainerId;
+    delete casePayload.retainerCoveredActionKeys;
     delete casePayload.retainerAllocation;
     delete casePayload.retainerSnapshot;
     delete casePayload.billingArrangement;
@@ -1219,6 +1220,7 @@ export const updateCase = async (req: AuthRequest, res: Response) => {
     // stale Edit Case form can never bypass balance validation or overwrite a
     // retainer snapshot.
     delete updatePayload.retainerId;
+    delete updatePayload.retainerCoveredActionKeys;
     delete updatePayload.retainerAllocation;
     delete updatePayload.retainerSnapshot;
     delete updatePayload.billingArrangement;
@@ -1412,6 +1414,9 @@ export const deleteCase = async (req: AuthRequest, res: Response) => {
 
     const deleted = await Case.findById(req.params.id).lean();
     if (!deleted) return res.status(404).json({ message: 'Case not found.' });
+    if ((deleted.retainerCoveredActionKeys || []).length || await Invoice.exists({ caseId: deleted._id, retainerReceiptId: { $exists: true } })) {
+      return res.status(409).json({ message: 'This matter has retainer accounting history. Close the matter to preserve its services, receipts and staff earnings.' });
+    }
 
     if ((deleted as any).retainerId) {
       await linkCaseToRetainer({
