@@ -22,6 +22,11 @@ async function main() {
       const month = new Date().toISOString().slice(0, 7);
       const retainer = { _id: '333333333333333333333333', retainerNo: 'RET-2026-001', name: 'Corporate legal services', clientName: 'Kigali Industries Ltd', billingModel: 'monthly', status: 'Active', effectiveStatus: 'Active', isUsable: true, currency: 'RWF', startDate: `${month}-01`, monthlyFee: 1000000, billingDay: 1, contractValue: 0, totalFunded: 0, availableBalance: 0, reservedAmount: 0, scope: 'Corporate advisory and dispute resolution', scopeApprovalRequired: true };
       const staff = [{ _id: 'aaaaaaaaaaaaaaaaaaaaaaaa', name: 'Alice Associate', role: 'associate' }, { _id: 'bbbbbbbbbbbbbbbbbbbbbbbb', name: 'Bob Senior Associate', role: 'senior_associate' }];
+      const cases = [
+        { _id: 'cccccccccccccccccccccccc', caseNo: 'MAT-2026-104', parties: 'Corporate advisory matter', department: 'Transaction & Advisory', status: 'Closed' },
+        { _id: '121212121212121212121212', caseNo: 'MAT-2026-105', parties: 'Client employment dispute', department: 'Dispute Resolution', status: 'Open' },
+        { _id: '131313131313131313131313', caseNo: 'N/A', parties: 'Company registration', department: 'Transaction & Advisory', status: 'Open' },
+      ];
       const allocation = { fixedFee: 1000000, actualReceived: 0, workValue: 0, allocableRevenue: 0, firmUnutilisedRevenue: 0, outstanding: 1000000, overpayment: 0, utilisation: 0, utilisationStatus: 'Underutilised', excessServiceValue: 0, substantialOverutilisation: false, staffTpa: 0, retainedAfterTpa: 0, mattersCount: 0, servicesCount: 0, departments: [{ department: 'Dispute Resolution', ordinaryValue: 0, share: 0, allocatedRevenue: 0 }, { department: 'Transaction & Advisory', ordinaryValue: 0, share: 0, allocatedRevenue: 0 }], services: [] };
       let period = null, saved = false;
       window.__retainerRequests = []; window.__rejectRetainerReceipt = false;
@@ -35,7 +40,7 @@ async function main() {
         const base = `/api/retainers/${retainer._id}`;
         if (endpoint === '/api/retainers' && method === 'GET') return reply([retainer]);
         if (endpoint === base) return reply(retainer);
-        if (endpoint === `${base}/cases`) return reply({ cases: [], summary: { caseCount: 0, contractValue: 0, totalBilled: 0, totalCollected: 0, outstanding: 0, directMatterCosts: 0, grossProfit: 0, profitableCases: 0, lossMakingCases: 0 } });
+        if (endpoint === `${base}/cases`) return reply({ cases });
         if (endpoint === `${base}/activity`) return reply([]);
         if (endpoint === `${base}/service-candidates`) return reply(saved ? [] : [{ caseId: 'cccccccccccccccccccccccc', matterNo: 'MAT-2026-104', actionKey: 'advisory', title: 'Corporate advisory review', performedOn: `${month}-02`, ordinaryFee: 1500000, department: 'Transaction & Advisory', assignedStaff: staff.map(s => s.name) }]);
         if (endpoint === `${base}/periods`) {
@@ -46,15 +51,26 @@ async function main() {
         if (endpoint.endsWith('/services') && method === 'POST') {
           saved = true;
           const work = { _id: 'eeeeeeeeeeeeeeeeeeeeeeee', caseId: body.caseId, actionKey: body.actionKey, title: 'Corporate advisory review', matterNo: 'MAT-2026-104', performedOn: `${month}-02`, ordinaryFee: 1500000, department: body.department, allocatedRevenue: 0, approvedBy: 'Fixture Partner', contributors: [{ userId: staff[0]._id, name: staff[0].name, role: staff[0].role, share: 50, tpaPercent: 5, production: 750000, earnedTpa: 37500 }, { userId: staff[1]._id, name: staff[1].name, role: staff[1].role, share: 50, tpaPercent: 6, production: 750000, earnedTpa: 45000 }] };
-          period.services.push(work); Object.assign(allocation, { workValue: 1500000, utilisation: 150, utilisationStatus: 'Overutilised', excessServiceValue: 500000, staffTpa: 82500, retainedAfterTpa: -82500, servicesCount: 1, mattersCount: 1, services: [work] });
-          allocation.departments[1].ordinaryValue = 1500000; allocation.departments[1].share = 100;
+          // Repeated work on one case, two departments and historical rates exercise
+          // monthly aggregation independently of the service entry form.
+          const extra = [
+            { ...work, _id: '141414141414141414141414', title: 'Follow-up advice', ordinaryFee: 100000, contributors: [{ ...work.contributors[0], share: 100, production: 100000, tpaPercent: 6, earnedTpa: 6000 }] },
+            { ...work, _id: '151515151515151515151515', caseId: cases[1]._id, matterNo: cases[1].caseNo, title: 'Labour submissions', department: cases[1].department, ordinaryFee: 500000, contributors: [{ ...work.contributors[0], share: 100, production: 500000, earnedTpa: 25000 }] },
+            { ...work, _id: '161616161616161616161616', caseId: cases[2]._id, matterNo: cases[2].caseNo, title: 'Company registration', ordinaryFee: 300000, contributors: [{ ...work.contributors[1], share: 100, production: 300000, earnedTpa: 18000 }] },
+          ];
+          const reversed = { ...work, _id: '171717171717171717171717', title: 'Reversed historical task', ordinaryFee: 999999, voidedAt: new Date().toISOString() };
+          period.services.push(work, ...extra, reversed);
+          Object.assign(allocation, { workValue: 2400000, utilisation: 240, utilisationStatus: 'Overutilised', excessServiceValue: 1400000, substantialOverutilisation: true, staffTpa: 131500, retainedAfterTpa: -131500, servicesCount: 4, mattersCount: 3, services: [work, ...extra] });
+          Object.assign(allocation.departments[0], { ordinaryValue: 500000, share: 20.83 });
+          Object.assign(allocation.departments[1], { ordinaryValue: 1900000, share: 79.17 });
           return reply(period);
         }
         if (endpoint.endsWith('/receipts') && method === 'POST') {
           if (window.__rejectRetainerReceipt) return reply({ message: 'This payment reference is already recorded.' }, 409);
           period.receipts.push({ _id: 'ffffffffffffffffffffffff', ...body });
-          Object.assign(allocation, { actualReceived: 1000000, allocableRevenue: 1000000, outstanding: 0, retainedAfterTpa: 917500 });
-          allocation.departments[1].allocatedRevenue = 1000000; allocation.services[0].allocatedRevenue = 1000000;
+          Object.assign(allocation, { actualReceived: 1000000, allocableRevenue: 1000000, outstanding: 0, retainedAfterTpa: 868500 });
+          allocation.departments[0].allocatedRevenue = 208333; allocation.departments[1].allocatedRevenue = 791667;
+          allocation.services.forEach((service, index) => { service.allocatedRevenue = [625000, 41667, 208333, 125000][index]; });
           return reply(period);
         }
         if (endpoint.endsWith('/actions/close')) { period.status = 'Closed'; return reply(period); }
@@ -75,13 +91,20 @@ async function main() {
     await agreementForm.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.goto(`${base}/matters/retainers/333333333333333333333333`);
     const statement = page.getByRole('region', { name: 'Monthly Retainer Statement' });
-    await statement.locator('.ra-empty').getByRole('heading', { name: 'Monthly Retainer Statement', exact: true }).waitFor();
+    await statement.locator('.ra-empty').getByRole('heading', { name: 'Prepare this month’s statement', exact: true }).waitFor();
+    const departments = statement.getByRole('region', { name: 'Department summary', exact: true });
+    const earnings = statement.getByRole('region', { name: 'Staff earnings by case', exact: true });
+    assert.deepEqual(await departments.locator('tbody tr').nth(1).locator('td').allTextContents(), ['2', '—', '—', '—', '—', '—']);
+    assert.equal(await page.getByRole('columnheader', { name: 'Billed', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('columnheader', { name: 'Result', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('region', { name: 'Linked matters', exact: true }).getByRole('link').count(), 3);
     await statement.getByRole('button', { name: 'Record fixed monthly fee', exact: true }).click();
     await statement.getByText('Fixed monthly fee', { exact: true }).waitFor();
+    assert(await earnings.getByText('No staff TPA recorded for this month.', { exact: false }).isVisible());
     await statement.getByRole('button', { name: 'Record service', exact: true }).click();
     await statement.getByLabel('Approved workflow task', { exact: false }).selectOption('cccccccccccccccccccccccc:advisory');
-    assert.equal(await statement.getByLabel('Department', { exact: false }).inputValue(), 'Transaction & Advisory');
-    assert(await statement.getByLabel('Department', { exact: false }).isDisabled());
+    assert.equal(await statement.getByRole('combobox', { name: /Department/ }).inputValue(), 'Transaction & Advisory');
+    assert(await statement.getByRole('combobox', { name: /Department/ }).isDisabled());
     assert.equal(await statement.getByLabel('Ordinary professional fee (RWF)', { exact: true }).inputValue(), '1500000');
     await statement.getByLabel('Staff member', { exact: false }).selectOption('aaaaaaaaaaaaaaaaaaaaaaaa');
     await statement.getByLabel('Contribution %', { exact: true }).fill('50');
@@ -94,18 +117,45 @@ async function main() {
     const serviceBody = await page.evaluate(() => window.__retainerRequests.find(r => r.endpoint.endsWith('/services') && r.method === 'POST').body);
     assert.deepEqual(serviceBody.contributors.map(c => c.share), [50, 50]);
     assert.equal(serviceBody.department, 'Transaction & Advisory');
-    assert(await statement.getByText('RWF 82,500', { exact: true }).count());
+    assert(await statement.getByText('RWF 131,500', { exact: true }).count());
+    assert.deepEqual(await departments.locator('tbody tr').nth(0).locator('td').allTextContents(), ['1', '1', 'RWF 500,000', '20.83%', 'RWF 0', 'RWF 25,000']);
+    assert.deepEqual(await departments.locator('tbody tr').nth(1).locator('td').allTextContents(), ['2', '3', 'RWF 1,900,000', '79.17%', 'RWF 0', 'RWF 106,500']);
+    const aliceRow = earnings.locator('tr').filter({ has: page.getByRole('button', { name: 'Alice Associate associate', exact: true }) });
+    assert.deepEqual(await aliceRow.locator(':scope > td').allTextContents(), ['2', '3', 'RWF 1,350,000', 'RWF 68,500']);
+    await earnings.getByRole('button', { name: 'Alice Associate associate', exact: true }).click();
+    const aliceCases = earnings.getByRole('table', { name: 'Alice Associate case earnings', exact: true });
+    assert.deepEqual(await aliceCases.locator('tbody tr').nth(0).locator('td').allTextContents(), ['Corporate advisory matterMAT-2026-104', 'Transaction & Advisory', '2', 'RWF 850,000', '5%, 6%', 'RWF 43,500']);
+    assert.equal(await aliceCases.locator('tbody tr').count(), 2);
+    await earnings.getByRole('button', { name: 'Bob Senior Associate senior associate', exact: true }).click();
+    const bobCases = earnings.getByRole('table', { name: 'Bob Senior Associate case earnings', exact: true });
+    assert(await bobCases.getByRole('link', { name: 'Company registration', exact: true }).isVisible());
+    assert.equal(await bobCases.getByRole('link', { name: 'Company registration', exact: true }).getAttribute('href'), '/cases/131313131313131313131313');
+    const selectedMonth = await statement.getByLabel('Month', { exact: true }).inputValue();
+    const nextMonthDate = new Date(`${selectedMonth}-01T12:00:00Z`); nextMonthDate.setUTCMonth(nextMonthDate.getUTCMonth() + 1);
+    await statement.getByLabel('Month', { exact: true }).fill(nextMonthDate.toISOString().slice(0, 7));
+    assert.equal(await earnings.getByRole('button', { name: 'Alice Associate associate', exact: true }).count(), 0);
+    assert(await statement.getByRole('button', { name: 'Record fixed monthly fee', exact: true }).isVisible());
+    await statement.getByLabel('Recorded statements', { exact: true }).selectOption('dddddddddddddddddddddddd');
+    await earnings.getByRole('button', { name: 'Alice Associate associate', exact: true }).waitFor();
+    assert.equal(await statement.getByLabel('Month', { exact: true }).inputValue(), selectedMonth);
+    await earnings.getByRole('button', { name: 'Alice Associate associate', exact: true }).click();
     await statement.getByRole('button', { name: 'Record actual revenue received', exact: true }).click();
     await statement.getByLabel('Amount (RWF)', { exact: true }).fill('1000000');
     await statement.getByLabel('Bank / payment reference', { exact: true }).fill('BROWSER-TEST-ONLY');
     await statement.locator('form').filter({ hasText: 'Record actual revenue received' }).getByRole('button', { name: 'Record actual revenue received', exact: true }).click();
     await statement.getByRole('status').filter({ hasText: 'Actual revenue received recorded once' }).waitFor();
     assert(await statement.getByText('BROWSER-TEST-ONLY', { exact: true }).isVisible());
+    assert.equal(await departments.locator('tbody tr').nth(0).locator('td').nth(4).innerText(), 'RWF 208,333');
+    assert.equal(await departments.locator('tbody tr').nth(1).locator('td').nth(4).innerText(), 'RWF 791,667');
     const downloadEvent = page.waitForEvent('download');
     await statement.getByRole('button', { name: 'Export Monthly Retainer Statement', exact: true }).click();
     const download = await downloadEvent;
     assert(download.suggestedFilename().endsWith('.csv'));
-    assert(fs.readFileSync(await download.path(), 'utf8').includes('Individual TPA'));
+    const csv = fs.readFileSync(await download.path(), 'utf8');
+    assert(csv.includes('Individual TPA'));
+    assert(csv.includes('"Alice Associate","2","3","1350000","68500"'));
+    assert(csv.includes('"Alice Associate","MAT-2026-104","Corporate advisory matter","Transaction & Advisory","2","850000","5, 6","43500"'));
+    assert(!csv.includes('Reversed historical task'));
     await page.evaluate(() => { window.__rejectRetainerReceipt = true; });
     await statement.getByRole('button', { name: 'Record actual revenue received', exact: true }).click();
     await statement.getByLabel('Amount (RWF)', { exact: true }).fill('1000000');
@@ -121,14 +171,18 @@ async function main() {
     const output = path.join(root, 'node_modules/.cache/retainer-ui'); fs.mkdirSync(output, { recursive: true });
     await page.screenshot({ path: path.join(output, 'desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const mobileOverflow = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
+      elements: [...document.querySelectorAll('body *')].filter(element => element.getBoundingClientRect().right > innerWidth + 2).slice(0, 16).map(element => ({ tag: element.tagName, className: element.className, right: element.getBoundingClientRect().right, width: element.getBoundingClientRect().width })) }));
+    if (mobileOverflow.scrollWidth > mobileOverflow.width + 2) console.error('Mobile overflow:', JSON.stringify(mobileOverflow));
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2), 'Mobile page must not overflow horizontally.');
     await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true });
     await page.evaluate(() => document.documentElement.classList.add('dark'));
     await page.screenshot({ path: path.join(output, 'mobile-dark.png'), fullPage: true });
     assert.deepEqual(errors, []);
-    console.log('PASS: month opening, service values, contributor validation, TPA display, receipt entry, duplicate error retention, CSV export, closure, mobile layout and dark mode.');
+    console.log('PASS: linked department counts, monthly totals, shared tasks, staff earnings per case, historical TPA rates, reversed task exclusion, month switching, receipt allocation, CSV totals, closure, mobile layout and dark mode.');
   } catch (error) {
-    if (page) { const output = path.join(root, 'node_modules/.cache/retainer-ui'); fs.mkdirSync(output, { recursive: true }); await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }).catch(() => {}); console.error((await page.locator('.retainer-accounting').innerText().catch(() => '')).slice(0, 7000)); }
+    if (page) { const output = path.join(root, 'node_modules/.cache/retainer-ui'); fs.mkdirSync(output, { recursive: true }); await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }).catch(() => {}); console.error((await page.locator('.retainer-accounting').first().innerText().catch(() => '')).slice(0, 7000)); }
     throw error;
   } finally { if (browser) await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 }

@@ -1,6 +1,14 @@
 # Monthly Retainer Statement
 
-Implemented from the requested monthly retainer workflow and the supplied `retainer.pdf`.
+Implemented from the requested monthly retainer workflow and the supplied retainer documents, including `retainer.docx`.
+
+## Retainer detail page
+
+- The selected month controls the entire Monthly Retainer Statement. Choosing an unrecorded month clears the previous statement's figures; preparing a statement remains an explicit action. Historical statements are available through **Recorded statements**.
+- **Department summary** sits below the monthly overview. It shows currently linked matter counts alongside the selected month's approved tasks, production, production share, revenue credit and staff TPA, with a total row. Before a statement is prepared, monthly amounts show a dash. Current matter counts and historical production are deliberately labelled separately: unlinking a matter does not erase recorded production or earnings.
+- **Staff earnings by case** groups approved contribution snapshots by user ID. Expand a staff member to see production, task counts, applicable historical rates and accrued TPA for each case and recorded department. Shared task contributions are counted once in total production; each contributor sees their own share. Reversed services are excluded. The page adds existing earned TPA amounts rather than recalculating historic earnings using today's staff rate.
+- CSV exports include departmental totals, individual staff totals, case earnings and the underlying task register.
+- Linked matters use a full-width directory with matter name, department and status. Duplicate fee cards, lifetime invoice/outstanding figures and case profit/loss labels were removed from this monthly page. Matter financial details remain available in the individual matter. Agreement terms, task records, corrections and audit history remain accessible in expandable sections.
 
 ## Terminology and implementation review
 
