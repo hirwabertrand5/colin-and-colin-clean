@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { User } from '../../App';
 import companyLogoLight from '../../assets/logo-colin.png';
 import companyLogoDark from '../../assets/logo-colin-dark-mode.png';
-import { loginApi } from '../../services/authService';
+import { loginApi, prepareSignIn, prepareSignInDashboards } from '../../services/authService';
 import { useTheme } from '../../hooks/useTheme';
+import { prepareDashboardData } from '../../services/dashboardBootstrap';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -15,11 +16,15 @@ export default function Login({ onLogin }: LoginProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  useEffect(() => { prepareSignIn(); }, []);
   const { isDark } = useTheme();
   const companyLogo = isDark ? companyLogoDark : companyLogoLight;
 
   const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
+  if (submitting.current) return;
+  submitting.current = true;
   setError('');
   setLoading(true);
 
@@ -28,11 +33,13 @@ export default function Login({ onLogin }: LoginProps) {
 
     localStorage.setItem('token', response.token);
     localStorage.setItem('user', JSON.stringify(response.user));
+    prepareDashboardData();
 
     onLogin(response.user);
   } catch (err: any) {
     setError(err.message || 'Login failed');
   } finally {
+    submitting.current = false;
     setLoading(false);
   }
 };
@@ -60,6 +67,7 @@ export default function Login({ onLogin }: LoginProps) {
               <input
                 id="email"
                 type="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500"
@@ -75,6 +83,8 @@ export default function Login({ onLogin }: LoginProps) {
               <input
                 id="password"
                 type="password"
+                autoComplete="current-password"
+                onFocus={prepareSignInDashboards}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500"

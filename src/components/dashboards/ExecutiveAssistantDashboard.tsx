@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 
 import { getExecutiveAssistantDashboard } from '../../services/dashboardService';
+import { getDashboardSection } from '../../services/dashboardBootstrap';
 import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 
@@ -56,7 +57,7 @@ export default function ExecutiveAssistantDashboard() {
         setLoading(true);
         setError('');
 
-        const data = await getExecutiveAssistantDashboard();
+        const data = await getDashboardSection<Awaited<ReturnType<typeof getExecutiveAssistantDashboard>>>('executive');
         if (!mounted) return;
 
         setStatsData(data.stats);

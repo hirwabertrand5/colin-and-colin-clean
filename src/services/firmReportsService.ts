@@ -151,16 +151,18 @@ export type FirmReportResponse = {
   expenseTypes?: Array<{ type: string; amount: number; count: number; clientRelatedAmount: number }>;
 };
 
-export const getFirmReports = async (params?: { range?: FirmReportRange; from?: string; to?: string; basis?: FirmReportDateBasis; teamMemberId?: string }) => {
+export const getFirmReports = async (params?: { range?: FirmReportRange | 'all'; from?: string; to?: string; basis?: FirmReportDateBasis; teamMemberId?: string; scope?: 'profitability' }, signal?: AbortSignal) => {
   const qs = new URLSearchParams();
   if (params?.range) qs.set('range', params.range);
   if (params?.from) qs.set('from', params.from);
   if (params?.to) qs.set('to', params.to);
   if (params?.basis) qs.set('basis', params.basis);
   if (params?.teamMemberId) qs.set('teamMemberId', params.teamMemberId);
+  if (params?.scope) qs.set('scope', params.scope);
 
   const res = await fetch(`${API_URL}/reports/firm?${qs.toString()}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
+    signal,
   });
 
   const data = await res.json().catch(() => ({}));

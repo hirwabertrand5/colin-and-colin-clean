@@ -13,6 +13,7 @@ import { getContractValue } from '../utils/financialMetrics';
 import { buildRoleByName, baseMemberName, resolveMemberTpa } from '../utils/workflowPercentages';
 import { allocateRetainer, DEPARTMENTS, decimal, retainerDepartmentOf } from '../utils/retainerAllocation';
 import type { StaffEarningsRow } from '../utils/staffEarningsLedger';
+import { localISODate } from '../utils/reportRange';
 
 export const ordinaryInvoiceFilter = { retainerReceiptId: { $exists: false } };
 export const fail = (message: string, status = 400): never => { throw Object.assign(new Error(message), { status }); };
@@ -256,9 +257,25 @@ export async function retainerFinancials(from?: string | null, to?: string | nul
 }
 
 export async function retainerEarningsRows(from: Date, to: Date, filters: { staffKey?: string | null; role?: string | null; matterId?: string | null } = {}): Promise<StaffEarningsRow[]> {
-  const financials = await retainerFinancials(null, null);
+  const fromDay = from.getUTCFullYear() <= 1970 ? '0001-01-01' : localISODate(from);
+  const toDay = to.getUTCFullYear() >= 9999 ? '9999-12-31' : localISODate(to);
+  // Earnings need only months containing work in this window. Do not rebuild
+  // every monthly financial statement and receipt allocation on every dashboard.
+  const periods: any[] = await Period.find({ services: { $elemMatch: {
+    performedOn: { $gte: fromDay, $lte: toDay }, voidedAt: null,
+    ...(filters.matterId ? { caseId: filters.matterId } : {}),
+  } } }).lean();
+  if (!periods.length) return [];
+  const receipts: any[] = await Receipt.find({ periodId: { $in: periods.map(p => p._id) }, voidedAt: { $exists: false } }).lean();
+  const receiptsByPeriod = new Map<string, any[]>();
+  for (const receipt of receipts) {
+    const key = String(receipt.periodId);
+    const list = receiptsByPeriod.get(key) || [];
+    list.push(receipt); receiptsByPeriod.set(key, list);
+  }
+  const statements = periods.map(p => ({ ...p, allocation: allocateRetainer(p, receiptsByPeriod.get(String(p._id)) || []) }));
   const rows: StaffEarningsRow[] = [];
-  for (const p of financials.statements) for (const s of p.allocation.services) for (const c of s.contributors) {
+  for (const p of statements) for (const s of p.allocation.services) for (const c of s.contributors) {
     const staffKey = baseMemberName(c.name);
     const at = `${s.performedOn}T12:00:00+02:00`;
     if (Date.parse(at) < from.getTime() || Date.parse(at) > to.getTime()) continue;

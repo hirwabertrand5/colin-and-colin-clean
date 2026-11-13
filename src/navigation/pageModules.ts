@@ -73,6 +73,7 @@ export function navigationPage(href: string, role: string): PageModule | undefin
   if (path === '/calendar') return 'Calendar';
   if (path === '/deadlines' || path.startsWith('/deadlines/')) return 'DeadlineManagementPage';
   if (path === '/billing') return 'BillingDashboard';
+  if (path === '/billing/finance/profitability' || path.startsWith('/billing/finance/profitability/')) return 'ProfitabilityPage';
   if (path.startsWith('/billing/finance/')) return 'BillingFinancePage';
   if (path === '/billing/invoices') return 'InvoiceManagement';
   if (path === '/billing/profitability') return 'ProfitabilityPage';

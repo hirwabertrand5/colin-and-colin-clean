@@ -2,8 +2,8 @@ import mongoose, { Document, Schema } from 'mongoose';
 import bcrypt from 'bcrypt'; // native bcrypt — significantly faster than bcryptjs
 
 // bcrypt work factor for password hashing. OWASP recommends 10–12; we use 10 so
-// logins stay fast (each step of 1 doubles the CPU cost). Existing cost-12
-// hashes are re-hashed to this cost on the user's next successful login.
+// logins stay fast (each step of 1 doubles the CPU cost). Existing stronger
+// hashes keep their work factor; sign-in only verifies them.
 export const BCRYPT_ROUNDS = 10;
 
 export type UserRole =

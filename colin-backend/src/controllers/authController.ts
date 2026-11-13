@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
-import User, { BCRYPT_ROUNDS } from '../models/userModel.js';
+import User from '../models/userModel.js';
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -11,12 +11,13 @@ export const login = async (req: Request, res: Response) => {
     };
 
     // ✅ Prevent crash when body is missing
-    if (!email || !password) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
       return res.status(400).json({ message: 'email and password are required.' });
     }
 
-    const user = await User.findOne({ email })
-      .select('name email role passwordHash isActive loginAttempts lockUntil');
+    const user = await User.findOne({ email: email.trim().toLowerCase() })
+      .select('name email role passwordHash isActive loginAttempts lockUntil')
+      .lean();
 
     if (!user || !user.isActive) {
       return res.status(401).json({ message: 'Invalid credentials.' });
@@ -24,34 +25,15 @@ export const login = async (req: Request, res: Response) => {
 
     // Password lockout intentionally disabled — a failed login only returns
     // Invalid credentials and never locks the account.
-    const valid = await user.comparePassword(password);
+    const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
       return res.status(401).json({ message: 'Invalid credentials. Please try again.' });
     }
 
-    // ✅ Reset stale try/lock data, but only persist when something actually changed so
-    // we don't write to the DB on every normal login (saves a network round-trip).
-    const hadLoginAttempts = user.loginAttempts !== 0;
-    const hadLockUntil = !!user.lockUntil;
-
-    user.loginAttempts = 0;
-    user.lockUntil = undefined as any;
-
-    // One-time cost migration: if this user's hash was created with a higher
-    // bcrypt cost (e.g. the old cost-12 hashes), migrate it to the current
-    // (cheaper) BCRYPT_ROUNDS so every *future* login verifies much faster.
-    //
-    // IMPORTANT: assign the PLAINTEXT password, never an already-hashed value.
-    // The model's pre-save hook hashes passwordHash exactly once on save — if we
-    // stored a hash here it would get hashed a second time, permanently breaking
-    // every future login.
-    const rehashNeeded = bcrypt.getRounds(user.passwordHash) > BCRYPT_ROUNDS;
-    if (rehashNeeded) {
-      user.passwordHash = password;
-    }
-
-    if (hadLoginAttempts || hadLockUntil || rehashNeeded) {
-      await user.save();
+    // Normal sign-in is one indexed read plus password verification. Do not
+    // hash and save the password again during login or replace stronger hashes.
+    if (user.loginAttempts || user.lockUntil) {
+      await User.updateOne({ _id: user._id }, { $set: { loginAttempts: 0 }, $unset: { lockUntil: 1 } });
     }
 
     const secret = process.env.JWT_SECRET as string;

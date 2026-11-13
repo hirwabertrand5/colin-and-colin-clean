@@ -5,8 +5,9 @@ import Case from '../models/caseModel';
 import { ordinaryInvoiceFilter, retainerFinancials } from '../services/retainerAccountingService';
 import Invoice from '../models/invoiceModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
-import { getContractValue, getDirectMatterCost } from '../utils/financialMetrics';
-import { resolveOptionalReportRange } from '../utils/reportRange';
+import { getContractValue } from '../utils/financialMetrics';
+import { invoicePaymentDate } from '../utils/invoicePaymentDate';
+import { resolveOptionalReportRange, isWithinReportRange, reportTimeZone } from '../utils/reportRange';
 
 type MatterFinancials = {
   id: string;
@@ -42,14 +43,6 @@ const practiceAreaOf = (matter: any) => {
 const clientOf = (matter: any) =>
   String(matter?.parties || matter?.clientName || matter?.caseNo || 'Unassigned client').trim() || 'Unassigned client';
 
-const withinDateRange = (value: unknown, from: string | null, to: string | null) => {
-  if (!from || !to) return true;
-  const valueDay = day(value);
-  return Boolean(valueDay && valueDay >= from && valueDay <= to);
-};
-
-const invoicePaymentDate = (invoice: any) => invoice?.updatedAt || null;
-
 const emptyRollup = (label: string) => ({
   label,
   matterCount: 0,
@@ -75,35 +68,40 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
 
     const from = range?.fromISO || null;
     const to = range?.toISO || null;
-    const invoiceQuery: Record<string, unknown> = to ? { date: { $lte: to } } : {};
-    const expenseQuery: Record<string, unknown> = from && to ? { date: { $gte: from, $lte: to } } : {};
+    const entryCutoff = range ? { createdAt: { $lt: range.toExclusive } } : {};
 
     // The prior profitability screen made a broad finance request, then a
     // second full Firm Reports request. These small projections are fetched in
     // parallel and are the only records this page needs. Staff KPIs load only
     // when their dedicated tab is opened, from the shared dashboard source.
     const [matters, invoices, expenses] = await Promise.all([
+      // Matter metadata can have been imported after a historical retainer
+      // payment. Keep it available for attribution; entry counts/values below
+      // are still scoped to createdAt and inactive rows are filtered out.
       Case.find({})
-        .select('_id caseNo parties status assignedTo legalServicePath budget workflowProgress billingSettings')
+        .select('_id caseNo parties status assignedTo legalServicePath budget workflowProgress billingSettings createdAt')
         .lean(),
-      Invoice.find({ ...invoiceQuery, ...ordinaryInvoiceFilter })
-        .select('caseId invoiceNo date amount status updatedAt')
+      Invoice.find({ ...entryCutoff, ...ordinaryInvoiceFilter })
+        .select('caseId invoiceNo date amount status createdAt updatedAt paidAt')
         .lean(),
-      PettyCashExpense.find(expenseQuery)
-        .select('caseId date amount refundAmount chargeType')
+      PettyCashExpense.find(entryCutoff)
+        .select('caseId date amount refundAmount refundDate chargeType createdAt')
         .lean(),
     ]);
 
     const financialsByMatter = new Map<string, MatterFinancials>();
+    const enteredMatterIds = new Set<string>();
     for (const matter of matters as any[]) {
       const id = String(matter._id);
+      const enteredInRange = isWithinReportRange(matter.createdAt, range);
+      if (enteredInRange) enteredMatterIds.add(id);
       financialsByMatter.set(id, {
         id,
         matterNo: String(matter.caseNo || 'Unnumbered matter'),
         client: clientOf(matter),
         practiceArea: practiceAreaOf(matter),
         status: String(matter.status || 'Open'),
-        contractValue: roundMoney(getContractValue(matter)),
+        contractValue: enteredInRange ? roundMoney(getContractValue(matter)) : 0,
         billed: 0,
         collected: 0,
         outstanding: 0,
@@ -120,9 +118,11 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
     for (const invoice of invoices as any[]) {
       const amount = Math.max(0, Number(invoice.amount) || 0);
       const matter = financialsByMatter.get(String(invoice.caseId || ''));
-      const issuedInRange = withinDateRange(invoice.date, from, to);
-      const paymentInRange = invoice.status === 'Paid' && withinDateRange(invoicePaymentDate(invoice), from, to);
-      const isOpenReceivable = invoice.status !== 'Paid' && (!to || day(invoice.date) <= to);
+      const issuedInRange = isWithinReportRange(invoice.createdAt, range);
+      const paidAt = invoicePaymentDate(invoice);
+      const paymentInRange = invoice.status === 'Paid' && isWithinReportRange(paidAt, range);
+      const paidByEnd = invoice.status === 'Paid' && (!range || (paidAt && new Date(paidAt) < range.toExclusive));
+      const isOpenReceivable = !paidByEnd;
 
       if (issuedInRange) {
         totalBilled += amount;
@@ -175,7 +175,11 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
     let directMatterCosts = 0;
     let generalOverheads = 0;
     for (const expense of expenses as any[]) {
-      const cost = getDirectMatterCost(expense);
+      // Entry and refund are separate events. A later refund cannot reduce an
+      // earlier period's costs, nor disappear because the original entry is old.
+      const incurred = isWithinReportRange(expense.createdAt, range) ? Math.max(0, Number(expense.amount) || 0) : 0;
+      const refunded = isWithinReportRange(expense.refundDate, range) ? Math.min(Math.max(0, Number(expense.refundAmount) || 0), Math.max(0, Number(expense.amount) || 0)) : 0;
+      const cost = incurred - refunded;
       if (expense.chargeType === 'client' && expense.caseId) {
         directMatterCosts += cost;
         const matter = financialsByMatter.get(String(expense.caseId));
@@ -186,6 +190,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
     }
 
     const matterRows = Array.from(financialsByMatter.values())
+      .filter(row => !range || enteredMatterIds.has(row.id) || row.billed || row.collected || row.outstanding || row.directMatterCosts)
       .map((row) => {
         const grossContribution = row.collected - row.directMatterCosts;
         return {
@@ -240,7 +245,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
     };
 
     const totalContractValue = matterRows.reduce((sum, row) => sum + row.contractValue, 0);
-    const activeMatters = matterRows.filter((row) => !row.id.startsWith('retainer:') && isOpenMatter(row.status)).length;
+    const activeMatters = matterRows.filter((row) => enteredMatterIds.has(row.id) && isOpenMatter(row.status)).length;
     const grossContribution = recognisedCollectedRevenue - directMatterCosts;
     const totalFirmCosts = directMatterCosts + generalOverheads + retainer.staffTpa;
     const netProfit = recognisedCollectedRevenue - totalFirmCosts;
@@ -250,6 +255,8 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
         ? { from: range.displayFrom, to: range.displayTo, label: range.label }
         : { from: null, to: null, label: 'All time' },
       currency: 'RWF',
+      timeZone: reportTimeZone(),
+      datePolicy: { entries: 'createdAt', staffEarnings: 'workCompletion', payments: 'paidAt', receivables: 'reportEnd' },
       retainer,
       dataAvailability: {
         taskFeeRecognition: false,

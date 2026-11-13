@@ -57,8 +57,8 @@ async function main() {
     server = app.listen(0, '127.0.0.1');
     await once(server, 'listening');
     const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api`;
-    const request = async (url: string, body?: unknown, actor = initiator) => {
-      const response = await fetch(`${base}${url}`, { method: body === undefined ? 'GET' : 'POST', headers: {
+    const request = async (url: string, body?: unknown, actor = initiator, method?: string) => {
+      const response = await fetch(`${base}${url}`, { method: method || (body === undefined ? 'GET' : 'POST'), headers: {
         Authorization: `Bearer ${jwt.sign({ id: String(actor._id) }, process.env.JWT_SECRET!)}`, 'Content-Type': 'application/json',
       }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       return { status: response.status, body: await response.json() as any };
@@ -77,6 +77,18 @@ async function main() {
     const login = await timed('login', () => request('/auth/login', { email: initiator.email, password: 'test-only' }));
     assert(login.token);
     await timed('case-management load', () => request(management));
+    const originalTemplate = await Template.findById(template._id).lean();
+    const added = await timed('add key action', () => request(`${workflow}/steps`, { title: 'Performance custom action', stageKey: 'work', percentage: 1, position: 10 }));
+    const custom = added.steps.find((step: any) => step.title === 'Performance custom action');
+    assert(custom?.custom);
+    assert.deepEqual(await Template.findById(template._id).lean(), originalTemplate, 'Adding a case action must preserve its template');
+    const originalDue = new Date(added.steps.find((step: any) => step.stepKey === 'action_8').dueAt);
+    const newDueAt = new Date(+originalDue + 86400000).toISOString();
+    const amended = await timed('amend deadline', () => request(`${workflow}/steps/action_8/extend-deadline`, { newDueAt, mode: 'standard', reason: 'Performance check' }));
+    assert.equal(new Date(amended.steps.find((step: any) => step.stepKey === 'action_8').dueAt).toISOString(), newDueAt);
+    assert.equal(new Date(amended.steps.find((step: any) => step.stepKey === 'action_9').dueAt).getTime(), +originalDue + 86400000);
+    const deleted = await timed('delete key action', () => request(`${workflow}/steps/${custom.stepKey}`, undefined, initiator, 'DELETE'));
+    assert(!deleted.steps.some((step: any) => step.stepKey === custom.stepKey));
     const denied = await request(`${workflow}/steps/action_9/complete`, {});
     assert.equal(denied.status, 409, 'Later actions must still wait for earlier work');
     const ticked = await timed('tick key action', () => request(`${workflow}/steps/action_8/complete`, {}));
@@ -110,6 +122,36 @@ async function main() {
     assert.equal(closed.body.workflowStatus, 'Completed');
     assert(await Ledger.exists({ caseId: matter._id, keyActionKey: 'action_9' }), 'Approval must persist earned-fee entries before returning');
     assert.equal((await Case.findById(matter._id))?.status, 'Closed');
+    const manager = await User.create({ name: 'Performance Manager', email: 'manager@performance.invalid', role: 'managing_director', passwordHash: initiator.passwordHash });
+    const profitability = await timed('staff profitability', () => request('/reports/firm?range=ytd&scope=profitability', undefined, manager));
+    assert(Array.isArray(profitability.team));
+    const summary = await timed('staff dashboard data', () => request('/dashboard/staff-summary'));
+    assert(summary.workByMatter?.[String(matter._id)], 'Dashboard summary must include work items without per-matter HTTP requests');
+    await Workflow.collection.updateOne({ caseId: matter._id }, { $set: { 'steps.9.independentContributors': [{
+      name: outsider.name, userId: outsider._id, role: 'Initiator', taskId: new mongoose.Types.ObjectId(), actedAt: new Date(),
+    }] } });
+    const delegatedSummary = await request('/dashboard/staff-summary', undefined, outsider);
+    assert.equal(delegatedSummary.status, 200);
+    assert(!delegatedSummary.body.workByMatter?.[String(matter._id)], 'A narrow independent contribution must not expose the full matter work queue');
+    const roles = (User.schema.path('role') as any).enumValues as string[];
+    for (const role of roles) {
+      const actor: any = await User.create({ name: `Dashboard ${role}`, email: `${role}@dashboards.invalid`, role, passwordHash: initiator.passwordHash });
+      queryCount = 0;
+      const started = performance.now();
+      const response: globalThis.Response = await fetch(`${base}/dashboard/bootstrap`, { headers: { Authorization: `Bearer ${jwt.sign({ id: String(actor._id) }, process.env.JWT_SECRET!)}` } });
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get('content-type') || '', /application\/x-ndjson/);
+      const sections: any[] = (await response.text()).trim().split('\n').map((line: string) => JSON.parse(line));
+      const ms = Math.round(performance.now() - started);
+      results.push({ action: `dashboard ${role}`, ms, databaseOperations: queryCount });
+      const primary = role === 'executive_assistant' ? 'executive' : ['managing_director', 'managing_partner', 'executive_managing_partner'].includes(role) ? 'cases' : 'summary';
+      assert.equal(sections.find(section => section.section === primary)?.status, 'fulfilled', `${role}: primary dashboard data must load`);
+      if (role === 'managing_partner' || role === 'executive_managing_partner') {
+        for (const key of ['billing', 'invoices', 'fund', 'audit']) assert.equal(sections.find(section => section.section === key)?.status, 'rejected', 'Streaming must retain source-route finance/audit permissions');
+      }
+      assert(!JSON.stringify(sections).includes('passwordHash'));
+    }
+    console.log('PASS: dashboard stream for every user role, primary data, work items, and unchanged finance/audit restrictions');
     const reopened = await request(`${workflow}/steps/action_9/reopen`, {});
     assert.equal(reopened.status, 200);
     assert.equal(reopened.body.status, 'Active');

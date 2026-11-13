@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import CaseClientReportsTab from '../reports/CaseClientReportsTab';
 import CaseWorkflowTab from './CaseWorkflowTab';
@@ -229,6 +229,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   }, []);
 
   // Case data
+  const workflowRefresh = useRef(0);
   const [caseData, setCaseData] = useState<CaseData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -1467,12 +1468,14 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 onOpenCaseManagement={openCaseManagementFromKeyAction}
                 onWorkflowChanged={async (updatedWorkflow) => {
                   if (!caseData?._id) return;
+                  const request = ++workflowRefresh.current;
                   // Mutation responses already contain the saved workflow.
                   if (updatedWorkflow) setWorkflowInstance(updatedWorkflow);
                   const [caseRes, wfRes] = await Promise.allSettled([
                     getCaseById(caseData._id),
                     updatedWorkflow ? Promise.resolve(updatedWorkflow) : getWorkflowForCase(caseData._id),
                   ]);
+                  if (request !== workflowRefresh.current) return;
                   if (caseRes.status === 'fulfilled' && caseRes.value) setCaseData(caseRes.value);
                   if (wfRes.status === 'fulfilled' && wfRes.value) setWorkflowInstance(wfRes.value);
                 }}

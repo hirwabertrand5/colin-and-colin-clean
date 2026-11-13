@@ -8,6 +8,7 @@ import usePageTitle from '../../hooks/usePageTitle';
 import { downloadWorkbook } from '../../utils/excelExport';
 import SortableHeader from '../ui/SortableHeader';
 import { sortRows, SortDir } from '../../utils/tableSort';
+import { REPORT_PERIOD_LABELS } from '../../constants/reportPeriods';
 
 type FirmReportTab =
   | 'overview'
@@ -34,15 +35,7 @@ const REPORT_TABS: readonly {
 
 const ALL_REPORT_TABS: readonly FirmReportTab[] = REPORT_TABS.map((t) => t.id);
 
-const RANGE_LABELS: Record<FirmReportRange, string> = {
-  daily: 'Today',
-  weekly: 'Last 7 Days',
-  monthly: 'This Month',
-  quarterly: 'Last Quarter',
-  yearly: 'Last Year',
-  ytd: 'Year to Date',
-  custom: 'Custom Range',
-};
+const RANGE_LABELS = REPORT_PERIOD_LABELS;
 const DATE_BASIS_LABELS: Record<FirmReportDateBasis, string> = {
   invoiceDate: 'Invoice Date',
   paymentDate: 'Payment Date',

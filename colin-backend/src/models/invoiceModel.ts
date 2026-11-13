@@ -12,6 +12,7 @@ export interface IInvoice extends Document {
   date: string;
   amount: number;
   status: 'Paid' | 'Pending';
+  paidAt?: Date;
 
   // ✅ Proof of payment (existing)
   proofUrl?: string;
@@ -38,6 +39,7 @@ const InvoiceSchema = new Schema<IInvoice>(
     date: { type: String, required: true },
     amount: { type: Number, required: true },
     status: { type: String, enum: ['Paid', 'Pending'], default: 'Pending' },
+    paidAt: { type: Date },
 
     proofUrl: { type: String },
 
@@ -55,6 +57,8 @@ InvoiceSchema.index({ caseId: 1, seqCase: 1 }, { unique: true });
 // by the payment date (updatedAt). This compound index serves both the
 // status/case filter and the payment-date range.
 InvoiceSchema.index({ status: 1, updatedAt: -1 });
+InvoiceSchema.index({ status: 1, paidAt: -1 });
+InvoiceSchema.index({ createdAt: -1 });
 InvoiceSchema.index({ caseId: 1, status: 1 });
 
 InvoiceSchema.post('save', async function (invoice) {

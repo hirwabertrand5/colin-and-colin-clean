@@ -1,3 +1,4 @@
+import { getDashboardSection } from '../../services/dashboardBootstrap';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -34,15 +35,15 @@ import {
 } from 'recharts';
 
 import usePageTitle from '../../hooks/usePageTitle';
-import { getAllCases, CaseData } from '../../services/caseService';
-import { getBillingSummary, BillingSummary } from '../../services/billingService';
-import { getAllTasks, TaskData } from '../../services/taskService';
-import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
-import { getRecentAuditFeed, AuditFeedItem } from '../../services/auditService';
-import { getAllProspects, Prospect } from '../../services/prospectService';
-import { listInvoices, Invoice } from '../../services/invoiceService';
-import { getActivePettyCashFund, PettyCashFund } from '../../services/pettyCashService';
-import { getStaffUsers, User as StaffUser } from '../../services/userService';
+import type { CaseData } from '../../services/caseService';
+import type { BillingSummary } from '../../services/billingService';
+import type { TaskData } from '../../services/taskService';
+import type { FirmCalendarEvent } from '../../services/eventService';
+import type { AuditFeedItem } from '../../services/auditService';
+import type { Prospect } from '../../services/prospectService';
+import type { Invoice } from '../../services/invoiceService';
+import type { PettyCashFund } from '../../services/pettyCashService';
+import type { User as StaffUser } from '../../services/userService';
 import { LEGAL_SERVICES_TREE, ServiceNode } from '../../constants/legalServicesTree';
 import { caseMatchesAssigneeCanonical } from '../../utils/caseAssignments';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
@@ -485,74 +486,29 @@ export default function ManagingPartnerDashboard() {
   const next14Days = useMemo(() => addDaysISO(today, 14), [today]);
   const startOfYear = useMemo(() => startOfYearISO(), []);
   useEffect(() => {
-    let mounted = true;
-
-    (async () => {
-      setLoading(true);
-      setError('');
-      const results = await Promise.allSettled([
-        getAllCases(),
-        getBillingSummary({ from: startOfYear, to: today }),
-        getAllTasks(),
-        getFirmEvents({ from: today, to: next14Days, type: 'all' }),
-        getRecentAuditFeed(8),
-        getAllProspects({ includeTerminal: true }),
-        listInvoices({ status: 'Pending' }),
-        getActivePettyCashFund(),
-        getStaffUsers(),
-      ]);
-
-      if (!mounted) return;
-      const nextSources = { ...emptySources };
-
-      if (results[0].status === 'fulfilled') {
-        setCases(results[0].value);
-        nextSources.cases = true;
-      }
-      if (results[1].status === 'fulfilled') {
-        setSummary(results[1].value);
-        nextSources.billing = true;
-      }
-      if (results[2].status === 'fulfilled') {
-        setTasks(results[2].value);
-        nextSources.tasks = true;
-      }
-      if (results[3].status === 'fulfilled') {
-        setEvents(results[3].value);
-        nextSources.events = true;
-      }
-      if (results[4].status === 'fulfilled') {
-        setAuditFeed(results[4].value);
-        nextSources.audit = true;
-      }
-      if (results[5].status === 'fulfilled') {
-        setProspects(results[5].value);
-        nextSources.prospects = true;
-      }
-      if (results[6].status === 'fulfilled') {
-        setPendingInvoices(results[6].value);
-        nextSources.invoices = true;
-      }
-      if (results[7].status === 'fulfilled') {
-        setActiveFund(results[7].value);
-        nextSources.fund = true;
-      }
-      if (results[8].status === 'fulfilled') {
-        // Keep the working-team directory: only active staff appear on this
-        // board (Total People, Capacity Distribution, Utilization).
-        setStaff(results[8].value.filter((person) => person?.isActive !== false));
-        nextSources.staff = true;
-      }
-
-      setSources(nextSources);
-      if (!Object.values(nextSources).some(Boolean)) setError('Unable to load dashboard data.');
-      setLoading(false);
-    })();
-
-    return () => {
-      mounted = false;
+    let mounted = true, pending = 9, succeeded = 0;
+    setLoading(true); setError('');
+    const load = (section: Parameters<typeof getDashboardSection>[0], source: keyof SourceState, apply: (value: any) => void) => {
+      void getDashboardSection(section).then(value => {
+        if (!mounted) return;
+        apply(value); succeeded++;
+        setSources(previous => ({ ...previous, [source]: true }));
+        setLoading(false);
+      }).catch(() => {}).finally(() => {
+        pending--;
+        if (mounted && pending === 0) {
+          setLoading(false);
+          if (!succeeded) setError('Unable to load dashboard data.');
+        }
+      });
     };
-  }, [next14Days, startOfYear, today]);
+    load('cases', 'cases', setCases); load('tasks', 'tasks', setTasks);
+    load('billing', 'billing', setSummary); load('events', 'events', setEvents);
+    load('audit', 'audit', setAuditFeed); load('prospects', 'prospects', setProspects);
+    load('invoices', 'invoices', setPendingInvoices); load('fund', 'fund', setActiveFund);
+    load('staff', 'staff', value => setStaff(value.filter((person: StaffUser) => person?.isActive !== false)));
+    return () => { mounted = false; };
+  }, [today]);
 
   const currentMonthKey = monthKey(new Date());
   const previousMonthKey = useMemo(() => {

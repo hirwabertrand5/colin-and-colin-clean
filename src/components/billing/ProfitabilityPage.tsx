@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { RetainerPerformancePanel } from './RetainerPerformancePanel';
 import { Link } from 'react-router-dom';
 import {
@@ -20,13 +20,16 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 import { UserRole } from '../../App';
-import { FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
+import { FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
 import {
   getProfitabilityReport,
   ProfitabilityResponse,
   ProfitabilityRow,
+  ProfitabilityPeriod,
 } from '../../services/profitabilityService';
 import usePageTitle from '../../hooks/usePageTitle';
+import './profitability.css';
+import { REPORT_PERIOD_OPTIONS } from '../../constants/reportPeriods';
 
 type ProfitabilityTab = 'overview' | 'matters' | 'clients' | 'practice' | 'staff';
 
@@ -50,7 +53,7 @@ const tabs: Array<{ id: ProfitabilityTab; label: string; icon: typeof BarChart3 
   { id: 'matters', label: 'Matter', icon: BriefcaseBusiness },
   { id: 'clients', label: 'Client', icon: Building2 },
   { id: 'practice', label: 'Practice area', icon: Building2 },
-  { id: 'staff', label: 'Staff contribution', icon: UsersRound },
+  { id: 'staff', label: 'Staff profitability', icon: UsersRound },
 ];
 
 function MetricCard({
@@ -97,8 +100,9 @@ function Skeleton() {
 }
 
 function CostStructurePanel({ firm }: { firm: ProfitabilityResponse['firm'] }) {
-  const total = Math.max(0, firm.totalFirmCosts || 0);
-  const directShare = total > 0 ? Math.min(100, Math.max(0, (firm.directMatterCosts / total) * 100)) : 0;
+  const total = firm.totalFirmCosts || 0;
+  const chartable = total > 0 && firm.directMatterCosts >= 0 && firm.generalOverheads >= 0;
+  const directShare = chartable ? Math.min(100, (firm.directMatterCosts / total) * 100) : 0;
 
   return (
     <section className="profitability-detail-card">
@@ -107,8 +111,8 @@ function CostStructurePanel({ firm }: { firm: ProfitabilityResponse['firm'] }) {
         <div><h2>Cost structure</h2><p>Recorded costs only; no inferred allocations.</p></div>
       </div>
       <div className="profitability-cost-body">
-        <div className="profitability-donut" style={{ background: `conic-gradient(#2f80ed 0 ${directShare}%, #9ac4f8 ${directShare}% 100%)` }}>
-          <div><strong>{money(total)}</strong><span>Total costs</span></div>
+        <div className="profitability-donut" style={{ background: chartable ? `conic-gradient(#2f80ed 0 ${directShare}%, #9ac4f8 ${directShare}% 100%)` : '#dbe4ef' }}>
+          <div><strong>{money(total)}</strong><span>{chartable ? 'Total costs' : 'Net costs after refunds'}</span></div>
         </div>
         <dl className="profitability-cost-legend">
           <div><dt><i className="is-direct" />Direct matter costs</dt><dd>{money(firm.directMatterCosts)} <small>{percentage(directShare)}</small></dd></div>
@@ -305,7 +309,7 @@ function StaffDashboardTable({ members }: { members: FirmReportResponse['team'] 
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">Staff performance & revenue attribution</h2>
         </div>
         <div className="profitability-staff-controls">
-          <label><span className="sr-only">Filter by role</span><select value={role} onChange={(event) => setRole(event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="all">All roles</option>{roles.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label><span>Role</span><select value={role} onChange={(event) => setRole(event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="all">All roles</option>{roles.map((value) => <option key={value} value={value}>{value.replaceAll('_', ' ')}</option>)}</select></label>
           <label><span className="sr-only">Sort staff</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="fees">Highest attributed fees</option><option value="matters">Most matters completed</option><option value="overdue">Most overdue matters</option></select></label>
           <label className="profitability-staff-search"><span className="sr-only">Search staff</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search staff…" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 transition focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label>
         </div>
@@ -343,157 +347,136 @@ function StaffDashboardTable({ members }: { members: FirmReportResponse['team'] 
 
 export default function ProfitabilityPage({ userRole, initialTab = 'overview' }: { userRole: UserRole; initialTab?: ProfitabilityTab }) {
   const [tab, setTab] = useState<ProfitabilityTab>(initialTab);
-  const [range, setRange] = useState<FirmReportRange>('ytd');
+  const [range, setRange] = useState<ProfitabilityPeriod>('ytd');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
-  const [data, setData] = useState<ProfitabilityResponse | null>(null);
+  const [result, setResult] = useState<{ key: string; financial?: ProfitabilityResponse; staff?: FirmReportResponse } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
-  const [staffReport, setStaffReport] = useState<FirmReportResponse | null>(null);
-  const [staffLoading, setStaffLoading] = useState(false);
-  const [staffError, setStaffError] = useState('');
-  const staffCache = useRef(new Map<string, FirmReportResponse>());
+  const [failure, setFailure] = useState({ key: '', message: '' });
+  const reportView = tab === 'staff' ? 'staff' : 'financial';
+  const reportKey = [reportView, range, range === 'custom' ? from : '', range === 'custom' ? to : '', refreshKey].join(':');
+  const customError = range !== 'custom' ? '' : !from || !to ? 'Choose both a From date and a To date to load this report.' : from > to ? 'The From date must be on or before the To date.' : '';
+  const data = result?.key === reportKey ? result.financial : null;
+  const staffReport = result?.key === reportKey ? result.staff : null;
+  const error = failure.key === reportKey ? failure.message : '';
+  const busy = !customError && !error && (loading || result?.key !== reportKey);
   const permitted = managementRoles.includes(userRole);
-  usePageTitle('Profitability');
+  usePageTitle(tab === 'staff' ? 'Staff profitability' : 'Profitability');
 
   useEffect(() => setTab(initialTab), [initialTab]);
 
   useEffect(() => {
-    if (!permitted) return;
-    if (range === 'custom' && (!from || !to)) {
-      setLoading(false);
-      return;
-    }
+    if (!permitted || customError) return;
     const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
+    setLoading(true);
+    setFailure({ key: reportKey, message: '' });
+    const load = async () => {
       try {
-        setRefreshing(Boolean(data));
-        setLoading(!data);
-        setError('');
-        const report = await getProfitabilityReport({ range, from: range === 'custom' ? from : undefined, to: range === 'custom' ? to : undefined }, controller.signal);
-        setData(report);
-      } catch (loadError: any) {
-        if (loadError?.name !== 'AbortError') setError(loadError?.message || 'Failed to load profitability report.');
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-          setRefreshing(false);
+        const params = { range, from: range === 'custom' ? from : undefined, to: range === 'custom' ? to : undefined };
+        if (reportView === 'staff') {
+          const staff = await getFirmReports({ ...params, basis: 'paymentDate', scope: 'profitability' }, controller.signal);
+          if (!controller.signal.aborted) setResult({ key: reportKey, staff });
+        } else {
+          const financial = await getProfitabilityReport(params, controller.signal);
+          if (!controller.signal.aborted) setResult({ key: reportKey, financial });
         }
+      } catch (loadError: any) {
+        if (!controller.signal.aborted) setFailure({ key: reportKey, message: loadError?.message || 'Failed to load profitability report.' });
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
       }
-    }, range === 'custom' ? 250 : 0);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
     };
-  }, [permitted, range, from, to, refreshKey]);
-
-  useEffect(() => {
-    if (!permitted) return;
-    if (range === 'custom' && (!from || !to)) return;
-
-    const reportKey = [range, range === 'custom' ? from : '', range === 'custom' ? to : '', refreshKey].join(':');
-    const cached = staffCache.current.get(reportKey);
-    if (cached) {
-      setStaffReport(cached);
-      setStaffError('');
-      setStaffLoading(false);
-      return;
-    }
-
-    let current = true;
-    setStaffLoading(true);
-    setStaffError('');
-    setStaffReport(null);
-    getFirmReports({
-      range,
-      from: range === 'custom' ? from : undefined,
-      to: range === 'custom' ? to : undefined,
-      basis: 'paymentDate',
-    })
-      .then((report) => {
-        if (!current) return;
-        staffCache.current.set(reportKey, report);
-        setStaffReport(report);
-      })
-      .catch((loadError: any) => {
-        if (current) setStaffError(loadError?.message || 'Failed to load staff dashboard KPIs.');
-      })
-      .finally(() => {
-        if (current) setStaffLoading(false);
-      });
-
-    return () => {
-      current = false;
-    };
-  }, [permitted, range, from, to, refreshKey]);
+    void load();
+    return () => controller.abort();
+  }, [permitted, reportKey, customError]);
 
   if (!permitted) return <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><h1 className="text-xl font-semibold">Access denied</h1><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">You do not have permission to view Billing & Finance profitability.</p></div>;
-  if (loading && !data) return <Skeleton />;
 
   const firm = data?.firm;
+  const scopeLabel = data?.range.label || (staffReport ? range === 'all' ? 'All time' : `${staffReport.range.from} → ${staffReport.range.to}` : '');
+  const inputClass = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100';
 
   return (
-    <div className="profitability-page space-y-5 pb-8">
-      <header className="profitability-page-header flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-        <div>
-          <Link to="/billing" className="profitability-back-link mb-3 inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-950 dark:text-slate-400 dark:hover:text-white"><ArrowLeft className="h-4 w-4" />Billing & Finance</Link>
-          <div className="profitability-identity flex items-center gap-3"><div className="rounded-xl bg-indigo-600 p-2.5 text-white shadow-sm"><BarChart3 className="h-5 w-5" /></div><div><h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">Profitability</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">A reconciled view of financial contribution, from firm level through matter, client, practice area and staff.</p></div></div>
-        </div>
-        <div className="profitability-filter-bar flex flex-wrap items-end gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <label className="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400"><span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Reporting period</span><select value={range} onChange={(event) => setRange(event.target.value as FirmReportRange)} className="min-w-36 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 outline-none ring-indigo-500 focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"><option value="daily">Today</option><option value="weekly">Last 7 days</option><option value="monthly">This month</option><option value="quarterly">Previous quarter</option><option value="yearly">Previous year</option><option value="ytd">Year to date</option><option value="custom">Custom range</option></select></label>
-          {range === 'custom' && <><label className="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400">From<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label><label className="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400">To<input type="date" value={to} onChange={(event) => setTo(event.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-500 focus:ring-2 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" /></label></>}
-          <button type="button" onClick={() => { staffCache.current.clear(); setRefreshKey((value) => value + 1); }} disabled={refreshing || staffLoading} className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-900 px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:opacity-60 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"><RefreshCw className={`h-4 w-4 ${refreshing || staffLoading ? 'animate-spin' : ''}`} />Refresh</button>
+    <div className="profitability-page space-y-5 pb-8" aria-busy={busy}>
+      <header className="profitability-page-header">
+        <Link to="/billing" className="profitability-back-link mb-3 inline-flex items-center gap-2"><ArrowLeft className="h-4 w-4" />Billing & Finance</Link>
+        <div className="profitability-identity flex items-center gap-3">
+          <div className="rounded-xl bg-blue-700 p-2.5 text-white"><BarChart3 className="h-5 w-5" /></div>
+          <div><h1>{tab === 'staff' ? 'Staff profitability' : 'Profitability'}</h1><p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Understand revenue, costs and staff contribution for your selected period.</p></div>
         </div>
       </header>
 
-      {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">{error}</div>}
-      {data && <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400"><span className="font-semibold text-slate-700 dark:text-slate-200">Scope:</span><span>{data.range.label}</span><span className="text-slate-300 dark:text-slate-600">•</span><span>Currency: RWF</span>{refreshing && <><span className="text-slate-300 dark:text-slate-600">•</span><span className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" />Updating</span></>}</div>}
+      <section className="profitability-filter-bar" aria-label="Report filters">
+        <div className="profitability-period-controls">
+          <label><span><CalendarDays className="h-4 w-4" />Reporting period</span>
+            <select value={range} onChange={event => setRange(event.target.value as ProfitabilityPeriod)} className={inputClass}>
+              {REPORT_PERIOD_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          {range === 'custom' && <>
+            <label><span>From</span><input type="date" value={from} max={to || undefined} onChange={event => setFrom(event.target.value)} className={inputClass} /></label>
+            <label><span>To</span><input type="date" value={to} min={from || undefined} onChange={event => setTo(event.target.value)} className={inputClass} /></label>
+          </>}
+          <button type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={busy || Boolean(customError)} className="profitability-refresh"><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />Refresh</button>
+        </div>
+        <p className="profitability-scope" role="status" aria-live="polite">{customError || (busy ? 'Loading selected period…' : error ? 'Report could not be loaded.' : `${scopeLabel} · RWF · ${data?.timeZone || 'Africa/Kigali'}`)}</p>
+      </section>
 
-      <nav className="profitability-tabs overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900" aria-label="Profitability reports"><div className="flex min-w-max gap-1">{tabs.map((item) => { const Icon = item.icon; const active = tab === item.id; return <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`profitability-tab inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${active ? 'bg-indigo-600 text-white shadow-sm is-active' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></nav>
+      <nav className="profitability-tabs overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-900" aria-label="Profitability reports">
+        <div className="flex min-w-max gap-1">{tabs.map(item => {
+          const Icon = item.icon; const active = tab === item.id;
+          return <button key={item.id} type="button" aria-pressed={active} onClick={() => setTab(item.id)} className={`profitability-tab inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${active ? 'bg-blue-700 text-white is-active' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}><Icon className="h-4 w-4" />{item.label}</button>;
+        })}</div>
+      </nav>
 
-      <RetainerPerformancePanel data={data?.retainer} />
-      {tab === 'overview' && firm && <div className="space-y-5">
-        <section className="profitability-financial-summary rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 p-6 text-white shadow-lg">
-          <div className="profitability-hero-main">
-            <div>
-              <p className="profitability-hero-label">Net profit</p>
-              <h2>{money(firm.netProfit)}</h2>
+      {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200">{error} Use Refresh to try again.</div>}
+      {customError && <p className="profitability-empty">{customError}</p>}
+      {busy && <Skeleton />}
+      {!busy && !error && !customError && <>
+        <details className="profitability-date-guide">
+          <summary>How dates affect this report</summary>
+          {tab === 'staff' ? <p>Attributed fees and completed matters use recorded work completion dates. Active and overdue counts use matters entered during this period and their current status; deadlines are checked up to the report end. Existing staff with no activity show zero. Fee bases retain the actual collected value of each completed action.</p> : <p>Contract values and active matter counts use the date the matter was entered. Invoices and expenses use their system entry dates. Collections use the recorded payment date; older invoices without a payment timestamp use the last update date. Refunds use their refund date. Receivables show the unpaid balance up to the report end, including earlier entries. Retainers use their statement, receipt and work dates.</p>}
+        </details>
+
+        {tab === 'overview' && firm && data && <div className="space-y-5">
+          <section className="profitability-financial-summary rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white">
+            <div className="profitability-hero-main"><div><p className="profitability-hero-label">Net profit in period</p><h2>{money(firm.netProfit)}</h2><p className="profitability-hero-description">Collected revenue less recorded costs and accrued retainer staff TPA.</p></div><span className="profitability-hero-art"><BarChart3 className="h-8 w-8" /></span></div>
+            <div className="profitability-hero-stat-grid">
+              <div className="is-emerald"><span className="profitability-hero-stat-icon"><Percent className="h-5 w-5" /></span><div><span>Net profit margin</span><strong>{percentage(firm.netProfitMargin)}</strong></div></div>
+              <div className="is-violet"><span className="profitability-hero-stat-icon"><Wallet className="h-5 w-5" /></span><div><span>Gross contribution</span><strong>{money(firm.grossContribution)}</strong></div></div>
+              <div className="is-amber"><span className="profitability-hero-stat-icon"><CircleHelp className="h-5 w-5" /></span><div><span>Cost ratio</span><strong>{percentage(firm.costRatio)}</strong></div></div>
             </div>
-            <span className="profitability-hero-art"><BarChart3 className="h-10 w-10" /></span>
-          </div>
-          <div className="profitability-hero-stat-grid">
-            <div className="is-emerald"><span className="profitability-hero-stat-icon"><Percent className="h-6 w-6" /></span><div><span>Net profit margin</span><strong>{percentage(firm.netProfitMargin)}</strong></div></div>
-            <div className="is-violet"><span className="profitability-hero-stat-icon"><Wallet className="h-6 w-6" /></span><div><span>Gross contribution</span><strong>{money(firm.grossContribution)}</strong></div></div>
-            <div className="is-amber"><span className="profitability-hero-stat-icon"><CircleHelp className="h-6 w-6" /></span><div><span>Cost ratio</span><strong>{percentage(firm.costRatio)}</strong></div></div>
-          </div>
-        </section>
-        <section>
-          <div className="mb-3 flex items-center gap-2"><h2 className="text-base font-semibold text-slate-950 dark:text-white">Revenue & receivables</h2><span title="Financial events remain distinct: contracted, billed and collected are never substituted for each other."><CircleHelp className="h-4 w-4 text-slate-400" /></span></div>
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-            <MetricCard icon={FileText} accent="blue" label="Contract value" value={money(firm.contractValue)} detail="Agreed fees for the selected matter population." />
-            <MetricCard icon={FileText} accent="emerald" label="Fees billed" value={money(firm.billed)} detail="Invoices issued in the period." />
-            <MetricCard icon={Wallet} accent="violet" label="Recognised collected revenue" value={money(firm.recognisedCollectedRevenue)} detail="Paid invoices recorded in the period; credit notes and payment refunds are not separately ledgered." valueClass="text-emerald-700 dark:text-emerald-300" />
-            <MetricCard icon={Wallet} accent="rose" label="Open receivables" value={money(firm.totalReceivables)} detail="Current unpaid invoices issued to the report end." valueClass="text-amber-700 dark:text-amber-300" />
-            <MetricCard icon={Percent} accent="emerald" label="Collection rate" value={percentage(firm.collectionRate)} detail="Recorded payments ÷ billed for the selected period." />
-            <MetricCard icon={BriefcaseBusiness} accent="blue" label="Active matters" value={number(firm.activeMatters)} detail="Open matters in the selected population." />
-          </div>
-        </section>
-        <section className="grid gap-4 xl:grid-cols-2">
-          <CostStructurePanel firm={firm} />
-          <ReceivablesAgeingPanel ageing={data.ageing} total={firm.totalReceivables} />
-        </section>
-      </div>}
+          </section>
+          <section>
+            <h2 className="profitability-section-title">Revenue & receivables</h2>
+            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+              <MetricCard icon={FileText} label="New contract value" value={money(firm.contractValue)} detail="Agreed fees on matters entered in the period." />
+              <MetricCard icon={FileText} accent="emerald" label="Fees billed" value={money(firm.billed)} detail="Invoice entries and retainer fees in the period." />
+              <MetricCard icon={Wallet} accent="violet" label="Collected revenue" value={money(firm.recognisedCollectedRevenue)} detail="Payments recorded in the period." valueClass="text-emerald-700 dark:text-emerald-300" />
+              <MetricCard icon={Wallet} accent="rose" label="Receivables at period end" value={money(firm.totalReceivables)} detail="Includes unpaid balances from earlier periods." valueClass="text-amber-700 dark:text-amber-300" />
+              <MetricCard icon={Percent} accent="emerald" label="Collection rate" value={percentage(firm.collectionRate)} detail="Period payments ÷ period billing; may exceed 100%." />
+              <MetricCard icon={BriefcaseBusiness} label="Active matters entered" value={number(firm.activeMatters)} detail="Matters entered in the period that are currently open." />
+            </div>
+          </section>
+          <section className="grid gap-4 xl:grid-cols-2"><CostStructurePanel firm={firm} /><ReceivablesAgeingPanel ageing={data.ageing} total={firm.totalReceivables} /></section>
+          <details className="profitability-retainers"><summary>Retainer performance</summary><RetainerPerformancePanel data={data.retainer} /></details>
+        </div>}
 
-      {tab === 'matters' && <FinancialTable title="Matter profitability" rows={data?.matterRows || []} kind="matter" />}
-      {tab === 'clients' && <FinancialTable title="Client profitability" rows={data?.clientRows || []} kind="client" />}
-      {tab === 'practice' && <FinancialTable title="Practice area profitability" rows={data?.practiceAreaRows || []} kind="practice" />}
-      {tab === 'staff' && <div className="space-y-4">
-        {staffReport && <section className="grid gap-3 md:grid-cols-3"><MetricCard label="Staff members" value={number(staffReport.team.length)} detail="Active dashboard population." /><MetricCard label="Attributed fees" value={money(staffReport.team.reduce((sum, member) => sum + (member.revenueAttributed ?? member.earnedFees ?? 0), 0))} detail="Fees Earned dashboard source." valueClass="text-emerald-700 dark:text-emerald-300" /><MetricCard label="Gross fee base" value={money(staffReport.team.reduce((sum, member) => sum + (member.grossFeesHandled ?? member.invoicePaymentsReceived ?? 0), 0))} detail="Collected-base allocation used by staff KPIs." /><MetricCard label="Overdue matters" value={number(staffReport.team.reduce((sum, member) => sum + (member.overdueTasks || 0), 0))} detail="Workflow matters past their deadline." valueClass="text-amber-700 dark:text-amber-300" /></section>}
-        {staffError && <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">{staffError}</div>}
-        {staffLoading ? <div className="rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">Loading dashboard-aligned staff KPIs…</div> : staffReport ? <StaffDashboardTable members={staffReport.team} /> : !staffError && <div className="rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">Choose a complete reporting period to view staff KPIs.</div>}
-      </div>}
+        {tab === 'matters' && <FinancialTable title="Matter profitability" rows={data?.matterRows || []} kind="matter" />}
+        {tab === 'clients' && <FinancialTable title="Client profitability" rows={data?.clientRows || []} kind="client" />}
+        {tab === 'practice' && <FinancialTable title="Practice area profitability" rows={data?.practiceAreaRows || []} kind="practice" />}
+        {tab === 'staff' && staffReport && <div className="space-y-4">
+          <section className="profitability-staff-summary">
+            <MetricCard icon={UsersRound} label="Staff members" value={number(staffReport.team.length)} detail="Active staff registered by the report end." />
+            <MetricCard icon={Wallet} accent="emerald" label="Attributed fees" value={money(staffReport.team.reduce((sum, member) => sum + (member.revenueAttributed ?? member.earnedFees ?? 0), 0))} detail="Earned from work completed in this period." valueClass="text-emerald-700 dark:text-emerald-300" />
+            <MetricCard icon={FileText} accent="violet" label="Collected work base" value={money(staffReport.team.reduce((sum, member) => sum + (member.grossFeesHandled ?? member.invoicePaymentsReceived ?? 0), 0))} detail="Collected base attributed to staff work in the period." />
+            <MetricCard icon={Clock} accent="amber" label="Overdue matters entered" value={number(staffReport.team.reduce((sum, member) => sum + (member.overdueTasks || 0), 0))} detail="Period entries still open with a deadline before the report end." valueClass="text-amber-700 dark:text-amber-300" />
+          </section>
+          <StaffDashboardTable members={staffReport.team} />
+          <p className="profitability-table-note">Staff costs and overhead allocations are not configured. Net contribution is unavailable.</p>
+        </div>}
+      </>}
     </div>
   );
 }

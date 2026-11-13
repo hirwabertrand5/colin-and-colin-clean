@@ -64,27 +64,18 @@ export const getExecutiveAssistantDashboard = async (req: AuthRequest, res: Resp
     // ----------------------------
     // Stats (MTD)
     // ----------------------------
-    const [casesCreatedMTD, documentsUploadedMTD, scheduledEventsMTD, tasksCoordinatedMTD] =
-      await Promise.all([
-        Case.countDocuments({ createdAt: { $gte: monthStartDate } }),
-        Document.countDocuments({ createdAt: { $gte: monthStartDate } }),
-        Event.countDocuments({ date: { $gte: monthStartISO, $lte: todayISO } }),
-        Task.countDocuments({ createdAt: { $gte: monthStartDate } }),
-      ]);
-
-    // ----------------------------
-    // Today schedule (events today)
-    // ----------------------------
-    const todayEvents = await Event.find({ date: todayISO })
-      .sort({ time: 1 })
-      .limit(20)
-      .lean();
-
-    // Attach case labels to events
-    const todayCaseIds = Array.from(new Set(todayEvents.map((e: any) => String(e.caseId)).filter(Boolean)));
-    const todayCases = await Case.find({ _id: { $in: todayCaseIds } }).select('_id caseNo parties').lean();
-    const caseMap = new Map(todayCases.map((c: any) => [String(c._id), c]));
-
+    const [casesCreatedMTD, documentsUploadedMTD, scheduledEventsMTD, tasksCoordinatedMTD, todayEvents, pendingTaskCandidates, recent] = await Promise.all([
+      Case.countDocuments({ createdAt: { $gte: monthStartDate } }),
+      Document.countDocuments({ createdAt: { $gte: monthStartDate } }),
+      Event.countDocuments({ date: { $gte: monthStartISO, $lte: todayISO } }),
+      Task.countDocuments({ createdAt: { $gte: monthStartDate } }),
+      Event.find({ date: todayISO }).select('caseId title time type description').sort({ time: 1 }).limit(20).lean(),
+      Task.find({ status: { $ne: 'Completed' } }).select('caseId title assignee status dueDate priority requiresApproval approvalStatus workflowStepKey').sort({ dueDate: 1, priority: 1 }).limit(100).lean(),
+      Case.find().select('caseNo parties status createdAt').sort({ createdAt: -1 }).limit(5).lean(),
+    ]);
+    const linkedCaseIds = [...new Set([...todayEvents, ...pendingTaskCandidates].map(item => String(item.caseId || '')).filter(Boolean))];
+    const linkedCases = await Case.find({ _id: { $in: linkedCaseIds } }).select('_id caseNo parties status workflowProgress').lean();
+    const caseMap = new Map(linkedCases.map((matter: any) => [String(matter._id), matter]));
     const todaySchedule = todayEvents.map((e: any) => {
       const c = caseMap.get(String(e.caseId));
       const caseLabel = c ? c.caseNo || c.parties : '';
@@ -103,17 +94,7 @@ export const getExecutiveAssistantDashboard = async (req: AuthRequest, res: Resp
     // ----------------------------
     // Fetch enough rows to retain ten after excluding tasks whose matter was
     // closed. Closed-matter tasks must not reappear as pending/overdue work.
-    const pendingTaskCandidates = await Task.find({ status: { $ne: 'Completed' } })
-      .sort({ dueDate: 1, priority: 1 })
-      .limit(100)
-      .lean();
-
-    // attach case labels to tasks
-    const pendingCaseIds = Array.from(new Set(pendingTaskCandidates.map((t: any) => String(t.caseId)).filter(Boolean)));
-    const pendingCases = await Case.find({ _id: { $in: pendingCaseIds } })
-      .select('_id caseNo parties status workflowProgress')
-      .lean();
-    const pendingCaseMap = new Map(pendingCases.map((c: any) => [String(c._id), c]));
+    const pendingCaseMap = caseMap;
     const pendingTasks = pendingTaskCandidates
       .filter((task: any) => {
         const caseDoc: any = pendingCaseMap.get(String(task.caseId));
@@ -145,7 +126,7 @@ export const getExecutiveAssistantDashboard = async (req: AuthRequest, res: Resp
     // ----------------------------
     // Recent cases (last 5)
     // ----------------------------
-    const recent = await Case.find().sort({ createdAt: -1 }).limit(5).lean();
+
 
     const recentCases = recent.map((c: any) => ({
       id: String(c._id),
@@ -372,8 +353,6 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     }
     const period = periodResolution || null;
 
-    const currentTpaUser = await User.findById(req.user?.id).select('name role tpaHistory').lean();
-    const roleTpaPercent = currentTpaUser ? resolveMemberTpa(currentTpaUser.name, buildRoleByName([currentTpaUser])).tpaPercent : getTpaPercent(String(req.user?.role || ''));
     // Names may be stored as an account first name or the full picker label;
     // use the platform's canonical comparison everywhere a dashboard decides
     // whether a value belongs to the signed-in member.
@@ -397,11 +376,14 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     // A delegated independent task grants a narrow workflow role, not general
     // case-workspace access. It must nevertheless put the contributor's fee
     // row on their personal dashboard once they have performed that role.
-    const independentContributorCaseIds: any[] = identityRegexes.length
-      ? await WorkflowInstance.distinct('caseId', {
-          $or: identityRegexes.map((identity) => ({ 'steps.independentContributors.name': identity })),
-        })
-      : [];
+    const [users, independentContributorCaseIds, monthlyEarnings]: [any[], any[], any[]] = await Promise.all([
+      User.find({}).select('name role tpaHistory').lean(),
+      WorkflowInstance.distinct('caseId', { $or: identityRegexes.map(identity => ({ 'steps.independentContributors.name': identity })) }),
+      retainerEarningsRows(new Date(0), new Date('9999-12-31'), { staffKey: baseMemberName(meName) }),
+    ]);
+    const currentTpaUser = users.find(user => String(user._id) === String(req.user?.id));
+    const roleTpaPercent = currentTpaUser ? resolveMemberTpa(currentTpaUser.name, buildRoleByName([currentTpaUser])).tpaPercent : getTpaPercent(String(req.user?.role || ''));
+
     const matterVisibilityFilters: any[] = identityRegexes.flatMap((identity) => [
             { assignedTo: identity },
             { 'caseAssignments.initiator': identity },
@@ -415,37 +397,20 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     if (independentContributorCaseIds.length) {
       matterVisibilityFilters.push({ _id: { $in: independentContributorCaseIds } });
     }
-    const matters: any[] = matterVisibilityFilters.length
-      ? await Case.find({ $or: matterVisibilityFilters })
-          .sort({ updatedAt: -1 })
-          .lean()
-      : [];
-
-    const monthlyEarnings = await retainerEarningsRows(new Date(0), new Date('9999-12-31'), { staffKey: baseMemberName(meName) });
+    const records: any[] = matterVisibilityFilters.length ? await Case.aggregate([
+      { $match: { $or: matterVisibilityFilters } }, { $sort: { updatedAt: -1 } },
+      { $lookup: { from: WorkflowInstance.collection.name, localField: '_id', foreignField: 'caseId', as: '_dashboardInstances' } },
+      { $lookup: { from: Task.collection.name, localField: '_id', foreignField: 'caseId', as: '_dashboardTasks' } },
+      { $lookup: { from: Invoice.collection.name, localField: '_id', foreignField: 'caseId',
+        pipeline: [{ $match: { status: 'Paid', retainerReceiptId: { $exists: false } } }, { $project: { caseId: 1, amount: 1, paidAt: 1, updatedAt: 1 } }], as: '_dashboardInvoices' } },
+      { $lookup: { from: WorkflowTemplate.collection.name, localField: '_dashboardInstances.templateId', foreignField: '_id', as: '_dashboardTemplates' } },
+    ]) : [];
+    const matters: any[] = records.map(({ _dashboardInstances, _dashboardTasks, _dashboardInvoices, _dashboardTemplates, ...matter }) => matter);
     if (!matters.length && !monthlyEarnings.length) return res.json(emptyStaffSummary(meName, roleTpaPercent, buildStaffPeriod(period)));
-
-    const caseIds = matters.map((matter) => matter._id);
-    const [instances, tasks, paidInvoices] = await Promise.all([
-      WorkflowInstance.find({ caseId: { $in: caseIds } }).lean(),
-      Task.find({ caseId: { $in: caseIds } }).lean(),
-      Invoice.find({ caseId: { $in: caseIds }, status: 'Paid', retainerReceiptId: { $exists: false } })
-        .select('caseId amount updatedAt')
-        .lean(),
-    ]);
-
-    const instanceList = instances as any[];
-    const taskList = tasks as any[];
-    const invoiceList = paidInvoices as any[];
-
-    const templateIds = Array.from(
-      new Set(instanceList.map((instance) => String(instance?.templateId || '')).filter(Boolean))
-    );
-    const templates: any[] = templateIds.length
-      ? await WorkflowTemplate.find({ _id: { $in: templateIds } }).lean()
-      : [];
-    const templatesById = new Map<string, any>(
-      templates.map((template: any) => [String(template?._id || ''), template])
-    );
+    const instanceList: any[] = records.flatMap(record => record._dashboardInstances);
+    const taskList: any[] = records.flatMap(record => record._dashboardTasks);
+    const invoiceList: any[] = records.flatMap(record => record._dashboardInvoices);
+    const templatesById = new Map<string, any>(records.flatMap(record => record._dashboardTemplates).map((template: any) => [String(template._id), template]));
 
     const instancesByCase = new Map<string, any>(
       instanceList.map((instance: any) => [String(instance?.caseId || ''), instance])
@@ -470,7 +435,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     const collectedInPeriodByCase = new Map<string, number>();
     if (period) {
       for (const invoice of invoiceList) {
-        if (!isWithinReportRange(invoice?.updatedAt, period)) continue;
+        if (!isWithinReportRange(invoice?.paidAt || invoice?.updatedAt, period)) continue;
         const key = String(invoice?.caseId || '');
         if (!key) continue;
         collectedInPeriodByCase.set(
@@ -485,7 +450,7 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     // Resolve each assigned member's system role so the TPA column follows the
     // same role-based table as the Case Workspace Earned Fees table. The users
     // collection is loaded whole and keyed case/whitespace-insensitively.
-    const users: any[] = await User.find({}).select('name role tpaHistory').lean();
+
     const roleByName = buildRoleByName(users);
     if (meName && req.user?.role) roleByName.set(normalizeMemberName(meName), String(req.user.role));
 
@@ -900,6 +865,16 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       averageQualityScore: averageOf(qualityScores),
       feesEarnedTotal: hasScoredFee ? round2(feesEarnedTotal) : null,
       collectedBaseTotal: round2(collectedBaseTotal),
+      workByMatter: Object.fromEntries(matters.filter(matter => [matter.assignedTo, matter.caseAssignments?.initiator,
+        matter.caseAssignments?.reviewer, matter.caseAssignments?.signerApprover].some(matchesCurrentUser)).map(matter => {
+        const caseId = String(matter._id), instance = instancesByCase.get(caseId);
+        const template = instance ? templatesById.get(String(instance.templateId)) : null;
+        return [caseId, { caseId, caseNo: String(matter.caseNo || ''), parties: String(matter.parties || ''),
+          steps: normalizeEffectiveWorkflowSteps(instance, template).map((step: any) => ({
+            stepKey: String(step.stepKey), title: String(step.title || step.stepKey), status: String(step.status || 'Not Started'),
+            startAt: step.startAt, dueAt: step.dueAt,
+          })) }];
+      })),
       rows,
       period: periodSummary,
     });

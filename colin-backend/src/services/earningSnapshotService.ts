@@ -30,6 +30,10 @@ export async function captureActivityRates(doc: any, workflow: boolean) {
     values.push(...await Promise.all(reads.map(read => read())));
   }
   const [matter, users, stored, previous] = values;
+  if (workflow) {
+    const completedKeys = (record: any) => (record?.steps || []).filter((step: any) => step.status === 'Completed').map((step: any) => String(step.stepKey)).sort();
+    doc.$locals.completedStepKeysUnchanged = JSON.stringify(completedKeys(previous)) === JSON.stringify(completedKeys(doc));
+  }
   if (!matter) return;
   const roles = buildRoleByName(users);
   const steps = workflow ? doc.steps : [undefined];
@@ -55,6 +59,30 @@ export async function captureActivityRates(doc: any, workflow: boolean) {
 
 /** Reuse the report engine; no alternate collection, quality or timeliness formula. */
 export async function loadEarningRows(caseIds?: string[], session: ClientSession | null = null) {
+  // A workflow save snapshots one matter. Load its financial inputs in ONE
+  // transaction read; separate queries previously required six network trips.
+  if (caseIds?.length === 1 && mongoose.isValidObjectId(caseIds[0])) {
+    const records: any[] = await Case.aggregate([
+      { $match: { _id: new mongoose.Types.ObjectId(caseIds[0]) } },
+      { $lookup: { from: Workflow.collection.name, localField: '_id', foreignField: 'caseId', as: '_earningInstances' } },
+      { $lookup: { from: Template.collection.name, localField: 'workflowTemplateId', foreignField: '_id', as: '_earningTemplates' } },
+      { $lookup: { from: Task.collection.name, localField: '_id', foreignField: 'caseId', as: '_earningTasks' } },
+      { $lookup: { from: Invoice.collection.name, localField: '_id', foreignField: 'caseId',
+        pipeline: [{ $match: { status: 'Paid', retainerReceiptId: { $exists: false } } }, { $project: { amount: 1, invoiceNo: 1, paidAt: 1, updatedAt: 1 } }], as: '_earningInvoices' } },
+      { $lookup: { from: User.collection.name, pipeline: [{ $project: { name: 1, role: 1, tpaHistory: 1 } }], as: '_earningUsers' } },
+    ]).session(session);
+    const record = records[0];
+    if (!record) return [];
+    const { _earningInstances: instances, _earningTemplates: templates, _earningTasks: tasks,
+      _earningInvoices: invoices, _earningUsers: users, ...matter } = record;
+    const caseId = String(matter._id);
+    return buildStaffEarningsRows({ matters: [matter], users,
+      templatesById: new Map(templates.map((t: any) => [String(t._id), t])),
+      instancesByCaseId: new Map(instances.map((i: any) => [String(i.caseId), i])),
+      tasksByCaseId: new Map([[caseId, tasks]]),
+      paidInvoicesByCaseId: new Map([[caseId, invoices.map((invoice: any) => ({ invoiceNo: invoice.invoiceNo, amount: invoice.amount, paidAt: invoice.paidAt || invoice.updatedAt }))]]),
+      from: new Date(0), to: new Date('9999-12-31T23:59:59Z'), timeZone: 'Africa/Kigali' });
+  }
   const matters: any[] = await Case.find(caseIds ? { _id: { $in: caseIds } } : {}).session(session).lean();
   const ids = matters.map(m => m._id);
   const instances = await Workflow.find({ caseId: { $in: ids } }).session(session).lean();

@@ -1,3 +1,5 @@
+import type { DashboardWorkMatter } from '../../services/dashboardService';
+import { getDashboardSection } from '../../services/dashboardBootstrap';
 import ContributionBadge from '../ui/ContributionBadge';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -18,21 +20,20 @@ import {
 import { UserRole } from '../../App';
 import usePageTitle from '../../hooks/usePageTitle';
 import { caseMatchesAssigneeCanonical } from '../../utils/caseAssignments';
-import { getAllCases, CaseData } from '../../services/caseService';
+import type { CaseData } from '../../services/caseService';
 import {
   getStaffDashboardSummary,
   StaffDashboardPeriodRange,
   StaffDashboardSummaryResponse,
   StaffDashboardMatterRow,
 } from '../../services/dashboardService';
-import { getFirmEvents, FirmCalendarEvent } from '../../services/eventService';
-import { getMyPerformance, PerformanceSummary } from '../../services/performanceService';
-import { getAllProspects, Prospect } from '../../services/prospectService';
-import { listIndependentTasks, IndependentTask } from '../../services/independentTaskService';
-import { getCaseManagement, CaseManagementState } from '../../services/caseManagementService';
+import type { FirmCalendarEvent } from '../../services/eventService';
+import type { PerformanceSummary } from '../../services/performanceService';
+import type { Prospect } from '../../services/prospectService';
+import type { IndependentTask } from '../../services/independentTaskService';
 import { getStageDueAt, getStageUrgencyColor } from '../../utils/prospectStageConfig';
 import { identityMatches } from '../../utils/caseAssignments';
-import { getAllTasks, TaskData } from '../../services/taskService';
+import type { TaskData } from '../../services/taskService';
 import { getMyAuditTrail, AuditFeedItem } from '../../services/auditService';
 import { buildCaseManagementLink } from '../../utils/caseWorkspaceLinks';
 import {
@@ -505,11 +506,11 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   /**
    * Per-matter Case Management state (Key Actions = sub-tasks).
    *
-   * Fetched for the member's authorised matters only, after the matters load.
+   * Included in the summary for the member's current assigned matters.
    * Each matter is the PARENT task; its open Key Actions are the counted
    * sub-tasks, coloured by the same platform urgency as every other surface.
    */
-  const [caseManagementByMatter, setCaseManagementByMatter] = useState<Record<string, CaseManagementState>>({});
+  const [caseManagementByMatter, setCaseManagementByMatter] = useState<Record<string, DashboardWorkMatter>>({});
   // Activity trail is server-paginated: `auditItems` is the current page, and
   // `auditTotal`/`auditPages` come from the backend so a long period is never
   // silently truncated or presented as complete.
@@ -553,52 +554,30 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const next30Days = useMemo(() => addDaysISO(today, 30), [today]);
   const meName = useMemo(() => baseNameFromLabel(me?.name), [me?.name]);
 
+  const initialSummaryEligible = useRef(true);
+  const initialAuditEligible = useRef(true);
   useEffect(() => {
-    let mounted = true;
-
-    (async () => {
-      try {
-        setLoading(true);
-        setError('');
-
-        const [taskResult, caseResult, eventResult, performanceResult, summaryResult, prospectResult, independentResult, auditResult] = await Promise.allSettled([
-          getAllTasks(),
-          getAllCases(),
-          getFirmEvents({ from: today, to: next30Days, type: 'all' }),
-          getMyPerformance(),
-          getStaffDashboardSummary(),
-          getAllProspects({ includeTerminal: true }),
-          listIndependentTasks({ limit: 200 }),
-          getMyAuditTrail({ limit: AUDIT_PAGE_SIZE, page: 1 }),
-        ]);
-
-        if (!mounted) return;
-        if (taskResult.status === 'fulfilled') setTasks(taskResult.value);
-        if (caseResult.status === 'fulfilled') setCases(caseResult.value);
-        if (eventResult.status === 'fulfilled') setEvents(eventResult.value);
-        if (performanceResult.status === 'fulfilled') setPerformance(performanceResult.value);
-        if (summaryResult.status === 'fulfilled') setStaffSummary(summaryResult.value);
-        if (prospectResult.status === 'fulfilled') setProspects(prospectResult.value);
-        if (independentResult.status === 'fulfilled') setIndependentTasks(independentResult.value?.items || []);
-        if (auditResult.status === 'fulfilled') {
-          const page = auditResult.value;
-          setAuditItems(page.items || []);
-          setAuditTotal(page.total || 0);
-          setAuditPages(page.pages || 1);
-          setAuditPage(page.page || 1);
-        }
-      } catch (e: any) {
-        if (!mounted) return;
-        setError(e?.message || 'Failed to load dashboard.');
-      } finally {
-        if (!mounted) return;
-        setLoading(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
+    let mounted = true, corePending = 2;
+    setLoading(true); setSummaryLoading(true); setError('');
+    const load = (section: Parameters<typeof getDashboardSection>[0], apply: (value: any) => void, core = false) => {
+      void getDashboardSection(section).then(value => { if (mounted) apply(value); })
+        .catch((error: any) => { if (mounted && section === 'summary' && initialSummaryEligible.current) setError(error?.message || 'Unable to load dashboard summary.'); })
+        .finally(() => {
+          if (!mounted) return;
+          if (core && --corePending === 0) setLoading(false);
+          if (section === 'summary' && initialSummaryEligible.current) setSummaryLoading(false);
+        });
     };
+    load('tasks', setTasks, true); load('cases', setCases, true);
+    load('events', setEvents); load('performance', setPerformance);
+    load('summary', value => { if (initialSummaryEligible.current) { setStaffSummary(value); setCaseManagementByMatter(value.workByMatter || {}); } });
+    load('prospects', setProspects); load('independent', value => setIndependentTasks(value?.items || []));
+    load('audit', value => {
+      if (!initialAuditEligible.current) return;
+      setAuditItems(value.items || []); setAuditTotal(value.total || 0);
+      setAuditPages(value.pages || 1); setAuditPage(value.page || 1);
+    });
+    return () => { mounted = false; };
   }, [next30Days, today]);
 
   // Resolve the currently-APPLIED period into request parameters.
@@ -622,11 +601,12 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   // older request overwriting a newer period's figures; `scope` records which
   // period the response belongs to as a second line of defence.
   const fetchSummaryForPeriod = async (signal?: { cancelled: boolean }) => {
+    initialSummaryEligible.current = false;
     try {
       setSummaryLoading(true);
       setError('');
       const summary = await getStaffDashboardSummary(periodRequest.params);
-      if (!signal?.cancelled) setStaffSummary(summary);
+      if (!signal?.cancelled) { setStaffSummary(summary); setCaseManagementByMatter(summary.workByMatter || {}); }
     } catch (e: any) {
       if (!signal?.cancelled) setError(e?.message || 'Failed to update the dashboard for the selected period.');
     } finally {
@@ -638,6 +618,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   // it always shows the actions performed inside the window being reviewed. It
   // is fetched server-paginated and resets to page 1 for a new period.
   const fetchAuditForPeriod = async (signal?: { cancelled: boolean }, pageOverride?: number) => {
+    initialAuditEligible.current = false;
     try {
       setAuditLoading(true);
       setAuditError('');
@@ -817,50 +798,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
     };
   };
 
-  /**
-   * Per-matter Key Actions (sub-tasks) for the unified My Work list.
-   *
-   * One batched fetch per authorised matter runs after the matters load — not
-   * inside any render loop — and failures resolve to an empty map so the cards
-   * still render from the other sources (legacy tasks, independent tasks,
-   * prospects, calendar).
-   */
-  const authorisedCaseKey = useMemo(
-    () => authorisedCases.map((matter) => String(matter._id || '')).filter(Boolean).sort().join('|'),
-    [authorisedCases],
-  );
-  useEffect(() => {
-    let mounted = true;
-    const ids = authorisedCaseKey ? authorisedCaseKey.split('|') : [];
-    if (!ids.length) {
-      setCaseManagementByMatter({});
-      return () => {
-        mounted = false;
-      };
-    }
-    (async () => {
-      const entries = await Promise.all(
-        ids.slice(0, 60).map(async (id) => {
-          try {
-            const state = await getCaseManagement(id);
-            return [id, state] as const;
-          } catch {
-            return null;
-          }
-        })
-      );
-      if (!mounted) return;
-      const next: Record<string, CaseManagementState> = {};
-      entries.forEach((entry) => {
-        if (entry) next[entry[0]] = entry[1];
-      });
-      setCaseManagementByMatter(next);
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [authorisedCaseKey]);
-
+  // Key Actions arrive with the summary; no per-matter request fan-out.
   const tasksByCase = useMemo(() => {
     const map = new Map<string, TaskData[]>();
     ownTasks.forEach((task) => {
@@ -1604,7 +1542,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         {headlineStats.map((stat) => (
-          <StatCardView key={stat.label} stat={stat} loading={loading || summaryLoading} />
+          <StatCardView key={stat.label} stat={stat} loading={summaryLoading} />
         ))}
       </div>
 

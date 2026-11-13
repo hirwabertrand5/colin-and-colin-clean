@@ -1,4 +1,4 @@
-﻿import { Response } from 'express';
+import { Response } from 'express';
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/authMiddleware';
 import WorkflowTemplate from '../models/workflowTemplateModel';
@@ -649,15 +649,19 @@ export const updateCaseWorkflowProgress = async (c: any, inst: any, session?: mo
 };
 
 /** Save both records and await one final earnings snapshot via the Case hook. */
-const saveWorkflowWithCaseProgress = async (c: any, inst: any) => {
+const saveWorkflowWithCaseProgress = async (c: any, inst: any, activityUnchanged = false) => {
   const previous = inst.$locals.caseProgressSavePending;
+  const priorActivityFlag = inst.$locals.activityRatesUnchanged;
   inst.$locals.caseProgressSavePending = true;
+  inst.$locals.activityRatesUnchanged = activityUnchanged;
   try {
     await inst.save();
     await updateCaseWorkflowProgress(c, inst);
   } finally {
     if (previous === undefined) delete inst.$locals.caseProgressSavePending;
     else inst.$locals.caseProgressSavePending = previous;
+    if (priorActivityFlag === undefined) delete inst.$locals.activityRatesUnchanged;
+    else inst.$locals.activityRatesUnchanged = priorActivityFlag;
   }
 };
 
@@ -1457,14 +1461,14 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     const { extendDays, newDueAt, reason, mode } = req.body || {};
     const amendmentMode = mode === 'fixed' ? 'fixed' : 'standard';
 
-    const c: any = await Case.findById(caseId);
+    const [c, inst]: any[] = await Promise.all([Case.findById(caseId), WorkflowInstance.findOne({ caseId })]);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
 
     if (!canManageWorkflowStepsOfCase(req, c)) {
       return res.status(403).json({ message: 'Only the members assigned to this matter can amend its deadlines.' });
     }
 
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
 
     const step = (inst.steps || []).find((s: any) => s.stepKey === stepKey);
@@ -1525,8 +1529,8 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
+    inst.$locals.completedStepKeysUnchanged = true;
+    await saveWorkflowWithCaseProgress(c, inst, true);
 
     const actor = actorFromReq(req);
     await writeAudit({
@@ -1539,7 +1543,7 @@ export const extendStepDeadline = async (req: AuthRequest, res: Response) => {
     });
     await notifyMatterParticipants(c, { type: 'DEADLINE_CHANGED', title: `Legal deadline amended: ${step.title}`,
       message: `${step.title}\nPrevious: ${formatNotificationTime(oldDue)}\nNew deadline: ${formatNotificationTime(newDue)}${reason ? `\nReason: ${String(reason).trim()}` : ''}`,
-      severity: 'critical', link: `/cases/${c._id}`, dedupeKey: `LEGAL_DEADLINE:${inst._id}:${stepKey}:${inst.updatedAt.toISOString()}` });
+      severity: 'critical', link: `/cases/${c._id}`, dedupeKey: `LEGAL_DEADLINE:${inst._id}:${stepKey}:${inst.updatedAt.toISOString()}` }, [], { deferEmailQueue: true });
 
     res.json(inst);
   } catch (e: any) {
@@ -1789,14 +1793,14 @@ export const addStep = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'A Key Action percentage above 0% is required.' });
     }
 
-    const c: any = await Case.findById(caseId);
+    const [c, inst]: any[] = await Promise.all([Case.findById(caseId), WorkflowInstance.findOne({ caseId })]);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
 
     if (!canManageWorkflowStepsOfCase(req, c)) {
       return res.status(403).json({ message: 'Only the members assigned to this matter can add its Key Actions.' });
     }
 
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
     if (isClosedCaseWorkflow(c, inst)) {
       return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
@@ -1830,8 +1834,8 @@ export const addStep = async (req: AuthRequest, res: Response) => {
       outputs: [],
     });
 
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
+    inst.$locals.completedStepKeysUnchanged = true;
+    await saveWorkflowWithCaseProgress(c, inst, true);
 
     const actor = actorFromReq(req);
     await writeAudit({
@@ -1912,14 +1916,14 @@ export const updateStep = async (req: AuthRequest, res: Response) => {
     const { caseId, stepKey } = req.params as any;
     const { title, stageKey, position, percentage } = req.body || {};
 
-    const c: any = await Case.findById(caseId);
+    const [c, inst]: any[] = await Promise.all([Case.findById(caseId), WorkflowInstance.findOne({ caseId })]);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
 
     if (!canManageWorkflowStepsOfCase(req, c)) {
       return res.status(403).json({ message: 'Only the members assigned to this matter can edit its Key Actions.' });
     }
 
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
     if (isClosedCaseWorkflow(c, inst)) {
       return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
@@ -1984,8 +1988,8 @@ export const updateStep = async (req: AuthRequest, res: Response) => {
       step.customOrder = step.order;
     }
 
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
+    inst.$locals.completedStepKeysUnchanged = true;
+    await saveWorkflowWithCaseProgress(c, inst, true);
 
     const actor = actorFromReq(req);
     await writeAudit({
@@ -2012,14 +2016,14 @@ export const deleteStep = async (req: AuthRequest, res: Response) => {
   try {
     const { caseId, stepKey } = req.params as any;
 
-    const c: any = await Case.findById(caseId);
+    const [c, inst]: any[] = await Promise.all([Case.findById(caseId), WorkflowInstance.findOne({ caseId })]);
     if (!c) return res.status(404).json({ message: 'Case not found.' });
 
     if (!canManageWorkflowStepsOfCase(req, c)) {
       return res.status(403).json({ message: 'Only the members assigned to this matter can delete its Key Actions.' });
     }
 
-    const inst: any = await WorkflowInstance.findOne({ caseId: c._id });
+
     if (!inst) return res.status(404).json({ message: 'Workflow instance not found.' });
     if (isClosedCaseWorkflow(c, inst)) {
       return res.status(400).json({ message: 'Reopen the workflow step before changing a completed matter.' });
@@ -2048,8 +2052,7 @@ export const deleteStep = async (req: AuthRequest, res: Response) => {
       if (nextOpen && nextOpen.status === 'Not Started') nextOpen.status = 'In Progress';
     }
 
-    await inst.save();
-    await updateCaseWorkflowProgress(c, inst);
+    await saveWorkflowWithCaseProgress(c, inst, true);
 
     const actor = actorFromReq(req);
     await writeAudit({

@@ -423,7 +423,7 @@ const WorkflowInstanceSchema = new Schema<IWorkflowInstance>(
 );
 
 WorkflowInstanceSchema.pre('save', async function () {
-  if (this.isNew || this.isModified('steps')) await (await import('../services/earningSnapshotService')).captureActivityRates(this, true);
+  if (!this.$locals.activityRatesUnchanged && (this.isNew || this.isModified('steps'))) await (await import('../services/earningSnapshotService')).captureActivityRates(this, true);
 });
 WorkflowInstanceSchema.post('save', async function (instance) {
   // Controllers that immediately save case progress take the snapshot in the
@@ -435,6 +435,9 @@ WorkflowInstanceSchema.post('save', async function (instance) {
 // Independent Tasks are views onto these Key Actions. Keep completed handoffs
 // synchronized when an authorized reviewer/approver acts in either workspace.
 WorkflowInstanceSchema.post('save', async function (instance) {
+  const unchanged = instance.$locals.completedStepKeysUnchanged;
+  delete instance.$locals.completedStepKeysUnchanged;
+  if (unchanged) return;
   const TaskModel = mongoose.models.IndependentTask;
   if (!TaskModel) return;
   const completedKeys = instance.steps

@@ -12,9 +12,10 @@ import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
-import { computeRange, normalizeReportBasis } from '../utils/reportRange';
+import { computeRange, normalizeReportBasis, resolveOptionalReportRange, isWithinReportRange } from '../utils/reportRange';
 import { computeEarnedFee, buildRoleByName, resolveMemberTpa, baseMemberName } from '../utils/workflowPercentages';
 import { caseMatchesAssigneeCanonical } from '../utils/caseAssignments';
+import { paidInvoiceRangeQuery } from '../utils/invoicePaymentDate';
 import {
   allocateCollectedValueAcrossKeyActions,
   calculateCollectedKeyActionEarnings,
@@ -317,7 +318,10 @@ const buildCollectedKeyActionRows = ({
         rows.push({
           id: `${caseId}:${item.action.key}:${member.key}`,
           caseId,
-          caseCompleted: isWholeCaseCompleted(instance),
+          caseCompleted: isWholeCaseCompleted(instance) && inSelectedWindow(
+            effectiveSteps.map((step: any) => parseTaskDate(step.completedAt || step.reviewedAt || step.doneAt))
+              .filter((date: Date | null): date is Date => Boolean(date))
+              .sort((a: Date, b: Date) => b.getTime() - a.getTime())[0]),
           completedAt: item.completedAt ? item.completedAt.toISOString() : null,
           staff: member.name,
           assignmentRole: member.role,
@@ -376,23 +380,25 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const { range, from, to, basis, teamMemberId } = req.query as any;
     const dateBasis = normalizeBasis(basis);
 
-    let fromDate: Date;
-    let toDate: Date;
-
-    if (from && to) {
-      fromDate = new Date(String(from));
-      toDate = new Date(String(to));
-      if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
-        return res.status(400).json({ message: 'Invalid from/to date.' });
-      }
-      fromDate.setHours(0, 0, 0, 0);
-      toDate.setHours(23, 59, 59, 999);
-    } else {
-      ({ from: fromDate, to: toDate } = computeRange(range));
-    }
-
-    const fromISO = iso(fromDate);
-    const toISO = iso(toDate);
+    const period = resolveOptionalReportRange({ range: range || (from || to ? 'custom' : 'monthly'), from, to });
+    if (period && 'error' in period) return res.status(400).json({ message: period.error });
+    const { from: fromDate, to: toDate } = period || computeRange('all');
+    const fromISO = period?.fromISO || '0001-01-01';
+    const toISO = period?.toISO || '9999-12-31';
+    // Profitability counts entries in the window. Other management reports
+    // retain their current open-workload view.
+    const profitabilityScope = req.query.scope === 'profitability';
+    // Staff profitability needs seven small read sets, with no financial or
+    // client-report pipeline. Run every independent read in the same round trip.
+    const staffInputs: any[] | null = profitabilityScope ? await Promise.all([
+      Case.find().select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties clientName budget createdAt updatedAt workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel retainerCoveredActionKeys').lean(),
+      Task.find().select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages tpaSnapshots').lean(),
+      User.find({ isActive: { $ne: false }, ...(period ? { createdAt: { $lt: period.toExclusive } } : {}) }).select('name role tpaHistory').lean(),
+      WorkflowTemplate.find().select('_id matterType stages steps').lean(),
+      WorkflowInstance.find().select('caseId templateId status steps').lean(),
+      Invoice.aggregate([{ $match: { status: 'Paid', ...ordinaryInvoiceFilter } }, { $group: { _id: '$caseId', total: { $sum: '$amount' } } }]),
+      retainerEarningsRows(fromDate, toDate),
+    ]) : null;
 
     const selectedMember = teamMemberId
       ? await User.findById(teamMemberId).select('name role tpaHistory').lean()
@@ -406,28 +412,28 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     let activeCases = 0;
 
     const invoicesByInvoiceDateQuery = { date: { $gte: fromISO, $lte: toISO }, ...ordinaryInvoiceFilter };
-    const invoicesByPaymentDateQuery = { status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate }, ...ordinaryInvoiceFilter };
+    const invoicesByPaymentDateQuery = { ...paidInvoiceRangeQuery(fromDate, toDate), ...ordinaryInvoiceFilter };
     const tasksByDateQuery = { status: 'Completed', completedAt: { $gte: fromDate, $lte: toDate } };
 
     const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, allTaskLinks, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
-      Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
-      Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
-      Task.find(tasksByDateQuery).select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore tpaSnapshots').lean(),
-      Task.find()
+      staffInputs ? [] : Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
+      staffInputs ? [] : Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
+      staffInputs ? staffInputs[1].filter((task: any) => task.status === 'Completed' && isWithinReportRange(task.completedAt, period)) : Task.find(tasksByDateQuery).select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore tpaSnapshots').lean(),
+      staffInputs ? staffInputs[1] : Task.find()
         .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages tpaSnapshots')
         .lean(),
-      User.find({ isActive: { $ne: false } }).select('name role tpaHistory').lean(),
-      Prospect.aggregate([
+      staffInputs ? staffInputs[2] : User.find({ isActive: { $ne: false } }).select('name role tpaHistory').lean(),
+      staffInputs ? [] : Prospect.aggregate([
         { $match: { createdAt: { $gte: fromDate, $lte: toDate }, createdBy: { $exists: true } } },
         { $group: { _id: '$createdBy', count: { $sum: 1 } } },
       ]),
-      ClientReport.aggregate([
+      staffInputs ? [] : ClientReport.aggregate([
         { $match: { createdAt: { $gte: fromDate, $lte: toDate }, generatedByUserId: { $exists: true } } },
         { $group: { _id: '$generatedByUserId', count: { $sum: 1 } } },
       ]),
     ]);
 
-    const allCases = await Case.find()
+    const allCases: any[] = staffInputs ? staffInputs[0] : await Case.find()
       .select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties clientName budget createdAt updatedAt workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel retainerCoveredActionKeys')
       .lean();
     const invoicedCaseIds = new Set([...invoicesByInvoiceDate, ...invoicesByPaymentDate].map((invoice: any) => String(invoice.caseId || '')));
@@ -436,10 +442,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const workflowTemplateIds = Array.from(new Set((allCases as any[])
       .map((c) => String(c.workflowTemplateId || '').trim())
       .filter(Boolean)));
-    const workflowTemplates = workflowTemplateIds.length
+    const workflowTemplates: any[] = staffInputs ? staffInputs[3] : workflowTemplateIds.length
       ? ((await WorkflowTemplate.find({ _id: { $in: workflowTemplateIds } }).select('_id matterType stages steps').lean()) as any[])
       : [];
-    const workflowTemplateMatterTypeById = new Map(
+    const workflowTemplateMatterTypeById = new Map<string, string>(
       workflowTemplates.map((template) => [String(template._id), String(template.matterType || '').trim()])
     );
 
@@ -481,7 +487,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const totalContractValue = selectedMatters.reduce((sum: number, matter: any) => sum + getContractValue(matter), 0);
     const progressValue = selectedMatters.reduce((sum: number, matter: any) => sum + getCollectedValueFromProgress(matter), 0);
-    const retainer = await retainerFinancials(fromISO, toISO);
+    const retainer = profitabilityScope ? { statements: [], collected: 0, billed: 0, outstanding: 0, staffTpa: 0, workValue: 0, unutilisedRevenue: 0 } : await retainerFinancials(fromISO, toISO);
     const retainerCash = selectedMemberName ? 0 : retainer.collected;
     const totalCollected = invoicesByPaymentDate.reduce((sum: number, inv: any) => {
       const caseId = String(inv.caseId || '');
@@ -489,7 +495,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       return sum + (Number(inv.amount) || 0);
     }, 0) + retainerCash;
     const totalBilled = selectedInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0) + (selectedMemberName ? 0 : retainer.billed);
-    const [pendingInvoices, directExpenses, operatingExpenses, ageingInvoices] = await Promise.all([
+    const [pendingInvoices, directExpenses, operatingExpenses, ageingInvoices] = profitabilityScope ? [[], [], [], []] : await Promise.all([
       Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toISO }, ...ordinaryInvoiceFilter,
         ...(selectedMemberName ? { caseId: { $in: Array.from(selectedMatterIds) } } : {}) }).select('amount').lean(),
       PettyCashExpense.find({ date: { $gte: fromISO, $lte: toISO }, chargeType: 'client', caseId: { $in: Array.from(selectedMatterIds) } })
@@ -551,6 +557,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const activeCaseIdsByShortKey = new Map<string, Set<string>>();
     const allOpenCaseIds = new Set<string>();
     for (const c of allCases as any[]) {
+      if (profitabilityScope && !isWithinReportRange(c.createdAt, period)) continue;
       if (!isOpenCase(c)) continue;
       allOpenCaseIds.add(String(c._id));
       const assignments = c.caseAssignments || {};
@@ -567,6 +574,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const caseId = String(task.caseId || '');
       const caseDoc = caseById.get(caseId);
       if (!caseId || !caseDoc || !isOpenCase(caseDoc)) continue;
+      if (profitabilityScope && !isWithinReportRange(caseDoc.createdAt, period)) continue;
       const linkedNames = [task.assignee, task.supervisor].map(normalizeName).filter(Boolean);
       if (!linkedNames.length) continue;
       for (const name of linkedNames) {
@@ -606,7 +614,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     for (const matter of selectedMatters as any[]) {
       historicalCollectedByCaseId.set(String(matter._id), 0);
     }
-    const historicalPaidTotals = await Invoice.aggregate([
+    const historicalPaidTotals = staffInputs ? staffInputs[5] : await Invoice.aggregate([
       { $match: { status: 'Paid', ...ordinaryInvoiceFilter, caseId: { $in: selectedMatters.map((matter: any) => matter._id) } } },
       { $group: { _id: '$caseId', total: { $sum: '$amount' } } },
     ]);
@@ -614,7 +622,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       historicalCollectedByCaseId.set(String(row._id), Number(row.total) || 0);
     }
     const selectedMatterIdsForEarnings = selectedMatters.map((matter: any) => matter._id);
-    const workflowInstances = selectedMatterIdsForEarnings.length
+    const workflowInstances = staffInputs ? staffInputs[4] : selectedMatterIdsForEarnings.length
       ? await WorkflowInstance.find({ caseId: { $in: selectedMatterIdsForEarnings } })
         .select('caseId templateId steps')
         .lean()
@@ -628,8 +636,13 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       if (!caseId) continue;
       tasksByCaseId.set(caseId, [...(tasksByCaseId.get(caseId) || []), task]);
     }
+    const earningsMatters = profitabilityScope && period ? selectedMatters.filter((matter: any) => {
+      const caseId = String(matter._id);
+      return (instancesByCaseId.get(caseId)?.steps || []).some((step: any) => isWithinReportRange(step.completedAt, period))
+        || (tasksByCaseId.get(caseId) || []).some((task: any) => isWithinReportRange(task.completedAt || task.updatedAt, period));
+    }) : selectedMatters;
     const productivityRows = buildCollectedKeyActionRows({
-      matters: selectedMatters,
+      matters: earningsMatters,
       templatesById: workflowTemplateById,
       instancesByCaseId,
       tasksByCaseId,
@@ -640,7 +653,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       toDate,
       selectedMemberName,
     });
-    productivityRows.push(...(await retainerEarningsRows(fromDate, toDate, { staffKey: selectedMemberName ? baseMemberName(selectedMemberName) : null })).map(toProductivityRow));
+    productivityRows.push(...(staffInputs ? staffInputs[6].filter((row: any) => !selectedMemberName || row.staffKey === baseMemberName(selectedMemberName)) : await retainerEarningsRows(fromDate, toDate, { staffKey: selectedMemberName ? baseMemberName(selectedMemberName) : null })).map(toProductivityRow));
     const earnedByName = new Map<string, number>();
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
@@ -697,10 +710,11 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     // attributed to its primary assignee (Task = whole case).
     const overdueMattersByName = new Map<string, number>();
     for (const c of allCases as any[]) {
+      if (profitabilityScope && !isWithinReportRange(c.createdAt, period)) continue;
       if (!isOpenCase(c)) continue;
       const wp = c.workflowProgress || {};
       const due = resolveDeadlineDateTime(wp.currentStepDueAt || wp.nextDueAt);
-      if (!due || due.getTime() > Date.now()) continue;
+      if (!due || due.getTime() > (profitabilityScope ? Math.min(toDate.getTime(), Date.now()) : Date.now())) continue;
       const assignments = c.caseAssignments || {};
       const primary = String(c.assignedTo || assignments.initiator || '').trim();
       const name = baseNameFromLabel(primary);
@@ -762,6 +776,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       })
       .filter((member) => !selectedMemberNameNormalized || baseNameFromLabel(member.name) === selectedMemberNameNormalized)
       .sort((a, b) => b.activeCases - a.activeCases);
+
+    if (profitabilityScope) return res.json({
+      range: { from: fromISO, to: toISO }, dateBasis, team,
+    });
 
     const caseAnalyticsByPath = new Map<string, { type: string; active: number; closed: number; durationTotal: number; durationCount: number }>();
     const casesForAnalytics = allCases;

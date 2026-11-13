@@ -1,5 +1,6 @@
 import ContributionBadge from '../ui/ContributionBadge';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { OptimisticMutationQueue } from '../../utils/optimisticMutationQueue';
 import { CalendarPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
 import {
   getWorkflowForCase,
@@ -54,8 +55,10 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [busyKey, setBusyKey] = useState<string>('');
+  const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
   const [template, setTemplate] = useState<WorkflowTemplate | null>(null);
   const [earned, setEarned] = useState<CaseEarnedFees | null>(null);
+  const earnedRequest = useRef(0);
 
   const canAmendDeadlines = canCompleteSteps;
   const [amendOpenFor, setAmendOpenFor] = useState<string>('');
@@ -78,12 +81,19 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   const [editPosition, setEditPosition] = useState<string>('');
   const [editPercentage, setEditPercentage] = useState<string>('');
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string>('');
+  const mutationQueue = useRef<OptimisticMutationQueue<WorkflowInstance> | null>(null);
+  if (!mutationQueue.current) mutationQueue.current = new OptimisticMutationQueue({
+    change: (workflow, keys) => { setWf(workflow); setBusyKey(keys[0] || ''); setPendingKeys(new Set(keys)); },
+    settled: workflow => { notifyWorkflowChanged(workflow); },
+    failed: message => setErr(message),
+  });
 
   const load = async () => {
     setLoading(true);
     setErr('');
     try {
       const data = await getWorkflowForCase(caseId);
+      if (data) mutationQueue.current?.reset(data);
       setWf(data);
       void refreshEarned();
       if (data?.templateId) {
@@ -106,9 +116,10 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   };
 
   const refreshEarned = async () => {
+    const request = ++earnedRequest.current;
     try {
       const data = await getCaseEarnedFees(caseId);
-      setEarned(data);
+      if (request === earnedRequest.current) setEarned(data);
     } catch {
       // Earned-fee projection is best-effort; never block the workflow tab on it.
     }
@@ -142,108 +153,74 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
   useEffect(() => {
     load();
+    return () => mutationQueue.current?.dispose();
     // eslint-disable-next-line
   }, [caseId]);
 
-  const onCompleteStep = async (stepKey: string) => {
-    if (!canCompleteSteps || busyKey) return;
-    const snapshot = wf;
-    // Optimistic: the tick must feel instant, so the card flips immediately.
-    // Optimistically mirror the server's new state: a tick records 'Done'
-    // (work finished), NOT 'Completed' (which only an approval may write).
+  const onCompleteStep = (stepKey: string) => {
+    if (!canCompleteSteps || !wf || (busyKey && !busyKey.startsWith('complete:'))) return;
     setErr('');
-    setBusyKey(`complete:${stepKey}`);
-    setWf((current) =>
-      current
-        ? {
-            ...current,
-            steps: current.steps.map((step) =>
-              step.stepKey === stepKey
-                ? { ...step, status: 'Done', doneAt: step.doneAt || new Date().toISOString(), completedAt: undefined }
-                : step
-            ),
-          }
-        : current
-    );
-    try {
-      const updated = await completeWorkflowStep(caseId, stepKey);
-      setWf(updated);
-      notifyWorkflowChanged(updated);
-      // Stay on this checklist so staff can tick the rest of the Key Actions
-      // without being sent away to Case Management after every action.
-    } catch (e: any) {
-      setWf(snapshot); // revert the optimistic tick if the server refused
-      setErr(e.message || 'Failed to complete step');
-    } finally {
-      setBusyKey('');
-    }
+    const doneAt = new Date().toISOString();
+    mutationQueue.current?.enqueue({
+      key: `complete:${stepKey}`,
+      apply: current => ({ ...current, steps: current.steps.map(step => step.stepKey === stepKey
+        ? { ...step, status: 'Done', doneAt: step.doneAt || doneAt, completedAt: undefined } : step) }),
+      save: () => completeWorkflowStep(caseId, stepKey),
+    });
   };
 
-  const onReopenStep = async (stepKey: string) => {
-    if (!canCompleteSteps || busyKey) return;
-    const snapshot = wf;
-    setWf(current => current ? { ...current, status: 'Active', currentStepKey: stepKey,
-      steps: current.steps.map(step => step.stepKey === stepKey
-        ? { ...step, status: 'In Progress', doneAt: undefined, completedAt: undefined, submittedAt: undefined, reviewedAt: undefined }
-        : step) } : current);
-    try {
-      setBusyKey(`complete:${stepKey}`);
-      setErr('');
-      const updated = await reopenWorkflowStep(caseId, stepKey);
-      setWf(updated);
-      notifyWorkflowChanged(updated);
-    } catch (e: any) {
-      setWf(snapshot);
-      setErr(e.message || 'Failed to reopen step');
-    } finally {
-      setBusyKey('');
-    }
+  const onReopenStep = (stepKey: string) => {
+    if (!canCompleteSteps || !wf || busyKey) return;
+    setErr('');
+    mutationQueue.current?.enqueue({
+      key: `complete:${stepKey}`,
+      apply: current => ({ ...current, status: 'Active', currentStepKey: stepKey,
+        steps: current.steps.map(step => step.stepKey === stepKey
+          ? { ...step, status: 'In Progress', doneAt: undefined, completedAt: undefined, submittedAt: undefined, reviewedAt: undefined } : step) }),
+      save: () => reopenWorkflowStep(caseId, stepKey),
+    });
   };
 
-  const onAmendDeadline = async (stepKey: string) => {
-    if (!canAmendDeadlines) return;
-    const step = wf?.steps?.find((x) => x.stepKey === stepKey);
-    if (!step) {
-      setErr('Step not found');
-      return;
-    }
-    if (!step.dueAt) {
-      setErr('Step has no current due date to amend.');
-      return;
-    }
-    if (!amendDate) {
-      setErr('Please choose a new due date and time.');
-      return;
-    }
-    try {
-      const selected = new Date(amendDate);
-      if (!Number.isFinite(selected.getTime())) {
-        setErr('Please choose a valid date and time.');
-        return;
-      }
-
-      setBusyKey(`amend:${stepKey}`);
-      setErr('');
-      const updated = await amendWorkflowStepDeadline(caseId, stepKey, selected.toISOString(), amendReason, amendMode);
-      setWf(updated);
-      notifyWorkflowChanged(updated);
-      setAmendOpenFor('');
-      setAmendDate('');
-      setAmendReason('');
-      setAmendMode('standard');
-    } catch (e: any) {
-      setErr(e.message || 'Failed to amend deadline');
-    } finally {
-      setBusyKey('');
-    }
+  const onAmendDeadline = (stepKey: string) => {
+    if (!canAmendDeadlines || !wf || busyKey) return;
+    const step = wf.steps.find(item => item.stepKey === stepKey);
+    const selected = new Date(amendDate);
+    if (!step?.dueAt || !amendDate || !Number.isFinite(selected.getTime())) { setErr('Please choose a valid deadline.'); return; }
+    const newDueAt = selected.toISOString(), reason = amendReason, mode = amendMode;
+    const selectedDate = amendDate;
+    setErr(''); setAmendOpenFor(''); setAmendDate(''); setAmendReason(''); setAmendMode('standard');
+    mutationQueue.current?.enqueue({
+      key: `amend:${stepKey}`,
+      apply: current => {
+        const ordered = orderWorkflowSteps(current.steps, template);
+        const index = ordered.findIndex(item => item.stepKey === stepKey);
+        const target = ordered[index];
+        if (!target?.dueAt) return current;
+        const delta = Date.parse(newDueAt) - Date.parse(target.dueAt);
+        const downstream = new Set(ordered.slice(index + 1).map(item => item.stepKey));
+        return { ...current, steps: current.steps.map(item => {
+          if (item.stepKey === stepKey) return { ...item, dueAt: newDueAt, extensionHistory: [...(item.extensionHistory || []), {
+            previousDueAt: item.dueAt!, newDueAt, days: Math.round(delta / 86400000 * 100) / 100,
+            reason, grantedBy: currentUserName || 'You', grantedAt: new Date().toISOString(), mode,
+          }] };
+          const fixed = (item.extensionHistory || []).some(record => record.revoked !== true && record.mode === 'fixed');
+          if (mode === 'fixed' || !downstream.has(item.stepKey) || fixed) return item;
+          return { ...item, ...(item.startAt ? { startAt: new Date(Date.parse(item.startAt) + delta).toISOString() } : {}),
+            ...(item.dueAt ? { dueAt: new Date(Date.parse(item.dueAt) + delta).toISOString() } : {}) };
+        }) };
+      },
+      save: () => amendWorkflowStepDeadline(caseId, stepKey, newDueAt, reason, mode),
+      onFailure: () => { setAmendOpenFor(stepKey); setAmendDate(selectedDate); setAmendReason(reason); setAmendMode(mode); },
+    });
   };
 
   const onRevokeAmendment = async (stepKey: string, recordIndex: number) => {
-    if (!canAmendDeadlines) return;
+    if (!canAmendDeadlines || busyKey) return;
     try {
       setBusyKey(`revoke:${stepKey}:${recordIndex}`);
       setErr('');
       const updated = await revokeWorkflowStepDeadlineAmendment(caseId, stepKey, recordIndex, revokeReason);
+      mutationQueue.current?.reset(updated);
       setWf(updated);
       notifyWorkflowChanged(updated);
       setRevokeReason('');
@@ -301,24 +278,26 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       setErr('Position must be a whole number of 1 or more.');
       return;
     }
-    try {
-      setBusyKey(`add:${stageKey}`);
-      setErr('');
-      // The API position is 0-based (0 = first in the stage); the form is 1-based.
-      const updated = await addWorkflowStep(caseId, {
-        title,
-        stageKey,
-        percentage,
-        ...(position !== undefined ? { position: position - 1 } : {}),
-      });
-      setWf(updated);
-      notifyWorkflowChanged(updated);
-      resetAddForm();
-    } catch (e: any) {
-      setErr(e.message || 'Failed to add Key Action.');
-    } finally {
-      setBusyKey('');
-    }
+    if (!wf || busyKey) return;
+    const stage = wf.steps.filter(step => step.stageKey === stageKey).sort((a, b) => a.order - b.order);
+    const insertAt = position === undefined ? stage.length : Math.min(stage.length, position - 1);
+    const before = stage[insertAt - 1], after = stage[insertAt];
+    const order = before && after ? (before.order + after.order) / 2 : before ? before.order + 1 : after ? after.order - 1 : 1;
+    const first = stage[0];
+    const pendingStep: WorkflowInstance['steps'][number] = {
+      stepKey: `pending:${crypto.randomUUID()}`, title, stageKey, percentage, order, customOrder: order, custom: true,
+      status: 'Not Started', stageTitle: first?.stageTitle || stageMetaByKey.get(stageKey)?.title,
+      stageOrder: first?.stageOrder, stagePercentage: first?.stagePercentage || stageMetaByKey.get(stageKey)?.percentage,
+      startAt: first?.startAt, dueAt: first?.dueAt, slaMinutes: first?.slaMinutes, slaText: first?.slaText, actions: [], outputs: [],
+    };
+    const originalPosition = addPosition, originalPercentage = addPercentage;
+    setErr(''); resetAddForm();
+    mutationQueue.current?.enqueue({
+      key: `add:${stageKey}`,
+      apply: current => ({ ...current, steps: [...current.steps, pendingStep] }),
+      save: () => addWorkflowStep(caseId, { title, stageKey, percentage, ...(position !== undefined ? { position: position - 1 } : {}) }),
+      onFailure: () => { setAddOpenFor(stageKey); setAddTitle(title); setAddPosition(originalPosition); setAddPercentage(originalPercentage); },
+    });
   };
 
   const openEditForm = (step: WorkflowInstance['steps'][number]) => {
@@ -351,7 +330,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   };
 
   const onSubmitEdit = async (stepKey: string, originalStageKey: string) => {
-    if (!canCompleteSteps) return;
+    if (!canCompleteSteps || busyKey) return;
     const title = editTitle.trim();
     if (!title) {
       setErr('Enter a title for this Key Action.');
@@ -378,6 +357,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
         percentage,
         ...(position !== undefined ? { position: position - 1 } : {}),
       });
+      mutationQueue.current?.reset(updated);
       setWf(updated);
       notifyWorkflowChanged(updated);
       resetEditForm();
@@ -388,21 +368,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
     }
   };
 
-  const onConfirmDelete = async (stepKey: string) => {
-    if (!canCompleteSteps) return;
-    try {
-      setBusyKey(`delete:${stepKey}`);
-      setErr('');
-      const updated = await deleteWorkflowStep(caseId, stepKey);
-      setWf(updated);
-      notifyWorkflowChanged(updated);
-      setConfirmDeleteKey('');
-      if (editOpenFor === stepKey) resetEditForm();
-    } catch (e: any) {
-      setErr(e.message || 'Failed to delete Key Action.');
-    } finally {
-      setBusyKey('');
-    }
+  const onConfirmDelete = (stepKey: string) => {
+    if (!canCompleteSteps || !wf || busyKey) return;
+    setErr(''); setConfirmDeleteKey('');
+    if (editOpenFor === stepKey) resetEditForm();
+    mutationQueue.current?.enqueue({
+      key: `delete:${stepKey}`,
+      apply: current => ({ ...current, steps: current.steps.filter(step => step.stepKey !== stepKey) }),
+      save: () => deleteWorkflowStep(caseId, stepKey),
+    });
   };
 
   const templatePill = !wf?.templateId ? null : (
@@ -512,6 +486,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   return (
     <div className="space-y-4">
       {err && <div role="alert" className="py-4 text-red-700 bg-red-50 border border-red-100 rounded px-4">{err}</div>}
+      {pendingKeys.size > 0 && <div role="status" aria-live="polite" className="text-xs text-blue-700 dark:text-blue-300">Saving {pendingKeys.size === 1 ? 'change' : `${pendingKeys.size} changes`}…</div>}
       {/* Earned fees — contract value × workflow completion, productivity formula (TPA × timeliness × quality) */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
@@ -1124,7 +1099,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
 
               {canCompleteSteps && (
                 <button
-                  disabled={Boolean(busyKey) || Boolean(blockedBy)}
+                  disabled={pendingKeys.has(`complete:${s.stepKey}`) || s.stepKey.startsWith('pending:') || (Boolean(busyKey) && !busyKey.startsWith('complete:')) || Boolean(blockedBy)}
                   onClick={() => {
                     // Clicking a ticked Key Action reopens it; clicking an
                     // unticked one records the work as done. The tick state is

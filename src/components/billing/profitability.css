@@ -1,0 +1,80 @@
+.profitability-page { min-width: 0; font-size: 0.875rem; line-height: 1.5; }
+.profitability-page .profitability-page-header { display: block; }
+.profitability-page h1 { font-size: 1.5rem; line-height: 1.3; font-weight: 700; }
+.profitability-page .profitability-filter-bar { display: block; width: 100%; background: #fff; border: 1px solid #dbe4ef; padding: 1rem; }
+.profitability-period-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem; }
+.profitability-period-controls label, .profitability-page .profitability-staff-controls label { display: grid; gap: 0.35rem; min-width: 0; }
+.profitability-period-controls label > span, .profitability-staff-controls label > span:not(.sr-only) { display: flex; align-items: center; gap: 0.35rem; color: #64748b; font-size: 0.75rem; font-weight: 600; }
+.profitability-period-controls input, .profitability-period-controls select { min-height: 2.5rem; font: inherit; }
+.profitability-period-controls select { min-width: 12rem; }
+.profitability-refresh { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 2.5rem; margin-left: auto; padding: 0.5rem 1rem; border-radius: 0.5rem; background: #1e3a5f; color: #fff; font-size: 0.875rem; font-weight: 600; }
+.profitability-refresh:disabled { opacity: 0.55; cursor: not-allowed; }
+.profitability-page .profitability-scope { margin: 0.8rem 0 0; padding-top: 0.8rem; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.8125rem; }
+.profitability-page .profitability-tabs { box-shadow: none; }
+.profitability-page .profitability-tab { font-size: 0.875rem; font-weight: 600; }
+.profitability-page .profitability-staff-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
+.profitability-page .profitability-metric { min-height: 8.25rem; padding: 1rem; box-shadow: none; }
+.profitability-page .profitability-metric-icon { width: 2.25rem; height: 2.25rem; border-radius: 0.625rem; }
+.profitability-page .profitability-metric p:first-child { font-size: 0.75rem; letter-spacing: 0.02em; text-transform: none; line-height: 1.4; }
+.profitability-page .profitability-metric .profitability-metric-value { font-size: 1.125rem; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.profitability-page .profitability-metric p:last-child:not(.profitability-metric-value) { font-size: 0.75rem; line-height: 1.5; }
+.profitability-page .profitability-section-title, .profitability-page .profitability-table-header h2, .profitability-page .profitability-detail-heading h2 { margin-bottom: 0.75rem; font-size: 1rem; font-weight: 650; line-height: 1.4; }
+.profitability-page .profitability-hero-main { min-height: 0; padding: 1.5rem; }
+.profitability-page .profitability-hero-main h2 { font-size: 1.875rem; line-height: 1.3; overflow-wrap: anywhere; }
+.profitability-page .profitability-hero-main .profitability-hero-label { font-size: 0.875rem; font-weight: 600; }
+.profitability-page .profitability-hero-art { width: 3.5rem; height: 3.5rem; border-radius: 1rem; }
+.profitability-page .profitability-hero-stat-grid { gap: 0.75rem; padding: 1rem; }
+.profitability-page .profitability-hero-stat-grid strong { font-size: 1.125rem; overflow-wrap: anywhere; }
+.profitability-page .profitability-detail-card { padding: 1.25rem; }
+.profitability-page .profitability-detail-heading h2 { margin-bottom: 0.25rem; }
+.profitability-page .profitability-detail-heading p { font-size: 0.8125rem; }
+.profitability-date-guide, .profitability-retainers { border: 1px solid #e2e8f0; background: #fff; border-radius: 0.75rem; padding: 0.85rem 1rem; }
+.profitability-date-guide summary, .profitability-retainers summary { cursor: pointer; font-size: 0.8125rem; font-weight: 600; color: #334155; }
+.profitability-date-guide p { margin-top: 0.75rem; color: #64748b; font-size: 0.8125rem; line-height: 1.7; max-width: 90ch; }
+.profitability-page .profitability-retainers .retainer-accounting { margin-bottom: 0; border: 0; padding: 1rem 0 0; border-radius: 0; box-shadow: none; }
+.profitability-page .retainer-accounting h2 { font-size: 1rem; }
+.profitability-page .retainer-accounting .ra-metric > strong { font-size: 1.125rem; }
+.profitability-page .profitability-table-header { padding: 1rem; }
+.profitability-page .profitability-staff-header { grid-template-columns: 1fr; gap: 1rem; }
+.profitability-page .profitability-staff-controls { grid-template-columns: minmax(9rem, 0.8fr) minmax(12rem, 1fr) minmax(12rem, 1.2fr); }
+.profitability-page .profitability-staff-controls label { align-content: end; }
+.profitability-page .profitability-staff-controls input, .profitability-page .profitability-staff-controls select { font-size: 0.875rem; min-height: 2.5rem; }
+.profitability-page .profitability-financial-table { min-width: 1280px; font-size: 0.8125rem; }
+.profitability-page .profitability-staff-table { min-width: 1400px; }
+.profitability-page .profitability-financial-table th { white-space: normal; font-size: 0.75rem; line-height: 1.45; font-weight: 600; letter-spacing: 0; text-transform: none; padding: 0.75rem; }
+.profitability-page .profitability-financial-table td { padding: 0.85rem 0.75rem; font-size: 0.8125rem; }
+.profitability-page .profitability-financial-table td p { font-size: 0.8125rem; }
+.profitability-page .profitability-financial-table td p + p { font-size: 0.75rem; text-transform: capitalize; }
+.profitability-page .profitability-col-row-number { width: 2.5rem; }
+.profitability-page .profitability-col-identifier, .profitability-page .profitability-col-staff { width: 13rem; }
+.profitability-page .profitability-col-small-number { width: 6rem; }
+.profitability-page .profitability-col-timing { width: 8rem; }
+.profitability-page .profitability-col-contract, .profitability-page .profitability-col-collected, .profitability-page .profitability-col-billed,
+.profitability-page .profitability-col-receivables, .profitability-page .profitability-col-costs, .profitability-page .profitability-col-contribution,
+.profitability-page .profitability-col-money { width: 9rem; }
+.profitability-page .profitability-col-margin, .profitability-page .profitability-col-ratio { width: 6.5rem; }
+.profitability-page .profitability-col-allocation { width: 9rem; }
+.profitability-page .profitability-financial-table th:nth-child(2), .profitability-page .profitability-financial-table td:nth-child(2) { left: 2.5rem; }
+.profitability-table-note, .profitability-empty { color: #64748b; font-size: 0.8125rem; line-height: 1.6; }
+.profitability-empty { padding: 2rem 1rem; text-align: center; border: 1px dashed #cbd5e1; border-radius: 0.75rem; }
+.profitability-page button:focus-visible, .profitability-page summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.dark .profitability-page .profitability-filter-bar, .dark .profitability-date-guide, .dark .profitability-retainers { background: #0f172a; border-color: #334155; }
+.dark .profitability-page .profitability-scope { border-color: #334155; }
+.dark .profitability-date-guide summary, .dark .profitability-retainers summary { color: #e2e8f0; }
+.dark .profitability-date-guide p, .dark .profitability-page .profitability-scope, .dark .profitability-table-note,
+.dark .profitability-empty, .dark .profitability-period-controls label > span, .dark .profitability-staff-controls label > span { color: #94a3b8; }
+@media (max-width: 1100px) {
+  .profitability-page .profitability-staff-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .profitability-period-controls label { flex: 1 1 8rem; }
+  .profitability-period-controls label:first-child { flex-basis: 100%; }
+  .profitability-refresh { width: 100%; }
+  .profitability-page .profitability-staff-controls { grid-template-columns: 1fr; }
+  .profitability-page .profitability-staff-summary { grid-template-columns: 1fr; }
+  .profitability-page .profitability-financial-table th:first-child, .profitability-page .profitability-financial-table td:first-child,
+  .profitability-page .profitability-financial-table th:nth-child(2), .profitability-page .profitability-financial-table td:nth-child(2) { position: static; box-shadow: none; }
+  .profitability-page .profitability-hero-stat-grid { grid-template-columns: 1fr; }
+  .profitability-page .profitability-hero-main h2 { font-size: 1.5rem; }
+  .profitability-page .profitability-pagination { align-items: start; flex-direction: column; gap: 0.75rem; }
+}

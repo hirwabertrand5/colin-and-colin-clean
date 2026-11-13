@@ -123,7 +123,13 @@ export type StaffDashboardPeriod = {
   contractValue: number;
 };
 
+export type DashboardWorkMatter = {
+  caseId: string; caseNo: string; parties: string;
+  steps: Array<{ stepKey: string; title: string; status: string; startAt?: string; dueAt?: string }>;
+};
+
 export type StaffDashboardSummaryResponse = {
+  workByMatter?: Record<string, DashboardWorkMatter>;
   user: { name: string };
   tpaPercent: number;
   currency: string;

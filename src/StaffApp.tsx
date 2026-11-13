@@ -1,5 +1,6 @@
 import { pageModules } from './navigation/pageModules';
 import { clearNavigationRequests } from './services/navigationRequest';
+import { clearDashboardData } from './services/dashboardBootstrap';
 import { lazy, Suspense, useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/auth/Login';
@@ -93,6 +94,7 @@ function StaffApp() {
   };
 
   const handleLogout = () => {
+    clearDashboardData();
     clearNavigationRequests();
     setUser(null);
     localStorage.removeItem('user');

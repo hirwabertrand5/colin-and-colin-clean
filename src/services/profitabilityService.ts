@@ -2,6 +2,8 @@ import { navigationFetch as fetch } from './navigationRequest';
 import { FirmReportRange } from './firmReportsService';
 import type { RetainerPerformance } from './retainerAccountingService';
 
+export type ProfitabilityPeriod = FirmReportRange | 'all';
+
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
 
@@ -31,6 +33,7 @@ export type ProfitabilityResponse = {
   retainer?: RetainerPerformance;
   range: { from: string | null; to: string | null; label: string };
   currency: 'RWF';
+  timeZone?: string;
   dataAvailability: {
     taskFeeRecognition: boolean;
     staffCostRegister: boolean;
@@ -67,7 +70,7 @@ export type ProfitabilityResponse = {
 };
 
 export const getProfitabilityReport = async (
-  params: { range?: FirmReportRange; from?: string; to?: string },
+  params: { range?: ProfitabilityPeriod; from?: string; to?: string },
   signal?: AbortSignal,
 ): Promise<ProfitabilityResponse> => {
   const query = new URLSearchParams();

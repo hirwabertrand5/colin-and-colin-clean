@@ -1,8 +1,10 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/authMiddleware';
 import { getExecutiveAssistantDashboard, getStaffDashboardSummary } from '../controllers/dashboardController';
+import { getDashboardBootstrap } from '../controllers/dashboardBootstrapController';
 
 const router = express.Router();
+router.get('/dashboard/bootstrap', authenticate, getDashboardBootstrap);
 
 router.get(
   '/dashboard/executive-assistant',

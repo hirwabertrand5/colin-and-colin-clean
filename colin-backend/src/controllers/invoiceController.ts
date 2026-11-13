@@ -115,7 +115,7 @@ export const uploadProof = async (req: Request, res: Response) => {
 
     const invoice = await Invoice.findByIdAndUpdate(
       invoiceId,
-      { status: 'Paid', proofUrl },
+      { status: 'Paid', proofUrl, paidAt: existing.paidAt || (existing.status === 'Paid' ? existing.updatedAt : new Date()) },
       { new: true }
     );
 
@@ -155,7 +155,7 @@ export const uploadInvoiceFile = async (req: Request, res: Response) => {
 
     const updated = await Invoice.findByIdAndUpdate(
       invoiceId,
-      { invoiceFileUrl },
+      { invoiceFileUrl, ...(existing.status === 'Paid' && !existing.paidAt ? { paidAt: existing.updatedAt } : {}) },
       { new: true }
     );
 
