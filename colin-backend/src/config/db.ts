@@ -7,7 +7,9 @@ const connectDB = async () => {
     dns.setServers(['8.8.8.8', '1.1.1.1']);
     console.log('Using DNS servers:', dns.getServers());
 
-    await mongoose.connect(process.env.MONGO_URI!);
+    // Workflow histories repeat many titles and field names. Negotiate built-in
+    // wire compression so report reads do not transfer those strings verbatim.
+    await mongoose.connect(process.env.MONGO_URI!, { compressors: ['zlib'], zlibCompressionLevel: 3 });
     console.log('MongoDB connected');
   } catch (err) {
     console.error('MongoDB connection error:', err);

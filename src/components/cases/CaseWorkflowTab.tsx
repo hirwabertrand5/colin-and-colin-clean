@@ -21,6 +21,7 @@ import {
   formatDeadlineDateTime,
   getUrgencyClass,
   getKeyActionDeadlineClock,
+  formatWorkDateTime,
   isStepWorkDone,
   toDateTimeLocalValue,
 } from '../../utils/workflowDeadline';
@@ -176,7 +177,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
       key: `complete:${stepKey}`,
       apply: current => ({ ...current, status: 'Active', currentStepKey: stepKey,
         steps: current.steps.map(step => step.stepKey === stepKey
-          ? { ...step, status: 'In Progress', doneAt: undefined, completedAt: undefined, submittedAt: undefined, reviewedAt: undefined } : step) }),
+          ? { ...step, status: 'In Progress', doneAt: undefined, completedAt: undefined, submittedAt: undefined, reviewedAt: undefined, carriedWork: undefined } : step) }),
       save: () => reopenWorkflowStep(caseId, stepKey),
     });
   };
@@ -470,7 +471,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
   // stage bars move the moment a Key Action is ticked, exactly like the tick.
   const completedSteps = steps.filter((s) => isStepWorkDone(s)).length;
   const overallPercent = steps.length ? Math.round((completedSteps / steps.length) * 100) : 0;
-  const currentStepRef = steps.find((s) => s.stepKey === wf.currentStepKey) || null;
+  const currentStepRef = steps.find(s => !isStepWorkDone(s)) || steps.find(s => s.stepKey === wf.currentStepKey) || null;
   const currentStageIndex = currentStepRef
     ? stageGroups.findIndex((group) => group.key === String(currentStepRef.stageKey || ''))
     : -1;
@@ -988,7 +989,7 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                           : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
                   ].join(' ')}
                 >
-                  {s.status}
+                  {isCompleted ? 'Completed (approved)' : s.status}
                 </span>
                 {s.custom === true ? (
                   <span
@@ -1020,10 +1021,15 @@ export default function CaseWorkflowTab({ caseId, canCompleteSteps, canToggleAct
                   className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${getUrgencyClass(
                     deadlineClock.color
                   )}`}
-                  title={s.dueAt ? `Due: ${formatDeadlineDateTime(s.dueAt)}` : 'No due date'}
+                  title={s.dueAt ? `${s.carriedWork ? 'Uses the original workflow submission. ' : ''}Due: ${formatDeadlineDateTime(s.dueAt)}` : 'No due date'}
                 >
                   {deadlineClock.countdown}
                 </span>
+                {deadlineClock.finishedAt ? (
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {s.carriedWork ? 'Original submission' : s.submittedAt ? 'Submitted' : 'Work finished'}: {formatWorkDateTime(deadlineClock.finishedAt)}
+                  </span>
+                ) : null}
                 {s.dueAt ? (
                   <span className="text-xs text-gray-500 dark:text-gray-400">Due {formatDeadlineDateTime(s.dueAt)}</span>
                 ) : null}

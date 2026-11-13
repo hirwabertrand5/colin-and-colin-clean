@@ -1,5 +1,6 @@
 import { navigationFetch as fetch } from './navigationRequest';
 import { CaseEarnedFees } from './workflowInstanceService';
+import type { CarriedWorkTiming } from '../utils/workflowWorkTime';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
@@ -33,6 +34,8 @@ export type CaseManagementStep = {
   dueAt?: string;
   completedAt?: string;
   submittedAt?: string;
+  doneAt?: string;
+  carriedWork?: CarriedWorkTiming;
   reviewedAt?: string;
   timelinessScore: number | null;
   actions: Array<{ text?: string; done: boolean }>;

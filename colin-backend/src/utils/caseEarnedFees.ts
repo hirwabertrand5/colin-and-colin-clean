@@ -9,6 +9,7 @@ import {
 } from './workflowPercentages';
 import { resolveDeadlineDateTime } from './deadlineUtils';
 import { SINGLE_CURRENCY } from './currency';
+import { resolveWorkflowWorkTime, scoreWorkflowTimeliness } from './workflowWorkTime';
 import {
   CASE_ASSIGNMENT_ROLE_CONFIG,
   CaseAssignmentRole,
@@ -71,16 +72,7 @@ export const computeStepTimelinessScore = (step: any): number | null => {
 
 /** Timeliness of an explicit event inside a step's start → due window. */
 export const computeStepTimelinessAt = (step: any, eventTime?: Date | null): number | null => {
-  if (!eventTime) return null;
-  const startAt = resolveDeadlineDateTime(step?.startAt);
-  const dueAt = resolveDeadlineDateTime(step?.dueAt);
-  if (!startAt || !dueAt) return null;
-  const totalMs = dueAt.getTime() - startAt.getTime();
-  if (!Number.isFinite(totalMs) || totalMs <= 0) return null;
-  const usedMs = eventTime.getTime() - startAt.getTime();
-  if (!Number.isFinite(usedMs)) return null;
-  const consumed = Math.round((usedMs / totalMs) * 1000) / 10;
-  return Math.min(100, Math.max(0, Math.round(100 - consumed)));
+  return scoreWorkflowTimeliness(step || {}, eventTime || null);
 };
 
 /**
@@ -111,35 +103,7 @@ export type StepWorkTime = {
  * source is returned rather than hidden. `resolveStepWorkTime` is the thin
  * timestamp-only wrapper so existing callers keep working unchanged.
  */
-export const resolveStepWorkTimeWithSource = (step: any): StepWorkTime => {
-  const submittedAt = resolveDeadlineDateTime(step?.submittedAt);
-  if (submittedAt) return { at: submittedAt, source: 'submitted' };
-
-  const actions = Array.isArray(step?.actions) ? step.actions : [];
-  if (actions.length && actions.every((action: any) => Boolean(action?.done))) {
-    const times = actions
-      .map((action: any) => resolveDeadlineDateTime(action?.doneAt))
-      .filter((date: Date | undefined): date is Date => Boolean(date));
-    if (times.length) {
-      return { at: new Date(Math.max(...times.map((date: Date) => date.getTime()))), source: 'lastActionTicked' };
-    }
-  }
-
-  // The Overview's large Key Action tick records its completion directly on
-  // the workflow step (rather than on nested checklist items). Honour that
-  // timestamp too, otherwise a later approval after a handover would appear to
-  // be the moment the previous contributor's work was performed.
-  const stepDoneAt = resolveDeadlineDateTime(step?.doneAt);
-  if (stepDoneAt) return { at: stepDoneAt, source: 'lastActionTicked' };
-
-  const completedAt = resolveDeadlineDateTime(step?.completedAt);
-  if (completedAt) return { at: completedAt, source: 'completed' };
-
-  const reviewedAt = resolveDeadlineDateTime(step?.reviewedAt);
-  if (reviewedAt) return { at: reviewedAt, source: 'reviewed' };
-
-  return { at: null, source: null };
-};
+export const resolveStepWorkTimeWithSource = (step: any): StepWorkTime => resolveWorkflowWorkTime(step);
 
 export const resolveStepWorkTime = (step: any): Date | null => resolveStepWorkTimeWithSource(step).at;
 

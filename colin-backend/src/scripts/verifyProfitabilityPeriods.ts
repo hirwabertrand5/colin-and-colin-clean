@@ -8,6 +8,7 @@ import bcrypt from 'bcrypt';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
+import { loadStaffProfitabilityInputs } from '../services/staffProfitabilityInputs';
 import app from '../app';
 import User from '../models/userModel';
 import Case from '../models/caseModel';
@@ -63,7 +64,7 @@ async function main() {
     replSet: { count: 1, storageEngine: 'wiredTiger' }, instanceOpts: [{ launchTimeout: 120000 }] });
   let server: ReturnType<typeof app.listen> | undefined;
   try {
-    await mongoose.connect(db.getUri(), { dbName: 'profitability_periods', monitorCommands: true });
+    await mongoose.connect(db.getUri(), { dbName: 'profitability_periods', monitorCommands: true, compressors: ['zlib'], zlibCompressionLevel: 3 });
     await Promise.all(Object.values(mongoose.models).map(model => model.init()));
     const admin = await User.create({ name: 'Manager', email: 'manager@periods.invalid', role: 'managing_partner', passwordHash: 'test-only' });
     const alice = await User.create({ name: 'Alice', email: 'alice@periods.invalid', role: 'associate', passwordHash: 'test-only' });
@@ -163,6 +164,46 @@ async function main() {
     assert(aliceLate.earnedFees > 0);
     assert.equal((await report('2026-11-12', '2026-11-12', true)).team.find((m: any) => m.name === 'Alice').earnedFees, 0);
     console.log('PASS: staff earned fees, completed/active/overdue counts, future staff exclusion and old task links');
+
+    // Large historical workflows are not downloaded to render a current period.
+    const older = oid();
+    await Case.collection.insertOne({ _id: older, caseNo: 'OLDER-HISTORY', parties: 'Older client', status: 'Closed',
+      createdAt: stamp('2025-01-01'), workflowTemplateId: templateId });
+    await Workflow.collection.insertOne({ caseId: older, templateId, status: 'Completed', steps: Array.from({ length: 100 }, (_, i) => ({
+      stepKey: `old-${i}`, title: `Older work ${i}`, status: 'Completed', completedAt: stamp('2025-01-02'), percentage: 1,
+    })) });
+    await Task.collection.insertOne({ taskNo: 'OLDER-COMPLETED', caseId: older, status: 'Completed', completedAt: stamp('2025-01-02'), updatedAt: stamp('2026-11-13') });
+    await Task.collection.insertOne({ taskNo: 'OLDER-UNSTARTED', caseId: older, status: 'Not Started', updatedAt: stamp('2026-11-13'), checklist: [] });
+    const window = resolveOptionalReportRange({ range: 'custom', from: '2026-11-13', to: '2026-11-13' }) as ResolvedReportRange;
+    const inputs = await loadStaffProfitabilityInputs(window, window.from, window.to);
+    assert(!inputs[4].some((w: any) => String(w.caseId) === String(older)), 'Out-of-period workflow history stays on the server');
+    assert(!inputs[1].some((t: any) => String(t.caseId) === String(older)), 'A later edit cannot move already dated work into this period');
+    assert(inputs[4].some((w: any) => String(w.caseId) === String(completed)), 'In-period work still uses the entire authoritative workflow');
+    assert.equal((await report('2026-11-13', '2026-11-13', true)).team.find((m: any) => m.name === 'Alice').earnedFees, aliceLate.earnedFees);
+    await Task.collection.insertOne({ taskNo: 'UNUSED-GENERATED', caseId: completed, workflowStepKey: 'first',
+      status: 'Not Started', updatedAt: stamp('2026-11-13'), taskStages: [{ notes: 'unused'.repeat(10000) }] });
+    const slim = await loadStaffProfitabilityInputs(window, window.from, window.to);
+    assert(!slim[1].some((t: any) => String(t.caseId) === String(completed) && t.status === 'Not Started'), 'Generated tasks without work, scores or rates are excluded');
+    assert(!slim[1].some((t: any) => t.taskStages?.some((s: any) => s.notes)), 'Unused stage history is not transferred');
+    const legacy = oid();
+    await Case.collection.insertOne({ _id: legacy, status: 'Closed', caseNo: 'LEGACY-TIMESTAMP', workflowTemplateId: templateId, createdAt: stamp('2025-01-01') });
+    await Workflow.collection.insertOne({ caseId: legacy, templateId, steps: [
+      { stepKey: 'first', status: 'Completed' }, { stepKey: 'last', status: 'Completed', completedAt: stamp('2026-11-13') },
+    ] });
+    await Task.collection.insertOne({ taskNo: 'LEGACY-FALLBACK', caseId: legacy, workflowStepKey: 'first', status: 'Not Started', updatedAt: stamp('2026-11-13') });
+    const withLegacy = await loadStaffProfitabilityInputs(window, window.from, window.to);
+    assert(withLegacy[1].some((t: any) => String(t.caseId) === String(legacy)), 'Legacy actions without completion dates retain task timestamp fallback');
+    const partial = oid();
+    await Case.collection.insertOne({ _id: partial, status: 'Open', caseNo: 'PARTIAL-WORK', workflowTemplateId: templateId, createdAt: stamp('2025-01-01') });
+    await Workflow.collection.insertOne({ caseId: partial, templateId, steps: [
+      { stepKey: 'first', status: 'Completed', percentage: 50, completedAt: stamp('2026-11-13') },
+      { stepKey: 'last', status: 'Not Started', percentage: 50, title: 'Unused description '.repeat(1000), startAt: stamp('2026-11-13'), dueAt: stamp('2026-12-01') },
+    ] });
+    const compact = await loadStaffProfitabilityInputs(window, window.from, window.to);
+    const pending = compact[4].find((w: any) => String(w.caseId) === String(partial))?.steps.find((s: any) => s.stepKey === 'last');
+    assert(pending && pending.status === 'Not Started' && pending.percentage === 50, 'Unfinished actions retain their weight and status, so a partial workflow cannot become completed');
+    assert.equal(pending.title, undefined, 'Unused workflow descriptions are not transferred');
+    console.log('PASS: current-period reads exclude unrelated historical workflows/tasks without changing earnings');
 
     await Period.collection.insertOne({ retainerId: oid(), month: '2026-11', clientName: 'Retainer client', retainerNo: 'RET-PERIOD', fixedFee: 500,
       dueDate: '2026-11-13', status: 'Open', services: [], createdAt: stamp('2026-11-01') });

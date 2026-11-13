@@ -17,7 +17,7 @@ async function main() {
     browser = await chromium.launch({ channel: 'msedge', headless: true });
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [], requests = [];
-    let fail = false, revision = 0;
+    let fail = false, malformed = false, hangStaff = false, revision = 0;
     const actor = { id: '111111111111111111111111', name: 'Fixture Manager', role: 'managing_partner', email: 'fixture@ui.invalid' };
     page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(actor => { localStorage.setItem('token', 'fixture-token'); localStorage.setItem('user', JSON.stringify(actor)); }, actor);
@@ -27,8 +27,10 @@ async function main() {
       const value = ({ daily: 111, weekly: 222, monthly: 333, quarterly: 444, yearly: 555, ytd: 666, custom: 777, all: 888 })[period] + revision;
       const send = (json, status = 200) => route.fulfill({ status, json }).catch(() => {});
       if (endpoint.endsWith('/reports/firm')) {
+        if (hangStaff) return;
         await new Promise(done => setTimeout(done, period === 'daily' ? 900 : 50));
         if (fail) return send({ message: 'Synthetic reporting failure' }, 503);
+        if (malformed) return send({});
         return send({ range: { from: url.searchParams.get('from') || '2026-11-01', to: url.searchParams.get('to') || '2026-11-13' }, team: Array.from({ length: 13 }, (_, i) => ({
           id: `staff-${i}`, name: `Staff ${String(i + 1).padStart(2, '0')}`, role: i % 2 ? 'partner' : 'associate',
           activeCases: i + 1, tasksCompleted: i, earlyTasks: 1, onTimeTasks: 2, lateTasks: 0, overdueTasks: i % 3,
@@ -56,6 +58,7 @@ async function main() {
     await page.goto(`${origin}/billing/finance/profitability/staff-profitability`);
     await page.getByRole('heading', { name: 'Staff profitability', exact: true }).waitFor();
     await page.getByRole('table').waitFor();
+    assert.equal(await page.locator('.profitability-date-guide').count(), 0, 'Requested date explanation card is removed');
     assert(requests.some(r => r.endpoint.endsWith('/reports/firm') && r.query.includes('scope=profitability')));
     assert.equal(requests.filter(r => r.endpoint.endsWith('/reports/profitability')).length, 1, 'Financial tabs are prepared once alongside staff');
     assert.equal(await page.locator('.profitability-staff-summary .profitability-metric').count(), 4);
@@ -112,6 +115,24 @@ async function main() {
     await page.getByRole('table').waitFor();
     await page.waitForFunction(() => document.querySelector('tbody')?.textContent.includes('RWF 587'));
     assert.match(await page.locator('tbody').innerText(), /RWF 587/, 'Data invalidation must reload the current report');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    assert.equal(await page.getByRole('table').count(), 1, 'Refocusing must keep the loaded report visible');
+    malformed = true;
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'incomplete staff report' }).waitFor();
+    assert.equal(await page.getByRole('table').count(), 0, 'Malformed success responses cannot silently leave a blank tab');
+    malformed = false;
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page.getByRole('table').waitFor();
+    hangStaff = true;
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page.getByRole('status', { name: 'Loading profitability report' }).waitFor();
+    assert(await page.locator('.profitability-loading').evaluate(el => el.getBoundingClientRect().height >= 320), 'Loading panel remains visible without generated utility styles');
+    await page.getByRole('alert').filter({ hasText: 'timed out' }).waitFor({ timeout: 15000 });
+    hangStaff = false;
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await page.getByRole('table').waitFor();
+    console.log('PASS: date card removed, loaded content survives focus, malformed responses and stalled requests recover through Refresh');
     console.log('PASS: Firm Reports period options, requested API scope, rapid switches, stale response exclusion, custom dates, pagination, search, refresh and error recovery');
 
     const shots = path.join(root, 'build', 'verification'); fs.mkdirSync(shots, { recursive: true });

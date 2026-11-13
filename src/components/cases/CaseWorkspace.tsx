@@ -95,7 +95,9 @@ import {
   formatDeadlineDateTime,
   resolveDeadlineDateTime,
   getUrgencyColorForDueDate,
+  isStepWorkDone,
 } from '../../utils/workflowDeadline';
+import { orderWorkflowSteps } from '../../utils/workflowOrder';
 import { uploadedFileUrl, handleRestrictedIntakeDownload } from '../../services/apiConfig';
 
 const getToken = () => localStorage.getItem('token');
@@ -360,9 +362,12 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
 
   const currentWorkflowStep = useMemo(() => {
     if (!workflowInstance?.steps?.length) return null;
-    // Use the server-provided currentStepKey only — do not fallback to the first non-completed step.
-    return workflowInstance.steps.find((step) => step.stepKey === workflowInstance.currentStepKey) || null;
-  }, [workflowInstance]);
+    // The next work action advances while earlier actions wait for review.
+    // Keep the separate review pointer for Case Management.
+    const ordered = orderWorkflowSteps(workflowInstance.steps, workflowTemplate);
+    return ordered.find(step => !isStepWorkDone(step))
+      || ordered.find(step => step.stepKey === workflowInstance.currentStepKey) || null;
+  }, [workflowInstance, workflowTemplate]);
 
   const taskTimingSummary = currentWorkflowStep
     ? `${currentWorkflowStep.title}${currentWorkflowStep.slaText ? ` • ${currentWorkflowStep.slaText}` : ''}${

@@ -1,5 +1,6 @@
 import { AppliedTpaSchema } from './appliedTpaSchema';
 import type { AppliedTpaSnapshot } from '../utils/tpaAttribution';
+import type { CarriedWorkTiming } from '../utils/workflowWorkTime';
 import mongoose, { Schema, Document } from 'mongoose';
 
 /**
@@ -115,6 +116,8 @@ export interface IInstanceStep {
    * urgency color locks at whatever it was when the work was finished.
    */
   doneAt?: Date;
+  /** Original work evidence retained when this case changes workflow. */
+  carriedWork?: CarriedWorkTiming;
   extensionHistory?: Array<{
     previousDueAt?: Date;
     newDueAt?: Date;
@@ -321,6 +324,13 @@ const InstanceStepSchema = new Schema<IInstanceStep>(
     },
     // Set when the assigned member ticks the work done; freezes the deadline clock.
     doneAt: { type: Date },
+    carriedWork: { type: new Schema({
+      sourceTemplateId: { type: String, required: true },
+      sourceStepKeys: { type: [String], required: true },
+      startAt: { type: Date }, dueAt: { type: Date }, doneAt: { type: Date }, submittedAt: { type: Date },
+      recordedAt: { type: Date, required: true },
+      colorBasis: { type: String, enum: ['percentage-bands'] },
+    }, { _id: false }), default: undefined },
     extensionHistory: {
       type: [
         new Schema(

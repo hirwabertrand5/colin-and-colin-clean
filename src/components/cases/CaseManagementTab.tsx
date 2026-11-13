@@ -12,7 +12,7 @@ import {
   CaseManagementStep,
 } from '../../services/caseManagementService';
 import { getDocumentsForCase, addDocumentToCase, deleteDocument, CaseDocument } from '../../services/documentService';
-import { formatDeadlineDateTime } from '../../utils/workflowDeadline';
+import { formatDeadlineDateTime, formatWorkDateTime, getKeyActionDeadlineClock, getUrgencyClass } from '../../utils/workflowDeadline';
 import { uploadedFileUrl, handleRestrictedIntakeDownload } from '../../services/apiConfig';
 
 type Props = {
@@ -53,7 +53,7 @@ const LIFECYCLE_LABEL: Record<string, string> = {
   Done: 'Done - awaiting submission',
   'Awaiting Review': 'Awaiting review',
   'Awaiting Approval': 'Awaiting approval',
-  Completed: 'Completed',
+  Completed: 'Completed (approved)',
 };
 export default function CaseManagementTab({ caseId, currentUserName, currentUserEmail, onWorkflowChanged, onDocumentsChanged, focusStepKey }: Props) {
   void currentUserName;
@@ -313,9 +313,9 @@ function CaseLifecycleBanner({ state }: { state: CaseManagementState }) {
         ? 3
         : firstOpen?.status === 'Awaiting Review'
           ? 2
-          : firstOpen && completed === 0
-            ? 1
-            : 2;
+          : firstOpen?.status === 'Done'
+            ? 2
+            : 1;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800">
@@ -737,24 +737,38 @@ function KeyActionsList(props: {
                 </div>
                 <div>
                   <span className="font-medium text-gray-500 dark:text-gray-400">Timeliness:</span>{' '}
-                  {step.timelinessScore == null ? DASH : `${step.timelinessScore}%`}
+                  <span className={step.carriedWork?.colorBasis === 'percentage-bands' ? `inline-flex rounded-full border px-2 py-0.5 ${getUrgencyClass(getKeyActionDeadlineClock(step).color)}` : ''}>
+                    {step.timelinessScore == null ? DASH : `${step.timelinessScore}%`}
+                  </span>
                 </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">Deadline result:</span>{' '}
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 ${getUrgencyClass(getKeyActionDeadlineClock(step).color)}`}>
+                    {getKeyActionDeadlineClock(step).countdown}
+                  </span>
+                </div>
+                {step.carriedWork?.submittedAt ? (
+                  <div>
+                    <span className="font-medium text-gray-500 dark:text-gray-400">Original workflow submission:</span>{' '}
+                    {formatWorkDateTime(step.carriedWork.submittedAt)}
+                  </div>
+                ) : null}
                 {step.submittedAt ? (
                   <div>
                     <span className="font-medium text-gray-500 dark:text-gray-400">Submitted for review:</span>{' '}
-                    {formatDeadlineDateTime(step.submittedAt)}
+                    {formatWorkDateTime(step.submittedAt)}
                   </div>
                 ) : null}
                 {step.reviewedAt ? (
                   <div>
                     <span className="font-medium text-gray-500 dark:text-gray-400">Reviewed:</span>{' '}
-                    {formatDeadlineDateTime(step.reviewedAt)}
+                    {formatWorkDateTime(step.reviewedAt)}
                   </div>
                 ) : null}
                 {step.completedAt ? (
                   <div>
-                    <span className="font-medium text-gray-500 dark:text-gray-400">Completed:</span>{' '}
-                    {formatDeadlineDateTime(step.completedAt)}
+                    <span className="font-medium text-gray-500 dark:text-gray-400">Approved:</span>{' '}
+                    {formatWorkDateTime(step.completedAt)}
                   </div>
                 ) : null}
               </div>
@@ -765,7 +779,7 @@ function KeyActionsList(props: {
                   <p className="mt-1 whitespace-pre-wrap">{step.correctionRequest.reason}</p>
                 </div>
               )}
-              {(canRequestReview(step) || canRequestApproval(step) || canApprove(step)) && (
+              {step.status !== 'Completed' && (canRequestReview(step) || canRequestApproval(step) || canApprove(step)) && (
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-5 py-3 dark:border-gray-700">
                   {canRequestReview(step) && (
                     <button

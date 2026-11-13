@@ -21,6 +21,7 @@ import { canEnterQualityScore, isAllowedQualityScoreRole } from '../utils/caseAs
 import { completeStepForCase, reconcileInstanceTemplateWithCanonical } from './workflowController';
 import { identityMatches } from '../utils/caseAssignments';
 import { returnCaseWorkForCorrections } from '../services/caseWorkCorrectionService';
+import { classifyWorkflowWork } from '../utils/workflowWorkTime';
 
 const isAdmin = (role?: string) =>
   role === 'managing_director' ||
@@ -162,6 +163,9 @@ const buildCaseManagementState = async ({ caseDoc, template, inst, tasks, collec
     dueAt: step?.dueAt,
     completedAt: step?.completedAt,
     submittedAt: step?.submittedAt,
+    doneAt: step?.doneAt,
+    carriedWork: step?.carriedWork,
+    timing: classifyWorkflowWork(step),
     reviewedAt: step?.reviewedAt,
     correctionRequest: step?.correctionRequest,
     reviewHistory: step?.reviewHistory || [],

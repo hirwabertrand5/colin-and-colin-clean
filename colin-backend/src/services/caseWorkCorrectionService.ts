@@ -67,6 +67,7 @@ export async function returnCaseWorkForCorrections(args: {
       // Reuse the canonical reopened-work status. No parallel approval state.
       step.status = 'In Progress';
       step.doneAt = undefined;
+      step.carriedWork = undefined;
       step.completedAt = undefined;
       step.reviewedAt = undefined;
       step.delegatedClaim = task ? { taskId: task._id, role: 'Initiator', claimantName: task.assignee, claimedAt: now } : undefined;

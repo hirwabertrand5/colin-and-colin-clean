@@ -253,7 +253,7 @@ export const buildUpdatedInstanceSteps = (existingSteps: any[] | undefined, temp
           }
         : {}),
       startAt: previous?.startAt ? new Date(previous.startAt) : nextStep.startAt,
-      dueAt: pinnedFixed || (hasManualDeadline && previous?.dueAt ? new Date(previous.dueAt) : nextStep.dueAt),
+      dueAt: pinnedFixed || ((hasManualDeadline || isStepWorkDone(previous)) && previous?.dueAt ? new Date(previous.dueAt) : nextStep.dueAt),
       stageOrder:
         isOverridden && typeof previous?.stageOrder === 'number'
           ? previous.stageOrder
@@ -1419,6 +1419,7 @@ export const reopenStep = async (req: AuthRequest, res: Response) => {
     step.reviewedAt = undefined;
     // Resume the deadline clock: the work is no longer finished.
     step.doneAt = undefined;
+    step.carriedWork = undefined;
 
     // Update current step to this one
     inst.currentStepKey = stepKey;
@@ -2337,6 +2338,7 @@ export const toggleStepAction = async (req: AuthRequest, res: Response) => {
       step.reviewedAt = undefined;
       // Resume the deadline clock: the work is no longer finished.
       step.doneAt = undefined;
+      step.carriedWork = undefined;
       inst.status = 'Active';
       inst.currentStepKey = stepKey;
     }

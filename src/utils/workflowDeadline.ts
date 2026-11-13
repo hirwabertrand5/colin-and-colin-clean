@@ -1,3 +1,4 @@
+import { parseWorkTimestamp, classifyWorkflowWork, type WorkTimingStep } from './workflowWorkTime';
 export type UrgencyColor = 'blue' | 'green' | 'yellow' | 'red' | 'gray';
 
 /**
@@ -242,38 +243,18 @@ export const formatDueCountdown = (dueAt?: Date | string, now = new Date()) => {
   return `${formatDurationCountdown(diff)} left`;
 };
 
-/**
- * The moment a Key Action's work was finished, if it has been.
- *
- * A Key Action freezes its deadline clock the instant its work is ticked as
- * done (or later submitted/approved). We use the earliest available stamp so
- * the timer stops at the true "work finished" moment and never drifts:
- *   - `doneAt`      — set the moment the member ticked the work done;
- *   - `submittedAt` — set when the Initiator submitted it for review;
- *   - `reviewedAt`  — set when the Reviewer forwarded it for approval;
- *   - `completedAt` — set when the Approver finally approved it.
- * Older records may only carry some of these, so we take whichever exists.
- */
-const resolveWorkFinishedAt = (step: {
-  doneAt?: Date | string;
-  submittedAt?: Date | string;
-  reviewedAt?: Date | string;
-  completedAt?: Date | string;
-}): Date | undefined => {
-  for (const value of [step.doneAt, step.submittedAt, step.reviewedAt, step.completedAt]) {
-    const resolved = resolveDeadlineDateTime(value);
-    if (resolved) return resolved;
-  }
-  return undefined;
-};
+/** Format an actual work event without applying a legacy deadline-hour adjustment. */
+export const formatWorkDateTime = (value?: Date | string) => parseWorkTimestamp(value)?.toLocaleString() || 'Time unavailable';
 
 export type KeyActionDeadlineClock = {
   /** Countdown text: live ("3d 4h left" / "2d overdue") or frozen ("Done on time" / "Done 3d late"). */
   countdown: string;
-  /** Urgency color for the pill. Frozen at the work-finished moment when done. */
+  /** Open-work urgency, or the green/red result once work has finished. */
   color: UrgencyColor;
   /** True once the work is done — the clock has stopped and will not change again. */
   frozen: boolean;
+  /** Actual submission/work time used for this result, never a render-time fallback. */
+  finishedAt?: Date;
 };
 
 /**
@@ -281,23 +262,22 @@ export type KeyActionDeadlineClock = {
  *
  * While a Key Action is still open the countdown ticks down live and the color
  * follows the remaining time. The moment the work is ticked/submitted/approved
- * the clock FREEZES at that instant: the countdown becomes a permanent result
- * ("Done on time" or "Done 3d late") and the color is locked to the urgency the
- * Key Action had at that moment — so a Key Action cleared on time stays calm and
- * one cleared late stays red, and neither keeps counting afterwards.
+ * the clock uses the same submitted/work timestamp as the API. The countdown
+ * becomes a permanent result: on-time work is green, late work is red, and
+ * a missing completion timestamp stays unknown instead of drifting with now.
  *
  * `now` is injectable for deterministic tests.
  */
 export const getKeyActionDeadlineClock = (
   step:
-    | {
+    | (WorkTimingStep & {
         status?: string;
         dueAt?: Date | string;
         doneAt?: Date | string;
         submittedAt?: Date | string;
         reviewedAt?: Date | string;
         completedAt?: Date | string;
-      }
+      })
     | null
     | undefined,
   now = new Date()
@@ -313,16 +293,26 @@ export const getKeyActionDeadlineClock = (
 
   // Once the work is done, freeze the clock at the moment it was finished.
   if (isStepWorkDone(step)) {
-    const finishedAt = resolveWorkFinishedAt(step) ?? now;
-    const lateByMs = finishedAt.getTime() - due.getTime();
+    const result = classifyWorkflowWork(step);
+    const finishedAt = result.at;
+    if (!finishedAt) return { countdown: 'Completion time unavailable', color: 'gray', frozen: true };
+    const lateByMs = result.lateByMs;
+    if (step.carriedWork?.colorBasis === 'percentage-bands') {
+      return { countdown: result.outcome === 'late'
+        ? `Done ${lateByMs < 60000 ? '<1m' : formatDurationCountdown(lateByMs)} late · ${result.score ?? '_'}%`
+        : `Done · ${result.performance.label}${result.score === null ? '' : ` · ${result.score}%`}`,
+        color: result.performance.color, frozen: true, finishedAt };
+    }
     // Color is judged at the finish moment: on-time work keeps a calm color,
     // late work is red — and it never changes again.
-    const color = getUrgencyColorForDueDate(step.dueAt, undefined, finishedAt);
+    // An open deadline's warning colour is not a completed-work result.
+    // Work submitted by its deadline is green, including the last 48 hours.
+    const color: UrgencyColor = result.outcome === 'late' ? 'red' : 'green';
     const countdown =
       lateByMs <= 0
         ? 'Done on time'
-        : `Done ${formatDurationCountdown(lateByMs)} late`;
-    return { countdown, color, frozen: true };
+        : `Done ${lateByMs < 60000 ? '<1m' : formatDurationCountdown(lateByMs)} late`;
+    return { countdown, color, frozen: true, finishedAt };
   }
 
   // Still open: live countdown + live color from remaining time.

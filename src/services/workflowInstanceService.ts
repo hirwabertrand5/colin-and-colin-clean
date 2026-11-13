@@ -1,5 +1,6 @@
 import { navigationFetch as fetch } from './navigationRequest';
 import { shareRequest } from './sharedRequest';
+import type { CarriedWorkTiming } from '../utils/workflowWorkTime';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
@@ -43,6 +44,7 @@ export type WorkflowInstance = {
     reviewedAt?: string;
     /** Set the moment the assigned member ticked the work as done (freezes the deadline clock). */
     doneAt?: string;
+    carriedWork?: CarriedWorkTiming;
     extensionHistory?: AmendmentRecord[];
 
     actions?: Array<{
