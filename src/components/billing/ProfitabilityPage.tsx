@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { RetainerPerformancePanel } from './RetainerPerformancePanel';
 import { Link } from 'react-router-dom';
 import {
@@ -20,9 +20,8 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 import { UserRole } from '../../App';
-import { FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
+import { FirmReportResponse } from '../../services/firmReportsService';
 import {
-  getProfitabilityReport,
   ProfitabilityResponse,
   ProfitabilityRow,
   ProfitabilityPeriod,
@@ -30,6 +29,8 @@ import {
 import usePageTitle from '../../hooks/usePageTitle';
 import './profitability.css';
 import { REPORT_PERIOD_OPTIONS } from '../../constants/reportPeriods';
+import { getDataRevision, subscribeDataChanges } from '../../services/navigationRequest';
+import { readFinancialProfitability, readStaffProfitability, profitabilityScopeKey } from '../../services/profitabilityResource';
 
 type ProfitabilityTab = 'overview' | 'matters' | 'clients' | 'practice' | 'staff';
 
@@ -87,7 +88,8 @@ function MetricCard({
 
 function Skeleton() {
   return (
-    <div className="space-y-6" aria-busy="true" aria-label="Loading profitability report">
+    <div className="profitability-loading space-y-6" role="status" aria-busy="true" aria-label="Loading profitability report">
+      <p>Loading report data…</p>
       <div className="h-10 w-64 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 8 }).map((_, index) => (
@@ -351,45 +353,55 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+  const revision = useSyncExternalStore(subscribeDataChanges, getDataRevision);
+  const [focusKey, setFocusKey] = useState(0);
+  const snapshots = useRef(new Map<string, { financial?: ProfitabilityResponse; staff?: FirmReportResponse }>());
+  const refreshed = useRef(0);
   const [result, setResult] = useState<{ key: string; financial?: ProfitabilityResponse; staff?: FirmReportResponse } | null>(null);
-  const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState({ key: '', message: '' });
   const reportView = tab === 'staff' ? 'staff' : 'financial';
-  const reportKey = [reportView, range, range === 'custom' ? from : '', range === 'custom' ? to : '', refreshKey].join(':');
+  const params = { range, from: range === 'custom' ? from : undefined, to: range === 'custom' ? to : undefined };
+  const scopeKey = [profitabilityScopeKey(params), revision, refreshKey].join(':');
+  const reportKey = `${reportView}:${scopeKey}`;
   const customError = range !== 'custom' ? '' : !from || !to ? 'Choose both a From date and a To date to load this report.' : from > to ? 'The From date must be on or before the To date.' : '';
-  const data = result?.key === reportKey ? result.financial : null;
-  const staffReport = result?.key === reportKey ? result.staff : null;
+  const snapshot = snapshots.current.get(scopeKey);
+  const data = snapshot?.financial || (result?.key === reportKey ? result.financial : null);
+  const staffReport = snapshot?.staff || (result?.key === reportKey ? result.staff : null);
   const error = failure.key === reportKey ? failure.message : '';
-  const busy = !customError && !error && (loading || result?.key !== reportKey);
+  const busy = !customError && !error && !(reportView === 'staff' ? staffReport : data);
   const permitted = managementRoles.includes(userRole);
   usePageTitle(tab === 'staff' ? 'Staff profitability' : 'Profitability');
 
   useEffect(() => setTab(initialTab), [initialTab]);
+  useEffect(() => {
+    const refreshOnFocus = () => setFocusKey(value => value + 1);
+    window.addEventListener('focus', refreshOnFocus);
+    return () => window.removeEventListener('focus', refreshOnFocus);
+  }, []);
 
   useEffect(() => {
     if (!permitted || customError) return;
     const controller = new AbortController();
-    setLoading(true);
+    const force = refreshed.current !== refreshKey;
+    refreshed.current = refreshKey;
     setFailure({ key: reportKey, message: '' });
-    const load = async () => {
-      try {
-        const params = { range, from: range === 'custom' ? from : undefined, to: range === 'custom' ? to : undefined };
-        if (reportView === 'staff') {
-          const staff = await getFirmReports({ ...params, basis: 'paymentDate', scope: 'profitability' }, controller.signal);
-          if (!controller.signal.aborted) setResult({ key: reportKey, staff });
-        } else {
-          const financial = await getProfitabilityReport(params, controller.signal);
-          if (!controller.signal.aborted) setResult({ key: reportKey, financial });
-        }
-      } catch (loadError: any) {
-        if (!controller.signal.aborted) setFailure({ key: reportKey, message: loadError?.message || 'Failed to load profitability report.' });
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
+    const receive = (value: { financial?: ProfitabilityResponse; staff?: FirmReportResponse }) => {
+      if (controller.signal.aborted) return;
+      while (snapshots.current.size > 6) snapshots.current.delete(snapshots.current.keys().next().value!);
+      const combined = { ...snapshots.current.get(scopeKey), ...value };
+      snapshots.current.set(scopeKey, combined);
+      setResult({ key: reportKey, ...combined });
     };
-    void load();
+    // Prepare both views once per period. Matter/client/practice share the
+    // financial response; staff no longer discards it or waits for a click.
+    void readFinancialProfitability(params, force).then(financial => receive({ financial })).catch(error => {
+      if (!controller.signal.aborted && reportView === 'financial') setFailure({ key: reportKey, message: error.message });
+    });
+    void readStaffProfitability(params, force).then(staff => receive({ staff })).catch(error => {
+      if (!controller.signal.aborted && reportView === 'staff') setFailure({ key: reportKey, message: error.message });
+    });
     return () => controller.abort();
-  }, [permitted, reportKey, customError]);
+  }, [permitted, reportKey, customError, focusKey]);
 
   if (!permitted) return <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><h1 className="text-xl font-semibold">Access denied</h1><p className="mt-2 text-sm text-slate-500 dark:text-slate-400">You do not have permission to view Billing & Finance profitability.</p></div>;
 
@@ -434,10 +446,6 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
       {customError && <p className="profitability-empty">{customError}</p>}
       {busy && <Skeleton />}
       {!busy && !error && !customError && <>
-        <details className="profitability-date-guide">
-          <summary>How dates affect this report</summary>
-          {tab === 'staff' ? <p>Attributed fees and completed matters use recorded work completion dates. Active and overdue counts use matters entered during this period and their current status; deadlines are checked up to the report end. Existing staff with no activity show zero. Fee bases retain the actual collected value of each completed action.</p> : <p>Contract values and active matter counts use the date the matter was entered. Invoices and expenses use their system entry dates. Collections use the recorded payment date; older invoices without a payment timestamp use the last update date. Refunds use their refund date. Receivables show the unpaid balance up to the report end, including earlier entries. Retainers use their statement, receipt and work dates.</p>}
-        </details>
 
         {tab === 'overview' && firm && data && <div className="space-y-5">
           <section className="profitability-financial-summary rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white">

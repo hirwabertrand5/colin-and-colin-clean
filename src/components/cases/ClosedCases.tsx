@@ -4,6 +4,7 @@ import { Plus, Search, Briefcase, ArrowUpDown } from 'lucide-react';
 import { UserRole } from '../../App';
 import { getAllCases, CaseData } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
+import { isCompletedMatter } from '../../utils/matterLifecycle';
 import {
   formatDueCountdown,
   formatDeadlineDateTime,
@@ -70,13 +71,7 @@ export default function ClosedCases({ userRole }: ClosedCasesProps) {
     try {
       const data = await getAllCases();
       // Consider closed cases as those explicitly marked 'Closed' or where the workflow progress status is 'Completed'.
-      const closed = (data || []).filter((c) => {
-        const status = String(c.status || '').toLowerCase();
-        const isClosedStatus = status === 'closed';
-        const isTemporaryClosed = status === 'temporarily closed';
-        const isWorkflowCompleted = (c.workflowProgress && c.workflowProgress.status) === 'Completed';
-        return !isTemporaryClosed && (isClosedStatus || isWorkflowCompleted);
-      });
+      const closed = (data || []).filter(isCompletedMatter);
       setCases(closed);
     } catch (err: any) {
       setError(err.message || 'Failed to load closed cases');

@@ -1,3 +1,4 @@
+import { isActiveMatter } from '../../utils/matterLifecycle';
 /**
  * Task Management.
  *
@@ -247,7 +248,7 @@ export default function TaskBoard({ userRole }: TaskBoardProps) {
   const overdueCount = matterCards.filter((card) => card.isOverdue).length;
   const pendingApprovalMatters = matterCards.filter((card) => card.pendingApprovals > 0).length;
   const activeMatterCount = matterCards.filter(
-    (card) => card.column !== 'Completed' && !isTemporarilyClosedCase(card.caseData)
+    (card) => card.column !== 'Completed' && isActiveMatter(card.caseData)
   ).length;
 
   const headerSubtitle =

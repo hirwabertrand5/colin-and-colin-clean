@@ -9,7 +9,8 @@ client.interceptors.response.use(response => {
   if (writes(response.config.method)) clearNavigationRequests();
   return response;
 }, error => {
-  if (writes(error.config?.method) || [401, 403].includes(error.response?.status)) clearNavigationRequests();
+  if (writes(error.config?.method)) clearNavigationRequests();
+  else if ([401, 403].includes(error.response?.status)) clearNavigationRequests(false);
   return Promise.reject(error);
 });
 export default client;

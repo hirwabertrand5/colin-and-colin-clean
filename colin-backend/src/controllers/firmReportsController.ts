@@ -14,8 +14,10 @@ import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { computeRange, normalizeReportBasis, resolveOptionalReportRange, isWithinReportRange } from '../utils/reportRange';
 import { computeEarnedFee, buildRoleByName, resolveMemberTpa, baseMemberName } from '../utils/workflowPercentages';
-import { caseMatchesAssigneeCanonical } from '../utils/caseAssignments';
+import { caseMatchesAssigneeCanonical, identityMatches } from '../utils/caseAssignments';
 import { paidInvoiceRangeQuery } from '../utils/invoicePaymentDate';
+import { isActiveMatter, isCompletedMatter } from '../utils/matterLifecycle';
+import { loadStaffProfitabilityInputs } from '../services/staffProfitabilityInputs';
 import {
   allocateCollectedValueAcrossKeyActions,
   calculateCollectedKeyActionEarnings,
@@ -104,7 +106,7 @@ const baseNameFromLabel = (value: unknown) => {
   const withoutCommaSuffix = withoutParenthetical.split(',')[0] || '';
   return withoutCommaSuffix.trim().replace(/\s+/g, ' ');
 };
-const isOpenCase = (c: any) => String(c?.status || '').trim().toLowerCase() !== 'closed';
+const isOpenCase = isActiveMatter;
 
 type PerformanceZone = 'excellent' | 'good' | 'delayed' | 'risk';
 
@@ -388,17 +390,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     // Profitability counts entries in the window. Other management reports
     // retain their current open-workload view.
     const profitabilityScope = req.query.scope === 'profitability';
-    // Staff profitability needs seven small read sets, with no financial or
-    // client-report pipeline. Run every independent read in the same round trip.
-    const staffInputs: any[] | null = profitabilityScope ? await Promise.all([
-      Case.find().select('_id assignedTo caseAssignments assignmentHandoverHistory status caseNo parties clientName budget createdAt updatedAt workflowProgress billingSettings caseManagement workflowTemplateId matterType workflow legalServicePath caseType caseTypeLabel retainerCoveredActionKeys').lean(),
-      Task.find().select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages tpaSnapshots').lean(),
-      User.find({ isActive: { $ne: false }, ...(period ? { createdAt: { $lt: period.toExclusive } } : {}) }).select('name role tpaHistory').lean(),
-      WorkflowTemplate.find().select('_id matterType stages steps').lean(),
-      WorkflowInstance.find().select('caseId templateId status steps').lean(),
-      Invoice.aggregate([{ $match: { status: 'Paid', ...ordinaryInvoiceFilter } }, { $group: { _id: '$caseId', total: { $sum: '$amount' } } }]),
-      retainerEarningsRows(fromDate, toDate),
-    ]) : null;
+    const staffInputs: any[] | null = profitabilityScope
+      ? await loadStaffProfitabilityInputs(period, fromDate, toDate) : null;
 
     const selectedMember = teamMemberId
       ? await User.findById(teamMemberId).select('name role tpaHistory').lean()
@@ -554,6 +547,13 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         .some((slot) => slot === wanted);
     };
     const activeCaseIdsByName = new Map<string, Set<string>>();
+    const activeCaseIdsForMember = (memberName: string) => {
+      const ids = new Set<string>();
+      for (const [identity, cases] of activeCaseIdsByName) {
+        if (identityMatches(identity, memberName)) for (const id of cases) ids.add(id);
+      }
+      return ids;
+    };
     const activeCaseIdsByShortKey = new Map<string, Set<string>>();
     const allOpenCaseIds = new Set<string>();
     for (const c of allCases as any[]) {
@@ -570,21 +570,10 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         activeCaseIdsByName.set(name, current);
       }
     }
-    for (const task of allTaskLinks as any[]) {
-      const caseId = String(task.caseId || '');
-      const caseDoc = caseById.get(caseId);
-      if (!caseId || !caseDoc || !isOpenCase(caseDoc)) continue;
-      if (profitabilityScope && !isWithinReportRange(caseDoc.createdAt, period)) continue;
-      const linkedNames = [task.assignee, task.supervisor].map(normalizeName).filter(Boolean);
-      if (!linkedNames.length) continue;
-      for (const name of linkedNames) {
-        const current = activeCaseIdsByName.get(name) || new Set<string>();
-        current.add(caseId);
-        activeCaseIdsByName.set(name, current);
-      }
-    }
+    // Task links and former handovers grant work/history visibility; only
+    // current matter assignments contribute to a member's active portfolio.
     activeCases = selectedMemberNameNormalized
-      ? (activeCaseIdsByName.get(selectedMemberNameNormalized)?.size || 0)
+      ? activeCaseIdsForMember(selectedMemberNameNormalized).size
       : allOpenCaseIds.size;
 
     const completedTasksByName = new Map<string, number>();
@@ -749,7 +738,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           role: u.role,
           earningRoleLabel: roleShare.label,
           earningSharePercent: roleShare.percent,
-          activeCases: activeCaseIdsByName.get(normalizedName)?.size || 0,
+          activeCases: activeCaseIdsForMember(name).size,
           tasksCompleted: wholeCasesCompleted,
           assistantTasksCompleted: taskCount,
           prospectsCreated: prospectCount,
@@ -792,7 +781,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         durationTotal: 0,
         durationCount: 0,
       };
-      const closed = String(c.status || '').toLowerCase() === 'closed';
+      const closed = isCompletedMatter(c);
       if (closed) {
         current.closed += 1;
         const duration = (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) / (1000 * 60 * 60 * 24);
@@ -800,7 +789,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           current.durationTotal += duration;
           current.durationCount += 1;
         }
-      } else {
+      } else if (isActiveMatter(c)) {
         current.active += 1;
       }
       caseAnalyticsByPath.set(type, current);
@@ -986,7 +975,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       current.partyName = partyName;
       current.matterCount += 1;
       if (isOpenCase(matter)) current.activeMatters += 1;
-      else current.completedMatters += 1;
+      else if (isCompletedMatter(matter)) current.completedMatters += 1;
       current.contractValue += getContractValue(matter);
       current.retainerValue += parseMoneyValue(matter?.billingSettings?.prepaidTotal);
       const matterPracticeArea = selectedPathLabel(matter, workflowTemplateMatterTypeById);
@@ -1040,7 +1029,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       current.partyName = partyName;
       current.matterCount += 1;
       if (String(prospect.stage || '').trim().toLowerCase() === 'non-converted') current.completedMatters += 1;
-      else current.activeMatters += 1;
+      // Prospects remain pipeline records; they are never active matters.
       current.contractValue += parseMoneyValue(prospect?.estimatedFeeValue || prospect?.quotationAmount || 0);
       current.retainerValue += parseMoneyValue(prospect?.depositAmount);
       const prospectPracticeArea = Array.isArray(prospect.legalServicePath) && prospect.legalServicePath.length
@@ -1283,7 +1272,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         { 'assignmentHandoverHistory.nextAssignee': displayName },
       ],
     })
-      .select('_id assignedTo caseAssignments assignmentHandoverHistory caseNo parties budget workflowProgress billingSettings caseManagement matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel retainerCoveredActionKeys')
+      .select('_id status assignedTo caseAssignments assignmentHandoverHistory caseNo parties budget workflowProgress billingSettings caseManagement matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel retainerCoveredActionKeys')
       .lean();
     const memberMatterIds = (memberMatters as any[]).map((matter) => matter._id);
     const [memberWorkflowInstances, memberTasks, paidMemberInvoices] = await Promise.all([
@@ -1383,7 +1372,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
           role,
           earningRoleLabel: roleShare.label,
           earningSharePercent: roleShare.percent,
-          activeCases: memberMatters.length,
+          activeCases: memberMatters.filter(matter => isActiveMatter(matter) && caseMatchesAssigneeCanonical(matter, displayName)).length,
           tasksCompleted: countCompletedWholeCases(rows),
           invoicePaymentsReceived: totalTaskFeeCollected,
           earnedFees: totalFeeEarned,

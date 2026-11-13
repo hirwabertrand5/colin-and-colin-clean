@@ -4,6 +4,7 @@ import { Plus, Search, Briefcase, ArrowUpDown, ShieldQuestion, Loader2 } from 'l
 import { UserRole } from '../../App';
 import { getAllCases, deleteCase, CaseData, requestTakeCase } from '../../services/caseService';
 import usePageTitle from '../../hooks/usePageTitle';
+import { isActiveMatter, isTemporarilyClosedMatter } from '../../utils/matterLifecycle';
 import {
   formatDeadlineDateTime,
   formatDueCountdown,
@@ -107,16 +108,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
     setError('');
     try {
       const data = await getAllCases();
-      // Treat a case as closed if its explicit status is 'Closed' or its workflowProgress.status is 'Completed'.
-      const active = (data || []).filter((c) => {
-        const status = String(c.status || '').toLowerCase();
-        const isClosedStatus = status === 'closed';
-        const isTemporaryClosed = status === 'temporarily closed';
-        const isReturnedToIntake = status === 'returned to intake';
-        const isWorkflowCompleted = (c.workflowProgress && c.workflowProgress.status) === 'Completed';
-        if (isTemporaryClosedMode) return isTemporaryClosed;
-        return !(isClosedStatus || isWorkflowCompleted || isTemporaryClosed || isReturnedToIntake);
-      });
+      const active = (data || []).filter(isTemporaryClosedMode ? isTemporarilyClosedMatter : isActiveMatter);
       setCases(active);
     } catch (err: any) {
       setError(err.message || 'Failed to load cases');
@@ -162,6 +154,7 @@ export default function CaseList({ userRole, mode = 'active' }: CaseListProps) {
   // A matter is "requestable" when its next deadline is at YELLOW urgency (at risk).
   // This mirrors the backend isPublicYellowCase rule and the matter detail page logic.
   const isYellowCase = (c: CaseData) => {
+    if (!isActiveMatter(c)) return false;
     if (String(c.status || '').toLowerCase() === 'closed') return false;
     if (String(c.status || '').toLowerCase() === 'temporarily closed') return false;
     if (String(c.workflowProgress?.status || '').toLowerCase() === 'completed') return false;

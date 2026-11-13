@@ -3,14 +3,25 @@
 const prepared = new Map<string, { promise: Promise<Response>; expires: number; generation: number }>();
 const reading = new Map<string, Promise<Response>>();
 let generation = 0;
+let dataRevision = 0;
 let account = '';
+const dataListeners = new Set<() => void>();
+export const getDataRevision = () => dataRevision;
+export const subscribeDataChanges = (listener: () => void) => {
+  dataListeners.add(listener);
+  return () => { dataListeners.delete(listener); };
+};
 const MAX_PREPARED = 32;
 const PREPARE_MS = 5000;
 
-export function clearNavigationRequests() {
+export function clearNavigationRequests(invalidateData = true) {
   generation++;
   prepared.clear();
   reading.clear();
+  if (invalidateData) {
+    dataRevision++;
+    for (const listener of dataListeners) listener();
+  }
 }
 
 function requestKey(input: RequestInfo | URL, init?: RequestInit) {
@@ -32,7 +43,7 @@ function read(input: RequestInfo | URL, init: RequestInit | undefined, key: stri
     const clear = () => { if (reading.get(key) === pending) reading.delete(key); };
     void pending.then(response => {
       clear();
-      if (response.status === 401 || response.status === 403) clearNavigationRequests();
+      if (response.status === 401 || response.status === 403) clearNavigationRequests(false);
     }, clear);
   }
   return pending;

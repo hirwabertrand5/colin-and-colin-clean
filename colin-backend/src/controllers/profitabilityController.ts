@@ -7,6 +7,7 @@ import Invoice from '../models/invoiceModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import { getContractValue } from '../utils/financialMetrics';
 import { invoicePaymentDate } from '../utils/invoicePaymentDate';
+import { isActiveMatter } from '../utils/matterLifecycle';
 import { resolveOptionalReportRange, isWithinReportRange, reportTimeZone } from '../utils/reportRange';
 
 type MatterFinancials = {
@@ -15,6 +16,7 @@ type MatterFinancials = {
   client: string;
   practiceArea: string;
   status: string;
+  active: boolean;
   contractValue: number;
   billed: number;
   collected: number;
@@ -30,7 +32,6 @@ const day = (value: unknown) =>
   value instanceof Date
     ? value.toISOString().slice(0, 10)
     : String(value || '').slice(0, 10);
-const isOpenMatter = (status: unknown) => !['closed', 'completed', 'cancelled'].includes(normaliseName(status));
 
 const practiceAreaOf = (matter: any) => {
   const path = Array.isArray(matter?.legalServicePath) ? matter.legalServicePath : [];
@@ -101,6 +102,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
         client: clientOf(matter),
         practiceArea: practiceAreaOf(matter),
         status: String(matter.status || 'Open'),
+        active: isActiveMatter(matter),
         contractValue: enteredInRange ? roundMoney(getContractValue(matter)) : 0,
         billed: 0,
         collected: 0,
@@ -169,7 +171,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
       const accountId = `retainer:${p._id}`;
       financialsByMatter.set(accountId, { id: accountId,
         matterNo: `${p.retainerNo} / ${p.month} (agreement)`, client: p.clientName, practiceArea: 'Retainer — firm level',
-        status: 'Agreement', contractValue: 0, billed: p.feeInRange, collected: p.cashAllocation.firmUnutilisedRevenue,
+        status: 'Agreement', active: false, contractValue: 0, billed: p.feeInRange, collected: p.cashAllocation.firmUnutilisedRevenue,
         outstanding: !to || p.dueDate <= to ? p.allocation.outstanding : 0, directMatterCosts: 0 });
     }
     let directMatterCosts = 0;
@@ -216,7 +218,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
         const label = keyOf(matter);
         const current = rows.get(label) || emptyRollup(label);
         if (!matter.id.startsWith('retainer:')) current.matterCount += 1;
-        if (!matter.id.startsWith('retainer:') && isOpenMatter(matter.status)) current.activeMatters += 1;
+        if (enteredMatterIds.has(matter.id) && matter.active) current.activeMatters += 1;
         current.contractValue += matter.contractValue;
         current.billed += matter.billed;
         current.collected += matter.collected;
@@ -245,7 +247,7 @@ export const getProfitabilityReport = async (req: AuthRequest, res: Response) =>
     };
 
     const totalContractValue = matterRows.reduce((sum, row) => sum + row.contractValue, 0);
-    const activeMatters = matterRows.filter((row) => enteredMatterIds.has(row.id) && isOpenMatter(row.status)).length;
+    const activeMatters = matterRows.filter((row) => enteredMatterIds.has(row.id) && row.active).length;
     const grossContribution = recognisedCollectedRevenue - directMatterCosts;
     const totalFirmCosts = directMatterCosts + generalOverheads + retainer.staffTpa;
     const netProfit = recognisedCollectedRevenue - totalFirmCosts;

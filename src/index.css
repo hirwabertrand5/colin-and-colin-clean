@@ -3868,6 +3868,13 @@ html {
   color: #1e293b;
 }
 
+.profitability-loading { display: grid; gap: 16px; min-height: 320px; }
+.profitability-loading > p { margin: 0; font-size: 14px; color: #64748b; }
+.profitability-loading > .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.profitability-loading .animate-pulse { min-height: 96px; border-radius: 12px; background: #e2e8f0; }
+.dark .profitability-loading .animate-pulse { background: #1e293b; }
+.dark .profitability-loading > p { color: #94a3b8; }
+
 .profitability-page-header {
   align-items: flex-start;
   margin-bottom: 0.1rem;

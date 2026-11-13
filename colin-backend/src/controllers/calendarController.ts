@@ -6,6 +6,7 @@ import Case from '../models/caseModel';
 import Task from '../models/taskModel';
 import Prospect from '../models/prospectModel';
 import IndependentTask from '../modules/independentTasks/models/independentTaskModel';
+import { isActiveMatter } from '../utils/matterLifecycle';
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -102,7 +103,7 @@ export const getFirmEvents = async (req: AuthRequest, res: Response) => {
     workflowCaseFilter.status = { $nin: ['Closed', 'Temporarily Closed'] };
     workflowCaseFilter['workflowProgress.status'] = { $ne: 'Completed' };
     const workflowCases = includeMatters
-      ? await Case.find(workflowCaseFilter).select('_id caseNo parties assignedTo workflowProgress')
+      ? (await Case.find(workflowCaseFilter).select('_id caseNo parties status assignedTo workflowProgress')).filter(isActiveMatter)
       : [];
 
     const cases = await Case.find({

@@ -18,6 +18,7 @@ import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import { identityMatches } from '../utils/caseAssignments';
 import { buildRoleByName, resolveMemberTpa, getTpaPercent, normalizeMemberName, baseMemberName } from '../utils/workflowPercentages';
 import { retainerEarningsRows } from '../services/retainerAccountingService';
+import { isActiveMatter } from '../utils/matterLifecycle';
 import {
   isWithinReportRange,
   resolveOptionalReportRange,
@@ -502,9 +503,9 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
 
       const allStepsCompleted =
         steps.length > 0 && steps.every((step: any) => String(step?.status || '').toLowerCase() === 'completed');
-      const outstanding = !completed && !allStepsCompleted;
+      const outstanding = isActiveMatter(matter) && !completed && !allStepsCompleted;
 
-      const matterOverdueSections = completed
+      const matterOverdueSections = completed || !isActiveMatter(matter)
         ? 0
         : steps.filter((step: any) => {
             if (String(step?.status || '').toLowerCase() === 'completed') return false;

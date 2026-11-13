@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { navigationFetch, prepareNavigationRequest, clearNavigationRequests } from '../src/services/navigationRequest.ts';
+import { navigationFetch, prepareNavigationRequest, clearNavigationRequests, getDataRevision, subscribeDataChanges } from '../src/services/navigationRequest.ts';
 
 const native = globalThis.fetch;
 const auth = { headers: { Authorization: 'Bearer account-a' } };
@@ -8,8 +8,10 @@ let version = 1;
 let fail = false;
 let release;
 let delayed = false;
+let forbidden = false;
 globalThis.fetch = async (_url, init) => {
   calls++;
+  if (forbidden) return Response.json({ message: 'Forbidden' }, { status: 403 });
   const captured = version;
   if (init?.method === 'POST') { version++; return Response.json({ saved: true }); }
   if (delayed) { delayed = false; await new Promise(resolve => { release = resolve; }); }
@@ -49,6 +51,18 @@ try {
   const beforeNoStore = calls;
   await navigationFetch('https://api.invalid/fresh', { ...auth, cache: 'no-store' });
   assert.equal(calls, beforeNoStore + 1, 'No-store reads bypass preparation');
+  const revision = getDataRevision();
+  let notifications = 0;
+  const unsubscribe = subscribeDataChanges(() => notifications++);
+  forbidden = true;
+  await navigationFetch('https://api.invalid/unrelated-poll', auth);
+  assert.equal(getDataRevision(), revision, 'A forbidden polling read must not restart every open report');
+  assert.equal(notifications, 0);
+  forbidden = false;
+  await navigationFetch('https://api.invalid/tasks', { ...auth, method: 'POST' });
+  assert(getDataRevision() > revision, 'Successful writes still invalidate report data');
+  assert(notifications > 0);
+  unsubscribe();
   clearNavigationRequests();
   console.log('PASS: speculative reads, concurrent body isolation, fresh repeat reads, write invalidation, late-response races, retries, account separation, and no-store behavior.');
 } finally { globalThis.fetch = native; clearNavigationRequests(); }

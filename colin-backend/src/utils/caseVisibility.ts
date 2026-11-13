@@ -1,4 +1,5 @@
 import { resolveDeadlineDateTime } from './deadlineUtils';
+import { isActiveMatter } from './matterLifecycle';
 
 export type UrgencyColor = 'blue' | 'green' | 'yellow' | 'red' | 'gray';
 
@@ -64,7 +65,7 @@ export const getCaseUrgencyColor = (c: any, now = new Date()): UrgencyColor => {
 
 export const isPublicYellowCase = (c: any, now = new Date()) => {
   const status = String(c?.status || '').trim().toLowerCase();
-  if (!c) return false;
+  if (!isActiveMatter(c)) return false;
   if (status === 'closed' || status === 'temporarily closed') return false;
   if (String(c?.workflowProgress?.status || '').trim().toLowerCase() === 'completed') return false;
   if (String(c?.takeRequestState?.status || '').trim().toLowerCase() === 'claimed') return false;

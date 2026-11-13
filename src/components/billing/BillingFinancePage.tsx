@@ -1,3 +1,4 @@
+import { isActiveMatter } from '../../utils/matterLifecycle';
 import { useEffect, useMemo, useState } from "react";
 import { RetainerPerformancePanel } from './RetainerPerformancePanel';
 import { Link } from "react-router-dom";
@@ -586,7 +587,7 @@ export default function BillingFinancePage({
       ),
     0,
   );
-  const activeMatterCount = filteredCases.length;
+  const activeMatterCount = filteredCases.filter(isActiveMatter).length;
   const billedIssuedInvoices = classificationInvoices.filter(
     (invoice) =>
       invoice.status === "Issued" ||

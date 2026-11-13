@@ -1,4 +1,5 @@
 import { getDashboardSection } from '../../services/dashboardBootstrap';
+import { isActiveMatter, isCompletedMatter } from '../../utils/matterLifecycle';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -146,11 +147,9 @@ const timeAgo = (iso?: string) => {
 };
 
 const normalize = (value?: string) => String(value || '').trim().toLowerCase().replace(/[-_]/g, ' ');
-const isClosedMatter = (matter: CaseData) => normalize(matter.status) === 'closed';
-const isActiveMatter = (matter: CaseData) => !isClosedMatter(matter) && normalize(matter.status) !== 'temporarily closed';
+const isClosedMatter = isCompletedMatter;
 /** Task = whole case: a matter is complete only when the whole workflow is complete. */
-const isMatterCompleted = (matter: CaseData) =>
-  normalize(matter.workflowProgress?.status || '') === 'completed' || isClosedMatter(matter);
+const isMatterCompleted = isCompletedMatter;
 const matterNextDueAt = (matter: CaseData) =>
   resolveDeadlineDateTime(matter.workflowProgress?.currentStepDueAt || matter.workflowProgress?.nextDueAt);
 const getTaskDueAt = (task: TaskData) => resolveDeadlineDateTime(task.dueDate);

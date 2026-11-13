@@ -31,5 +31,6 @@ colin-backend/node_modules/
 colin-backend/dist/
 colin-backend/build/
 colin-backend/.env
+colin-backend/.local-operations/
 colin-backend/uploads/
 colin-backend/.vercel/

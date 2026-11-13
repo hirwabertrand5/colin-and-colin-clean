@@ -9,6 +9,7 @@ import { FirmReportRange, getFirmReports, FirmReportResponse } from '../../servi
 import { resolveDeadlineDateTime } from '../../utils/workflowDeadline';
 import { identityMatches } from '../../utils/caseAssignments';
 import usePageTitle from '../../hooks/usePageTitle';
+import { isActiveMatter, isCompletedMatter } from '../../utils/matterLifecycle';
 import SortableHeader from '../ui/SortableHeader';
 import TableExport from '../ui/TableExport';
 import { SortDir, sortRows } from '../../utils/tableSort';
@@ -66,11 +67,6 @@ const money = (value: number) => `RWF ${Math.round(Number.isFinite(value) ? valu
 const pct = (value: number | null) => value == null || !Number.isFinite(value) ? '-' : `${Math.round(value)}%`;
 const rate = (numerator: number, denominator: number) => denominator > 0 ? (numerator / denominator) * 100 : null;
 
-/** Task = whole case: a case is "closed" when it is operationally closed. */
-const isClosedCase = (c: CaseData) => String(c.status || '').toLowerCase() === 'closed';
-/** Task = whole case: a matter is complete only when the whole workflow is complete. */
-const caseCompleted = (c: CaseData) =>
-  String(c.workflowProgress?.status || '').toLowerCase() === 'completed' || isClosedCase(c);
 /** The assignment identities a member can own on a matter (mirrors caseMatchesAssignee). */
 const caseIdentities = (c: CaseData): string[] =>
   [c.assignedTo, c.caseAssignments?.initiator, c.caseAssignments?.reviewer, c.caseAssignments?.signerApprover]
@@ -230,8 +226,8 @@ export default function PeopleCapacityPage({ view, userRole }: { view: PeopleCap
   const rows = useMemo<StaffRow[]>(() => staff.map((person) => {
     const name = normalize(person.name);
     const personCases = casesForPerson(person.name);
-    const completed = personCases.filter(caseCompleted);
-    const open = personCases.filter((c) => !caseCompleted(c) && !isClosedCase(c));
+    const completed = personCases.filter(isCompletedMatter);
+    const open = personCases.filter(isActiveMatter);
     const overdue = open.filter((c) => {
       const due = caseNextDue(c);
       return Boolean(due && due.getTime() < Date.now());
@@ -252,7 +248,7 @@ export default function PeopleCapacityPage({ view, userRole }: { view: PeopleCap
     return {
       staff: person,
       assigned: personCases.length,
-      active: personCases.filter((c) => !isClosedCase(c)).length,
+      active: personCases.filter(isActiveMatter).length,
       open: open.length,
       completed: completed.length,
       overdue: overdue.length,

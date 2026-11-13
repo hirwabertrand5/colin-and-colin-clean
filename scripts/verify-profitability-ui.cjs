@@ -57,8 +57,20 @@ async function main() {
     await page.getByRole('heading', { name: 'Staff profitability', exact: true }).waitFor();
     await page.getByRole('table').waitFor();
     assert(requests.some(r => r.endpoint.endsWith('/reports/firm') && r.query.includes('scope=profitability')));
-    assert(!requests.some(r => r.endpoint.endsWith('/reports/profitability')), 'Staff tab must not fetch unrelated financial/retainer data');
+    assert.equal(requests.filter(r => r.endpoint.endsWith('/reports/profitability')).length, 1, 'Financial tabs are prepared once alongside staff');
     assert.equal(await page.locator('.profitability-staff-summary .profitability-metric').count(), 4);
+    const readyRequests = requests.filter(r => r.endpoint.includes('/reports/')).length;
+    const switchTimings = [];
+    for (const [tab, heading] of [['Practice area', 'Practice area profitability'], ['Staff profitability', 'Staff performance & revenue attribution'], ['Client', 'Client profitability'], ['Staff profitability', 'Staff performance & revenue attribution'], ['Matter', 'Matter profitability'], ['Practice area', 'Practice area profitability']]) {
+      const started = Date.now();
+      await page.getByRole('button', { name: tab, exact: true }).click();
+      await page.getByRole('heading', { name: heading, exact: true }).waitFor({ timeout: 1000 });
+      switchTimings.push({ tab, ms: Date.now() - started });
+    }
+    assert.equal(requests.filter(r => r.endpoint.includes('/reports/')).length, readyRequests, 'Switching between prepared staff/practice/client/matter tabs must not download them again');
+    assert(switchTimings.every(item => item.ms < 1000));
+    console.table(switchTimings);
+    await page.getByRole('button', { name: 'Staff profitability', exact: true }).click();
     const period = page.getByRole('combobox', { name: 'Reporting period' });
     assert.deepEqual(await period.locator('option').allTextContents(), ['Today', 'Last 7 Days', 'This Month', 'Last Quarter', 'Last Year', 'Year to Date', 'Custom Range']);
     await period.selectOption('daily');
@@ -95,6 +107,11 @@ async function main() {
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.getByRole('table').waitFor();
     assert.match(await page.locator('tbody').innerText(), /RWF 577/);
+    revision = 20;
+    await page.evaluate(() => window.dispatchEvent(new StorageEvent('storage', { key: 'token' })));
+    await page.getByRole('table').waitFor();
+    await page.waitForFunction(() => document.querySelector('tbody')?.textContent.includes('RWF 587'));
+    assert.match(await page.locator('tbody').innerText(), /RWF 587/, 'Data invalidation must reload the current report');
     console.log('PASS: Firm Reports period options, requested API scope, rapid switches, stale response exclusion, custom dates, pagination, search, refresh and error recovery');
 
     const shots = path.join(root, 'build', 'verification'); fs.mkdirSync(shots, { recursive: true });
