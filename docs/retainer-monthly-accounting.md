@@ -8,7 +8,7 @@ Implemented from the requested monthly retainer workflow and the supplied retain
 - **Department summary** sits below the monthly overview. It shows currently linked matter counts alongside the selected month's approved tasks, production, production share, revenue credit and staff TPA, with a total row. Before a statement is prepared, monthly amounts show a dash. Current matter counts and historical production are deliberately labelled separately: unlinking a matter does not erase recorded production or earnings.
 - **Staff earnings by case** groups approved contribution snapshots by user ID. Expand a staff member to see production, task counts, applicable historical rates and accrued TPA for each case and recorded department. Shared task contributions are counted once in total production; each contributor sees their own share. Reversed services are excluded. The page adds existing earned TPA amounts rather than recalculating historic earnings using today's staff rate.
 - CSV exports include departmental totals, individual staff totals, case earnings and the underlying task register.
-- Linked matters use a full-width directory with matter name, department and status. Duplicate fee cards, lifetime invoice/outstanding figures and case profit/loss labels were removed from this monthly page. Matter financial details remain available in the individual matter. Agreement terms, task records, corrections and audit history remain accessible in expandable sections.
+- Workspace overview includes linked matters with department, status, retainer production, received revenue credit, direct expenses, staff earnings and net contribution. Monthly statement entries, corrections and audit history remain in the separate Monthly statements view. Agreement details are always visible above both views.
 
 ## Terminology and implementation review
 
@@ -27,7 +27,7 @@ The earlier implementation exposed subscription/hybrid choices, showed no monthl
 - Following the document, **Individual TPA = Individual monthly production × applicable TPA %**. **Individual monthly production** is the staff member's contribution to approved workflow tasks. It is calculated from the ordinary professional fees of those tasks. **Actual revenue received** is recorded separately.
 - Following PDF section 5, **allocable revenue = min(actual receipts, approved ordinary work value)**. Departments receive this revenue in proportion to their approved production. Any unused receipts stay at firm level. Whole-franc rounding reconciles service, department and receipt allocations.
 - Example: fixed fee/receipt RWF 1,000; Dispute production 1,500; Transaction production 1,800. Actual revenue is 1,000; department credits are 455 and 545; production is 3,300; utilisation is 330%. At TPA rates 5% and 6%, staff accrue 75 and 108. For production of 500 against receipts of 1,000, 500 is allocated and 500 remains unutilised at firm level.
-- Utilisation is approved production divided by monthly fixed fee. Excess production is a management indicator and creates no automatic invoice or additional client debt. Included/excluded scope, extra-charge permission, out-of-scope approval references and the substantial overutilisation threshold are configurable.
+- Utilisation is approved production divided by monthly fixed fee. Excess production creates no automatic invoice or additional client debt. The agreement form records covered services; legacy exclusions, charging controls and threshold settings are no longer exposed in the retainer interface.
 
 ## Duplicate prevention and corrections
 
@@ -53,3 +53,18 @@ The shared retainer performance panel shows service-month statements, received-d
 5. Check **Departmental revenue allocation**, **Individual monthly production**, **Individual TPA**, **Retainer utilisation**, **Excess service value**, and **Unutilised retainer revenue**. Choose **Export Monthly Retainer Statement**, then compare the same dates in **Billing & Margins**, **Staff TPA**, and **Management Reports**. Close the month after review.
 
 Run `npm.cmd run verify:retainers` from `colin-backend`. It uses a disposable local MongoDB replica set and never reads the production MongoDB URI or sends emails. Existing TPA regressions use `npm.cmd run verify:tpa`. Frontend validation uses `npm.cmd run build` and `node scripts/verify-retainer-ui.cjs`.
+## Retainer workspace overview
+
+The agreement overview displays all saved form details: agreement/client in the page heading, status, monthly fee, billing day, term, renewal review, covered services and internal notes. The creation and edit forms no longer expose a retainer-level responsible partner, exclusions, a utilisation threshold, additional-work charging or scope approval settings. Responsibility comes from the teams assigned to linked cases. Legacy stored fields remain compatible with existing records.
+
+Case teams and earned fees lists each linked case's Initiator, Reviewer and Signer/Approver by name, even before any monthly service is recorded. The server batches case workflows, templates, tasks and staff records and uses the shared case earned-fee engine for roles, TPA, timeliness, quality, collected base and earned fee. Handover and delegated contributors remain visible. Missing scores and earned fees remain pending; real zeroes stay zero. Ordinary case earned fees are displayed separately from recorded retainer TPA and do not change retainer accounting totals.
+
+Workspace overview shows cumulative totals across recorded monthly statements. Monthly statements remains a separate view for recording and correcting fees, approved services and receipts. Successful accounting changes refresh the workspace totals and linked-case breakdown without a page reload.
+
+`GET /retainers/:id/cases` returns an `accounting` summary scoped to that retainer, plus each currently linked case's retainer revenue credit, work value, direct expenses after refunds, contributing staff, accrued TPA and net contribution. Reversed receipts and services do not contribute to totals. Historical accounting stays attributed to its original retainer after a case is unlinked; linked-case expenses cover currently linked cases only.
+
+- Department revenue credit is received cash allocated to approved work. Unallocated cash stays at firm level.
+- Department net contribution is revenue credit minus current linked-case expenses and accrued TPA. Services retain their recorded department; expenses use the case's current department.
+- Case net contribution is that retainer's revenue credit minus direct case expenses and that retainer's accrued staff TPA. Standalone invoices are excluded.
+- Firm net after costs and TPA is total retainer receipts minus current linked-case expenses and all accrued retainer TPA, before overheads.
+- Collection percentage uses paid amounts capped separately against each recorded month's fee, so an overpaid month does not hide another month's arrears.

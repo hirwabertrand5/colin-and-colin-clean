@@ -10,19 +10,18 @@ export const retainerMoney = (n: number) => `RWF ${Number(n || 0).toLocaleString
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kigali', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 type Staff = { _id: string; name: string; role: string };
 type InvoiceOption = { _id: string; invoiceNo: string; amount: number };
-export function RetainerMonthlyStatement({ retainer, linkedCases = [] }: { retainer: Retainer; linkedCases?: RetainerCase[] }) {
+export function RetainerMonthlyStatement({ retainer, linkedCases = [], onAccountingChange }: { retainer: Retainer; linkedCases?: RetainerCase[]; onAccountingChange?: () => Promise<void> }) {
   const [periods, setPeriods] = useState<RetainerPeriod[]>([]), [staff, setStaff] = useState<Staff[]>([]);
   const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
   const [period, setPeriod] = useState<RetainerPeriod | null>(null), [month, setMonth] = useState(today().slice(0, 7));
   const [candidates, setCandidates] = useState<WorkCandidate[]>([]), [candidateKey, setCandidateKey] = useState('');
   const [ordinaryFee, setOrdinaryFee] = useState(''), [department, setDepartment] = useState<Department | ''>('');
   const [contributors, setContributors] = useState([{ userId: '', share: 100 }]);
-  const [outOfScope, setOutOfScope] = useState(false), [scopeApproval, setScopeApproval] = useState('');
   const [receipt, setReceipt] = useState({ amount: '', receivedOn: today(), reference: '', sourceInvoiceId: '' });
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [panel, setPanel] = useState<'service' | 'receipt' | null>(null);
   const base = `${retainer._id}/periods`;
-  const refresh = async (selected?: string) => {
+  const refresh = async (selected?: string, changed = false) => {
     const [meta, work] = await Promise.all([
       retainerAccounting<{ periods: RetainerPeriod[]; staff: Staff[]; invoices: InvoiceOption[] }>(base),
       retainerAccounting<WorkCandidate[]>(`${retainer._id}/service-candidates`),
@@ -31,20 +30,20 @@ export function RetainerMonthlyStatement({ retainer, linkedCases = [] }: { retai
     const next = selected || meta.periods.find((item) => item.month === month)?._id;
     if (next) { const data = await retainerAccounting<RetainerPeriod>(`${base}/${next}`); setPeriod(data); setMonth(data.month); }
     else setPeriod(null);
+    if (changed) await onAccountingChange?.();
   };
   const linkedCaseIds = linkedCases.map((matter) => matter._id).join(',');
-  useEffect(() => { setLoading(true); refresh().catch((e) => setError(e.message)).finally(() => setLoading(false)); }, [retainer._id, linkedCaseIds]);
+  useEffect(() => { setLoading(true); refresh().catch((e) => setError(e.message)).finally(() => setLoading(false)); }, [retainer._id, retainer.updatedAt, linkedCaseIds]);
   const run = async (operation: () => Promise<void>) => {
     setBusy(true); setError(''); setNotice('');
     try { await operation(); } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
   const open = (e: FormEvent) => { e.preventDefault(); run(async () => {
-    const opened = await retainerAccounting<RetainerPeriod>(base, { month }); await refresh(opened._id); setNotice('Fixed monthly fee recorded. Record actual revenue received and approved workflow tasks below.');
+    const opened = await retainerAccounting<RetainerPeriod>(base, { month }); await refresh(opened._id, true); setNotice('Fixed monthly fee recorded. Record actual revenue received and approved workflow tasks below.');
   }); };
   const selectMonth = (selectedMonth: string) => {
     setMonth(selectedMonth); setPeriod(null); setPanel(null); setError(''); setNotice('');
     setCandidateKey(''); setOrdinaryFee(''); setDepartment(''); setContributors([{ userId: '', share: 100 }]);
-    setOutOfScope(false); setScopeApproval('');
     const existing = periods.find((item) => item.month === selectedMonth);
     if (existing) run(async () => { setPeriod(await retainerAccounting<RetainerPeriod>(`${base}/${existing._id}`)); });
   };
@@ -52,20 +51,20 @@ export function RetainerMonthlyStatement({ retainer, linkedCases = [] }: { retai
     const work = candidates.find((w) => `${w.caseId}:${w.actionKey}` === candidateKey);
     if (!period || !work) throw new Error('Select approved work performed in this month.');
     await retainerAccounting(`${base}/${period._id}/services`, { caseId: work.caseId, actionKey: work.actionKey,
-      ordinaryFee: Number(ordinaryFee), department, contributors, outOfScope, scopeApproval });
-    setPanel(null); setCandidateKey(''); setOrdinaryFee(''); setContributors([{ userId: '', share: 100 }]); setOutOfScope(false); setScopeApproval('');
-    await refresh(); setNotice('Approved workflow task recorded. Departmental production, departmental revenue allocation and individual TPA have been updated.');
+      ordinaryFee: Number(ordinaryFee), department, contributors });
+    setPanel(null); setCandidateKey(''); setOrdinaryFee(''); setContributors([{ userId: '', share: 100 }]);
+    await refresh(undefined, true); setNotice('Approved workflow task recorded. Departmental production, departmental revenue allocation and individual TPA have been updated.');
   }); };
   const saveReceipt = (e: FormEvent) => { e.preventDefault(); run(async () => {
     if (!period) return;
     await retainerAccounting(`${base}/${period._id}/receipts`, { ...receipt, amount: Number(receipt.amount) });
-    setPanel(null); setReceipt({ amount: '', receivedOn: today(), reference: '', sourceInvoiceId: '' }); await refresh(); setNotice('Actual revenue received recorded once in Billing & Margins and Management Reports.');
+    setPanel(null); setReceipt({ amount: '', receivedOn: today(), reference: '', sourceInvoiceId: '' }); await refresh(undefined, true); setNotice('Actual revenue received recorded once in Billing & Margins and Management Reports.');
   }); };
   const act = (action: string, extra: object = {}) => run(async () => {
     if (!period) return;
     const reason = action === 'close' ? undefined : window.prompt('Reason for this correction (at least five characters):');
     if (action !== 'close' && !reason) return;
-    await retainerAccounting(`${base}/${period._id}/actions/${action}`, { ...extra, reason }); await refresh(); setNotice('Statement updated. The audit history has been retained.');
+    await retainerAccounting(`${base}/${period._id}/actions/${action}`, { ...extra, reason }); await refresh(undefined, true); setNotice('Statement updated. The audit history has been retained.');
   });
   const exportCsv = () => {
     if (!period) return;
@@ -110,13 +109,12 @@ export function RetainerMonthlyStatement({ retainer, linkedCases = [] }: { retai
           <Metric label="Staff TPA earned" value={retainerMoney(a.staffTpa)} detail="Accrued from approved individual production" />
           <Metric label="Unutilised retainer revenue" value={retainerMoney(a.firmUnutilisedRevenue)} detail="Retainer revenue retained at firm level" />
         </div>
-        {(a.excessServiceValue > 0 || a.overpayment > 0) && <div className="ra-warning">{a.excessServiceValue > 0 && <p><strong>{a.substantialOverutilisation ? 'Management review required. ' : 'Overutilised. '}</strong>Excess service value: {retainerMoney(a.excessServiceValue)}. Additional fees depend on the retainer agreement.</p>}{a.overpayment > 0 && <p>Actual revenue received exceeds the fixed monthly fee by {retainerMoney(a.overpayment)}. Review the actual revenue received.</p>}</div>}
+        {a.overpayment > 0 && <div className="ra-warning"><p>Actual revenue received exceeds the fixed monthly fee by {retainerMoney(a.overpayment)}.</p></div>}
         <div className="ra-toolbar ra-entry-toolbar"><h3>Update this month</h3><button type="button" disabled={busy || period.status === 'Closed'} aria-expanded={panel === 'service'} onClick={() => setPanel(panel === 'service' ? null : 'service')}><Plus size={16} /> Record service</button><button type="button" disabled={busy} aria-expanded={panel === 'receipt'} onClick={() => setPanel(panel === 'receipt' ? null : 'receipt')}><Wallet size={16} /> Record actual revenue received</button></div>
         {panel === 'service' && <form className="ra-entry-form" onSubmit={saveService}><h3>Workflow task valuation</h3><p>Complete the matter’s review and approval first. Select the approved action and confirm its ordinary professional fee and assigned/contributing staff.</p>
           <label className="ra-wide">Approved workflow task<select required value={candidateKey} onChange={(e) => { setCandidateKey(e.target.value); const w = candidates.find((c) => `${c.caseId}:${c.actionKey}` === e.target.value); setOrdinaryFee(String(w?.ordinaryFee || '')); setDepartment(w?.department || ''); }}><option value="">{available.length ? 'Select approved workflow tasks completed during this month' : 'No unrecorded approved workflow tasks in this month'}</option>{available.map((w) => <option key={`${w.caseId}:${w.actionKey}`} value={`${w.caseId}:${w.actionKey}`}>{w.matterNo} · {w.title} · {w.performedOn}</option>)}</select></label>
           <label>Ordinary professional fee (RWF)<input required min="1" step="1" type="number" value={ordinaryFee} onChange={(e) => setOrdinaryFee(e.target.value)} /></label><label>Department<select required disabled={!!selectedWork?.department} value={department} onChange={(e) => setDepartment(e.target.value as Department)}><option value="">Select department</option><option>Dispute Resolution</option><option>Transaction & Advisory</option></select>{selectedWork?.department && <small>The department selected for the matter.</small>}</label>
           <fieldset className="ra-wide"><legend>Assigned/contributing staff · total must equal 100%</legend>{contributors.map((c, i) => <div className="ra-contributor" key={i}><label>Staff member<select required value={c.userId} onChange={(e) => setContributors((all) => all.map((v, j) => i === j ? { ...v, userId: e.target.value } : v))}><option value="">Select staff</option>{staff.map((s) => <option key={s._id} value={s._id}>{s.name} · {s.role.replaceAll('_', ' ')}</option>)}</select></label><label>Contribution %<input required type="number" min="0.01" max="100" step="0.01" value={c.share} onChange={(e) => setContributors((all) => all.map((v, j) => i === j ? { ...v, share: Number(e.target.value) } : v))} /></label>{contributors.length > 1 && <button type="button" onClick={() => setContributors((all) => all.filter((_, j) => i !== j))}>Remove</button>}</div>)}<button type="button" onClick={() => setContributors((all) => [...all, { userId: '', share: 0 }])}>Add contributor</button><span className="ra-share-total">Total: {contributors.reduce((n, c) => n + c.share, 0)}%</span></fieldset>
-          <label className="ra-checkbox ra-wide"><input type="checkbox" checked={outOfScope} onChange={(e) => setOutOfScope(e.target.checked)} /> Work outside included scope</label>{outOfScope && <label className="ra-wide">Scope approval reference<input required={retainer.scopeApprovalRequired !== false} value={scopeApproval} onChange={(e) => setScopeApproval(e.target.value)} placeholder="Approver / instruction / approval reference" /></label>}
           <div className="ra-form-actions ra-wide"><button type="button" onClick={() => setPanel(null)}>Cancel</button><button disabled={busy || Math.abs(contributors.reduce((n, c) => n + c.share, 0) - 100) > 0.0001}><CheckCircle2 size={16} /> {busy ? 'Saving…' : 'Record approved workflow task'}</button></div>
         </form>}
         {panel === 'receipt' && <form className="ra-entry-form" onSubmit={saveReceipt}><h3>Record actual revenue received</h3><p>Use the existing paid invoice option if this money is already recorded in the platform.</p><label className="ra-wide">Payment source<select value={receipt.sourceInvoiceId} onChange={(e) => { const inv = invoices.find((i) => i._id === e.target.value); setReceipt((r) => ({ ...r, sourceInvoiceId: e.target.value, amount: inv ? String(inv.amount) : '', reference: inv?.invoiceNo || '' })); }}><option value="">New receipt — not already recorded in a matter invoice</option>{invoices.map((i) => <option value={i._id} key={i._id}>Transfer {i.invoiceNo} · {retainerMoney(i.amount)}</option>)}</select></label><label>Amount (RWF)<input required type="number" min="1" step="1" disabled={!!receipt.sourceInvoiceId} value={receipt.amount} onChange={(e) => setReceipt((r) => ({ ...r, amount: e.target.value }))} /></label><label>Received on<input required type="date" max={today()} disabled={!!receipt.sourceInvoiceId} value={receipt.receivedOn} onChange={(e) => setReceipt((r) => ({ ...r, receivedOn: e.target.value }))} /></label><label className="ra-wide">Bank / payment reference<input required maxLength={180} disabled={!!receipt.sourceInvoiceId} value={receipt.reference} onChange={(e) => setReceipt((r) => ({ ...r, reference: e.target.value }))} /></label><div className="ra-form-actions ra-wide"><button type="button" onClick={() => setPanel(null)}>Cancel</button><button disabled={busy}>{busy ? 'Saving…' : 'Record actual revenue received'}</button></div></form>}

@@ -214,10 +214,10 @@ export async function changePeriod(periodId: string, action: string, input: any,
 
 /** Cash uses receipt date; production/TPA use performed date. Allocations are
  * attribution of that cash and are never added to firm revenue a second time. */
-export async function retainerFinancials(from?: string | null, to?: string | null, asOf?: string | null) {
-  const periods: any[] = await Period.find({}).lean();
+export async function retainerFinancials(from?: string | null, to?: string | null, asOf?: string | null, retainerId?: string) {
+  const periods: any[] = await Period.find(retainerId ? { retainerId: id(retainerId) } : {}).lean();
   const receiptCutoff = asOf || to;
-  const receipts: any[] = await Receipt.find({ voidedAt: { $exists: false }, ...(receiptCutoff ? { receivedOn: { $lte: receiptCutoff } } : {}) }).lean();
+  const receipts: any[] = await Receipt.find({ voidedAt: { $exists: false }, ...(retainerId ? { retainerId } : {}), ...(receiptCutoff ? { receivedOn: { $lte: receiptCutoff } } : {}) }).lean();
   const inside = (day: string) => (!from || day >= from) && (!to || day <= to);
   const statements = periods.map((period) => {
     const payments = receipts.filter((r) => String(r.periodId) === String(period._id));

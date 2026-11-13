@@ -26,7 +26,6 @@ const emptyForm = (): RetainerPayload => ({
   monthlyFee: 0,
   billingDay: 1,
   scope: '',
-  responsiblePartner: '',
   notes: '',
 });
 
@@ -41,12 +40,7 @@ const toForm = (retainer: Retainer): RetainerPayload => ({
   monthlyFee: retainer.monthlyFee || 0,
   billingDay: retainer.billingDay || 1,
   scope: retainer.scope || '',
-  responsiblePartner: retainer.responsiblePartner || '',
   notes: retainer.notes || '',
-  excludedServices: retainer.excludedServices || '',
-  additionalWorkChargeable: retainer.additionalWorkChargeable || false,
-  scopeApprovalRequired: retainer.scopeApprovalRequired !== false,
-  utilisationThreshold: retainer.utilisationThreshold || 150,
 });
 
 function StatusBadge({ status }: { status: string }) {
@@ -211,7 +205,7 @@ export default function RetainerManagement() {
         </section>
       </div>
 
-      {showForm && <RetainerFormDialog form={form} setForm={setForm} editing={Boolean(editingId)} saving={saving} onClose={closeForm} onSubmit={saveRetainer} />}
+      {showForm && <RetainerFormDialog form={form} setForm={setForm} editing={Boolean(editingId)} saving={saving} error={error} onClose={closeForm} onSubmit={saveRetainer} />}
     </>
   );
 }

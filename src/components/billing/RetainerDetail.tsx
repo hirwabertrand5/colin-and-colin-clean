@@ -10,11 +10,15 @@ import {
   RetainerActivity,
   RetainerCase,
   RetainerPayload,
+  RetainerWorkspaceAccounting,
   setCaseRetainer,
   updateRetainer,
 } from '../../services/retainerService';
 import { RetainerFormDialog } from './RetainerFormDialog';
 import { RetainerMonthlyStatement } from './RetainerMonthlyStatement';
+import { RetainerAgreementOverview } from './RetainerAgreementOverview';
+import { RetainerWorkspaceSummary } from './RetainerWorkspaceSummary';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
 const money = (value?: number) => `RWF ${Number(value || 0).toLocaleString()}`;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -30,12 +34,7 @@ const toForm = (retainer: Retainer): RetainerPayload => ({
   monthlyFee: retainer.monthlyFee || 0,
   billingDay: retainer.billingDay || 1,
   scope: retainer.scope || '',
-  responsiblePartner: retainer.responsiblePartner || '',
   notes: retainer.notes || '',
-  excludedServices: retainer.excludedServices || '',
-  additionalWorkChargeable: retainer.additionalWorkChargeable || false,
-  scopeApprovalRequired: retainer.scopeApprovalRequired !== false,
-  utilisationThreshold: retainer.utilisationThreshold || 150,
 });
 
 const activityLabel = (type: RetainerActivity['type']) => ({
@@ -58,6 +57,7 @@ export default function RetainerDetail() {
   const { retainerId = '' } = useParams();
   const [retainer, setRetainer] = useState<Retainer | null>(null);
   const [linkedCases, setLinkedCases] = useState<RetainerCase[]>([]);
+  const [accounting, setAccounting] = useState<RetainerWorkspaceAccounting | null>(null);
   const [activity, setActivity] = useState<RetainerActivity[]>([]);
   const [allCases, setAllCases] = useState<CaseData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,6 +83,7 @@ export default function RetainerDetail() {
       ]);
       setRetainer(retainerData);
       setLinkedCases(caseData.cases);
+      setAccounting(caseData.accounting);
       setActivity(activityData);
       setAllCases(cases);
     } catch (loadError: any) {
@@ -96,6 +97,16 @@ export default function RetainerDetail() {
   useEffect(() => {
     load();
   }, [retainerId]);
+
+  const refreshAccounting = async () => {
+    try {
+      const data = await getRetainerCases(retainerId);
+      setLinkedCases(data.cases);
+      setAccounting(data.accounting);
+    } catch (refreshError: any) {
+      setError(`The entry was saved, but the workspace could not refresh: ${refreshError.message}. Refresh the page to reload totals.`);
+    }
+  };
 
   const linkableCases = useMemo(() => {
     const query = caseSearch.trim().toLowerCase();
@@ -180,28 +191,39 @@ export default function RetainerDetail() {
 
         {(error || notice) && <div role={error ? 'alert' : 'status'} className={`retainer-page-alert ${error ? 'is-error' : 'is-success'}`}>{error || notice}</div>}
 
-        <RetainerMonthlyStatement retainer={retainer} linkedCases={linkedCases} />
+        <RetainerAgreementOverview retainer={retainer} />
+
+        <Tabs defaultValue="overview" className="ra-workspace-tabs">
+          <TabsList aria-label="Retainer workspace views"><TabsTrigger value="overview">Workspace overview</TabsTrigger><TabsTrigger value="monthly">Monthly statements</TabsTrigger></TabsList>
+          <TabsContent value="overview" forceMount>
+        {accounting && <RetainerWorkspaceSummary accounting={accounting} linkedCases={linkedCases} />}
 
         <section className="retainer-accounting retainer-linked-matters" aria-label="Linked matters">
-          <div className="ra-section-heading"><div><h2>Linked matters <span className="ra-section-count">{linkedCases.length}</span></h2><p>Matters covered by this agreement. Monthly work and earnings appear in the statement above.</p></div><button type="button" aria-expanded={showLinkForm} aria-controls="retainer-link-form" onClick={() => setShowLinkForm((current) => !current)}><Plus size={16} /> {showLinkForm ? 'Hide matter search' : 'Link a matter'}</button></div>
+          <div className="ra-section-heading"><div><h2>Linked matters <span className="ra-section-count">{linkedCases.length}</span></h2><p>All recorded retainer work and revenue, with direct expenses and staff earnings for each case.</p></div><button type="button" aria-expanded={showLinkForm} aria-controls="retainer-link-form" onClick={() => setShowLinkForm((current) => !current)}><Plus size={16} /> {showLinkForm ? 'Hide matter search' : 'Link a matter'}</button></div>
           {showLinkForm && <form id="retainer-link-form" className="ra-entry-form" onSubmit={linkCase}>
             <label className="ra-wide">Find a matter<input value={caseSearch} onChange={(event) => { setCaseSearch(event.target.value); setCaseToLink(''); }} placeholder="Search by case number or party name" autoFocus /></label>
             {caseSearch.trim().length < 2 ? <p>Type at least two characters to search available matters.</p> : <label className="ra-wide">Matching matters<select required value={caseToLink} onChange={(event) => setCaseToLink(event.target.value)}><option value="">{linkableCases.length ? 'Select a matter to link' : 'No available matching matters'}</option>{linkableCases.map((caseData) => <option key={caseData._id} value={caseData._id}>{caseData.caseNo && caseData.caseNo !== 'N/A' ? `${caseData.caseNo} — ` : ''}{caseData.parties}</option>)}</select></label>}
             <div className="ra-form-actions ra-wide"><button type="button" disabled={saving} onClick={() => setShowLinkForm(false)}>Cancel</button><button disabled={saving || !caseToLink}>{saving ? 'Linking…' : 'Link matter'}</button></div>
           </form>}
-          {linkedCases.length === 0 ? <div className="ra-summary-empty">No matters linked yet. Use “Link a matter” to add the cases covered by this agreement.</div> : <div className="ra-table-wrap"><table><thead><tr><th scope="col">Matter</th><th scope="col">Department</th><th scope="col">Status</th><th scope="col"><span className="ra-sr-only">Actions</span></th></tr></thead><tbody>{linkedCases.map((caseData) => <tr key={caseData._id}><td><Link to={`/cases/${caseData._id}`} className="ra-matter-name">{caseData.parties || 'View matter'}</Link>{caseData.caseNo && caseData.caseNo !== 'N/A' && <small>{caseData.caseNo}</small>}</td><td>{caseData.department || 'Department required'}</td><td><span className="ra-status">{caseData.status}</span></td><td className="ra-number"><button type="button" aria-label={`Unlink ${caseData.parties || caseData.caseNo}`} onClick={() => unlinkCase(caseData)} disabled={saving}>Unlink</button></td></tr>)}</tbody></table></div>}
+          {linkedCases.length === 0 ? <div className="ra-summary-empty">No matters linked yet. Use “Link a matter” to add the cases covered by this agreement.</div> : <div className="ra-table-wrap"><table className="ra-linked-case-financials">
+            <caption className="ra-sr-only">Linked case financial summary across all recorded months</caption>
+            <thead><tr><th scope="col">Matter / department</th><th scope="col">Status</th><th scope="col" className="ra-number">Work value</th><th scope="col" className="ra-number">Revenue credit</th><th scope="col" className="ra-number">Case expenses</th><th scope="col">Staff / TPA earned</th><th scope="col" className="ra-number">Net contribution</th><th scope="col"><span className="ra-sr-only">Actions</span></th></tr></thead>
+            <tbody>{linkedCases.map((caseData) => <tr key={caseData._id}>
+              <td><Link to={`/cases/${caseData._id}`} className="ra-matter-name">{caseData.parties || 'View matter'}</Link>{caseData.caseNo && caseData.caseNo !== 'N/A' && <small>{caseData.caseNo}</small>}<small>{caseData.department || 'Department required'} · {caseData.servicesCount || 0} approved tasks</small></td>
+              <td><span className="ra-status">{caseData.status}</span></td>
+              <td className="ra-number">{money(caseData.ordinaryWorkValue)}</td><td className="ra-number">{money(caseData.retainerRevenue)}</td><td className="ra-number">{money(caseData.directMatterCosts)}</td>
+              <td>{caseData.contributors?.length ? <><strong>{money(caseData.staffTpa)}</strong>{caseData.contributors.map((member) => <small key={member.userId}>{member.name} · {money(member.earnedTpa)}</small>)}</> : <small>No earnings recorded</small>}</td>
+              <td className="ra-number">{money(caseData.netContribution)}</td><td className="ra-number"><button type="button" aria-label={`Unlink ${caseData.parties || caseData.caseNo}`} onClick={() => unlinkCase(caseData)} disabled={saving}>Unlink</button></td>
+            </tr>)}</tbody>
+            <tfoot><tr><th scope="row" colSpan={2}>Linked cases total</th><td className="ra-number">{money(linkedCases.reduce((total, matter) => total + (matter.ordinaryWorkValue || 0), 0))}</td><td className="ra-number">{money(linkedCases.reduce((total, matter) => total + (matter.retainerRevenue || 0), 0))}</td><td className="ra-number">{money(linkedCases.reduce((total, matter) => total + (matter.directMatterCosts || 0), 0))}</td><td className="ra-number">{money(linkedCases.reduce((total, matter) => total + (matter.staffTpa || 0), 0))}</td><td className="ra-number">{money(linkedCases.reduce((total, matter) => total + (matter.netContribution || 0), 0))}</td><td /></tr></tfoot>
+          </table></div>}
+          <p className="ra-table-note">Net contribution = retainer revenue credit − case expenses − staff TPA. Standalone case invoices are excluded from these retainer totals.</p>
         </section>
+          </TabsContent>
+          <TabsContent value="monthly" forceMount><RetainerMonthlyStatement retainer={retainer} linkedCases={linkedCases} onAccountingChange={refreshAccounting} /></TabsContent>
+        </Tabs>
 
-        <section className="retainer-accounting retainer-supporting-details" aria-label="Agreement details and activity">
-          <details className="ra-register"><summary>Agreement details</summary><dl className="ra-agreement-grid">
-            <div><dt>Services covered</dt><dd>{retainer.scope || 'Not specified'}</dd></div>
-            <div><dt>Services excluded</dt><dd>{retainer.excludedServices || 'Not specified'}</dd></div>
-            <div><dt>Agreement term</dt><dd>{retainer.startDate.slice(0, 10)}{retainer.endDate ? ` to ${retainer.endDate.slice(0, 10)}` : ' · Ongoing'}</dd></div>
-            <div><dt>Responsible partner</dt><dd>{retainer.responsiblePartner || 'Not assigned'}</dd></div>
-            <div><dt>Additional work</dt><dd>{retainer.additionalWorkChargeable ? 'Separately chargeable under the agreement' : 'No separate charges under the agreement'}<small>Excess work does not create invoices automatically.</small></dd></div>
-            <div><dt>Scope controls</dt><dd>{retainer.scopeApprovalRequired !== false ? 'Approval required for work outside scope' : 'No scope approval required'}<small>Management alert above {retainer.utilisationThreshold || 150}% utilisation.</small></dd></div>
-            {retainer.notes && <div><dt>Notes</dt><dd>{retainer.notes}</dd></div>}
-          </dl></details>
+        <section className="retainer-accounting retainer-supporting-details" aria-label="Retainer activity">
           <details className="ra-register"><summary>Recent activity <span>{activity.length} entries</span></summary>
             {activity.length === 0 ? <p>No activity has been recorded yet.</p> : <div className="retainer-activity-list">{activity.slice(0, 8).map((item) => <div key={item._id}><strong>{activityLabel(item.type)}</strong><span>{new Date(item.createdAt).toLocaleDateString()}</span><b>{item.amount ? money(item.amount) : '—'}</b><small>{item.note || (item.case ? `${item.case.caseNo} — ${item.case.parties}` : 'Retainer agreement updated.')}</small></div>)}</div>}
           </details>
@@ -211,7 +233,7 @@ export default function RetainerDetail() {
       {showForm && form && <RetainerFormDialog form={form} setForm={(updater) => setForm((current) => {
         if (!current) return current;
         return typeof updater === 'function' ? updater(current) : updater;
-      })} editing saving={saving} onClose={() => { if (!saving) setShowForm(false); }} onSubmit={saveEdit} />}
+      })} editing saving={saving} error={error} onClose={() => { if (!saving) setShowForm(false); }} onSubmit={saveEdit} />}
     </>
   );
 }

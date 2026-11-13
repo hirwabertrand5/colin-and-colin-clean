@@ -13,6 +13,7 @@ import Receipt from '../models/retainerReceiptModel';
 import Case from '../models/caseModel';
 import User from '../models/userModel';
 import Invoice from '../models/invoiceModel';
+import PettyCashExpense from '../models/pettyCashExpenseModel';
 import Template from '../models/workflowTemplateModel';
 import Workflow from '../models/workflowInstanceModel';
 import Ledger from '../models/staffEarningsLedgerModel';
@@ -24,6 +25,7 @@ import { getStaffEarningsReport } from '../controllers/staffEarningsController';
 import { getFirmReports, getMyProductivityEarningsReport } from '../controllers/firmReportsController';
 import { getStaffDashboardSummary } from '../controllers/dashboardController';
 import { updateCase, deleteCase } from '../controllers/caseController';
+import { getCaseEarnedFees } from '../controllers/workflowController';
 import { calculateCollectedKeyActionEarnings } from '../utils/keyActionEarnings';
 import { allocateRetainer, apportion } from '../utils/retainerAllocation';
 
@@ -46,6 +48,7 @@ async function main() {
     app.get('/mine', authenticate, getMyProductivityEarningsReport);
     app.get('/staff-dashboard', authenticate, getStaffDashboardSummary);
     app.put('/cases/:id', authenticate, updateCase); app.delete('/cases/:id', authenticate, deleteCase);
+    app.get('/cases/:caseId/earned-fees', authenticate, getCaseEarnedFees);
     server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
     const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     const request = async (url: string, body?: any, actor = manager, method?: string) => {
@@ -81,13 +84,20 @@ async function main() {
       const department = number === 2 ? { id: 'transactions_advisory', label: 'B. Transactions & Advisory' } : { id: 'dispute_resolution', label: 'A. Dispute Resolution' };
       const matter = await Case.create({ caseNo: `RET-M${number}`, parties: 'Client Ltd', caseType: 'Transactional Cases', status: 'In Progress', budget: String(fee),
         legalServicePath: [department],
-        assignedTo: alice.name, caseAssignments: { initiator: alice.name }, workflowTemplateId: template._id, matterType: template.matterType,
+        assignedTo: alice.name, caseAssignments: { initiator: alice.name, reviewer: bob.name, signerApprover: manager.name }, workflowTemplateId: template._id, matterType: template.matterType,
         billingArrangement: 'retainer', retainerId: agreement._id });
       const workflow = await Workflow.create({ caseId: matter._id, templateId: template._id, steps: [{ stepKey: 'service', title: `Service ${number}`, stageKey: 'delivery', order: 1, percentage: 100, status: 'Not Started', actions: [], outputs: [] }] });
       await Workflow.collection.updateOne({ _id: workflow._id }, { $set: { 'steps.0.status': status, 'steps.0.doneAt': new Date('2020-01-15T10:00:00Z'), 'steps.0.completedAt': new Date('2020-01-16T10:00:00Z') } });
       return matter;
     };
     const m1 = await fixture(1, 1500), m2 = await fixture(2, 1800), pending = await fixture(3, 100, 'Awaiting Approval');
+    const assignedTeams = await ok(`/retainers/${agreement._id}/cases`);
+    const pendingTeam = assignedTeams.cases.find((matter: any) => matter._id === String(pending._id)).team;
+    assert.deepEqual(pendingTeam.map((member: any) => [member.role, member.name, member.tpaPercent]), [['Initiator', 'Alice', 5], ['Reviewer', 'Bob', 6], ['Signer/Approver', 'Manager', 10]]);
+    assert(pendingTeam.every((member: any) => member.earnedFee == null && member.timelinessScore == null && member.qualityScore == null));
+    const pendingCaseFees = await ok(`/cases/${pending._id}/earned-fees`);
+    assert.deepEqual(pendingTeam, pendingCaseFees.team);
+    pass('Linked case teams show real assigned names, roles and TPA before retainer services, matching the case workspace');
     await Workflow.collection.updateOne({ caseId: m1._id }, { $set: { 'steps.0.submittedAt': new Date('2020-02-02T10:00:00Z'), 'steps.0.completedAt': new Date('2020-02-03T10:00:00Z') } });
     const delayedApproval = await ok(`/retainers/${agreement._id}/service-candidates`);
     assert.equal(delayedApproval.find((w: any) => w.caseId === String(m1._id)).performedOn, '2020-01-15');
@@ -207,6 +217,40 @@ async function main() {
     assert.equal(arrears.ageingReport.reduce((n: number, x: any) => n + x.amount, 0), 1000);
     assert.equal(arrears.clientProfitability.reduce((n: number, x: any) => n + x.outstanding, 0), 1000);
     pass('Historical retainer arrears remain visible in later periods without duplicate billing');
+    await PettyCashExpense.create([
+      { fundId: new mongoose.Types.ObjectId(), date: '2020-01-15', title: 'Client filing cost', amount: 300, refundAmount: 50, chargeType: 'client', caseId: m1._id, createdByName: manager.name },
+      { fundId: new mongoose.Types.ObjectId(), date: '2020-01-15', title: 'Fully refunded client cost', amount: 80, refundAmount: 100, chargeType: 'client', caseId: m2._id, createdByName: manager.name },
+      { fundId: new mongoose.Types.ObjectId(), date: '2020-01-15', title: 'Firm overhead', amount: 100, chargeType: 'internal', caseId: m1._id, createdByName: manager.name },
+    ]);
+    const otherPeriod = await ok(`/retainers/${createdAgreement.data._id}/periods`, { month: '2020-01' });
+    await ok(`/retainers/${createdAgreement.data._id}/periods/${otherPeriod._id}/receipts`, { amount: 750, receivedOn: '2020-01-10', reference: 'OTHER-RETAINER' });
+    let workspace = await ok(`/retainers/${agreement._id}/cases`);
+    assert.equal(workspace.accounting.recordedMonths, 2);
+    assert.equal(workspace.accounting.fixedFees, 2200);
+    assert.equal(workspace.accounting.actualReceived, 1600);
+    assert.equal(workspace.accounting.outstanding, 1000);
+    assert.equal(workspace.accounting.overpayment, 400);
+    assert.equal(workspace.accounting.workValue, 3300);
+    assert.equal(workspace.accounting.staffTpa, 192);
+    const caseFees = await ok(`/cases/${m1._id}/earned-fees`);
+    assert.deepEqual(workspace.cases.find((matter: any) => matter._id === String(m1._id)).team, caseFees.team);
+    assert.equal(workspace.accounting.services.length, 2);
+    assert.equal(workspace.accounting.departments.reduce((sum: number, d: any) => sum + d.allocatedRevenue, 0), 1600);
+    const firstCase = workspace.cases.find((matter: any) => matter._id === String(m1._id));
+    assert.equal(firstCase.directMatterCosts, 250);
+    assert.equal(firstCase.retainerRevenue, 727);
+    assert.equal(firstCase.staffTpa, 84);
+    assert.equal(firstCase.netContribution, 393);
+    assert.deepEqual(firstCase.contributors.map((member: any) => [member.name, member.earnedTpa]), [['Bob', 54], ['Alice', 30]]);
+    assert.equal(workspace.cases.find((matter: any) => matter._id === String(m2._id)).directMatterCosts, 0);
+    pass('Workspace totals reconcile multiple months, shared staff earnings, refunds and reversals, and exclude other retainers');
+    await ok(`/retainers/cases/${m1._id}/link`, {});
+    workspace = await ok(`/retainers/${agreement._id}/cases`);
+    assert(!workspace.cases.some((matter: any) => matter._id === String(m1._id)));
+    assert.equal(workspace.accounting.workValue, 3300);
+    assert.equal(workspace.accounting.staffTpa, 192);
+    assert.equal(workspace.accounting.actualReceived, 1600);
+    pass('Unlinking a case preserves recorded retainer revenue and staff earnings');
     console.log(`Retainer accounting verification: ${passed} checks passed.`);
   } finally {
     if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));

@@ -48,6 +48,27 @@
 .ra-agreement-grid dt { color: var(--ra-muted); font-size: 11px; margin-bottom: 6px; }
 .ra-agreement-grid dd { margin: 0; color: var(--ra-ink); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ra-agreement-grid small { display: block; color: var(--ra-muted); font-size: 11px; }
+.ra-agreement-overview .ra-agreement-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ra-agreement-wide { grid-column: 1 / -1; }
+.ra-case-team { margin-top: 18px; padding: 18px; border: 1px solid var(--ra-line); border-radius: 12px; min-width: 0; }
+.ra-case-team h4 { margin: 0 0 5px; font-size: 14px; font-weight: 650; }
+.ra-case-team h4 a { color: var(--ra-ink); }
+.ra-case-retainer-earnings { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; font-size: 12px; line-height: 1.6; }
+.ra-case-retainer-earnings span { color: var(--ra-muted); }
+.ra-workspace-tabs { min-width: 0; }
+.ra-workspace-tabs > [data-slot=tabs-content][data-state=inactive] { display: none; }
+.ra-workspace-tabs > [data-slot=tabs-content] { min-width: 0; }
+.ra-workspace-tabs > [data-slot=tabs-list] { width: fit-content; max-width: 100%; height: auto; padding: 4px; background: #e8edf3; border-radius: 10px; }
+.ra-workspace-tabs > [data-slot=tabs-list] button { padding: 10px 16px; border-radius: 7px; font-size: 13px; color: #475569; }
+.ra-workspace-tabs > [data-slot=tabs-list] button[data-state=active] { background: #fff; color: #172c47; box-shadow: 0 1px 4px #172c4712; }
+.dark .ra-workspace-tabs > [data-slot=tabs-list] { background: #1e293b; }
+.dark .ra-workspace-tabs > [data-slot=tabs-list] button { color: #94a3b8; }
+.dark .ra-workspace-tabs > [data-slot=tabs-list] button[data-state=active] { background: #334155; color: #f8fafc; }
+.ra-workspace-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.retainer-accounting .ra-linked-case-financials { min-width: 1100px; }
+.retainer-linked-matters .ra-linked-case-financials td:first-child { width: 25%; min-width: 220px; }
+.ra-linked-case-financials td:nth-child(6) { min-width: 190px; }
+@media (max-width: 1100px) { .ra-workspace-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .retainer-supporting-details .ra-register:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
 .retainer-supporting-details .ra-register:last-child { padding-bottom: 0; }
 .retainer-linked-matters .ra-matter-name { font-weight: 600; overflow-wrap: anywhere; }
@@ -60,7 +81,7 @@
 @media (max-width: 700px) {
   .retainer-detail-page .retainer-accounting { padding: 16px; }
   .ra-section-heading { align-items: flex-start; flex-wrap: wrap; }
-  .ra-agreement-grid { grid-template-columns: minmax(0, 1fr); }
+  .ra-agreement-grid, .ra-agreement-overview .ra-agreement-grid { grid-template-columns: minmax(0, 1fr); }
   .ra-month-picker { flex-wrap: wrap; }
   .ra-month-picker button { white-space: normal; }
   .ra-entry-toolbar h3 { flex-basis: 100%; }

@@ -7,11 +7,17 @@ import PettyCashExpense from '../models/pettyCashExpenseModel';
 import Retainer from '../models/retainerModel';
 import RetainerActivity from '../models/retainerActivityModel';
 import RetainerPeriod from '../models/retainerPeriodModel';
+import Task from '../models/taskModel';
+import User from '../models/userModel';
+import Workflow from '../models/workflowInstanceModel';
+import Template from '../models/workflowTemplateModel';
 import { buildYearlySequence } from '../utils/counter';
 import { getContractValue, getDirectMatterCost } from '../utils/financialMetrics';
 import { linkCaseToRetainer, retainerIsUsable } from '../services/retainerService';
 import { ordinaryInvoiceFilter, retainerFinancials } from '../services/retainerAccountingService';
-import { retainerDepartmentOf } from '../utils/retainerAllocation';
+import { DEPARTMENTS, decimal, retainerDepartmentOf } from '../utils/retainerAllocation';
+import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
+import { buildRoleByName } from '../utils/workflowPercentages';
 
 const MANAGER_ROLES = new Set([
   'managing_director',
@@ -297,12 +303,12 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
     const retainerId = text(req.params.id);
     if (!mongoose.Types.ObjectId.isValid(retainerId)) return res.status(400).json({ message: 'Invalid retainer id.' });
     const cases = await Case.find({ retainerId: new mongoose.Types.ObjectId(retainerId) })
-      .select('caseNo parties status priority budget workflowProgress legalServicePath caseType createdAt updatedAt')
+      .select('caseNo parties status priority budget workflowProgress legalServicePath caseType createdAt updatedAt caseAssignments assignedTo assignmentHandoverHistory caseManagement retainerCoveredActionKeys workflowTemplateId')
       .sort({ updatedAt: -1 })
       .lean();
     const caseIds = cases.map((item: any) => item._id);
 
-    const [invoiceTotals, expenses] = await Promise.all([
+    const [invoiceTotals, expenses, retainerFinancialData, workflows, tasks, users] = await Promise.all([
       caseIds.length
         ? Invoice.aggregate([
             { $match: { caseId: { $in: caseIds }, ...ordinaryInvoiceFilter } },
@@ -318,14 +324,31 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
       caseIds.length
         ? PettyCashExpense.find({ caseId: { $in: caseIds }, chargeType: 'client' }).select('caseId amount refundAmount').lean()
         : [],
+      retainerFinancials(null, null, null, retainerId),
+      caseIds.length ? Workflow.find({ caseId: { $in: caseIds } }).lean() : [],
+      caseIds.length ? Task.find({ caseId: { $in: caseIds } }).lean() : [],
+      caseIds.length ? User.find({}).select('name role tpaHistory').lean() : [],
     ]);
+    const templates = workflows.length ? await Template.find({ _id: { $in: workflows.map((workflow) => workflow.templateId).filter(Boolean) } }).lean() : [];
+    const workflowByCase = new Map(workflows.map((workflow) => [String(workflow.caseId), workflow]));
+    const templateById = new Map(templates.map((template) => [String(template._id), template]));
+    const tasksByCase = new Map<string, any[]>();
+    for (const task of tasks) {
+      const key = String(task.caseId);
+      const list = tasksByCase.get(key) || [];
+      list.push(task); tasksByCase.set(key, list);
+    }
+    const roleByName = buildRoleByName(users);
     const invoiceByCase = new Map(invoiceTotals.map((item: any) => [String(item._id), item]));
-    const retainerFinancialData = await retainerFinancials();
     const revenueByCase = new Map<string, number>();
     const productionByCase = new Map<string, number>();
-    for (const p of retainerFinancialData.statements.filter((p) => String(p.retainerId) === retainerId)) for (const service of p.allocation.services) {
+    const services = retainerFinancialData.statements.flatMap((p) => p.allocation.services);
+    const servicesByCase = new Map<string, any[]>();
+    for (const service of services) {
       const key = String(service.caseId); revenueByCase.set(key, (revenueByCase.get(key) || 0) + service.allocatedRevenue);
       productionByCase.set(key, (productionByCase.get(key) || 0) + service.ordinaryFee);
+      const work = servicesByCase.get(key) || [];
+      work.push(service); servicesByCase.set(key, work);
     }
     const costsByCase = new Map<string, number>();
     for (const expense of expenses as any[]) {
@@ -340,10 +363,36 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
       const totalCollected = amount(invoice?.totalCollected) + (revenueByCase.get(String(caseItem._id)) || 0);
       const directMatterCosts = amount(costsByCase.get(String(caseItem._id)));
       const grossProfit = totalCollected - directMatterCosts;
+      const work = servicesByCase.get(String(caseItem._id)) || [];
+      const contributors = new Map<string, { userId: string; name: string; earnedTpa: number }>();
+      for (const service of work) for (const member of service.contributors) {
+        const key = String(member.userId);
+        const prior = contributors.get(key);
+        contributors.set(key, { userId: key, name: member.name, earnedTpa: decimal((prior?.earnedTpa || 0) + member.earnedTpa) });
+      }
+      const staffTpa = decimal([...contributors.values()].reduce((total, member) => total + member.earnedTpa, 0));
+      const retainerRevenue = revenueByCase.get(String(caseItem._id)) || 0;
+      const workflow = workflowByCase.get(String(caseItem._id));
+      const template = workflow ? templateById.get(String(workflow.templateId)) : null;
+      const earnedFees = computeCaseEarnedFees({
+        caseDoc: caseItem,
+        template,
+        workflowInstance: { ...(workflow || {}), steps: normalizeEffectiveWorkflowSteps(workflow, template) },
+        tasks: tasksByCase.get(String(caseItem._id)) || [],
+        collectedAmount: amount(invoice?.totalCollected),
+        roleByName,
+      });
       return {
         ...caseItem,
         contractValue,
         ordinaryWorkValue: productionByCase.get(String(caseItem._id)) || 0,
+        retainerRevenue,
+        staffTpa,
+        servicesCount: work.length,
+        team: earnedFees.team,
+        caseStaffEarnedTotal: earnedFees.staffEarnedTotal,
+        contributors: [...contributors.values()].sort((a, b) => b.earnedTpa - a.earnedTpa || a.name.localeCompare(b.name)),
+        netContribution: decimal(retainerRevenue - directMatterCosts - staffTpa),
         department: retainerDepartmentOf(caseItem),
         totalBilled,
         totalCollected,
@@ -368,7 +417,26 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
       }),
       { caseCount: 0, contractValue: 0, ordinaryWorkValue: 0, totalBilled: 0, totalCollected: 0, outstanding: 0, directMatterCosts: 0, grossProfit: 0, profitableCases: 0, lossMakingCases: 0 }
     );
-    res.json({ cases: caseRows, summary });
+    const accounting = {
+      recordedMonths: retainerFinancialData.statements.length,
+      fixedFees: retainerFinancialData.billed,
+      actualReceived: retainerFinancialData.collected,
+      outstanding: retainerFinancialData.outstanding,
+      overpayment: retainerFinancialData.statements.reduce((total, p) => total + p.allocation.overpayment, 0),
+      workValue: retainerFinancialData.workValue,
+      staffTpa: retainerFinancialData.staffTpa,
+      firmUnutilisedRevenue: retainerFinancialData.unutilisedRevenue,
+      allocableRevenue: retainerFinancialData.collected - retainerFinancialData.unutilisedRevenue,
+      departments: DEPARTMENTS.map((department) => {
+        const work = services.filter((service) => service.department === department);
+        const ordinaryValue = work.reduce((total, service) => total + service.ordinaryFee, 0);
+        return { department, ordinaryValue,
+          share: retainerFinancialData.workValue ? decimal(ordinaryValue / retainerFinancialData.workValue * 100) : 0,
+          allocatedRevenue: work.reduce((total, service) => total + service.allocatedRevenue, 0) };
+      }),
+      services,
+    };
+    res.json({ cases: caseRows, summary, accounting });
   } catch (error: any) {
     res.status(500).json({ message: error?.message || 'Failed to fetch retainer cases.' });
   }
