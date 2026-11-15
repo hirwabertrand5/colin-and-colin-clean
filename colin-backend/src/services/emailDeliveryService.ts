@@ -4,12 +4,15 @@ import User from '../models/userModel';
 import NotificationPreferences from '../models/notificationPreferencesModel';
 import Notification from '../models/notificationModel';
 import EmailWebhook from '../models/emailWebhookModel';
+import { ClientIntakeLink, ClientIntakeSubmission } from '../models/digitalIntakeModel';
 import { reminderIsCurrent } from './reminderValidityService';
 import { sendEmailResend, validEmail } from './emailResendService';
 import { categoryForType, prefAllows, notificationEmailEnabled, emailAllowedInRollout } from './notificationPolicy';
 import { buildNotificationEmail } from './notificationTemplateService';
 
 export const queueNotificationEmail = async (notification: any) => {
+  // Intake sends its complete summary and receipt through its transactional outbox.
+  if (notification.type === 'INTAKE_SUBMISSION' && notification.dedupeKey?.startsWith('intake:')) return;
   const category = categoryForType(notification.type);
   if (!category) return;
   const users = await User.find({ isActive: { $ne: false }, $or: [
@@ -51,11 +54,11 @@ export const processEmailDeliveries = async (now = new Date(), limit = 25) => {
     catch { await Notification.updateOne({ _id: notification._id }, { $set: { emailQueueState: 'failed' } }); }
   }
   await applyEmailWebhooks();
-  if (!notificationEmailEnabled()) return 0;
+  const notificationsEnabled = notificationEmailEnabled();
   let processed = 0;
   for (; processed < limit; processed++) {
     const claimId = randomUUID();
-    const delivery = await EmailDelivery.findOneAndUpdate({ $or: [
+    const delivery = await EmailDelivery.findOneAndUpdate({ ...(notificationsEnabled ? {} : { category: 'intake' }), $or: [
       { status: 'pending', nextAttemptAt: { $lte: now } },
       { status: 'processing', leaseUntil: { $lte: now } },
     ] }, { $set: { status: 'processing', claimId, leaseUntil: new Date(now.getTime() + 120000) }, $inc: { attempts: 1 } }, { returnDocument: 'after', sort: { nextAttemptAt: 1 } });
@@ -66,10 +69,13 @@ export const processEmailDeliveries = async (now = new Date(), limit = 25) => {
       await EmailDelivery.updateOne(filter, { $set: { status: 'failed', lastCode: 'RETRY_WINDOW_EXPIRED', lastError: 'Review provider logs before any manual resend.' } });
       continue;
     }
-    const notification = await Notification.findById(delivery.notificationId).lean();
+    const intake = delivery.category === 'intake' && delivery.intakeLinkId;
+    const intakeLink = intake ? await ClientIntakeLink.findById(delivery.intakeLinkId).select('submittedAt submissionId').lean<any>() : null;
+    const intakeCurrent = intakeLink?.submittedAt && await ClientIntakeSubmission.exists({ _id: intakeLink.submissionId, deletedAt: null });
+    const notification = delivery.notificationId ? await Notification.findById(delivery.notificationId).lean() : null;
     const user = delivery.userId ? await User.findById(delivery.userId).select('isActive email').lean() : null;
     const prefs = delivery.userId ? await NotificationPreferences.findOne({ userId: delivery.userId }).lean() : null;
-    if (!notification || !(await reminderIsCurrent(notification, now)) || (delivery.userId && (!user || user.isActive === false || user.email !== delivery.to)) || !prefAllows(prefs, delivery.category, notification?.type) || !emailAllowedInRollout(delivery.to)) {
+    if (intake ? !intakeCurrent : !notification || !(await reminderIsCurrent(notification, now)) || (delivery.userId && (!user || user.isActive === false || user.email !== delivery.to)) || !prefAllows(prefs, delivery.category, notification?.type) || !emailAllowedInRollout(delivery.to)) {
       await EmailDelivery.updateOne(filter, { $set: { status: 'suppressed', lastCode: 'RECIPIENT_OR_PREFERENCES_CHANGED' } });
       continue;
     }

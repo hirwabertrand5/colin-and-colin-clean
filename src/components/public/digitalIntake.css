@@ -213,3 +213,10 @@
   .intake-public .intake-input { font-size: 16px; }
   .intake-public .intake-form-footer { position: sticky; bottom: 0; z-index: 2; background: #fff; padding: 14px 0 max(14px, env(safe-area-inset-bottom)); box-shadow: 0 -10px 16px #fff; }
 }
+.intake-routing-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 16px; margin-bottom:16px; background:var(--intake-surface); border:1px solid var(--intake-line); border-radius:10px; font-size:13px; }
+.intake-settings-dialog { max-width:760px; }
+.intake-settings-dialog fieldset { border:0; padding:0; margin:0; min-width:0; }
+.intake-email-compose { padding:16px; border:1px solid var(--intake-line); border-radius:12px; margin-top:20px; }
+.intake-email-compose .intake-field { margin:12px 0; }
+.intake-email-status { border-bottom:1px solid var(--intake-line); padding:10px 0; overflow-wrap:anywhere; }
+.intake-email-status strong,.intake-email-status span,.intake-email-status small { display:block; }

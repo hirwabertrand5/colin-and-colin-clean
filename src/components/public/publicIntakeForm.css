@@ -264,3 +264,16 @@
 @media (prefers-reduced-motion: reduce) {
   .intake-public * { scroll-behavior: auto !important; transition: none !important; }
 }
+.intake-draft-bar { display:flex; gap:12px; justify-content:space-between; flex-wrap:wrap; margin:0 0 16px; color:#506974; font-size:12px; }
+.intake-document-checklist { display:grid; gap:10px; margin-bottom:24px; }
+.intake-document-checklist > div { display:flex; align-items:center; gap:12px; padding:16px; border:1px solid #d8e1e3; border-radius:12px; background:#f6f9f9; }
+.intake-document-checklist > div.complete { border-color:#a6c9b6; background:#f1f8f4; }
+.intake-document-checklist > div > div { flex:1; }
+.intake-document-checklist strong,.intake-document-checklist small { display:block; }
+.intake-document-checklist small { margin-top:4px; color:#61757d; }
+.intake-public .intake-service-tree { width:100%; }
+.intake-public .intake-service-tree .intake-field { min-width:0; }
+@media(max-width:600px) { .intake-document-checklist > div { flex-wrap:wrap; } }
+.intake-data-notice { color:#526677; font-size:12px; margin-top:-16px; }
+.intake-data-notice summary { cursor:pointer; width:fit-content; }
+.intake-data-notice p { max-width:850px; }

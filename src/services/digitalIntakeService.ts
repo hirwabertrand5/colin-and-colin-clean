@@ -1,7 +1,7 @@
 import { navigationFetch as fetch } from './navigationRequest';
 import { API_URL } from './apiConfig';
 const API = `${API_URL}/digital-intake`;
-export { CLIENT_FIELDS, PARTY_EXTRA_FIELDS, MATTER_FIELDS, ARTICLES_GROUPS, SHAREHOLDER_FIELDS, OFFICIAL_USE_FIELDS, INTAKE_CONFIRMATION } from '../../colin-backend/src/config/digitalIntakeSchema';
+export { CLIENT_FIELDS, PARTY_EXTRA_FIELDS, MATTER_FIELDS, ARTICLES_GROUPS, SHAREHOLDER_FIELDS, OFFICIAL_USE_FIELDS, INTAKE_CONFIRMATION, DOCUMENT_KINDS, requiredIntakeDocuments } from '../../colin-backend/src/config/digitalIntakeSchema';
 export type { IntakeQuestion } from '../../colin-backend/src/config/digitalIntakeSchema';
 export const intakeRequest = async (path: string, method = 'GET', body?: unknown, token?: string): Promise<any> => {
   const controller = new AbortController();
@@ -23,9 +23,9 @@ export const intakeRequest = async (path: string, method = 'GET', body?: unknown
     throw error;
   } finally { clearTimeout(timer); }
 };
-export const uploadIntakeFile = (token: string, file: File, section: string, onProgress: (progress: number) => void): Promise<any> => new Promise((resolve, reject) => {
+export const uploadIntakeFile = (token: string, file: File, section: string, onProgress: (progress: number) => void, documentKind = 'supporting', clarification = false): Promise<any> => new Promise((resolve, reject) => {
   const request = new XMLHttpRequest();
-  request.open('POST', `${API}/public/files`);
+  request.open('POST', `${API}/public/${clarification ? 'clarification/' : ''}files`);
   request.setRequestHeader('X-Intake-Token', token);
   request.upload.onprogress = event => { if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 100)); };
   request.timeout = 120000;
@@ -33,9 +33,10 @@ export const uploadIntakeFile = (token: string, file: File, section: string, onP
   request.onerror = () => reject(new Error('Upload interrupted. Please retry.'));
   request.onload = () => {
     let data: any; try { data = JSON.parse(request.responseText); } catch { data = {}; }
-    if (request.status >= 200 && request.status < 300) resolve(data); else reject(new Error(data.message || 'Upload failed. Please retry.'));
+    if (request.status >= 200 && request.status < 300 && typeof data._id === 'string' && /^[a-f\d]{24}$/i.test(data._id) && data.name === file.name && data.size === file.size) resolve(data);
+    else reject(new Error(data.message || 'The server did not confirm this upload. Please retry.'));
   };
-  const body = new FormData(); body.append('file', file); body.append('section', section); request.send(body);
+  const body = new FormData(); body.append('file', file); body.append('section', section); body.append('documentKind', documentKind); request.send(body);
 });
 export const downloadIntakeDocument = async (id: string, name: string) => {
   const response = await fetch(`${API}/files/${id}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }, cache: 'no-store', referrerPolicy: 'no-referrer' });

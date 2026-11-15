@@ -6,10 +6,13 @@ import User from '../models/userModel';
 import Prospect from '../models/prospectModel';
 import Case from '../models/caseModel';
 import AuditLog from '../models/auditLogModel';
-import { INTAKE_SERVICES, DEFAULT_NOTICE, QUESTIONNAIRES, OFFICIAL_USE_FIELDS, INTAKE_CONFIRMATION } from '../config/digitalIntakeSchema';
+import { INTAKE_SERVICES, DEFAULT_NOTICE, QUESTIONNAIRES, OFFICIAL_USE_FIELDS, INTAKE_CONFIRMATION, DOCUMENT_KINDS, requiredIntakeDocuments } from '../config/digitalIntakeSchema';
+import { queueIntakeSubmissionEmails } from './intakeEmailService';
+import EmailDelivery from '../models/emailDeliveryModel';
+import { processEmailDeliveries } from './emailDeliveryService';
 import { IntakeError, textValue, validateEmail, serviceById, validateIntakeForm } from './digitalIntakeValidation';
 import { createProspectRecord } from '../controllers/prospectController';
-import { notifyUsersById } from './notifyService';
+import { createNotification } from './notifyService';
 import { getEmailConfiguration, sendEmailResend } from './emailResendService';
 import { storeRestrictedUpload, deleteRestrictedUpload } from './fileStorageService';
 import { caseMatchesAssignee } from '../utils/caseAssignments';
@@ -63,6 +66,7 @@ export const linkStatus = (link: any) => link.submittedAt ? 'Submitted' : link.r
 const safeLink = (link: any) => {
   const out = typeof link.toObject === 'function' ? link.toObject() : { ...link };
   delete out.tokenHash;
+  delete out.draft;
   return { ...out, status: linkStatus(link) };
 };
 const officialFields = (body: any) => Object.fromEntries(OFFICIAL_USE_FIELDS.map(question => {
@@ -76,13 +80,13 @@ const assignmentFields = async (payload: any, required = false) => {
     const raw = payload[field];
     if (!raw && !required) { out[field] = null; continue; }
     const id = idValue(raw);
-    if (!await User.exists({ _id: id, isActive: { $ne: false } })) throw new IntakeError(400, 'Select active staff members for all assignments.');
+    if (!await User.exists({ _id: id, isActive: { $ne: false }, role: { $in: INTAKE_STAFF } })) throw new IntakeError(400, 'Select active staff members for all assignments.');
     out[field] = new mongoose.Types.ObjectId(id);
   }
   return out;
 };
 export const getIntakeSettings = async (): Promise<any> => (await Settings.findOne({ key: 'portal' }).lean<any>()) || {
-  key: 'portal', noticeText: DEFAULT_NOTICE, noticeVersion: 'draft-1', privacyContact: '', retentionPolicy: '', noticeApproved: false, defaultExpiryDays: 7,
+  key: 'portal', noticeText: DEFAULT_NOTICE, noticeVersion: 'draft-1', privacyContact: '', retentionPolicy: '', noticeApproved: false, defaultExpiryDays: 7, notificationEmail: 'info@colinandcolin.com',
 };
 export const updateIntakeSettings = async (payload: any, req: AuthRequest) => {
   if (!canManageIntake(req)) throw new IntakeError(403, 'Management approval is required to publish the privacy notice.');
@@ -93,9 +97,10 @@ export const updateIntakeSettings = async (payload: any, req: AuthRequest) => {
   const defaultExpiryDays = Number(payload.defaultExpiryDays || 7);
   if (!Number.isInteger(defaultExpiryDays) || defaultExpiryDays < 1 || defaultExpiryDays > 30) throw new IntakeError(400, 'Expiry must be between 1 and 30 days.');
   const previous = await getIntakeSettings();
+  const notificationEmail = validateEmail(payload.notificationEmail || previous.notificationEmail || 'info@colinandcolin.com', true);
   if (previous.noticeApproved && previous.noticeVersion === noticeVersion && (previous.noticeText !== noticeText || previous.privacyContact !== privacyContact || previous.retentionPolicy !== retentionPolicy)) throw new IntakeError(400, 'Use a new notice version when changing approved privacy wording.');
   const setting = await Settings.findOneAndUpdate({ key: 'portal' }, { $set: {
-    noticeText, noticeVersion, privacyContact, retentionPolicy, defaultExpiryDays,
+    noticeText, noticeVersion, privacyContact, retentionPolicy, defaultExpiryDays, notificationEmail,
     noticeApproved: payload.noticeApproved === true, approvedBy: req.user!.id, approvedAt: new Date(),
   } }, { upsert: true, returnDocument: 'after', runValidators: true });
   await audit(req, 'INTAKE_NOTICE_UPDATED', { _id: undefined, reference: noticeVersion });
@@ -150,14 +155,14 @@ export const changeIntakeLink = async (id: unknown, action: 'revoke' | 'regenera
   else {
     token = tokenValue(); url = publicUrl(token);
     link.tokenHash = intakeHash(token); link.tokenVersion += 1; link.revokedAt = undefined; link.openedAt = undefined;
-    link.emailStatus = undefined; link.emailFailureCode = undefined;
+    link.emailStatus = undefined; link.emailFailureCode = undefined; link.draft = undefined; link.draftRevision = 0; link.draftSavedAt = undefined;
     link.expiresAt = new Date(Date.now() + Number((await getIntakeSettings()).defaultExpiryDays || 7) * 86400000);
   }
   await link.save();
   await audit(req, action === 'revoke' ? 'INTAKE_LINK_REVOKED' : 'INTAKE_LINK_REGENERATED', link);
   return { link: safeLink(link), ...(token ? { token, url } : {}) };
 };
-export const sendIntakeInvitation = async (id: unknown, rawToken: unknown, req: AuthRequest) => {
+export const sendIntakeInvitation = async (id: unknown, rawToken: unknown, req: AuthRequest, compose: any = {}) => {
   const link = await authorizedIntakeLink(id, req);
   if (!['Pending', 'Opened'].includes(linkStatus(link))) throw new IntakeError(409, 'This link cannot be sent in its current status.');
   const token = textValue(rawToken, 100, true);
@@ -165,11 +170,14 @@ export const sendIntakeInvitation = async (id: unknown, rawToken: unknown, req: 
   if (!/^[A-Za-z0-9_-]{43}$/.test(token) || !timingSafeEqual(Buffer.from(intakeHash(token)), Buffer.from(stored.tokenHash))) throw new IntakeError(400, 'Regenerate the link to obtain a new copy before sending.');
   if (!link.clientEmail) throw new IntakeError(400, 'This invitation needs a client email address.');
   const url = publicUrl(token);
+  const to = link.clientEmail;
+  const subject = textValue(compose.subject, 200) || 'Your secure Colin & Colin intake form';
+  const message = textValue(compose.message, 5000) || link.introduction || 'Please complete our secure intake form so our team can review your enquiry.';
   if (link.emailStatus === 'Sent' && link.sentTokenVersion === link.tokenVersion) return { sent: true, message: 'This invitation has already been sent. You can still copy and share its link.' };
-  const result = await sendEmailResend([link.clientEmail], 'Your secure Colin & Colin intake form', `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#102c36"><h2>Colin & Colin Legal Solutions</h2><p>Hello ${escapeHtml(link.clientName || 'there')},</p><p>${escapeHtml(link.introduction || 'Please complete our secure intake form so our team can review your enquiry.')}</p><p><a href="${escapeHtml(url)}">Open your secure intake form</a></p><p>Expires: ${new Date(link.expiresAt).toISOString().slice(0, 10)}. Please keep this link private.</p><p>${escapeHtml(link.notice.contact || '')}</p><p>Submitting the form does not establish an attorney–client relationship.</p></div>`, { idempotencyKey: `intake-invitation/${link._id}/${link.tokenVersion}` });
+  const result = await sendEmailResend([to], subject, `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#102c36"><h2>Colin & Colin Legal Solutions</h2><p>Hello ${escapeHtml(link.clientName || 'there')},</p><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(url)}">Open your secure intake form</a></p><p>Expires: ${new Date(link.expiresAt).toISOString().slice(0, 10)}. Please keep this link private.</p><p>${escapeHtml(link.notice.contact || '')}</p><p>Submitting the form does not establish an attorney–client relationship.</p></div>`, { idempotencyKey: `intake-invitation/${link._id}/${link.tokenVersion}` });
   link.emailStatus = result.ok ? 'Sent' : 'Failed'; link.emailFailureCode = result.ok ? undefined : result.code; if (result.ok) { link.sentAt = new Date(); link.sentTokenVersion = link.tokenVersion; } await link.save();
   await audit(req, result.ok ? 'INTAKE_LINK_SENT' : 'INTAKE_EMAIL_FAILED', link);
-  return result.ok ? { sent: true, message: 'Invitation accepted by the email provider. Check the recipient?s inbox and spam folder.' } : { sent: false, code: result.code, retryable: result.retryable, message: result.error };
+  return result.ok ? { sent: true, providerId: result.id, to, message: `Invitation accepted by the email provider for ${to}.` } : { sent: false, code: result.code, retryable: result.retryable, message: result.error };
 };
 export const resolvePublicIntakeLink = async (token: string, session: mongoose.ClientSession | null = null) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new IntakeError(404, 'This intake link is invalid.', 'INVALID_LINK');
@@ -183,10 +191,25 @@ export const publicIntakeDetails = async (token: string) => {
   const link = await resolvePublicIntakeLink(token);
   if (link.submittedAt) throw new IntakeError(409, 'Your form has already been submitted. Please contact the firm for any changes.', 'ALREADY_SUBMITTED');
   await Link.updateOne({ _id: link._id, openedAt: { $exists: false } }, { $set: { openedAt: new Date() } });
+  const draftLink = await Link.findById(link._id).select('+draft').lean<any>();
+  const files = await Attachment.find({ linkId: link._id, tokenVersion: link.tokenVersion, submissionId: null }).select('_id name size section documentKind').lean();
   return { expiresAt: link.expiresAt, introduction: link.introduction, serviceId: link.serviceId, questionnaireId: link.questionnaireId,
+    draft: draftLink?.draft, draftRevision: draftLink?.draftRevision || 0, draftSavedAt: draftLink?.draftSavedAt, files,
     notice: { version: link.notice.version, text: link.notice.text, contact: link.notice.contact, retention: link.notice.retention },
     // Intended recipient identity and all staff fields stay internal.
     services: INTAKE_SERVICES, questionnaires: QUESTIONNAIRES };
+};
+export const saveIntakeDraft = async (token: string, body: any) => {
+  const link = await resolvePublicIntakeLink(token);
+  if (!Number.isInteger(body.revision) || body.revision < 0 || !body.form || typeof body.form !== 'object' || Array.isArray(body.form)) throw new IntakeError(400, 'Invalid draft.');
+  const draft: any = {};
+  for (const key of ['client', 'parties', 'matter', 'serviceId', 'questionnaireId', 'answers', 'shareholders']) if (body.form[key] !== undefined) draft[key] = body.form[key];
+  for (const key of ['client', 'matter', 'answers']) if (draft[key] !== undefined && (!draft[key] || typeof draft[key] !== 'object' || Array.isArray(draft[key]) || Object.values(draft[key]).some(value => !['string', 'number', 'boolean'].includes(typeof value)))) throw new IntakeError(400, 'Invalid draft fields.');
+  for (const [key, limit] of [['parties', 20], ['shareholders', 100]] as const) if (draft[key] !== undefined && (!Array.isArray(draft[key]) || draft[key].length > limit || draft[key].some((row: any) => !row || typeof row !== 'object' || Array.isArray(row) || Object.values(row).some(value => !['string', 'number', 'boolean'].includes(typeof value))))) throw new IntakeError(400, 'Invalid draft entries.');
+  for (const key of ['serviceId', 'questionnaireId']) if (draft[key] !== undefined && typeof draft[key] !== 'string') throw new IntakeError(400, 'Invalid draft service.');
+  const saved = await Link.findOneAndUpdate({ _id: link._id, tokenVersion: link.tokenVersion, ...(body.revision === 0 ? { $or: [{ draftRevision: 0 }, { draftRevision: { $exists: false } }] } : { draftRevision: body.revision }), submittedAt: { $exists: false }, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() } }, { $set: { draft, draftSavedAt: new Date() }, $inc: { draftRevision: 1 } }, { returnDocument: 'after' });
+  if (!saved) throw new IntakeError(409, 'This form changed in another tab or is no longer editable. Reload to recover the latest saved draft.', 'DRAFT_CONFLICT');
+  return { revision: saved.draftRevision, savedAt: saved.draftSavedAt };
 };
 const assertUploadFile = (file: Express.Multer.File) => {
   const extension = file.originalname.split('.').pop()?.toLowerCase();
@@ -198,72 +221,94 @@ const assertUploadFile = (file: Express.Multer.File) => {
     || extension === 'docx' && file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && b.subarray(0, 2).toString() === 'PK' && b.includes(Buffer.from('word/')) && b.includes(Buffer.from('[Content_Types].xml'));
   if (!valid || !file.size || file.size > 10 * 1048576) throw new IntakeError(400, 'Upload a valid PDF, DOC, DOCX, JPG or PNG file up to 10 MB.');
 };
-export const uploadIntakeAttachment = async (token: string, file: Express.Multer.File | undefined, section: unknown) => {
+export const uploadIntakeAttachment = async (token: string, file: Express.Multer.File | undefined, section: unknown, kind: unknown = 'supporting', clarification = false) => {
   if (!file) throw new IntakeError(400, 'Select a supporting document.');
   assertUploadFile(file);
-  const link = await resolvePublicIntakeLink(token);
-  const reserved = await Link.findOneAndUpdate({ _id: link._id, tokenVersion: link.tokenVersion, submittedAt: { $exists: false }, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() }, uploadCount: { $lt: 20 }, uploadBytes: { $lte: 100 * 1048576 - file.size } }, { $inc: { uploadCount: 1, uploadBytes: file.size } }, { returnDocument: 'after' });
+  if (!DOCUMENT_KINDS.some(item => item.id === kind)) throw new IntakeError(400, 'Choose a valid document type.');
+  const correction = clarification ? await resolveClarification(token) : null;
+  if (correction?.request.respondedAt) throw new IntakeError(409, 'This reply has already been received.');
+  const link = correction ? await Link.findById(correction.submission.linkId) : await resolvePublicIntakeLink(token);
+  const reserved = correction
+    ? await Submission.findOneAndUpdate({ _id: correction.submission._id, clarificationHash: intakeHash(token), status: 'Additional Information Requested', clarificationUploadCount: { $lt: 20 }, clarificationUploadBytes: { $lte: 100 * 1048576 - file.size } }, { $inc: { clarificationUploadCount: 1, clarificationUploadBytes: file.size } }, { returnDocument: 'after' })
+    : await Link.findOneAndUpdate({ _id: link._id, tokenVersion: link.tokenVersion, submittedAt: { $exists: false }, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() }, uploadCount: { $lt: 20 }, uploadBytes: { $lte: 100 * 1048576 - file.size } }, { $inc: { uploadCount: 1, uploadBytes: file.size } }, { returnDocument: 'after' });
   if (!reserved) throw new IntakeError(409, 'This invitation cannot accept more documents (maximum 20 files / 100 MB).');
   let storageId: string | undefined;
   try {
     storageId = await storeRestrictedUpload(file, String(link._id));
-    const attachment = await Attachment.create({ linkId: link._id, tokenVersion: link.tokenVersion, storageId, name: textValue(file.originalname.replace(/[\\/]/g, '_'), 255, true), size: file.size, mimeType: file.mimetype, section: textValue(section, 100) });
-    return { _id: attachment._id, name: attachment.name, size: attachment.size, section: attachment.section };
+    const attachment = await Attachment.create({ linkId: link._id, tokenVersion: link.tokenVersion, storageId, name: textValue(file.originalname.replace(/[\\/]/g, '_'), 255, true), size: file.size, mimeType: file.mimetype, section: textValue(section, 100), documentKind: kind, ...(clarification ? { clarificationHash: intakeHash(token) } : {}) });
+    return { _id: attachment._id, name: attachment.name, size: attachment.size, section: attachment.section, documentKind: attachment.documentKind };
   } catch (error) {
     if (storageId) await deleteRestrictedUpload(storageId).catch(() => {});
-    await Link.updateOne({ _id: link._id }, { $inc: { uploadCount: -1, uploadBytes: -file.size } });
+    if (correction) await Submission.updateOne({ _id: correction.submission._id, clarificationHash: intakeHash(token) }, { $inc: { clarificationUploadCount: -1, clarificationUploadBytes: -file.size } });
+    else await Link.updateOne({ _id: link._id }, { $inc: { uploadCount: -1, uploadBytes: -file.size } });
     throw error;
   }
 };
-export const removeIntakeAttachment = async (token: string, id: unknown) => {
-  const link = await resolvePublicIntakeLink(token);
+export const removeIntakeAttachment = async (token: string, id: unknown, clarification = false) => {
+  const correction = clarification ? await resolveClarification(token) : null;
+  if (correction?.request.respondedAt) throw new IntakeError(409, 'Your reply has already been received.');
+  const link = correction ? await Link.findById(correction.submission.linkId) : await resolvePublicIntakeLink(token);
   // Serialize against final submission so a submitted document cannot be removed.
   const session = await mongoose.startSession();
   let storageId = '';
   try { await session.withTransaction(async () => {
-    const locked = await Link.findOneAndUpdate({ _id: link._id, tokenVersion: link.tokenVersion, submittedAt: { $exists: false }, revokedAt: { $exists: false } }, { $inc: { uploadCount: -1 } }, { session, returnDocument: 'after' });
+    const locked = correction
+      ? await Submission.findOneAndUpdate({ _id: correction.submission._id, clarificationHash: intakeHash(token), status: 'Additional Information Requested' }, { $inc: { clarificationUploadCount: -1 } }, { session, returnDocument: 'after' })
+      : await Link.findOneAndUpdate({ _id: link._id, tokenVersion: link.tokenVersion, submittedAt: { $exists: false }, revokedAt: { $exists: false } }, { $inc: { uploadCount: -1 } }, { session, returnDocument: 'after' });
     if (!locked) throw new IntakeError(409, 'The form is no longer open for editing.');
-    const file = await Attachment.findOneAndDelete({ _id: idValue(id), linkId: link._id, tokenVersion: link.tokenVersion, submissionId: null }).session(session).select('+storageId');
+    const file = await Attachment.findOneAndDelete({ _id: idValue(id), linkId: link._id, tokenVersion: link.tokenVersion, submissionId: null, ...(clarification ? { clarificationHash: intakeHash(token) } : {}) }).session(session).select('+storageId');
     if (!file) throw new IntakeError(404, 'Document not found.');
     storageId = file.storageId;
-    await Link.updateOne({ _id: link._id }, { $inc: { uploadBytes: -file.size } }, { session });
+    if (correction) await Submission.updateOne({ _id: correction.submission._id }, { $inc: { clarificationUploadBytes: -file.size } }, { session });
+    else await Link.updateOne({ _id: link._id }, { $inc: { uploadBytes: -file.size } }, { session });
   }); } finally { await session.endSession(); }
   await deleteRestrictedUpload(storageId).catch(() => {});
 };
 export const submitIntakeForm = async (token: string, body: any) => {
   const session = await mongoose.startSession();
-  let saved: any; let linkDoc: any; let createdNow = false;
+  let saved: any; let createdNow = false;
   try { await session.withTransaction(async () => {
     createdNow = false;
-    const link = await resolvePublicIntakeLink(token, session); linkDoc = link;
+    const link = await resolvePublicIntakeLink(token, session);
     if (link.submittedAt) { saved = await Submission.findOne({ linkId: link._id }).session(session); return; }
     const form = validateIntakeForm(body, link);
     const ids = Array.isArray(body.documentIds) ? body.documentIds.map(idValue) : [];
     if (new Set(ids).size !== ids.length || ids.length > 20) throw new IntakeError(400, 'Document references are invalid.');
     const files = await Attachment.find({ _id: { $in: ids }, linkId: link._id, tokenVersion: link.tokenVersion, submissionId: null }).session(session);
     if (files.length !== ids.length) throw new IntakeError(400, 'A document does not belong to this invitation.');
+    const missing = requiredIntakeDocuments(form.client).filter(required => !files.some(file => file.documentKind === required.id));
+    if (missing.length) throw new IntakeError(400, `Please upload: ${missing.map(item => item.label).join(', ')}.`, 'REQUIRED_DOCUMENTS');
     const submission = new Submission({ reference: reference('INT'), linkId: link._id, form, submittedAt: new Date(),
       noticeAcknowledgment: body.confirmationVersion === INTAKE_CONFIRMATION.version
         ? { kind: 'enquiry-confirmation', ...INTAKE_CONFIRMATION, at: new Date() }
         : { kind: 'notice', version: link.notice.version, text: link.notice.text, contact: link.notice.contact, retention: link.notice.retention, at: new Date() }, reviewHistory: [{ action: 'Submitted', actorName: 'Client', at: new Date() }] });
     await submission.save({ session });
     // The invitation write is the concurrency boundary for uploads and final submit.
-    link.submittedAt = submission.submittedAt; link.submissionId = submission._id; await link.save({ session });
+    link.submittedAt = submission.submittedAt; link.submissionId = submission._id; link.draft = undefined; await link.save({ session });
     await Attachment.updateMany({ _id: { $in: ids } }, { $set: { submissionId: submission._id } }, { session });
     await audit({} as AuthRequest, 'INTAKE_SUBMISSION_RECEIVED', link, submission, '', session);
+    await queueIntakeSubmissionEmails(submission, link, files, await getIntakeSettings(), publicClientOrigin(), session);
+    await createNotification({ type: 'INTAKE_SUBMISSION', title: 'Client intake received', message: `${submission.reference} · ${submission.form.client.name}`, link: `/matters/intake-prospects?submission=${submission._id}`, dedupeKey: `intake:${submission._id}`, audienceUserIds: [...new Set([link.createdBy, link.assignedTo, link.responsiblePartner, link.responsibleAssociate].filter(Boolean).map(String))] as string[] }, { session });
     saved = submission;
     createdNow = true;
   }); } finally { await session.endSession(); }
-  const recipients = [...new Set([linkDoc.createdBy, linkDoc.assignedTo, linkDoc.responsiblePartner, linkDoc.responsibleAssociate].filter(Boolean).map(String))] as string[];
   // Notification/email delivery never rolls back a successful client submission.
-  if (createdNow) await Promise.resolve().then(() => notifyUsersById({ userIds: recipients, category: 'taskAssignments', notification: { type: 'INTAKE_SUBMISSION', title: 'Client intake received', message: `${saved.reference} • ${saved.form.client.name} • ${INTAKE_SERVICES.find(s => s.id === saved.form.serviceId)?.label || 'Legal enquiry'} • ${new Date(saved.submittedAt).toISOString()}`, link: `/matters/intake-prospects?submission=${saved._id}`, dedupeKey: `intake:${saved._id}` }, email: { subject: `Intake received: ${saved.reference}`, html: `<p>A client intake submission is ready for review.</p><p>Reference: ${escapeHtml(saved.reference)}</p><p>Client: ${escapeHtml(saved.form.client.name)}</p><p>Service: ${escapeHtml(INTAKE_SERVICES.find(s => s.id === saved.form.serviceId)?.label || 'Legal enquiry')}</p><p>Received: ${new Date(saved.submittedAt).toISOString()}</p><p><a href="${publicClientOrigin()}/matters/intake-prospects?submission=${saved._id}">Review in the application</a></p>` } })).catch(() => {});
+  if (createdNow) {
+    void processEmailDeliveries().catch(() => {});
+  }
   return { reference: saved.reference, submittedAt: saved.submittedAt };
 };
 export const listIntakeSubmissions = async (req: AuthRequest) => {
   const links = await Link.find(scope(req)).select('_id assignedTo responsiblePartner responsibleAssociate').lean<any[]>();
-  const items = await Submission.find({ linkId: { $in: links.map(l => l._id) }, deletedAt: null }).sort({ submittedAt: -1, _id: -1 }).select('reference status submittedAt prospectId linkId form.client.name form.serviceId administration.serviceId').lean<any[]>();
+  const items = await Submission.find({ linkId: { $in: links.map(l => l._id) }, deletedAt: null }).sort({ submittedAt: -1, _id: -1 }).select('reference status submittedAt prospectId linkId form.client.name form.serviceId form.matter.deadline administration.serviceId').lean<any[]>();
   const staff = await User.find({ _id: { $in: links.map(l => l.assignedTo).filter(Boolean) } }).select('name').lean();
-  return items.map(item => ({ ...item, clientName: item.form?.client?.name, service: INTAKE_SERVICES.find(s => s.id === (item.administration?.serviceId || item.form?.serviceId))?.label || '', assignedStaff: staff.find(u => String(u._id) === String(links.find(l => String(l._id) === String(item.linkId))?.assignedTo))?.name || 'Unassigned', form: undefined }));
+  const staffById = new Map(staff.map(user => [String(user._id), user.name]));
+  const linksById = new Map(links.map(link => [String(link._id), link]));
+  const servicesById = new Map(INTAKE_SERVICES.map(service => [service.id, service]));
+  return items.map(item => {
+    const service = servicesById.get(item.administration?.serviceId || item.form?.serviceId);
+    return { ...item, clientName: item.form?.client?.name, service: service?.path.slice(-1)[0]?.label || '', department: service?.path[0]?.label || '', deadline: item.form?.matter?.deadline || '', assignedStaff: staffById.get(String(linksById.get(String(item.linkId))?.assignedTo)) || 'Unassigned', form: undefined };
+  });
 };
 export const authorizedSubmission = async (id: unknown, req: AuthRequest, session: mongoose.ClientSession | null = null) => {
   const submission = await Submission.findOne({ _id: idValue(id), deletedAt: null }).session(session);
@@ -314,7 +359,22 @@ const duplicateCandidates = async (submission: any, req: AuthRequest) => {
 export const getIntakeSubmission = async (id: unknown, req: AuthRequest) => {
   const { submission, link } = await authorizedSubmission(id, req);
   const files = await Attachment.find({ submissionId: submission._id }).lean();
-  return { ...submission.toObject(), link: safeLink(link), files, duplicates: await duplicateCandidates(submission, req) };
+  const emails = await EmailDelivery.find({ intakeLinkId: link._id }).select('to subject status attempts lastCode nextAttemptAt providerId').lean();
+  return { ...submission.toObject(), link: safeLink(link), files, emails, duplicates: await duplicateCandidates(submission, req) };
+};
+export const retryIntakeEmails = async (id: unknown, req: AuthRequest) => {
+  const { link } = await authorizedSubmission(id, req);
+  await authorizedIntakeLink(String(link._id), req, null, true);
+  // A confirmed rejection can be retried after configuration is corrected. Ambiguous
+  // sends retain the provider's original idempotency key and 23-hour retry boundary.
+  const knownRejection = ['EMAIL_NOT_CONFIGURED', 'EMAIL_SENDER_INVALID', 'EMAIL_CREDENTIALS_INVALID', 'EMAIL_DOMAIN_UNVERIFIED', 'EMAIL_TEST_MODE', 'EMAIL_RECIPIENT_INVALID'];
+  const ready = getEmailConfiguration();
+  if (!ready.configured) throw new IntakeError(409, ready.message, ready.code);
+  await EmailDelivery.updateMany({ intakeLinkId: link._id, status: 'failed', lastCode: { $in: knownRejection } }, { $set: { status: 'pending', attempts: 0, nextAttemptAt: new Date(), lastCode: '', lastError: '' }, $unset: { firstAttemptAt: 1, leaseUntil: 1, claimId: 1 } });
+  await EmailDelivery.updateMany({ intakeLinkId: link._id, status: 'failed', firstAttemptAt: { $gt: new Date(Date.now() - 23 * 3600000) }, lastCode: { $in: ['EMAIL_RATE_LIMITED', 'EMAIL_PROVIDER_UNAVAILABLE'] } }, { $set: { status: 'pending', attempts: 0, nextAttemptAt: new Date(), lastCode: '', lastError: '' }, $unset: { leaseUntil: 1, claimId: 1 } });
+  void processEmailDeliveries().catch(() => {});
+  await audit(req, 'INTAKE_EMAIL_RETRY_REQUESTED', link);
+  return { queued: true };
 };
 export const reviewIntakeSubmission = async (id: unknown, body: any, req: AuthRequest) => {
   const assignments = await assignmentFields(body);
@@ -383,23 +443,40 @@ export const requestIntakeInformation = async (id: unknown, body: any, req: Auth
   if (['Accepted', 'Rejected'].includes(submission.status)) throw new IntakeError(409, 'This submission has already been resolved.');
   const message = textValue(body.message, 5000, true); const token = tokenValue(); const url = publicUrl(token, true);
   submission.clarificationHash = intakeHash(token); submission.clarificationExpiresAt = new Date(Date.now() + 7 * 86400000);
+  submission.clarificationUploadCount = 0; submission.clarificationUploadBytes = 0;
   submission.status = 'Additional Information Requested'; submission.clarifications.push({ message, requestedAt: new Date(), requestedBy: req.user!.id });
   submission.reviewHistory.push({ action: 'Additional information requested', actorName: req.user!.name, at: new Date(), note: message });
   await submission.save(); await audit(req, 'INTAKE_INFORMATION_REQUESTED', link, submission);
-  const email = await sendEmailResend([submission.form.client.email], `Additional information requested: ${submission.reference}`, `<h2>Colin & Colin Legal Solutions</h2><p>Please provide additional information for your enquiry.</p><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(url)}">Reply securely</a></p><p>This link expires in seven days.</p>`);
+  const email = await sendEmailResend([submission.form.client.email], `Additional information requested: ${submission.reference}`, `<h2>Colin & Colin Legal Solutions</h2><p>Please provide additional information for your enquiry.</p><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(url)}">Reply securely</a></p><p>This link expires in seven days.</p>`, { idempotencyKey: `intake-clarification/${submission._id}/${intakeHash(token)}` });
   return email.ok ? { url, sent: true, message: 'Additional-information request accepted by the email provider.' } : { url, sent: false, code: email.code, retryable: email.retryable, message: email.error };
 };
-export const publicClarification = async (token: string, body?: any) => {
+const resolveClarification = async (token: string, session: mongoose.ClientSession | null = null) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new IntakeError(404, 'This clarification link is invalid.');
-  const submission = await Submission.findOne({ clarificationHash: intakeHash(token), clarificationExpiresAt: { $gt: new Date() }, status: 'Additional Information Requested', deletedAt: null });
+  const submission = await Submission.findOne({ clarificationHash: intakeHash(token), clarificationExpiresAt: { $gt: new Date() }, status: { $in: ['Additional Information Requested', 'Awaiting Review', 'Under Review'] }, deletedAt: null }).session(session);
   if (!submission) throw new IntakeError(410, 'This clarification link has expired or is no longer available.');
-  const request = submission.clarifications[submission.clarifications.length - 1];
-  if (!body) return { reference: submission.reference, message: request.message };
-  request.response = textValue(body.response, 20000, true); request.respondedAt = new Date();
-  submission.clarificationHash = undefined; submission.status = 'Awaiting Review';
-  submission.reviewHistory.push({ action: 'Client clarification received', actorName: 'Client', at: new Date() });
-  await submission.save();
-  const link = await Link.findById(submission.linkId);
-  await notifyUsersById({ userIds: [String(link.assignedTo || link.createdBy)], category: 'taskAssignments', notification: { type: 'INTAKE_SUBMISSION', title: 'Client clarification received', message: submission.reference, link: `/matters/intake-prospects?submission=${submission._id}` } }).catch(() => {});
-  return { reference: submission.reference, received: true };
+  return { submission, request: submission.clarifications[submission.clarifications.length - 1] };
+};
+export const publicClarification = async (token: string, body?: any) => {
+  if (!body) {
+    const { submission, request } = await resolveClarification(token);
+    if (request.respondedAt) return { reference: submission.reference, received: true };
+    const files = await Attachment.find({ clarificationHash: intakeHash(token), submissionId: null }).select('_id name size section documentKind').lean();
+    return { reference: submission.reference, message: request.message, files };
+  }
+  const session = await mongoose.startSession();
+  let receipt: any;
+  try { await session.withTransaction(async () => {
+    const { submission, request } = await resolveClarification(token, session);
+    receipt = { reference: submission.reference, received: true };
+    if (request.respondedAt) return;
+    const ids = Array.isArray(body.documentIds) ? body.documentIds.map(idValue) : [];
+    const files = await Attachment.find({ _id: { $in: ids }, clarificationHash: intakeHash(token), submissionId: null }).session(session);
+    if (files.length !== ids.length || new Set(ids).size !== ids.length) throw new IntakeError(400, 'Invalid reply documents.');
+    request.response = textValue(body.response, 20000, true); request.respondedAt = new Date();
+    submission.status = 'Awaiting Review';
+    submission.reviewHistory.push({ action: 'Client clarification received', actorName: 'Client', at: new Date() });
+    await submission.save({ session });
+    await Attachment.updateMany({ _id: { $in: ids } }, { $set: { submissionId: submission._id } }, { session });
+  }); } finally { await session.endSession(); }
+  return receipt;
 };

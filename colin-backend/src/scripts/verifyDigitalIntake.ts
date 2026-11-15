@@ -20,6 +20,7 @@ import { INTAKE_SERVICES, ARTICLES_GROUPS, INTAKE_CONFIRMATION } from '../config
 import { getStageConfig, stageChecklistKey } from '../utils/prospectStageConfig';
 import { publicClientOrigin } from '../services/digitalIntakeService';
 import { classifyEmailFailure, getEmailConfiguration } from '../services/emailResendService';
+import EmailDelivery from '../models/emailDeliveryModel';
 import { serveStoredUpload, storeUploadedFile } from '../services/fileStorageService';
 
 async function main() {
@@ -72,7 +73,7 @@ async function main() {
     assert.equal((await req(staff('/links'), invitation, inactive)).status, 403);
     assert.equal((await req(staff('/configuration'), {}, owner, 'PUT')).status, 403);
     const approvalRequired = await req(staff('/links'), invitation); assert.equal(approvalRequired.status, 409); assert.equal(approvalRequired.data.code, 'NOTICE_APPROVAL_REQUIRED');
-    await ok(staff('/configuration'), { noticeText: 'Synthetic approved test notice', noticeVersion: 'test-v1', privacyContact: 'privacy@test.invalid', retentionPolicy: 'Synthetic test retention policy', noticeApproved: true }, manager, 'PUT');
+    await ok(staff('/configuration'), { noticeText: 'Synthetic approved test notice', noticeVersion: 'test-v1', privacyContact: 'privacy@test.invalid', retentionPolicy: 'Synthetic test retention policy', noticeApproved: true, notificationEmail: 'info@colinandcolin.com' }, manager, 'PUT');
     const unassigned = await ok(staff('/links'), { expiryDays: 3 }); assert.equal(unassigned.link.assignedTo, null); assert.equal(unassigned.link.clientEmail, ''); assert.equal(unassigned.link.status, 'Pending');
     for (const expiryDays of [0, 31, 1.5]) assert.equal((await req(staff('/links'), { expiryDays })).status, 400);
     pass('Authentication, inactive staff, privacy approval gate, optional invitation fields and valid expiry enforcement');
@@ -85,6 +86,16 @@ async function main() {
     for (const field of ['createdBy', 'assignedTo', 'responsiblePartner', 'clientName', 'clientEmail', 'tokenHash']) assert(!(field in publicDetails.data));
     assert.equal((await Link.findById(first.link._id))!.openedAt instanceof Date, true);
     pass('Random hashed tokens, safe public response and reliable opened status');
+    const draft = { ...form(), acknowledged: true, internalNotes: 'Must never become a draft field' };
+    const savedDraft = await req(staff('/public/draft'), { form: draft, revision: 0 }, null, 'PUT', first.token);
+    assert.equal(savedDraft.status, 200); assert.equal(savedDraft.data.revision, 1);
+    assert.equal((await req(staff('/public/draft'), { form: draft, revision: 0 }, null, 'PUT', first.token)).status, 409);
+    const recovered = (await pub('/form', first.token)).data;
+    assert.equal(recovered.draft.client.name, draft.client.name); assert(!recovered.draft.acknowledged); assert(!recovered.draft.internalNotes);
+    assert(!(await ok(staff('/links'))).find((row: any) => row._id === first.link._id).draft);
+    assert.equal((await pub('/submit', first.token, form({ client: { ...form().client, phone: '.........' } }))).status, 400);
+    assert.equal((await pub('/submit', first.token, form({ serviceId: 'transactions_advisory' }))).status, 400);
+    pass('Secure draft restoration, stale-tab conflict prevention, private draft isolation, phone digits and complete service tree');
     const mailLink = await generate();
     const sendMail = () => ok(staff(`/links/${mailLink.link._id}/send`), { token: mailLink.token });
     let mailResult = await sendMail(); assert.equal(mailResult.sent, false); assert.equal(mailResult.code, 'EMAIL_NOT_CONFIGURED'); assert.match(mailResult.message, /RESEND_API_KEY.*EMAIL_FROM/);
@@ -139,9 +150,11 @@ async function main() {
     assert.equal((await pub('/submit', first.token, form({ questionnaireId: 'not-a-questionnaire' }))).status, 400);
     assert.equal((await pub('/submit', first.token, form({ matter: { overview: 'x'.repeat(270000) } }))).status, 413);
     pass('Required fields, conditional company fields, notice, document ownership and payload limits');
-    const upload = async (token: string, name: string, content: string, type = 'application/pdf') => { const data = new FormData(); data.append('section', 'Client identification'); data.append('file', new Blob([content], { type }), name); const response = await fetch(base + staff('/public/files'), { method: 'POST', headers: { 'X-Intake-Token': token }, body: data }); return { status: response.status, data: await response.json() }; };
+    const upload = async (token: string, name: string, content: string, type = 'application/pdf') => { const data = new FormData(); data.append('documentKind', name.includes('registration') ? 'business-registration' : 'national-id'); data.append('section', 'Client identification'); data.append('file', new Blob([content], { type }), name); const response = await fetch(base + staff('/public/files'), { method: 'POST', headers: { 'X-Intake-Token': token }, body: data }); return { status: response.status, data: await response.json() }; };
     assert.equal((await upload(first.token, 'spoof.pdf', '<script>bad</script>')).status, 400);
     const file = await upload(first.token, 'verification.pdf', '%PDF-1.4\nsynthetic verification'); assert.equal(file.status, 201);
+    assert.equal((await pub('/submit', first.token, form())).data.code, 'REQUIRED_DOCUMENTS');
+    assert.equal((await pub('/submit', first.token, form({ client: { ...form().client, identityType: 'Passport' }, documentIds: [file.data._id] }))).data.code, 'REQUIRED_DOCUMENTS');
     const foreign = await upload(renewed.token, 'other.pdf', '%PDF-1.4\nother verification'); assert.equal(foreign.status, 201);
     assert.equal((await pub('/submit', first.token, form({ documentIds: [foreign.data._id] }))).status, 400);
     const privateFile = await Attachment.findById(file.data._id).select('+storageId').lean<any>();
@@ -156,6 +169,26 @@ async function main() {
     assert.equal((await req(staff(`/submissions/${submission._id}`), undefined, other)).status, 404);
     assert.equal((await req(staff(`/submissions/${submission._id}`), undefined, owner)).status, 200);
     pass('Concurrent submit is idempotent; structured parties retained; notifications survive disabled email; staff scope enforced');
+    // Retry real outbox records through the existing provider adapter, never the network.
+    const queued = await EmailDelivery.find({ intakeLinkId: first.link._id }).lean();
+    assert.equal(queued.length, 2); assert(queued.some(item => item.to === 'info@colinandcolin.com')); assert(queued.some(item => item.html.includes('Synthetic verification enquiry') && item.html.includes('Related Individual')));
+    const until = async (predicate: () => Promise<boolean>) => { const end = Date.now() + 10000; while (!(await predicate())) { assert(Date.now() < end, 'Delivery worker did not finish'); await new Promise(resolve => setTimeout(resolve, 50)); } };
+    await until(async () => await EmailDelivery.countDocuments({ intakeLinkId: first.link._id, status: 'failed' }) === 2);
+    process.env.RESEND_API_KEY = 're_synthetic_verification_only'; process.env.EMAIL_FROM = 'Synthetic <sender@test.invalid>';
+    const actualFetch = globalThis.fetch; const mailBodies: any[] = [];
+    globalThis.fetch = (async (input: any, options?: any) => {
+      if (!String(input).startsWith('https://api.resend.com/')) return actualFetch(input, options);
+      mailBodies.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ id: `synthetic-outbox-${mailBodies.length}` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+    try {
+      await ok(staff(`/submissions/${submission._id}/retry-emails`), {});
+      await until(async () => await EmailDelivery.countDocuments({ intakeLinkId: first.link._id, status: 'sent' }) === 2);
+      assert.equal(mailBodies.length, 2); assert(mailBodies.some(item => item.subject.startsWith('Your enquiry reference:')));
+      assert.equal((await pub('/submit', first.token, form())).data.reference, submission.reference);
+      assert.equal(await EmailDelivery.countDocuments({ intakeLinkId: first.link._id }), 2);
+    } finally { globalThis.fetch = actualFetch; delete process.env.RESEND_API_KEY; delete process.env.EMAIL_FROM; }
+    pass('Full summary and client receipt persist with submission; failed setup can be corrected and retried without duplicates');
     const download = await fetch(base + staff(`/files/${file.data._id}`), { headers: { Authorization: `Bearer ${jwt.sign({ id: String(owner._id) }, process.env.JWT_SECRET!)}` } });
     assert.equal(download.status, 200); assert.match(await download.text(), /^%PDF-/); assert.equal(download.headers.get('cache-control'), 'no-store');
     assert.equal((await fetch(base + staff(`/files/${file.data._id}`))).status, 401);
@@ -168,10 +201,15 @@ async function main() {
     const clarify = await ok(staff(`/submissions/${submission._id}/request-information`), { message: review.missingInformation });
     assert.equal(clarify.sent, false); const correctionToken = clarify.url.split('/').pop();
     const publicCorrection = await pub('/clarification', correctionToken); assert.equal(publicCorrection.data.message, review.missingInformation); assert(!publicCorrection.data.form);
+    const correctionFile = new FormData(); correctionFile.append('documentKind', 'supporting'); correctionFile.append('section', 'Requested information'); correctionFile.append('file', new Blob(['%PDF-1.4\nSynthetic clarification'], { type: 'application/pdf' }), 'clarification.pdf');
+    const correctionUpload = await fetch(base + staff('/public/clarification/files'), { method: 'POST', headers: { 'X-Intake-Token': correctionToken }, body: correctionFile });
+    assert.equal(correctionUpload.status, 201); const correctionDocument = await correctionUpload.json();
+    assert.equal((await pub('/clarification', correctionToken)).data.files[0]._id, correctionDocument._id);
     assert.equal((await req(staff(`/submissions/${submission._id}/accept`), review)).status, 409);
-    assert.equal((await pub('/clarification/reply', correctionToken, { response: 'Timing confirmed.' })).status, 200);
-    assert.equal((await pub('/clarification/reply', correctionToken, { response: 'Retry' })).status, 410);
-    pass('Review administration persists; secure clarification is single-use and email failure preserves the request');
+    assert.equal((await pub('/clarification/reply', correctionToken, { response: 'Timing confirmed.', documentIds: [correctionDocument._id] })).status, 200);
+    assert.equal(String((await Attachment.findById(correctionDocument._id))!.submissionId), String(submission._id));
+    assert.equal((await pub('/clarification/reply', correctionToken, { response: 'Retry' })).status, 200);
+    pass('Review administration persists; secure clarification retries return the same receipt and email failure preserves the request');
     const accepted = await Promise.all([req(staff(`/submissions/${submission._id}/accept`), review), req(staff(`/submissions/${submission._id}/accept`), review)]);
     assert(accepted.every(r => r.status === 200), JSON.stringify(accepted)); assert.equal(String(accepted[0]!.data.prospectId), String(accepted[1]!.data.prospectId));
     let prospect: any = await Prospect.findById(accepted[0]!.data.prospectId); assert.equal(await Prospect.countDocuments(), 1); assert.equal(await Case.countDocuments(), 0);
@@ -181,7 +219,9 @@ async function main() {
     const companyLink = await generate({ questionnaireId: 'articles-of-association-v1' });
     const answers: Record<string, any> = Object.fromEntries(ARTICLES_GROUPS.flatMap(g => g.questions).map(q => [q.key, q.type === 'number' ? 2 : `Synthetic ${q.key}`])); answers.appointSecretary = true;
     const company = form({ client: { type: 'Company', name: 'Synthetic Company', tin: 'TEST-TIN-002', representativeName: 'Synthetic Representative', representativeIdentification: 'TEST-REP-ID', email: 'client@test.invalid', phone: '+250700000002', country: 'Rwanda' }, questionnaireId: 'articles-of-association-v1', answers, shareholders: [{ name: 'Synthetic Shareholder', identification: 'TEST-SH-ID', shares: 20, percentage: 40, contribution: 200 }] });
+    assert.equal((await pub('/submit', companyLink.token, company)).data.code, 'REQUIRED_DOCUMENTS');
     assert.equal((await pub('/submit', companyLink.token, { ...company, shareholders: [{ name: 'Invalid', percentage: 101 }] })).status, 400);
+    company.documentIds = [(await upload(companyLink.token, 'representative.pdf', '%PDF-1.4\nsynthetic representative')).data._id, (await upload(companyLink.token, 'registration.pdf', '%PDF-1.4\nsynthetic registration')).data._id];
     assert.equal((await pub('/submit', companyLink.token, { ...company, confirmationVersion: INTAKE_CONFIRMATION.version })).status, 200);
     const companySubmission: any = await Submission.findOne({ linkId: companyLink.link._id });
     assert.equal(companySubmission.noticeAcknowledgment.kind, 'enquiry-confirmation');
@@ -194,7 +234,7 @@ async function main() {
     assert.equal((await req(staff(`/submissions/${companySubmission._id}/accept`), review)).status, 409);
     const companyAccepted = await ok(staff(`/submissions/${companySubmission._id}/accept`), { ...review, duplicatesReviewed: true }); assert(companyAccepted.prospectId);
     pass('Company/AoA data and every questionnaire answer retained; partial ownership allowed; duplicate confirmation required');
-    const rejectLink = await generate(); await pub('/submit', rejectLink.token, form()); const rejected: any = await Submission.findOne({ linkId: rejectLink.link._id });
+    const rejectLink = await generate(); await pub('/submit', rejectLink.token, form({ documentIds: [(await upload(rejectLink.token, 'identity.pdf', '%PDF-1.4\nsynthetic')).data._id] })); const rejected: any = await Submission.findOne({ linkId: rejectLink.link._id });
     await ok(staff(`/submissions/${rejected._id}/reject`), { reason: 'Synthetic rejection reason' }); assert.equal((await req(staff(`/submissions/${rejected._id}/accept`), review)).status, 409);
     pass('Rejection records its reason and prevents acceptance');
     const manual = await ok('/api/prospects', { ...assignments, clientName: 'Manual Test', contact: { name: 'Manual Test', email: 'manual@test.invalid' }, inquiryDescription: 'Manual test inquiry', legalServicePath: service.path });
@@ -249,7 +289,7 @@ async function main() {
     assert(await Prospect.exists({ _id: prospect._id })); assert(await Attachment.exists({ _id: file.data._id }));
     pass('Scoped invitation deletion disables URLs, records an audit and preserves accepted source records and private documents');
 
-    const removeSubmissionLink = await generate(); await pub('/submit', removeSubmissionLink.token, form());
+    const removeSubmissionLink = await generate(); await pub('/submit', removeSubmissionLink.token, form({ documentIds: [(await upload(removeSubmissionLink.token, 'identity.pdf', '%PDF-1.4\nsynthetic')).data._id] }));
     const removable: any = await Submission.findOne({ linkId: removeSubmissionLink.link._id });
     const reply = await ok(staff(`/submissions/${removable._id}/request-information`), { message: 'Synthetic clarification before deletion' });
     const submissionRoute = staff(`/submissions/${removable._id}`);
@@ -266,7 +306,7 @@ async function main() {
     assert(await AuditLog.exists({ intakeSubmissionId: removable._id, action: 'INTAKE_SUBMISSION_DELETED' }));
     pass('Submission deletion removes its invitation, invalidates clarification and prevents later review, duplicates or acceptance');
 
-    const racingLink = await generate(); await pub('/submit', racingLink.token, form());
+    const racingLink = await generate(); await pub('/submit', racingLink.token, form({ documentIds: [(await upload(racingLink.token, 'identity.pdf', '%PDF-1.4\nsynthetic')).data._id] }));
     const racing: any = await Submission.findOne({ linkId: racingLink.link._id });
     const [acceptRace, deleteRace] = await Promise.all([
       req(staff(`/submissions/${racing._id}/accept`), { ...review, duplicatesReviewed: true }),

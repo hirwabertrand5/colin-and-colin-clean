@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, ArrowRight, Check, CheckCircle2, ChevronDown, Clock3, Copy, ExternalLink, FileText, Link2, Loader2, LockKeyhole, Mail, RefreshCw, ShieldCheck, UserRound, UsersRound, X } from 'lucide-react';
 import type { User } from '../../services/userService';
+import LegalServiceDecisionTree from '../public/LegalServiceDecisionTree';
 
 export type IntakeInvitation = {
   clientName: string; clientEmail: string; serviceId: string; questionnaireId: string;
@@ -8,7 +9,7 @@ export type IntakeInvitation = {
   expiryDays: number | string; introduction: string;
 };
 export type IntakeLinkConfiguration = {
-  settings: { noticeApproved: boolean; defaultExpiryDays?: number };
+  settings: { noticeApproved: boolean; defaultExpiryDays?: number; notificationEmail?: string };
   services: Array<{ id: string; label: string; path: Array<{ id: string; label: string }> }>;
   canManage: boolean;
   delivery?: { email: { configured: boolean; message: string }; publicUrl: { configured: boolean; origin?: string; message: string } };
@@ -20,7 +21,8 @@ type Props = {
   invitation: IntakeInvitation; generated: any; busy: boolean; error: string;
   onChange: (patch: Partial<IntakeInvitation>) => void;
   onGenerate: () => void; onClose: () => void; onCopy: () => Promise<boolean>;
-  onSend: () => void; onCreateAnother: () => void;
+  onSend: (compose: { subject: string; message: string }) => void; onCreateAnother: () => void;
+  onSettings: () => void;
   onReloadConfiguration: () => void; onReloadStaff: () => void;
 };
 const STAFF_FIELDS = [
@@ -34,9 +36,12 @@ export default function GenerateIntakeLinkDialog(props: Props) {
   const { configuration, configurationLoading, configurationError, staff, staffLoading, staffError, invitation, generated, busy, error } = props;
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
+  const [subject, setSubject] = useState('Your secure Colin & Colin intake form');
+  const [message, setMessage] = useState('');
   const [customExpiry, setCustomExpiry] = useState(![3, 7, 14, 30].includes(Number(invitation.expiryDays)));
   const errorRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
+  useEffect(() => { setSubject('Your secure Colin & Colin intake form'); setMessage(generated?.link.introduction || ''); }, [generated?.link._id]);
   useEffect(() => { if (![3, 7, 14, 30].includes(Number(invitation.expiryDays))) setCustomExpiry(true); }, [invitation.expiryDays]);
   useEffect(() => { setCopied(false); setFieldErrors({}); if (generated?.url) document.getElementById('generated-intake-url')?.focus(); else setCustomExpiry(![3, 7, 14, 30].includes(Number(invitation.expiryDays))); }, [generated?.url]);
   const service = configuration?.services.find(item => item.id === invitation.serviceId);
@@ -44,7 +49,7 @@ export default function GenerateIntakeLinkDialog(props: Props) {
   const emailConfigured = configuration?.delivery?.email.configured !== false;
   const emailSent = generated?.link.emailStatus === 'Sent';
   const publicAddressError = configuration?.delivery?.publicUrl.configured === false ? configuration.delivery.publicUrl.message : '';
-  const ready = !!configuration && !configurationLoading && !configurationError && !publicAddressError;
+  const ready = !!configuration && configuration.settings.noticeApproved && !configurationLoading && !configurationError && !publicAddressError;
   const expiry = Number(invitation.expiryDays);
   const expiryValid = Number.isInteger(expiry) && expiry >= 1 && expiry <= 30;
   const update = (patch: Partial<IntakeInvitation>) => {
@@ -66,11 +71,6 @@ export default function GenerateIntakeLinkDialog(props: Props) {
     props.onGenerate();
   };
   const copyLink = async () => { if (await props.onCopy()) setCopied(true); };
-  const groupedServices = new Map<string, NonNullable<Props['configuration']>['services']>();
-  for (const item of configuration?.services || []) {
-    const group = item.path[0]?.label || 'Legal services';
-    groupedServices.set(group, [...(groupedServices.get(group) || []), item]);
-  }
 
   return <div className="intake-modal-backdrop intake-invite-backdrop">
     <section className={`intake-modal intake-invite-dialog${generated ? ' intake-invite-created' : ''}`} role="dialog" aria-modal="true" aria-labelledby="intake-generate-title" aria-describedby="intake-generate-description">
@@ -85,7 +85,8 @@ export default function GenerateIntakeLinkDialog(props: Props) {
           <label className="intake-invite-label" htmlFor="generated-intake-url">Client intake link</label>
           <div className="intake-invite-copy"><input className="intake-input" id="generated-intake-url" value={generated.url} readOnly onFocus={event => event.target.select()} /><button type="button" className="intake-button" onClick={() => void copyLink()}>{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? 'Copied' : 'Copy link'}</button></div>
           <div className="intake-invite-success-meta"><span><Clock3 size={15} /> Expires {new Date(generated.link.expiresAt).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span><span><LockKeyhole size={15} /> No client account required</span></div>
-          <div className="intake-invite-email-card"><Mail size={21} /><div><strong>{generated.link.clientEmail ? 'Send the invitation by email' : 'Share the link directly'}</strong><p>{generated.link.clientEmail || 'Copy the link and share it through your preferred channel.'}</p></div>{generated.link.clientEmail && <button type="button" className="intake-button secondary" disabled={busy || !emailConfigured || emailSent} onClick={props.onSend}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}{busy ? 'Sending...' : emailSent ? 'Email sent' : emailConfigured ? 'Send via email' : 'Email unavailable'}</button>}</div>
+          {!emailSent && generated.link.clientEmail && <div className="intake-email-compose"><h3>Compose invitation</h3><div className="intake-field"><label htmlFor="invite-subject">Subject</label><input id="invite-subject" className="intake-input" maxLength={200} value={subject} disabled={busy} onChange={e => setSubject(e.target.value)} /></div><div className="intake-field"><label htmlFor="invite-message">Message</label><textarea id="invite-message" className="intake-input" rows={5} maxLength={5000} value={message} placeholder="Please complete our secure intake form so our team can review your enquiry." disabled={busy} onChange={e => setMessage(e.target.value)} /></div><small>The secure form link and expiry date are added automatically.</small></div>}
+          <div className="intake-invite-email-card"><Mail size={21} /><div><strong>{generated.link.clientEmail ? 'Send the invitation by email' : 'Share the link directly'}</strong><p>{generated.link.clientEmail || 'Copy the link and share it through your preferred channel.'}</p></div>{generated.link.clientEmail && <button type="button" className="intake-button secondary" disabled={busy || !emailConfigured || emailSent} onClick={() => props.onSend({ subject, message: message || generated.link.introduction || 'Please complete our secure intake form so our team can review your enquiry.' })}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Mail size={16} />}{busy ? 'Sending...' : emailSent ? 'Email sent' : emailConfigured ? 'Send via email' : 'Email unavailable'}</button>}</div>
           <a className="intake-text-button intake-invite-open-link" href={generated.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} /> Open client form</a>
           {configuration?.delivery?.email.configured === false && <div className="intake-warning" role="status"><strong>Email setup required</strong><p>{configuration.delivery.email.message}</p><button type="button" className="intake-text-button" disabled={configurationLoading} onClick={props.onReloadConfiguration}><RefreshCw size={14} /> Recheck email setup</button></div>}
           <p className="intake-invite-security-note"><LockKeyhole size={15} /><span>Share only with the intended client. Copy it before leaving; you can regenerate a new link later if needed.</span></p>
@@ -95,6 +96,7 @@ export default function GenerateIntakeLinkDialog(props: Props) {
       </> : <form className="intake-invite-form" noValidate onSubmit={submit}>
         <div className="intake-invite-body">
           <div className="intake-invite-main">
+            {configuration && !configuration.settings.noticeApproved && <div className="intake-warning"><strong>The client information notice needs approval.</strong><p>Management can review the notice and email routing in Intake settings.</p>{configuration.canManage && <button type="button" className="intake-text-button" onClick={props.onSettings}>Open intake settings</button>}</div>}
             {configurationLoading && <div className="intake-invite-status" role="status"><Loader2 size={18} className="animate-spin" /><span>Loading invitation settings. You can start filling in the client details.</span></div>}
             {publicAddressError && <div className="intake-error intake-invite-blocker" role="alert"><AlertCircle size={19} /><div><strong>The public intake address needs attention</strong><p>{publicAddressError}</p><button type="button" className="intake-text-button" onClick={props.onReloadConfiguration}><RefreshCw size={14} /> Recheck address</button></div></div>}
             {configurationError && <div className="intake-error intake-invite-blocker" role="alert"><AlertCircle size={19} /><div><strong>Invitation settings could not load</strong><p>{configurationError}</p><button type="button" className="intake-text-button" onClick={props.onReloadConfiguration}><RefreshCw size={14} /> Retry settings</button></div></div>}
@@ -104,7 +106,7 @@ export default function GenerateIntakeLinkDialog(props: Props) {
               <div className="intake-grid">
                 <div className="intake-field"><label htmlFor="invite-name">Client or organization name</label><input className="intake-input" id="invite-name" autoComplete="off" placeholder="e.g. Client or company name" value={invitation.clientName} maxLength={300} disabled={busy} onChange={event => update({ clientName: event.target.value })} /></div>
                 <div className="intake-field"><label htmlFor="invite-email">Client email address</label><input className="intake-input" id="invite-email" type="email" autoComplete="off" placeholder="client@example.com" value={invitation.clientEmail} maxLength={254} disabled={busy} aria-invalid={!!fieldErrors.clientEmail} aria-describedby={fieldErrors.clientEmail ? 'invite-email-error' : 'invite-email-help'} onChange={event => update({ clientEmail: event.target.value })} />{fieldErrors.clientEmail ? <small className="intake-field-error" id="invite-email-error" role="alert">{fieldErrors.clientEmail}</small> : <small className="intake-field-help" id="invite-email-help">Add an email to send directly, or copy the link to share.</small>}</div>
-                <div className="intake-field intake-field-wide"><label htmlFor="invite-service">Legal service</label><select className="intake-input" id="invite-service" value={invitation.serviceId} disabled={busy || !configuration} onChange={event => update({ serviceId: event.target.value, questionnaireId: '' })}><option value="">Let the client choose a legal service</option>{Array.from(groupedServices, ([group, services]) => <optgroup key={group} label={group}>{services.map(item => <option key={item.id} value={item.id}>{item.path.length > 1 ? item.path.slice(1).map(part => part.label).join(' / ') : item.label}</option>)}</optgroup>)}</select><small className="intake-field-help">Select a service to tailor the client’s form.</small></div>
+                <div className="intake-field intake-field-wide"><label>Legal service</label><LegalServiceDecisionTree value={invitation.serviceId} prefix="invite" disabled={busy || !configuration} onChange={value => update({ serviceId: value, questionnaireId: '' })} /><small className="intake-field-help">Choose a department, then follow its categories. Leave blank to let the client choose.</small></div>
               </div>
               {supportsArticles && <label className="intake-invite-questionnaire"><input type="checkbox" checked={!!invitation.questionnaireId} disabled={busy} onChange={event => update({ questionnaireId: event.target.checked ? 'articles-of-association-v1' : '' })} /><span><strong>Include Articles of Association</strong><small>Add questions about share capital, shareholders and corporate governance.</small></span><FileText size={19} /></label>}
             </section>
@@ -126,7 +128,7 @@ export default function GenerateIntakeLinkDialog(props: Props) {
         </div>
 
         <footer className="intake-invite-footer">
-          <div className="intake-invite-footer-status">{configurationLoading ? <><Loader2 size={16} className="animate-spin" /><span>Loading settings…</span></> : ready ? <><ShieldCheck size={16} /><span>Ready to generate and share</span></> : <><AlertCircle size={16} /><span>{configurationError ? 'Reload settings to continue' : publicAddressError ? 'Public intake address needs attention' : 'Reload settings to continue'}</span></>}</div>
+          <div className="intake-invite-footer-status">{configurationLoading ? <><Loader2 size={16} className="animate-spin" /><span>Loading settings…</span></> : ready ? <><ShieldCheck size={16} /><span>Ready to generate and share</span></> : <><AlertCircle size={16} /><span>{configurationError ? 'Reload settings to continue' : publicAddressError ? 'Public intake address needs attention' : !configuration?.settings.noticeApproved ? 'Client notice approval required' : 'Reload settings to continue'}</span></>}</div>
           {error && <div ref={errorRef} tabIndex={-1} role="alert" className="intake-error intake-invite-submit-error"><AlertCircle size={17} /><span>{error}</span></div>}
           <div className="intake-invite-footer-actions"><button type="button" className="intake-button secondary" onClick={props.onClose} disabled={busy}>Cancel</button><button type="submit" className="intake-button" disabled={busy || !ready} aria-busy={busy}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}{busy ? 'Generating…' : 'Generate secure link'}{!busy && <ArrowRight size={15} />}</button></div>
         </footer>

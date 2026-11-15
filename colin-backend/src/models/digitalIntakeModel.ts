@@ -6,6 +6,7 @@ const linkSchema = new Schema({
   reference: { type: String, required: true, unique: true },
   tokenHash: { type: String, required: true, unique: true, select: false },
   tokenVersion: { type: Number, default: 1 },
+  draft: { type: Schema.Types.Mixed, select: false }, draftRevision: { type: Number, default: 0 }, draftSavedAt: Date,
   createdBy: { ...staff, required: true }, responsiblePartner: staff, responsibleAssociate: staff, assignedTo: staff,
   clientName: { type: String, maxlength: 300 }, clientEmail: { type: String, lowercase: true, maxlength: 254 },
   serviceId: String, questionnaireId: String, introduction: { type: String, maxlength: 2000 },
@@ -33,6 +34,7 @@ const submissionSchema = new Schema({
   administration: { serviceId: String, responsiblePartner: staff, responsibleAssociate: staff, assignedTo: staff, consultationDate: String, attendingCounsel: String, previousClientStatus: String, referredBy: String, officialClientName: String, signatureRecord: String, recordDate: String },
   rejectionReason: { type: String, maxlength: 5000 },
   clarificationHash: { type: String, select: false }, clarificationExpiresAt: Date,
+  clarificationUploadCount: { type: Number, default: 0 }, clarificationUploadBytes: { type: Number, default: 0 },
   clarifications: [{ message: String, requestedAt: Date, requestedBy: staff, response: String, respondedAt: Date }],
   reviewHistory: { type: [history], default: [] }, duplicateReview: { confirmedAt: Date, confirmedBy: staff },
 }, { timestamps: true, optimisticConcurrency: true });
@@ -48,6 +50,8 @@ const attachmentSchema = new Schema({
   tokenVersion: { type: Number, required: true },
   storageId: { type: String, required: true, select: false },
   name: { type: String, required: true }, size: Number, mimeType: String, section: String,
+  documentKind: { type: String, enum: ['national-id', 'passport', 'business-registration', 'supporting'], default: 'supporting' },
+  clarificationHash: { type: String, select: false },
   matterId: { type: Schema.Types.ObjectId, ref: 'Case', default: null },
 }, { timestamps: true });
 export const ClientIntakeAttachment = mongoose.model<any>('ClientIntakeAttachment', attachmentSchema);
@@ -57,6 +61,7 @@ const settingsSchema = new Schema({
   noticeText: String, noticeVersion: String, privacyContact: String, retentionPolicy: String,
   noticeApproved: { type: Boolean, default: false }, approvedBy: staff, approvedAt: Date,
   defaultExpiryDays: { type: Number, default: 7, min: 1, max: 30 },
+  notificationEmail: { type: String, default: 'info@colinandcolin.com' },
 }, { timestamps: true });
 export const ClientIntakeSettings = mongoose.model<any>('ClientIntakeSettings', settingsSchema);
 

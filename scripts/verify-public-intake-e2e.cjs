@@ -34,7 +34,7 @@ async function main() {
     const Case = require('../colin-backend/dist/models/caseModel').default;
     const Notification = require('../colin-backend/dist/models/notificationModel').default;
     const { ClientIntakeSubmission: Submission, ClientIntakeAttachment: Attachment } = require('../colin-backend/dist/models/digitalIntakeModel');
-    const { ARTICLES_GROUPS, MATTER_FIELDS, SHAREHOLDER_FIELDS, INTAKE_CONFIRMATION } = require('../colin-backend/dist/config/digitalIntakeSchema');
+    const { INTAKE_SERVICES, ARTICLES_GROUPS, MATTER_FIELDS, SHAREHOLDER_FIELDS, INTAKE_CONFIRMATION } = require('../colin-backend/dist/config/digitalIntakeSchema');
     await Promise.all(Object.values(mongoose.models).map(model => model.init()));
     const manager = await User.create({ name: 'Synthetic Intake Manager', email: 'manager@test.invalid', role: 'managing_partner', passwordHash: 'fixture' });
     const associate = await User.create({ name: 'Synthetic Intake Associate', email: 'associate@test.invalid', role: 'associate', passwordHash: 'fixture' });
@@ -91,7 +91,7 @@ async function main() {
       const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); return context.getImageData(0, 0, 1, 1).data[3];
     });
     assert.equal(logoAlpha, 0, 'The supplied header logo must have a transparent background.');
-    assert.equal(await page.locator('.intake-client-form > .intake-field-section').count(), 3);
+    assert.equal(await page.locator('.intake-client-form > .intake-field-section').count(), 4);
     await page.setViewportSize({ width: 390, height: 844 });
     await layout('client identification'); await shot('public-mobile-identification');
     assert.equal(await page.locator('#intake-identification').count(), 1);
@@ -99,6 +99,9 @@ async function main() {
     assert.equal(await page.locator('#intake-identification').count(), 0);
     const client = { name: 'Synthetic Intake Company', tin: 'SYNTHETIC-TIN', representativeName: 'Synthetic Representative', representativeIdentification: 'SYNTHETIC-REP-ID', email: 'client@test.invalid', phone: '+250700000001', country: 'Rwanda', cityProvince: 'Synthetic city', district: 'Synthetic district', sector: 'Synthetic sector', cell: 'Synthetic cell', village: 'Synthetic village', profession: 'Director', contactName: 'Synthetic contact', contactPhone: '+250700000002' };
     for (const [key, value] of Object.entries(client)) await page.locator('#intake-' + key).fill(value);
+    await page.getByText('Draft saved securely. You can return using this link.', { exact: true }).waitFor();
+    await page.reload(); await page.getByRole('heading', { name: 'Your details', exact: true }).waitFor();
+    assert.equal(await page.locator('#intake-name').inputValue(), client.name);
     const next = async title => { await page.getByRole('button', { name: 'Next', exact: true }).click(); await page.getByRole('heading', { name: title, exact: true }).waitFor(); };
     await next('Relevant parties');
     for (let index = 0; index < 2; index++) {
@@ -106,11 +109,11 @@ async function main() {
       await page.locator(`#party-${index}-name`).fill('Synthetic Party ' + (index + 1));
       await page.locator(`#party-${index}-relationship`).fill(index ? 'Beneficiary' : 'Co-owner');
     }
-    await next('Legal matter'); await page.locator('#intake-service').selectOption('company_incorporation');
-    const matter = Object.fromEntries(MATTER_FIELDS.map(q => [q.key, 'Synthetic ' + q.key]));
+    await next('Legal matter'); for (const [level, node] of INTAKE_SERVICES.find(s => s.id === 'company_incorporation').path.entries()) await page.locator('#intake-service-' + level).selectOption(node.id);
+    await page.getByLabel('My enquiry includes preparing Articles of Association').check();
+    const matter = Object.fromEntries(MATTER_FIELDS.map(q => [q.key, q.type === 'date' ? '2026-12-15' : 'Synthetic ' + q.key]));
     for (const [key, value] of Object.entries(matter)) await page.locator('#intake-' + key).fill(value);
     await next('Supporting information');
-    await page.getByLabel('My enquiry includes preparing Articles of Association').check();
     await page.locator('.intake-question-group').evaluateAll(items => items.forEach((item, index) => item.open = index === 0));
     await shot('public-mobile-questionnaire');
     await page.setViewportSize({ width: 1440, height: 1000 }); await shot('public-desktop-questionnaire');
@@ -130,11 +133,27 @@ async function main() {
     await layout('complete questionnaire');
     await next('Documents');
     const pdf = Buffer.from('%PDF-1.4\nSynthetic supporting document for isolated verification.\n%%EOF');
+    // Simulate a broken upload response once; every successful upload uses the real API.
+    let brokenUpload = true;
+    await page.route('**/api/digital-intake/public/files', route => {
+      if (!brokenUpload) return route.continue();
+      brokenUpload = false; return route.fulfill({ status: 200, contentType: 'text/html', body: '<html>Unexpected gateway page</html>' });
+    });
     await page.locator('input[type=file]').setInputFiles({ name: 'synthetic-support.pdf', mimeType: 'application/pdf', buffer: pdf });
+    await page.getByText('The server did not confirm this upload. Please retry.', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Uploaded securely', { exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await page.getByText('Uploaded securely', { exact: true }).waitFor();
+    await page.locator('#upload-section').selectOption('business-registration');
+    await page.locator('input[type=file]').setInputFiles({ name: 'synthetic-registration.pdf', mimeType: 'application/pdf', buffer: pdf });
+    await page.getByText('Uploaded securely', { exact: true }).nth(1).waitFor();
     await next('Review & submit'); await layout('complete review'); await shot('public-mobile-review');
+    await page.getByRole('button', { name: 'Edit', exact: false }).filter({ hasText: 'Edit' }).first().click();
+    await page.getByRole('heading', { name: 'Your details', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Save and return to review', exact: true }).click();
+    await page.getByRole('heading', { name: 'Review & submit', exact: true }).waitFor();
     assert.equal(await page.locator('.intake-notice').count(), 0);
-    assert(!/Please read before submitting|Privacy and client notice|Privacy contact|Notice version/.test(await page.locator('.intake-client-form').innerText()));
+    await page.getByText('How we use your information', { exact: true }).waitFor();
     await page.getByLabel(INTAKE_CONFIRMATION.text, { exact: true }).waitFor();
     await page.setViewportSize({ width: 1440, height: 1000 }); await layout('desktop review'); await shot('public-desktop-review');
     await page.locator('.intake-checkbox input').check();
@@ -161,7 +180,7 @@ async function main() {
     assert.equal(stored.noticeAcknowledgment.text, INTAKE_CONFIRMATION.text); assert.equal(stored.noticeAcknowledgment.version, INTAKE_CONFIRMATION.version);
     assert(!stored.noticeAcknowledgment.contact); assert(!stored.noticeAcknowledgment.retention);
     assert.equal(await Prospect.countDocuments({}), 0); assert.equal(await Case.countDocuments({}), 0);
-    assert.equal(await Attachment.countDocuments({ submissionId: stored._id }), 1);
+    assert.equal(await Attachment.countDocuments({ submissionId: stored._id }), 2);
     assert(await Notification.countDocuments({ dedupeKey: 'intake:' + stored._id }) >= 1);
     assert(publicRequests.every(request => !request.headers().authorization && !request.url().includes(invitation.token)));
     console.log('PASS: anonymous direct visit and refresh, stale staff state isolation, all six steps and all PDF questionnaire groups, real upload, interrupted submit recovery, persisted submission and notification');
@@ -176,6 +195,24 @@ async function main() {
     await page.getByRole('button', { name: 'Accept into prospect pipeline' }).click();
     const accepted = await acceptedResponse; assert.equal(accepted.status(), 200, await accepted.text());
     const prospect = await Prospect.findOne({ intakeSubmissionId: stored._id }); assert(prospect); assert.equal(prospect.stage, 'Inquiry'); assert.equal(prospect.clientName, client.name); assert.equal(await Case.countDocuments({}), 0);
+    await page.getByRole('button', { name: 'Close submission review', exact: true }).click();
+    await page.getByRole('button', { name: 'Intake Links', exact: true }).click();
+    await page.getByRole('button', { name: 'Intake settings', exact: true }).click();
+    await page.getByRole('heading', { name: 'Intake settings', exact: true }).waitFor();
+    assert.equal(await page.locator('#intake-notification-mail').inputValue(), 'info@colinandcolin.com');
+    await page.getByRole('button', { name: 'Close intake settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Generate Intake Link', exact: true }).click();
+    await page.getByRole('heading', { name: 'Generate intake link', exact: true }).waitFor();
+    await page.locator('#invite-email').fill('synthetic-client@test.invalid');
+    assert.equal(await page.locator('#invite-service-0 option').count(), 3);
+    for (const [level, node] of INTAKE_SERVICES.find(s => s.id === 'contractual_disputes').path.entries()) await page.locator('#invite-service-' + level).selectOption(node.id);
+    await page.getByRole('button', { name: 'Generate secure link', exact: true }).click();
+    await page.getByRole('heading', { name: 'Your invitation is ready', exact: true }).waitFor();
+    await page.locator('#invite-subject').fill('Synthetic invitation subject');
+    await page.locator('#invite-message').fill('Synthetic composed invitation message');
+    await page.getByRole('heading', { name: 'Compose invitation', exact: true }).waitFor();
+    await shot('staff-invitation-compose');
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
     await page.goto(base + clientPath); await page.getByRole('heading', { name: 'Your form has been received', exact: true }).waitFor();
     assert.equal(await Submission.countDocuments({ linkId: invitation.link._id }), 1); assert.equal(await Prospect.countDocuments({ intakeSubmissionId: stored._id }), 1); assert.deepEqual(errors, []);
     console.log('PASS: actual staff Client Submissions list and review, acceptance into one Inquiry prospect, no Active Matter and safe already-submitted state');

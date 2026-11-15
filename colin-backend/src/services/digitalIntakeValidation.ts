@@ -21,6 +21,12 @@ export const serviceById = (id: unknown, required = false) => {
   if (key && !match) throw new IntakeError(400, 'Select a listed legal service.');
   return match;
 };
+export const normalizeIntakePhone = (value: string, country = '') => {
+  const digits = value.replace(/\D/g, '');
+  if (!/^\+?[\d\s().-]+$/.test(value) || digits.length < 7 || digits.length > 15) throw new IntakeError(400, 'Enter a telephone number with 7 to 15 digits.');
+  if (/^(rwanda|rw)$/i.test(country.trim()) && /^0\d{9}$/.test(digits)) return `+250${digits.slice(1)}`;
+  return `${value.startsWith('+') || digits.startsWith('250') ? '+' : ''}${digits}`;
+};
 const fieldsFrom = (raw: any, questions: IntakeQuestion[]) => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new IntakeError(400, 'Form information is invalid.');
   const out: Record<string, string | number> = {};
@@ -40,21 +46,27 @@ const person = (raw: any, client = false) => {
   if (!fields.name) throw new IntakeError(400, 'A full legal name or company name is required.');
   fields.email = validateEmail(fields.email, client);
   if (client && (!fields.phone || !fields.country)) throw new IntakeError(400, 'Telephone number and country are required.');
-  if (fields.phone && !/^[+\d\s().-]{5,40}$/.test(String(fields.phone))) throw new IntakeError(400, 'Enter a valid telephone number.');
+  if (fields.phone) fields.phone = normalizeIntakePhone(String(fields.phone), String(fields.country || ''));
+  if (fields.contactPhone) fields.contactPhone = normalizeIntakePhone(String(fields.contactPhone), String(fields.country || ''));
   if (client && raw.type === 'Individual' && !fields.identification) throw new IntakeError(400, 'National ID / Passport number is required.');
   if (raw.type === 'Individual') { delete fields.tin; delete fields.representativeName; delete fields.representativeIdentification; }
-  if (client && raw.type === 'Company' && (!fields.tin || !fields.representativeName || !fields.representativeIdentification)) throw new IntakeError(400, 'Company TIN and authorized representative details are required.');
-  return { type: raw.type, ...fields };
+  const registrationStatus = raw.registrationStatus === 'Proposed' ? 'Proposed' : 'Registered';
+  if (client && raw.type === 'Company' && ((!fields.tin && registrationStatus === 'Registered') || !fields.representativeName || !fields.representativeIdentification)) throw new IntakeError(400, 'Company TIN (for registered businesses) and authorized representative details are required.');
+  const identityType = raw.identityType || 'National ID';
+  if (!['National ID', 'Passport'].includes(identityType)) throw new IntakeError(400, 'Choose National ID or Passport.');
+  return { type: raw.type, ...fields, ...(client ? { identityType, ...(raw.type === 'Company' ? { registrationStatus } : {}) } : {}) };
 };
 export const validateIntakeForm = (raw: any, link: any) => {
   if (!raw || typeof raw !== 'object') throw new IntakeError(400, 'Complete the intake form.');
   const service = serviceById(raw.serviceId || link.serviceId, true)!;
-  if (link.serviceId && service.id !== link.serviceId) throw new IntakeError(400, 'This invitation is for a different legal service.');
+  if (link.serviceId && !service.path.some(p => p.id === link.serviceId)) throw new IntakeError(400, 'This invitation is for a different legal service.');
+  if (INTAKE_SERVICES.some(item => item.path.some(p => p.id === service.id) && item.id !== service.id)) throw new IntakeError(400, 'Complete the legal service decision tree.');
   const questionnaireId = textValue(raw.questionnaireId || link.questionnaireId, 100);
   if (questionnaireId && (questionnaireId !== 'articles-of-association-v1' || !service.path.some(p => p.id === 'company_incorporation'))) throw new IntakeError(400, 'This questionnaire is not available for the selected service.');
   const client = person(raw.client, true);
   if (!Array.isArray(raw.parties) || raw.parties.length > 20) throw new IntakeError(400, 'Up to 20 relevant parties are supported.');
   const matter = fieldsFrom(raw.matter, MATTER_FIELDS);
+  if (matter.deadline && (!/^\d{4}-\d{2}-\d{2}$/.test(String(matter.deadline)) || !Number.isFinite(Date.parse(String(matter.deadline))))) throw new IntakeError(400, 'Enter a valid deadline.');
   const parties = raw.parties.map((p: any) => person(p));
   let answers: any = {};
   let shareholders: any[] = [];

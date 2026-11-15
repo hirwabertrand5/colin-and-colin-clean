@@ -4,7 +4,8 @@ import mongoose, { Schema } from 'mongoose';
 // during retries: their unique keys are the application's long-term send ledger.
 const EmailDeliverySchema = new Schema({
   key: { type: String, required: true, unique: true },
-  notificationId: { type: Schema.Types.ObjectId, ref: 'Notification', required: true, index: true },
+  notificationId: { type: Schema.Types.ObjectId, ref: 'Notification', index: true },
+  intakeLinkId: { type: Schema.Types.ObjectId, ref: 'ClientIntakeLink', index: true },
   userId: { type: Schema.Types.ObjectId, ref: 'User' },
   to: { type: String, required: true },
   category: { type: String, required: true },

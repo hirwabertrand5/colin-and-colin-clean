@@ -23,8 +23,19 @@ export const MATTER_FIELDS: IntakeQuestion[] = [
   { ...q('inquiry', 'Nature of inquiry / Assistance required'), required: true },
   { ...q('objectives', 'Desired outcome / Objectives'), required: true },
   { ...q('overview', 'Case overview / Detailed description'), required: true },
+  q('deadline', 'Next court date / Critical deadline (if any)', 'date'),
   q('relevantDates', 'Relevant dates and deadlines'), q('jurisdictions', 'Relevant jurisdictions', 'text'),
   q('circumstances', 'Important circumstances / Background information'), q('concerns', 'Concerns or issues related to the matter'),
+];
+export const DOCUMENT_KINDS = [
+  { id: 'national-id', label: 'National ID' },
+  { id: 'passport', label: 'Passport (foreign national)' },
+  { id: 'business-registration', label: 'Business registration certificate' },
+  { id: 'supporting', label: 'Other supporting document' },
+] as const;
+export const requiredIntakeDocuments = (client: any): Array<{ id: string; label: string }> => [
+  client?.identityType === 'Passport' ? { id: 'passport', label: client.type === 'Company' ? 'Representative passport' : 'Passport' } : { id: 'national-id', label: client?.type === 'Company' ? 'Representative National ID' : 'National ID' },
+  ...(client?.type === 'Company' && client?.registrationStatus !== 'Proposed' ? [{ id: 'business-registration', label: 'Business registration certificate' }] : []),
 ];
 export const ARTICLES_GROUPS: IntakeQuestionGroup[] = [
   { key: 'company', title: 'Company information', questions: [q('companyType', 'Nature and type of proposed company', 'text'), q('companyName', 'Proposed company name', 'text'), q('businessObjects', 'Principal business activities and objects'), q('registeredOffice', 'Registered office'), q('principalBusiness', 'Principal place of business'), q('regulatoryRequirements', 'Regulatory or licensing requirements')] },

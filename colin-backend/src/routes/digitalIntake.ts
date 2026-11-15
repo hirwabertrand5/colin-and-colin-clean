@@ -19,10 +19,11 @@ router.use('/public', (req, res, next) => { (async () => {
   // Applied before multipart parsing. Persistent windows work across Render replicas.
   const windowMs = 10 * 60000;
   const stamp = Math.floor(Date.now() / windowMs);
-  const kinds = [{ key: req.ip || req.socket.remoteAddress || 'unknown', limit: 180 }];
-  if (token(req)) kinds.push({ key: token(req), limit: req.path.includes('files') ? 40 : 100 });
+  const draft = req.path.includes('draft');
+  const kinds = [{ key: req.ip || req.socket.remoteAddress || 'unknown', limit: draft ? 400 : 180 }];
+  if (token(req)) kinds.push({ key: token(req), limit: draft ? 300 : req.path.includes('files') ? 40 : 100 });
   for (const kind of kinds) {
-    const key = createHash('sha256').update(`${kind.key}:${stamp}:${req.method}:${req.path.includes('files') ? 'files' : 'form'}`).digest('hex');
+    const key = createHash('sha256').update(`${kind.key}:${stamp}:${req.method}:${draft ? 'draft' : req.path.includes('files') ? 'files' : 'form'}`).digest('hex');
     let bucket: any;
     try { bucket = await ClientIntakeRate.findOneAndUpdate({ key }, { $inc: { count: 1 }, $setOnInsert: { expiresAt: new Date((stamp + 2) * windowMs) } }, { upsert: true, returnDocument: 'after' }); }
     catch (error: any) { if (error.code === 11000) bucket = await ClientIntakeRate.findOneAndUpdate({ key }, { $inc: { count: 1 } }, { returnDocument: 'after' }); else throw error; }
@@ -34,17 +35,24 @@ router.use('/public', (req, res, next) => { (async () => {
 
 // Public tokens use a dedicated header, keeping them out of API access-log URLs.
 router.post('/public/form', run(async (req, res) => res.json(await intake.publicIntakeDetails(token(req)))));
+router.put('/public/draft', run(async (req, res) => res.json(await intake.saveIntakeDraft(token(req), req.body))));
 router.post('/public/submit', run(async (req, res) => res.json(await intake.submitIntakeForm(token(req), req.body))));
-const multipart = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1048576, files: 1, fields: 1, fieldSize: 300 } });
+const multipart = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1048576, files: 1, fields: 2, fieldSize: 300 } });
 router.post('/public/files', run(async (req, res) => {
   const link = await intake.resolvePublicIntakeLink(token(req));
   if (link.submittedAt) throw new IntakeError(409, 'This form has already been submitted.');
   await new Promise<void>((resolve, reject) => multipart.single('file')(req, res, error => error ? reject(error) : resolve()));
-  res.status(201).json(await intake.uploadIntakeAttachment(token(req), req.file, req.body.section));
+  res.status(201).json(await intake.uploadIntakeAttachment(token(req), req.file, req.body.section, req.body.documentKind));
 }));
 router.delete('/public/files/:id', run(async (req, res) => { await intake.removeIntakeAttachment(token(req), req.params.id); res.json({ removed: true }); }));
 router.post('/public/clarification', run(async (req, res) => res.json(await intake.publicClarification(token(req)))));
+router.post('/public/clarification/files', run(async (req, res) => {
+  await intake.publicClarification(token(req));
+  await new Promise<void>((resolve, reject) => multipart.single('file')(req, res, error => error ? reject(error) : resolve()));
+  res.status(201).json(await intake.uploadIntakeAttachment(token(req), req.file, req.body.section, req.body.documentKind, true));
+}));
 router.post('/public/clarification/reply', run(async (req, res) => res.json(await intake.publicClarification(token(req), req.body))));
+router.delete('/public/clarification/files/:id', run(async (req, res) => { await intake.removeIntakeAttachment(token(req), req.params.id, true); res.json({ removed: true }); }));
 
 router.use(authenticate, (req: AuthRequest, res, next) => {
   if (!intake.INTAKE_STAFF.includes(req.user?.role || '')) return res.status(403).json({ message: 'You do not have access to digital intake.' });
@@ -57,11 +65,12 @@ router.post('/links', run(async (req, res) => res.status(201).json(await intake.
 router.delete('/links/:id', run(async (req, res) => res.json(await intake.deleteIntakeLink(req.params.id, req))));
 router.post('/links/:id/revoke', run(async (req, res) => res.json(await intake.changeIntakeLink(req.params.id, 'revoke', req))));
 router.post('/links/:id/regenerate', run(async (req, res) => res.json(await intake.changeIntakeLink(req.params.id, 'regenerate', req))));
-router.post('/links/:id/send', run(async (req, res) => res.json(await intake.sendIntakeInvitation(req.params.id, req.body.token, req))));
+router.post('/links/:id/send', run(async (req, res) => res.json(await intake.sendIntakeInvitation(req.params.id, req.body.token, req, req.body))));
 router.get('/submissions', run(async (req, res) => res.json(await intake.listIntakeSubmissions(req))));
 router.get('/submissions/:id', run(async (req, res) => res.json(await intake.getIntakeSubmission(req.params.id, req))));
 router.delete('/submissions/:id', run(async (req, res) => res.json(await intake.deleteIntakeSubmission(req.params.id, req))));
 router.put('/submissions/:id/review', run(async (req, res) => res.json(await intake.reviewIntakeSubmission(req.params.id, req.body, req))));
+router.post('/submissions/:id/retry-emails', run(async (req, res) => res.json(await intake.retryIntakeEmails(req.params.id, req))));
 router.post('/submissions/:id/accept', run(async (req, res) => res.json(await intake.acceptIntakeSubmission(req.params.id, req.body, req))));
 router.post('/submissions/:id/reject', run(async (req, res) => res.json(await intake.rejectIntakeSubmission(req.params.id, req.body, req))));
 router.post('/submissions/:id/request-information', run(async (req, res) => res.json(await intake.requestIntakeInformation(req.params.id, req.body, req))));
