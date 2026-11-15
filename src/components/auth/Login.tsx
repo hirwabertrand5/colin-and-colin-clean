@@ -17,7 +17,17 @@ export default function Login({ onLogin }: LoginProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const submitting = useRef(false);
-  useEffect(() => { prepareSignIn(); }, []);
+  useEffect(() => {
+    prepareSignIn();
+    // Autofill and password managers may submit without focusing the password field.
+    // Prepare dashboard code while the browser is idle, before credentials are sent.
+    if ('requestIdleCallback' in window) {
+      const handle = window.requestIdleCallback(prepareSignInDashboards, { timeout: 500 });
+      return () => window.cancelIdleCallback(handle);
+    }
+    const handle = setTimeout(prepareSignInDashboards, 100);
+    return () => clearTimeout(handle);
+  }, []);
   const { isDark } = useTheme();
   const companyLogo = isDark ? companyLogoDark : companyLogoLight;
 
@@ -68,6 +78,7 @@ export default function Login({ onLogin }: LoginProps) {
                 id="email"
                 type="email"
                 autoComplete="username"
+                onFocus={prepareSignIn}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500"

@@ -15,7 +15,7 @@ export const createNotification = async (payload: {
 
   link?: string;
   dedupeKey?: string;
-  deliveryContext?: { kind: string; entityId: string; deadlineAt: string; stepKey?: string; ownerIdentity?: string; expiresAt?: string };
+  deliveryContext?: { kind: string; entityId: string; deadlineAt: string; stepKey?: string; ownerIdentity?: string; expiresAt?: string; emailBatch?: string };
 
   caseId?: string;
   taskId?: string;

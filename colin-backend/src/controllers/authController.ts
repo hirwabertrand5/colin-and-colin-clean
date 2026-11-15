@@ -33,7 +33,7 @@ export const login = async (req: Request, res: Response) => {
     // Normal sign-in is one indexed read plus password verification. Do not
     // hash and save the password again during login or replace stronger hashes.
     if (user.loginAttempts || user.lockUntil) {
-      await User.updateOne({ _id: user._id }, { $set: { loginAttempts: 0 }, $unset: { lockUntil: 1 } });
+      void User.updateOne({ _id: user._id }, { $set: { loginAttempts: 0 }, $unset: { lockUntil: 1 } }).catch(() => {});
     }
 
     const secret = process.env.JWT_SECRET as string;
@@ -48,7 +48,7 @@ export const login = async (req: Request, res: Response) => {
       { expiresIn: '7d' }
     );
 
-    return res.json({
+    return res.set('Cache-Control', 'no-store').json({
       token,
       user: {
         id: user._id,

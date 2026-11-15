@@ -23,6 +23,7 @@ export const runReminderScan = async (now = new Date()) => {
   const matters = await Case.find().select('_id status assignedTo caseNo caseAssignments').lean();
   const matterMap = new Map(matters.map(matter => [String(matter._id), matter]));
   const coordinators = await User.find({ role: { $in: ['managing_director', 'executive_assistant'] }, isActive: { $ne: false } }).select('_id email').lean();
+  const reminders: Array<Parameters<typeof createNotification>[0]> = [];
   const remind = async (args: { key: string; due: Date; priority: string; owner: string; title: string; link: string; caseId?: string; taskId?: string; eventId?: string; event?: boolean }) => {
     const user: any = await findUserByAssigneeString(args.owner);
     if (!user || user.isActive === false) return;
@@ -39,13 +40,14 @@ export const runReminderScan = async (now = new Date()) => {
       message: `${args.title}\nDeadline: ${formatNotificationTime(args.due)}${overdue ? '\nPlease act or arrange a revised deadline.' : ''}`,
       severity: overdue ? 'critical' as const : 'warning' as const, link: args.link,
       deliveryContext: { kind: contextKind, entityId: String(entityId), deadlineAt: args.due.toISOString(), ownerIdentity: args.owner,
+        ...(!args.event && args.caseId ? { emailBatch: String(Math.floor(now.getTime() / 60000)) } : {}),
         ...(!overdue ? { expiresAt: new Date(args.due.getTime() - nextThreshold * 3600000).toISOString() } : {}), ...(stepParts.length ? { stepKey: stepParts.join(':') } : {}) },
       ...(args.caseId ? { caseId: args.caseId } : {}), ...(args.taskId ? { taskId: args.taskId } : {}), ...(args.eventId ? { eventId: args.eventId } : {}) };
     const revisionKey = `${args.key}:${args.due.toISOString()}`;
-    await createNotification({ ...base, audienceUserIds: [String(user._id)], dedupeKey: `${revisionKey}:${user._id}:${threshold}` });
+    reminders.push({ ...base, audienceUserIds: [String(user._id)], dedupeKey: `${revisionKey}:${user._id}:${threshold}` });
     if (overdue && args.priority === 'Critical' && now.getTime() - args.due.getTime() >= (userPrefs?.overdueEscalationHours || 24) * 3600000) {
       const ids = coordinators.map(coordinator => String(coordinator._id)).filter(id => id !== String(user._id));
-      if (ids.length) await createNotification({ ...base, title: `Escalation: ${args.title}`, audienceUserIds: ids, dedupeKey: `${revisionKey}:ESCALATION` });
+      if (ids.length) reminders.push({ ...base, title: `Escalation: ${args.title}`, audienceUserIds: ids, dedupeKey: `${revisionKey}:ESCALATION` });
     }
   };
   for (const task of await Task.find({ status: { $ne: 'Completed' } }).lean()) {
@@ -61,11 +63,12 @@ export const runReminderScan = async (now = new Date()) => {
   for (const workflow of await Workflow.find({ status: { $ne: 'Completed' } }).lean()) {
     const matter: any = matterMap.get(String(workflow.caseId));
     if (!matterIsOpen(matter)) continue;
-    const step: any = (workflow.steps || []).find((item: any) => !['Completed', 'Skipped', 'Cancelled'].includes(item.status));
-    if (!step || ['Done', 'Awaiting Review', 'Awaiting Approval'].includes(step.status) || step.delegatedClaim?.taskId) continue;
-    const due = resolveDeadlineDateTime(step.dueAt);
-    if (due) await remind({ key: `LEGAL:${workflow._id}:${step.stepKey}`, due, priority: 'Critical', owner: matter.caseAssignments?.initiator || matter.assignedTo,
-      title: `${matter.caseNo}: ${step.title}`, link: `/cases/${matter._id}`, caseId: String(matter._id) });
+    for (const step of workflow.steps || []) {
+      if (['Completed', 'Skipped', 'Cancelled', 'Done', 'Awaiting Review', 'Awaiting Approval'].includes(step.status) || step.delegatedClaim?.taskId) continue;
+      const due = resolveDeadlineDateTime(step.dueAt);
+      if (due) await remind({ key: `LEGAL:${workflow._id}:${step.stepKey}`, due, priority: 'Critical', owner: matter.caseAssignments?.initiator || matter.assignedTo,
+        title: `${matter.caseNo}: ${step.title}`, link: `/cases/${matter._id}`, caseId: String(matter._id) });
+    }
   }
   for (const event of await Event.find().lean()) {
     const matter: any = matterMap.get(String(event.caseId));
@@ -79,6 +82,11 @@ export const runReminderScan = async (now = new Date()) => {
     for (const person of recipients.values()) await remind({ key: `EVENT:${event._id}`, due, priority: 'Medium', owner: person.email, title: `${event.title} (${matter.caseNo})`, event: true,
       link: `/cases/${event.caseId}`, caseId: String(event.caseId), eventId: String(event._id) });
   }
+  // Collect the complete scan first, then persist each recipient's related
+  // reminders together so slow scans cannot send a half-filled case email.
+  const groupKey = (item: typeof reminders[number]) => `${item.caseId || ''}:${item.deliveryContext?.deadlineAt || ''}:${[...(item.audienceUserIds || [])].sort().join(',')}`;
+  reminders.sort((left, right) => groupKey(left).localeCompare(groupKey(right)));
+  for (const reminder of reminders) await createNotification(reminder);
 };
 
 export const startReminderScheduler = () => {

@@ -98,6 +98,53 @@ async function main() {
       status: 'In Progress', startDate: '2026-11-01', dueDate: due.toISOString(), ...extra });
     const forTask = (id: any) => Notification.find({ taskId: id, type: 'TASK_DUE_REMINDER' }).lean();
 
+    if (process.argv.includes('--focus-grouping')) {
+      const scanAt = new Date(); const due = new Date(scanAt.getTime() + 3600000); const later = new Date(scanAt.getTime() + 4 * 3600000);
+      const otherMatter = await Case.create({ caseNo: 'NOTIFY-2', parties: 'Other fixture', caseType: 'Transactional Cases', status: 'In Progress', assignedTo: owner.name });
+      const workflowId = new mongoose.Types.ObjectId();
+      await Workflow.collection.insertOne({ _id: workflowId, caseId: matter._id, templateId: new mongoose.Types.ObjectId(), status: 'In Progress', steps: [
+        ...['Draft agreement', 'Prepare disclosure', 'File application'].map((title, index) => ({ stepKey: `group-${index}`, title, status: 'In Progress', dueAt: due })),
+        { stepKey: 'later', title: 'Later key action', status: 'In Progress', dueAt: later },
+        { stepKey: 'done', title: 'Already completed action', status: 'Completed', dueAt: due },
+      ] } as any);
+      await independent('Medium', due, { relatedMatterId: matter._id, title: 'Collect signature' });
+      await independent('Medium', due, { relatedMatterId: matter._id, assignee: outsider.name, title: 'Private delegated action' });
+      await independent('Medium', due, { relatedMatterId: otherMatter._id, title: 'Other case action' });
+      const stale = await independent('Medium', new Date(scanAt.getTime() + 3 * 3600000), { relatedMatterId: matter._id, title: 'Cancelled before sending' });
+      await Promise.all([runReminderScan(scanAt), runReminderScan(scanAt)]);
+      const common = await Delivery.findOne({ 'reminderGroup.caseId': matter._id, 'reminderGroup.deadlineAt': due.toISOString(), to: owner.email });
+      assert(common); assert.equal(common.notificationIds?.length, 4);
+      assert.equal(await Notification.countDocuments({ caseId: matter._id, type: 'TASK_DUE_REMINDER', audienceUserIds: owner._id, 'deliveryContext.deadlineAt': due.toISOString() }), 4);
+      assert.equal(await Delivery.countDocuments({ reminderGroup: { $exists: true } }), 5);
+      pass('All pending key actions and linked tasks share one email; individual in-app alerts stay intact; recipients, cases and deadline times stay separate');
+      const duplicate = await Notification.findOne({ 'deliveryContext.stepKey': 'group-2' }).lean(); assert(duplicate);
+      await createNotification({ type: 'TASK_DUE_REMINDER', title: duplicate.title, message: duplicate.message, deliveryContext: duplicate.deliveryContext, caseId: String(matter._id), audienceUserIds: [String(owner._id)], dedupeKey: 'same-action-another-reminder-record' });
+      await Workflow.collection.updateOne({ _id: workflowId }, { $set: { 'steps.0.status': 'Completed' } });
+      await IndependentTask.updateOne({ _id: stale._id }, { status: 'Cancelled' });
+      const deliverAt = new Date(Date.now() + 30000);
+      providerFailure = 429;
+      await Promise.all([processEmailDeliveries(deliverAt, 100), processEmailDeliveries(deliverAt, 100)]);
+      const frozen = await Delivery.findById(common._id); assert(frozen); assert.equal(frozen.preparedNotificationIds?.length, 3);
+      assert(!frozen.html.includes('Draft agreement')); assert(!frozen.html.includes('Private delegated action')); assert(!frozen.html.includes('Other case action'));
+      for (const title of ['Prepare disclosure', 'File application', 'Collect signature']) assert(frozen.html.includes(title));
+      assert.equal((frozen.html.match(/File application/g) || []).length, 1);
+      assert.equal(sends.length, 4);
+      const failedBodies = new Map(sends.map(send => [send.key, JSON.stringify(send.body)]));
+      providerFailure = 0;
+      await Workflow.collection.updateOne({ _id: workflowId }, { $set: { 'steps.1.status': 'Completed' } });
+      await Promise.all([processEmailDeliveries(new Date(deliverAt.getTime() + 120000), 100), processEmailDeliveries(new Date(deliverAt.getTime() + 120000), 100)]);
+      assert.equal(provider.size, 4); assert.equal(await Delivery.countDocuments({ status: 'sent' }), 4);
+      for (const send of sends) assert.equal(JSON.stringify(send.body), failedBodies.get(send.key), 'Retry must preserve the complete provider payload');
+      await runReminderScan(scanAt); await processEmailDeliveries(new Date(deliverAt.getTime() + 150000), 100);
+      assert.equal(provider.size, 4); assert.equal(sends.length, 8);
+      pass('Completed/cancelled actions are removed before sending; concurrent workers, rescans and provider retries send each grouped email once');
+      await runReminderScan(new Date(due.getTime() + 60000));
+      assert.equal(await Delivery.countDocuments({ 'reminderGroup.caseId': matter._id, 'reminderGroup.deadlineAt': due.toISOString(), to: owner.email }), 2);
+      pass('The next scheduled reminder round still occurs as one email, including overdue reminders');
+      console.log('Grouped reminder verification complete: 3 groups passed. All provider calls mocked.');
+      return;
+    }
+
     if (process.argv.includes('--focus-recipients')) {
       const delegation = await independent('Medium', new Date(Date.now() + 86400000), { relatedMatterId: matter._id, assignee: outsider.name });
       await notifyMatterParticipants(matter, { type: 'DEADLINE_CHANGED', title: 'Delegated legal deadline changed', message: 'A dependent deadline changed.', dedupeKey: 'recipient-deadline' });

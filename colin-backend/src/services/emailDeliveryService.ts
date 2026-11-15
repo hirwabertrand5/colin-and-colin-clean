@@ -9,6 +9,7 @@ import { reminderIsCurrent } from './reminderValidityService';
 import { sendEmailResend, validEmail } from './emailResendService';
 import { categoryForType, prefAllows, notificationEmailEnabled, emailAllowedInRollout } from './notificationPolicy';
 import { buildNotificationEmail } from './notificationTemplateService';
+import { buildCaseReminderEmail, currentCaseReminderNotifications, isGroupedCaseReminder, queueCaseReminderEmail } from './caseReminderEmailService';
 
 export const queueNotificationEmail = async (notification: any) => {
   // Intake sends its complete summary and receipt through its transactional outbox.
@@ -34,6 +35,10 @@ export const queueNotificationEmail = async (notification: any) => {
     else if (!notificationEmailEnabled()) reason = 'ROLLOUT_DISABLED';
     else if (!emailAllowedInRollout(to)) reason = 'ROLLOUT_ALLOWLIST';
     const invalid = !validEmail(to);
+    if (!invalid && !reason && isGroupedCaseReminder(notification)) {
+      await queueCaseReminderEmail(notification, { to, ...(recipient.userId ? { userId: recipient.userId } : {}) }, buildNotificationEmail(notification));
+      continue;
+    }
     const key = `${notification._id}:${to || String(recipient.userId)}`;
     await EmailDelivery.updateOne({ key }, { $setOnInsert: {
       key, notificationId: notification._id, ...(recipient.userId ? { userId: recipient.userId } : {}), to: to || '(missing)', category,
@@ -72,14 +77,20 @@ export const processEmailDeliveries = async (now = new Date(), limit = 25) => {
     const intake = delivery.category === 'intake' && delivery.intakeLinkId;
     const intakeLink = intake ? await ClientIntakeLink.findById(delivery.intakeLinkId).select('submittedAt submissionId').lean<any>() : null;
     const intakeCurrent = intakeLink?.submittedAt && await ClientIntakeSubmission.exists({ _id: intakeLink.submissionId, deletedAt: null });
-    const notification = delivery.notificationId ? await Notification.findById(delivery.notificationId).lean() : null;
+    const grouped = delivery.reminderGroup?.caseId && delivery.notificationIds?.length;
+    const members = grouped ? await currentCaseReminderNotifications(delivery, now) : null;
+    const notification = members ? members[0] : delivery.notificationId ? await Notification.findById(delivery.notificationId).lean() : null;
     const user = delivery.userId ? await User.findById(delivery.userId).select('isActive email').lean() : null;
     const prefs = delivery.userId ? await NotificationPreferences.findOne({ userId: delivery.userId }).lean() : null;
-    if (intake ? !intakeCurrent : !notification || !(await reminderIsCurrent(notification, now)) || (delivery.userId && (!user || user.isActive === false || user.email !== delivery.to)) || !prefAllows(prefs, delivery.category, notification?.type) || !emailAllowedInRollout(delivery.to)) {
+    if (intake ? !intakeCurrent : !notification || (!members && !(await reminderIsCurrent(notification, now))) || (delivery.userId && (!user || user.isActive === false || user.email !== delivery.to)) || !prefAllows(prefs, delivery.category, notification?.type) || !emailAllowedInRollout(delivery.to)) {
       await EmailDelivery.updateOne(filter, { $set: { status: 'suppressed', lastCode: 'RECIPIENT_OR_PREFERENCES_CHANGED' } });
       continue;
     }
-    await EmailDelivery.updateOne(filter, { $set: { firstAttemptAt: delivery.firstAttemptAt || now } });
+    if (members && !delivery.firstAttemptAt) {
+      const content = await buildCaseReminderEmail(delivery, members, now);
+      delivery.subject = content.subject; delivery.html = content.html;
+      await EmailDelivery.updateOne(filter, { $set: { ...content, firstAttemptAt: now, preparedNotificationIds: members.map(member => member._id) } });
+    } else await EmailDelivery.updateOne(filter, { $set: { firstAttemptAt: delivery.firstAttemptAt || now } });
     const result = await sendEmailResend([delivery.to], delivery.subject, delivery.html, { idempotencyKey: `notification/${delivery._id}` });
     if (result.ok) await EmailDelivery.updateOne(filter, { $set: { status: 'sent', providerId: result.id, lastCode: '', lastError: '' }, $unset: { leaseUntil: 1, claimId: 1 } });
     else {

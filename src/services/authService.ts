@@ -1,14 +1,19 @@
 import { navigationFetch as fetch } from './navigationRequest';
 import { UserRole } from '../App';
 import { pageModules } from '../navigation/pageModules';
+import { API_URL } from './apiConfig';
 
-const API_URL = import.meta.env.VITE_API_URL;
-
-let prepared = false;
+let preparedAt = 0;
 /** Start connection/server setup while the user enters credentials. */
 export const prepareSignIn = () => {
-  if (prepared) return;
-  prepared = true;
+  if (Date.now() - preparedAt < 60000) return;
+  preparedAt = Date.now();
+  try {
+    const origin = new URL(API_URL, location.origin).origin;
+    if (!document.querySelector('link[data-sign-in-preconnect]')) {
+      const link = document.createElement('link'); link.rel = 'preconnect'; link.href = origin; link.crossOrigin = 'anonymous'; link.dataset.signInPreconnect = 'true'; document.head.appendChild(link);
+    }
+  } catch { /* The request below reports an invalid API address normally. */ }
   void globalThis.fetch(`${API_URL}/health`, { cache: 'no-store' }).catch(() => {});
 };
 
@@ -38,8 +43,10 @@ export const loginApi = async (
 ): Promise<LoginResponse> => {
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+    // A safelisted form body avoids an extra cross-origin OPTIONS round trip.
+    // Credentials stay in the HTTPS request body, never in its URL.
+    body: new URLSearchParams({ email: email.trim().toLowerCase(), password }),
+    cache: 'no-store',
   });
 
   const data = await res.json();

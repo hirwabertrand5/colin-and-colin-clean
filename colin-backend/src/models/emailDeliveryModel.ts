@@ -1,10 +1,13 @@
 import mongoose, { Schema } from 'mongoose';
 
-// One durable record per notification and recipient. Never delete sent records
-// during retries: their unique keys are the application's long-term send ledger.
+// One durable record per email and recipient; a reminder email can cover several
+// notifications. Sent records are retained as the long-term send ledger.
 const EmailDeliverySchema = new Schema({
   key: { type: String, required: true, unique: true },
   notificationId: { type: Schema.Types.ObjectId, ref: 'Notification', index: true },
+  notificationIds: { type: [Schema.Types.ObjectId], ref: 'Notification', default: undefined },
+  preparedNotificationIds: { type: [Schema.Types.ObjectId], ref: 'Notification', default: undefined },
+  reminderGroup: { caseId: { type: Schema.Types.ObjectId, ref: 'Case' }, deadlineAt: String, batch: String },
   intakeLinkId: { type: Schema.Types.ObjectId, ref: 'ClientIntakeLink', index: true },
   userId: { type: Schema.Types.ObjectId, ref: 'User' },
   to: { type: String, required: true },
