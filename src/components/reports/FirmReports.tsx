@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RetainerPerformancePanel } from '../billing/RetainerPerformancePanel';
 import { Download, FileText, BarChart3, TrendingUp, Users, Search, ArrowUpDown } from 'lucide-react';
 import { UserRole } from '../../App';
 import { FirmReportDateBasis, FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
@@ -944,7 +943,6 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
           </div>
         )}
 
-        <RetainerPerformancePanel data={data?.retainer} />
         {/* Report Type Selector */}
         <div className="flex gap-2 border-b border-gray-200 dark:border-slate-700">
           {reportTypes.map((type) => {

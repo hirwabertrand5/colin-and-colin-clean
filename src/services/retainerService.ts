@@ -1,5 +1,4 @@
 import { navigationFetch as fetch } from './navigationRequest';
-import type { RetainerAllocation } from './retainerAccountingService';
 import type { CaseTeamEarnedFee } from './workflowInstanceService';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token') || ''}` });
@@ -29,10 +28,6 @@ export interface Retainer {
   /** Always zero for shared retainer subscriptions. */
   reservedAmount: number;
   scope?: string;
-  excludedServices?: string;
-  additionalWorkChargeable?: boolean;
-  scopeApprovalRequired?: boolean;
-  utilisationThreshold?: number;
   responsiblePartner?: string;
   notes?: string;
   linkedCaseCount?: number;
@@ -129,15 +124,11 @@ export const adjustRetainerContractValue = async (retainerId: string, amount: nu
 };
 
 export type RetainerCase = {
-  team?: CaseTeamEarnedFee[];
-  caseStaffEarnedTotal?: number | null;
-  ordinaryWorkValue?: number;
-  retainerRevenue?: number;
-  staffTpa?: number;
-  servicesCount?: number;
-  netContribution?: number;
-  contributors?: { userId: string; name: string; earnedTpa: number }[];
   department?: 'Dispute Resolution' | 'Transaction & Advisory' | null;
+  team?: CaseTeamEarnedFee[];
+  staffEarnedFees?: number | null;
+  pendingStaffCount?: number;
+  netAfterStaff?: number;
   _id: string;
   caseNo: string;
   parties: string;
@@ -153,7 +144,10 @@ export type RetainerCase = {
 };
 
 export type RetainerCaseSummary = {
-  ordinaryWorkValue?: number;
+  staffEarnedFees?: number;
+  pendingStaffCount?: number;
+  netAfterStaff?: number;
+  staffCount?: number;
   caseCount: number;
   contractValue: number;
   totalBilled: number;
@@ -165,12 +159,7 @@ export type RetainerCaseSummary = {
   lossMakingCases: number;
 };
 
-export type RetainerWorkspaceAccounting = Pick<RetainerAllocation, 'actualReceived' | 'outstanding' | 'overpayment' | 'workValue' | 'staffTpa' | 'firmUnutilisedRevenue' | 'allocableRevenue' | 'departments' | 'services'> & {
-  recordedMonths: number;
-  fixedFees: number;
-};
-
-export const getRetainerCases = async (retainerId: string): Promise<{ cases: RetainerCase[]; summary: RetainerCaseSummary; accounting: RetainerWorkspaceAccounting }> => {
+export const getRetainerCases = async (retainerId: string): Promise<{ cases: RetainerCase[]; summary: RetainerCaseSummary }> => {
   const res = await fetch(`${API_URL}/retainers/${retainerId}/cases`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await readError(res, 'Failed to fetch retainer cases.'));
   return res.json();

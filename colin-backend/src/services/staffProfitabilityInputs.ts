@@ -4,7 +4,6 @@ import User from '../models/userModel';
 import Invoice from '../models/invoiceModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
-import { ordinaryInvoiceFilter, retainerEarningsRows } from './retainerAccountingService';
 import type { ResolvedReportRange } from '../utils/reportRange';
 
 const stepFields = 'stepKey title stageKey stageOrder stageTitle stagePercentage percentage order status startAt dueAt completedAt submittedAt reviewedAt doneAt carriedWork actions tpaSnapshots independentContributors custom archivedFromTemplate'.split(' ');
@@ -24,10 +23,9 @@ const hasStepActivity = { $or: [
 export async function loadStaffProfitabilityInputs(period: ResolvedReportRange | null, from: Date, to: Date): Promise<any[]> {
   const inWindow = { $gte: from, $lte: to };
   const completedChecklist = { 'checklist.0': { $exists: true }, checklist: { $not: { $elemMatch: { completed: { $ne: true } } } } };
-  const [matters, users, retainer, workflowCaseIds, taskCaseIds] = await Promise.all([
-    Case.find().select('_id assignedTo caseAssignments assignmentHandoverHistory.role assignmentHandoverHistory.previousAssignee assignmentHandoverHistory.nextAssignee assignmentHandoverHistory.changedAt status caseNo budget createdAt updatedAt workflowProgress.status workflowProgress.percent workflowProgress.currentStepDueAt workflowProgress.nextDueAt workflowProgress.plannedValue workflowProgress.completedValue caseManagement.qualityScore workflowTemplateId retainerCoveredActionKeys').batchSize(500).lean(),
+  const [matters, users, workflowCaseIds, taskCaseIds] = await Promise.all([
+    Case.find().select('_id assignedTo caseAssignments assignmentHandoverHistory.role assignmentHandoverHistory.previousAssignee assignmentHandoverHistory.nextAssignee assignmentHandoverHistory.changedAt status caseNo budget createdAt updatedAt workflowProgress.status workflowProgress.percent workflowProgress.currentStepDueAt workflowProgress.nextDueAt workflowProgress.plannedValue workflowProgress.completedValue caseManagement.qualityScore workflowTemplateId').batchSize(500).lean(),
     User.find({ isActive: { $ne: false }, ...(period ? { createdAt: { $lt: period.toExclusive } } : {}) }).select('name role tpaHistory').lean(),
-    retainerEarningsRows(from, to),
     WorkflowInstance.distinct('caseId', period ? { 'steps.completedAt': inWindow } : {}),
     Task.distinct('caseId', period ? { $and: [
       { $or: [{ completedAt: inWindow }, { completedAt: null, updatedAt: inWindow }] },
@@ -45,7 +43,7 @@ export async function loadStaffProfitabilityInputs(period: ResolvedReportRange |
         steps: { $map: { input: { $ifNull: ['$steps', []] }, as: 'step', in: { $cond: [hasStepActivity, stepDetails, stepIdentity] } } },
       } },
     ]).option({ batchSize: 500 }),
-    Invoice.aggregate([{ $match: { caseId: { $in: candidateIds }, status: 'Paid', ...ordinaryInvoiceFilter } }, { $group: { _id: '$caseId', total: { $sum: '$amount' } } }]),
+    Invoice.aggregate([{ $match: { caseId: { $in: candidateIds }, status: 'Paid' } }, { $group: { _id: '$caseId', total: { $sum: '$amount' } } }]),
   ]) : [[], [], []];
   // Generated, unstarted tasks have neither completed work nor scores/rates.
   // Loading all of them transferred thousands of unused stage histories.
@@ -57,5 +55,5 @@ export async function loadStaffProfitabilityInputs(period: ResolvedReportRange |
   const tasks = candidateIds.length ? await Task.find({ caseId: { $in: candidateIds }, $or: [
     { status: 'Completed' }, completedChecklist, { 'tpaSnapshots.0': { $exists: true } }, { caseId: { $in: legacyCaseIds } },
   ] }).select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist.completed qualityScore status taskStages.staffMember taskStages.timelinessScore tpaSnapshots.staffKey tpaSnapshots.assignmentRole tpaSnapshots.activityAt tpaSnapshots.rate').lean() : [];
-  return [matters, tasks, users, templates, instances, paidTotals, retainer];
+  return [matters, tasks, users, templates, instances, paidTotals];
 }

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { RetainerPerformancePanel } from './RetainerPerformancePanel';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -118,11 +117,10 @@ function CostStructurePanel({ firm }: { firm: ProfitabilityResponse['firm'] }) {
         </div>
         <dl className="profitability-cost-legend">
           <div><dt><i className="is-direct" />Direct matter costs</dt><dd>{money(firm.directMatterCosts)} <small>{percentage(directShare)}</small></dd></div>
-          <div><dt><i className="is-overhead" />General overheads</dt><dd>{money(firm.generalOverheads)}</dd></div>
-          {!!firm.retainerStaffTpa && <div><dt>Accrued retainer staff TPA</dt><dd>{money(firm.retainerStaffTpa)}</dd></div>}
+          <div><dt><i className="is-overhead" />General overheads</dt><dd>{money(firm.generalOverheads)} <small>{percentage(100 - directShare)}</small></dd></div>
         </dl>
       </div>
-      <div className="profitability-total-strip"><span className="profitability-detail-icon"><FileText className="h-5 w-5" /></span><div><span>Total recorded firm costs</span><strong>{money(total)}</strong><small>Direct matter costs, internal operating expenses and accrued retainer staff TPA.</small></div></div>
+      <div className="profitability-total-strip"><span className="profitability-detail-icon"><FileText className="h-5 w-5" /></span><div><span>Total recorded firm costs</span><strong>{money(total)}</strong><small>Direct matter costs plus recorded internal operating expenses.</small></div></div>
     </section>
   );
 }
@@ -449,7 +447,7 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
 
         {tab === 'overview' && firm && data && <div className="space-y-5">
           <section className="profitability-financial-summary rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white">
-            <div className="profitability-hero-main"><div><p className="profitability-hero-label">Net profit in period</p><h2>{money(firm.netProfit)}</h2><p className="profitability-hero-description">Collected revenue less recorded costs and accrued retainer staff TPA.</p></div><span className="profitability-hero-art"><BarChart3 className="h-8 w-8" /></span></div>
+            <div className="profitability-hero-main"><div><p className="profitability-hero-label">Net profit in period</p><h2>{money(firm.netProfit)}</h2><p className="profitability-hero-description">Collected revenue less recorded costs.</p></div><span className="profitability-hero-art"><BarChart3 className="h-8 w-8" /></span></div>
             <div className="profitability-hero-stat-grid">
               <div className="is-emerald"><span className="profitability-hero-stat-icon"><Percent className="h-5 w-5" /></span><div><span>Net profit margin</span><strong>{percentage(firm.netProfitMargin)}</strong></div></div>
               <div className="is-violet"><span className="profitability-hero-stat-icon"><Wallet className="h-5 w-5" /></span><div><span>Gross contribution</span><strong>{money(firm.grossContribution)}</strong></div></div>
@@ -460,7 +458,7 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
             <h2 className="profitability-section-title">Revenue & receivables</h2>
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
               <MetricCard icon={FileText} label="New contract value" value={money(firm.contractValue)} detail="Agreed fees on matters entered in the period." />
-              <MetricCard icon={FileText} accent="emerald" label="Fees billed" value={money(firm.billed)} detail="Invoice entries and retainer fees in the period." />
+              <MetricCard icon={FileText} accent="emerald" label="Fees billed" value={money(firm.billed)} detail="Invoice entries in the period." />
               <MetricCard icon={Wallet} accent="violet" label="Collected revenue" value={money(firm.recognisedCollectedRevenue)} detail="Payments recorded in the period." valueClass="text-emerald-700 dark:text-emerald-300" />
               <MetricCard icon={Wallet} accent="rose" label="Receivables at period end" value={money(firm.totalReceivables)} detail="Includes unpaid balances from earlier periods." valueClass="text-amber-700 dark:text-amber-300" />
               <MetricCard icon={Percent} accent="emerald" label="Collection rate" value={percentage(firm.collectionRate)} detail="Period payments ÷ period billing; may exceed 100%." />
@@ -468,7 +466,6 @@ export default function ProfitabilityPage({ userRole, initialTab = 'overview' }:
             </div>
           </section>
           <section className="grid gap-4 xl:grid-cols-2"><CostStructurePanel firm={firm} /><ReceivablesAgeingPanel ageing={data.ageing} total={firm.totalReceivables} /></section>
-          <details className="profitability-retainers"><summary>Retainer performance</summary><RetainerPerformancePanel data={data.retainer} /></details>
         </div>}
 
         {tab === 'matters' && <FinancialTable title="Matter profitability" rows={data?.matterRows || []} kind="matter" />}

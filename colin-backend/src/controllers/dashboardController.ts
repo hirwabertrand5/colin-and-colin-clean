@@ -16,8 +16,7 @@ import WorkflowTemplate from '../models/workflowTemplateModel';
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
 import { resolveDeadlineDateTime } from '../utils/deadlineUtils';
 import { identityMatches } from '../utils/caseAssignments';
-import { buildRoleByName, resolveMemberTpa, getTpaPercent, normalizeMemberName, baseMemberName } from '../utils/workflowPercentages';
-import { retainerEarningsRows } from '../services/retainerAccountingService';
+import { buildRoleByName, resolveMemberTpa, getTpaPercent, normalizeMemberName } from '../utils/workflowPercentages';
 import { isActiveMatter } from '../utils/matterLifecycle';
 import {
   isWithinReportRange,
@@ -377,10 +376,9 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
     // A delegated independent task grants a narrow workflow role, not general
     // case-workspace access. It must nevertheless put the contributor's fee
     // row on their personal dashboard once they have performed that role.
-    const [users, independentContributorCaseIds, monthlyEarnings]: [any[], any[], any[]] = await Promise.all([
+    const [users, independentContributorCaseIds]: [any[], any[]] = await Promise.all([
       User.find({}).select('name role tpaHistory').lean(),
       WorkflowInstance.distinct('caseId', { $or: identityRegexes.map(identity => ({ 'steps.independentContributors.name': identity })) }),
-      retainerEarningsRows(new Date(0), new Date('9999-12-31'), { staffKey: baseMemberName(meName) }),
     ]);
     const currentTpaUser = users.find(user => String(user._id) === String(req.user?.id));
     const roleTpaPercent = currentTpaUser ? resolveMemberTpa(currentTpaUser.name, buildRoleByName([currentTpaUser])).tpaPercent : getTpaPercent(String(req.user?.role || ''));
@@ -403,11 +401,11 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       { $lookup: { from: WorkflowInstance.collection.name, localField: '_id', foreignField: 'caseId', as: '_dashboardInstances' } },
       { $lookup: { from: Task.collection.name, localField: '_id', foreignField: 'caseId', as: '_dashboardTasks' } },
       { $lookup: { from: Invoice.collection.name, localField: '_id', foreignField: 'caseId',
-        pipeline: [{ $match: { status: 'Paid', retainerReceiptId: { $exists: false } } }, { $project: { caseId: 1, amount: 1, paidAt: 1, updatedAt: 1 } }], as: '_dashboardInvoices' } },
+        pipeline: [{ $match: { status: 'Paid' } }, { $project: { caseId: 1, amount: 1, paidAt: 1, updatedAt: 1 } }], as: '_dashboardInvoices' } },
       { $lookup: { from: WorkflowTemplate.collection.name, localField: '_dashboardInstances.templateId', foreignField: '_id', as: '_dashboardTemplates' } },
     ]) : [];
     const matters: any[] = records.map(({ _dashboardInstances, _dashboardTasks, _dashboardInvoices, _dashboardTemplates, ...matter }) => matter);
-    if (!matters.length && !monthlyEarnings.length) return res.json(emptyStaffSummary(meName, roleTpaPercent, buildStaffPeriod(period)));
+    if (!matters.length) return res.json(emptyStaffSummary(meName, roleTpaPercent, buildStaffPeriod(period)));
     const instanceList: any[] = records.flatMap(record => record._dashboardInstances);
     const taskList: any[] = records.flatMap(record => record._dashboardTasks);
     const invoiceList: any[] = records.flatMap(record => record._dashboardInvoices);
@@ -820,24 +818,6 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
 
     // One reporting block is ALWAYS returned (All Time when no range) so the
     // dashboard renders the same cards for every period.
-    for (const row of monthlyEarnings) {
-      feesEarnedTotal += row.earnedFee || 0; hasScoredFee = true;
-      collectedBaseTotal += row.eligibleCollectedBase;
-      if (isWithinReportRange(row.completionAt, period)) {
-        periodFeesEarned += row.earnedFee || 0; hasPeriodFee = true;
-        periodCollectedValue += row.eligibleCollectedBase;
-      }
-      const matterRow = rows.find((r) => r.caseId === row.caseId);
-      if (matterRow) {
-        matterRow.earnedFee = (matterRow.earnedFee || 0) + (row.earnedFee || 0);
-        matterRow.collectedBase += row.eligibleCollectedBase;
-        if (period && isWithinReportRange(row.completionAt, period)) {
-          matterRow.earnedFeeInPeriod = (matterRow.earnedFeeInPeriod || 0) + (row.earnedFee || 0);
-          matterRow.collectedBaseInPeriod = (matterRow.collectedBaseInPeriod || 0) + row.eligibleCollectedBase;
-          matterRow.inPeriod = true;
-        }
-      }
-    }
     const periodSummary = buildStaffPeriod(period, {
       feesEarned: hasPeriodFee ? round2(periodFeesEarned) : null,
       collectedValue: round2(periodCollectedValue),
@@ -857,7 +837,6 @@ export const getStaffDashboardSummary = async (req: AuthRequest, res: Response) 
       user: { name: meName },
       tpaPercent: roleTpaPercent,
       currency,
-      retainerEarnings: monthlyEarnings,
       mattersAssigned: currentMattersAssigned,
       mattersOutstanding,
       mattersCompleted,

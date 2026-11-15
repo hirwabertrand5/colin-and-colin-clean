@@ -220,7 +220,7 @@ const loadCaseManagementContext = async (req: AuthRequest) => {
   const [template, tasks, paidInvoices, users] = await Promise.all([
     inst ? WorkflowTemplate.findById(inst.templateId).lean() : Promise.resolve(null),
     Task.find({ caseId }).lean(),
-    Invoice.find({ caseId, status: 'Paid', retainerReceiptId: { $exists: false } }).select('amount').lean(),
+    Invoice.find({ caseId, status: 'Paid' }).select('amount').lean(),
     User.find({}).select('name role tpaHistory').lean(),
   ]);
   const collectedAmount = (paidInvoices || []).reduce(

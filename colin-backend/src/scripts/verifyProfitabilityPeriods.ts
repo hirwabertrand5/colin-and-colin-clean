@@ -17,8 +17,6 @@ import Expense from '../models/pettyCashExpenseModel';
 import Template from '../models/workflowTemplateModel';
 import Workflow from '../models/workflowInstanceModel';
 import Task from '../models/taskModel';
-import Period from '../models/retainerPeriodModel';
-import Receipt from '../models/retainerReceiptModel';
 import { resolveOptionalReportRange, isWithinReportRange, type ResolvedReportRange } from '../utils/reportRange';
 
 const stamp = (day: string) => new Date(`${day}T10:00:00+02:00`);
@@ -204,17 +202,6 @@ async function main() {
     assert(pending && pending.status === 'Not Started' && pending.percentage === 50, 'Unfinished actions retain their weight and status, so a partial workflow cannot become completed');
     assert.equal(pending.title, undefined, 'Unused workflow descriptions are not transferred');
     console.log('PASS: current-period reads exclude unrelated historical workflows/tasks without changing earnings');
-
-    await Period.collection.insertOne({ retainerId: oid(), month: '2026-11', clientName: 'Retainer client', retainerNo: 'RET-PERIOD', fixedFee: 500,
-      dueDate: '2026-11-13', status: 'Open', services: [], createdAt: stamp('2026-11-01') });
-    const period = await Period.findOne({ retainerNo: 'RET-PERIOD' }).lean();
-    await Receipt.collection.insertOne({ periodId: period!._id, retainerId: period!.retainerId, amount: 500, receivedOn: '2026-11-14' });
-    const retainerFirst = await report('2026-11-13');
-    assert.equal(retainerFirst.retainer.billed, 500);
-    assert.equal(retainerFirst.retainer.collected, 0);
-    assert.equal(retainerFirst.retainer.outstanding, 500);
-    assert.equal((await report('2026-11-14')).retainer.collected, 500);
-    console.log('PASS: retainer statement/receipt dates and historical outstanding balances');
 
     for (const range of ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'ytd', 'all']) {
       assert.equal((await request(`/reports/profitability?range=${range}`)).status, 200);

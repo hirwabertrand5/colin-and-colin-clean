@@ -1,6 +1,5 @@
 import { isActiveMatter } from '../../utils/matterLifecycle';
 import { useEffect, useMemo, useState } from "react";
-import { RetainerPerformancePanel } from './RetainerPerformancePanel';
 import { Link } from "react-router-dom";
 import {
   AlertCircle,
@@ -483,7 +482,7 @@ export default function BillingFinancePage({
   );
   const classificationInvoices = useMemo(
     () =>
-      invoices.filter((invoice) => !invoice.retainerReceiptId && filteredCaseIds.has(String(invoice.caseId))),
+      invoices.filter((invoice) => filteredCaseIds.has(String(invoice.caseId))),
     [filteredCaseIds, invoices],
   );
   const classificationExpenses = useMemo(
@@ -556,26 +555,17 @@ export default function BillingFinancePage({
         Math.max(0, amount(expense.amount) - amount(expense.refundAmount)),
       0,
     );
-  const scopedRetainerCash = classificationPath.length
-    ? (summary?.retainer?.statements || []).reduce((n, p) => n + p.cashAllocation.services.filter((s) => filteredCaseIds.has(s.caseId)).reduce((v, s) => v + s.allocatedRevenue, 0), 0)
-    : summary?.retainer?.collected || 0;
-  const scopedRetainerFee = classificationPath.length
-    ? (summary?.retainer?.statements || []).reduce((n, p) => n + (p.allocation.workValue ? p.feeInRange * p.allocation.services.filter((s) => filteredCaseIds.has(s.caseId)).reduce((v, s) => v + s.ordinaryFee, 0) / p.allocation.workValue : 0), 0)
-    : summary?.retainer?.billed || 0;
-  const scopedRetainerTpa = classificationPath.length
-    ? (summary?.retainer?.statements || []).reduce((n, p) => n + p.allocation.services.filter((s) => filteredCaseIds.has(s.caseId) && (!period || (s.performedOn >= period.from && s.performedOn <= period.to))).reduce((v, s) => v + s.contributors.reduce((x, c) => x + c.earnedTpa, 0), 0), 0)
-    : summary?.retainer?.staffTpa || 0;
-  const billed = (classificationPath.length ? classificationInvoices.reduce(
+  const billed = classificationInvoices.reduce(
     (sum, invoice) => sum + amount(invoice.amount),
     0,
-  ) + scopedRetainerFee : summary?.billed || 0);
-  const collected = classificationPath.length ? classificationInvoices
+  );
+  const collected = classificationInvoices
     .filter((invoice) => invoice.status === "Paid")
-    .reduce((sum, invoice) => sum + amount(invoice.amount), 0) + scopedRetainerCash : summary?.collected || 0;
+    .reduce((sum, invoice) => sum + amount(invoice.amount), 0);
   const revenue = collected;
   const grossProfit = revenue - directCosts;
-  const netProfit = grossProfit - operatingExpenses - scopedRetainerTpa;
-  const outstanding = classificationPath.length ? Math.max(0, billed - collected) : summary?.outstanding || 0;
+  const netProfit = grossProfit - operatingExpenses;
+  const outstanding = Math.max(0, billed - collected);
   const margin = revenue > 0 ? (grossProfit / revenue) * 100 : null;
   const netMargin = revenue > 0 ? (netProfit / revenue) * 100 : null;
   const contractValue = filteredCases.reduce(
@@ -1026,7 +1016,6 @@ export default function BillingFinancePage({
           />
         ))}
       </div>
-      {!classificationPath.length && <RetainerPerformancePanel data={summary?.retainer} />}
       {view === "net-profit" && !summary?.netProfit && (
         <div className="mb-5 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Net profit uses the existing firm-level calculation. Matter-level

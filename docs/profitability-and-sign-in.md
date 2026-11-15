@@ -9,10 +9,9 @@
 - Payment proof replacement and invoice document uploads preserve the recorded payment timestamp. New indexes support payment and entry date reads.
 - Refunds belong to their refund date. Receivables show balances at the report end, including earlier entries and invoices paid after that end.
 - Staff attributed fees use recorded work completion dates and the existing earnings calculation. Completed matters count in the period of their last completed action. Active and overdue counts use matter entry dates; overdue deadlines are capped at the report end and current time. Current status is used because historical matter status snapshots are unavailable.
-- Retainers retain statement, receipt and performed-work dates. Later receipts do not reduce earlier report balances.
 - All time applies no period restriction in the API. The profitability dropdown now uses the shared Firm Reports presets (see [follow-up performance changes](dashboard-and-workflow-speed.md)). Missing dates cannot be attributed to a bounded period.
 
-The page keeps filters visible, hides old-period results during loading, cancels superseded requests, validates custom dates and supports refresh/error recovery. Staff reports load only on the staff tab and skip unrelated financial summaries and client analytics. Cards, tables and controls use consistent sizing, with contained horizontal table scrolling on smaller screens. Retainer detail is expandable below the firm summary.
+The page keeps filters visible, hides old-period results during loading, cancels superseded requests, validates custom dates and supports refresh/error recovery. Staff reports load only on the staff tab and skip unrelated financial summaries and client analytics. Cards, tables and controls use consistent sizing, with contained horizontal table scrolling on smaller screens.
 
 ## Sign-in
 

@@ -28,12 +28,9 @@
 .profitability-page .profitability-detail-card { padding: 1.25rem; }
 .profitability-page .profitability-detail-heading h2 { margin-bottom: 0.25rem; }
 .profitability-page .profitability-detail-heading p { font-size: 0.8125rem; }
-.profitability-date-guide, .profitability-retainers { border: 1px solid #e2e8f0; background: #fff; border-radius: 0.75rem; padding: 0.85rem 1rem; }
-.profitability-date-guide summary, .profitability-retainers summary { cursor: pointer; font-size: 0.8125rem; font-weight: 600; color: #334155; }
+.profitability-date-guide { border: 1px solid #e2e8f0; background: #fff; border-radius: 0.75rem; padding: 0.85rem 1rem; }
+.profitability-date-guide summary { cursor: pointer; font-size: 0.8125rem; font-weight: 600; color: #334155; }
 .profitability-date-guide p { margin-top: 0.75rem; color: #64748b; font-size: 0.8125rem; line-height: 1.7; max-width: 90ch; }
-.profitability-page .profitability-retainers .retainer-accounting { margin-bottom: 0; border: 0; padding: 1rem 0 0; border-radius: 0; box-shadow: none; }
-.profitability-page .retainer-accounting h2 { font-size: 1rem; }
-.profitability-page .retainer-accounting .ra-metric > strong { font-size: 1.125rem; }
 .profitability-page .profitability-table-header { padding: 1rem; }
 .profitability-page .profitability-staff-header { grid-template-columns: 1fr; gap: 1rem; }
 .profitability-page .profitability-staff-controls { grid-template-columns: minmax(9rem, 0.8fr) minmax(12rem, 1fr) minmax(12rem, 1.2fr); }
@@ -58,9 +55,9 @@
 .profitability-table-note, .profitability-empty { color: #64748b; font-size: 0.8125rem; line-height: 1.6; }
 .profitability-empty { padding: 2rem 1rem; text-align: center; border: 1px dashed #cbd5e1; border-radius: 0.75rem; }
 .profitability-page button:focus-visible, .profitability-page summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
-.dark .profitability-page .profitability-filter-bar, .dark .profitability-date-guide, .dark .profitability-retainers { background: #0f172a; border-color: #334155; }
+.dark .profitability-page .profitability-filter-bar, .dark .profitability-date-guide { background: #0f172a; border-color: #334155; }
 .dark .profitability-page .profitability-scope { border-color: #334155; }
-.dark .profitability-date-guide summary, .dark .profitability-retainers summary { color: #e2e8f0; }
+.dark .profitability-date-guide summary { color: #e2e8f0; }
 .dark .profitability-date-guide p, .dark .profitability-page .profitability-scope, .dark .profitability-table-note,
 .dark .profitability-empty, .dark .profitability-period-controls label > span, .dark .profitability-staff-controls label > span { color: #94a3b8; }
 @media (max-width: 1100px) {

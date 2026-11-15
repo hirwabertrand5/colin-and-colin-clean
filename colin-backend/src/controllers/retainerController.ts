@@ -6,18 +6,30 @@ import Invoice from '../models/invoiceModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
 import Retainer from '../models/retainerModel';
 import RetainerActivity from '../models/retainerActivityModel';
-import RetainerPeriod from '../models/retainerPeriodModel';
-import Task from '../models/taskModel';
 import User from '../models/userModel';
+import Task from '../models/taskModel';
 import Workflow from '../models/workflowInstanceModel';
 import Template from '../models/workflowTemplateModel';
 import { buildYearlySequence } from '../utils/counter';
 import { getContractValue, getDirectMatterCost } from '../utils/financialMetrics';
 import { linkCaseToRetainer, retainerIsUsable } from '../services/retainerService';
-import { ordinaryInvoiceFilter, retainerFinancials } from '../services/retainerAccountingService';
-import { DEPARTMENTS, decimal, retainerDepartmentOf } from '../utils/retainerAllocation';
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
-import { buildRoleByName } from '../utils/workflowPercentages';
+import { buildRoleByName, normalizeMemberName } from '../utils/workflowPercentages';
+
+const roundMoney = (value: number) => Math.round(value * 100) / 100;
+const departmentOf = (matter: any): 'Dispute Resolution' | 'Transaction & Advisory' | null => {
+  const root = matter.legalServicePath?.[0];
+  if (root) {
+    if (root.id === 'dispute_resolution') return 'Dispute Resolution';
+    if (['transactions_advisory', 'transaction_advisory'].includes(root.id)) return 'Transaction & Advisory';
+    const label = String(root.label || '').replace(/^[ab]\.\s*/i, '').trim().toLowerCase();
+    if (label === 'dispute resolution') return 'Dispute Resolution';
+    if (['transaction & advisory', 'transactions & advisory'].includes(label)) return 'Transaction & Advisory';
+    return null;
+  }
+  return matter.caseType === 'Transactional Cases' ? 'Transaction & Advisory'
+    : ['Litigation Cases', 'Labor Cases'].includes(matter.caseType) ? 'Dispute Resolution' : null;
+};
 
 const MANAGER_ROLES = new Set([
   'managing_director',
@@ -33,7 +45,7 @@ const MANAGER_ROLES = new Set([
   'originating_attorney',
 ]);
 
-export const canManage = (req: AuthRequest) => Boolean(req.user?.role && MANAGER_ROLES.has(req.user.role));
+const canManage = (req: AuthRequest) => Boolean(req.user?.role && MANAGER_ROLES.has(req.user.role));
 const actor = (req: AuthRequest) => ({ name: req.user?.name || 'System', ...(req.user?.id ? { userId: req.user.id } : {}) });
 const text = (value: unknown) => String(value ?? '').trim();
 const hasField = (source: unknown, field: string) =>
@@ -112,23 +124,22 @@ export const createRetainer = async (req: AuthRequest, res: Response) => {
     if (!canManage(req)) return res.status(403).json({ message: 'Forbidden.' });
     const name = text(req.body?.name);
     const clientName = text(req.body?.clientName);
-    const billingModel = text(req.body?.billingModel) || 'monthly';
+    const billingModel = text(req.body?.billingModel);
     const startDate = text(req.body?.startDate);
     const endDate = text(req.body?.endDate);
     const status = text(req.body?.status) || 'Draft';
-    if (billingModel !== 'monthly') return res.status(400).json({ message: 'A retainer agreement requires a fixed monthly fee.' });
-    if (!name || !clientName || !validDate(startDate)) {
-      return res.status(400).json({ message: 'Retainer agreement, retainer client, and a valid start date are required.' });
+    if (!name || !clientName || !['prepaid', 'monthly', 'hybrid'].includes(billingModel) || !validDate(startDate)) {
+      return res.status(400).json({ message: 'Name, client, billing model, and a valid start date are required.' });
     }
     if (endDate && (!validDate(endDate) || endDate < startDate)) return res.status(400).json({ message: 'End date must be on or after the start date.' });
     if (!['Draft', 'Active', 'Paused', 'Closed'].includes(status)) return res.status(400).json({ message: 'Invalid retainer status.' });
 
-    // New retainer agreements use the fixed monthly fee. Preserve older
-    // contract-value fields on existing records without treating them as cash.
-    const contractValue = 0;
+    // `openingBalance` is accepted only for an older frontend during rollout.
+    // The business term and persisted value are now contract value.
+    const contractValue = amount(req.body?.contractValue ?? req.body?.openingBalance);
     const monthlyFee = amount(req.body?.monthlyFee);
     if ((billingModel === 'monthly' || billingModel === 'hybrid') && monthlyFee <= 0) {
-      return res.status(400).json({ message: 'Record the fixed monthly fee for the retainer client.' });
+      return res.status(400).json({ message: 'A monthly or hybrid retainer needs a monthly fee.' });
     }
 
     const retainer = await Retainer.create({
@@ -153,10 +164,6 @@ export const createRetainer = async (req: AuthRequest, res: Response) => {
       ...(text(req.body?.responsiblePartner) ? { responsiblePartner: text(req.body.responsiblePartner) } : {}),
       ...(text(req.body?.notes) ? { notes: text(req.body.notes) } : {}),
       createdBy: actor(req).name,
-      excludedServices: text(req.body?.excludedServices),
-      additionalWorkChargeable: req.body?.additionalWorkChargeable === true,
-      scopeApprovalRequired: req.body?.scopeApprovalRequired !== false,
-      utilisationThreshold: Math.max(100, Math.min(10000, Number(req.body?.utilisationThreshold) || 150)),
       ...(actor(req).userId && mongoose.Types.ObjectId.isValid(actor(req).userId!) ? { createdByUserId: new mongoose.Types.ObjectId(actor(req).userId!) } : {}),
     });
 
@@ -183,7 +190,6 @@ export const updateRetainer = async (req: AuthRequest, res: Response) => {
     const existing = await Retainer.findById(req.params.id);
     if (!existing) return res.status(404).json({ message: 'Retainer not found.' });
     const billingModel = text(req.body?.billingModel || existing.billingModel);
-    if (existing.billingModel === 'monthly' && billingModel !== 'monthly') return res.status(400).json({ message: 'A retainer agreement requires a fixed monthly fee.' });
     const status = text(req.body?.status || existing.status);
     const startDate = text(req.body?.startDate || existing.startDate);
     const endDate = hasField(req.body, 'endDate') ? text(req.body?.endDate) : existing.endDate || '';
@@ -193,7 +199,7 @@ export const updateRetainer = async (req: AuthRequest, res: Response) => {
     }
     if (endDate && (!validDate(endDate) || endDate < startDate)) return res.status(400).json({ message: 'End date must be on or after the start date.' });
     if ((billingModel === 'monthly' || billingModel === 'hybrid') && monthlyFee <= 0) {
-      return res.status(400).json({ message: 'Record the fixed monthly fee for the retainer client.' });
+      return res.status(400).json({ message: 'A monthly or hybrid retainer needs a monthly fee.' });
     }
 
     existing.name = text(req.body?.name) || existing.name;
@@ -205,10 +211,6 @@ export const updateRetainer = async (req: AuthRequest, res: Response) => {
     if (hasField(req.body, 'renewalDate')) existing.set('renewalDate', text(req.body?.renewalDate) || undefined);
     if (hasField(req.body, 'billingDay')) existing.set('billingDay', Number(req.body?.billingDay) >= 1 && Number(req.body?.billingDay) <= 28 ? Number(req.body.billingDay) : undefined);
     existing.monthlyFee = monthlyFee;
-    if (hasField(req.body, 'excludedServices')) existing.excludedServices = text(req.body.excludedServices);
-    if (hasField(req.body, 'additionalWorkChargeable')) existing.additionalWorkChargeable = req.body.additionalWorkChargeable === true;
-    if (hasField(req.body, 'scopeApprovalRequired')) existing.scopeApprovalRequired = req.body.scopeApprovalRequired !== false;
-    if (hasField(req.body, 'utilisationThreshold')) existing.utilisationThreshold = Math.max(100, Math.min(10000, Number(req.body.utilisationThreshold) || 150));
     // A previous version stored per-case reservations. The shared
     // subscription model always exposes the whole contract value instead.
     existing.reservedAmount = 0;
@@ -236,7 +238,6 @@ export const deleteRetainer = async (req: AuthRequest, res: Response) => {
 
     const retainer = await Retainer.findById(retainerId);
     if (!retainer) return res.status(404).json({ message: 'Retainer not found.' });
-    if (await RetainerPeriod.exists({ retainerId })) return res.status(409).json({ message: 'Retainers with monthly accounting history must be closed rather than deleted.' });
     const linkedCases = await Case.countDocuments({ retainerId: retainer._id });
     if (linkedCases > 0) {
       return res.status(409).json({ message: 'Unlink all cases before deleting this retainer.' });
@@ -303,15 +304,15 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
     const retainerId = text(req.params.id);
     if (!mongoose.Types.ObjectId.isValid(retainerId)) return res.status(400).json({ message: 'Invalid retainer id.' });
     const cases = await Case.find({ retainerId: new mongoose.Types.ObjectId(retainerId) })
-      .select('caseNo parties status priority budget workflowProgress legalServicePath caseType createdAt updatedAt caseAssignments assignedTo assignmentHandoverHistory caseManagement retainerCoveredActionKeys workflowTemplateId')
+      .select('caseNo parties status priority budget workflowProgress createdAt updatedAt legalServicePath caseType caseAssignments assignedTo assignmentHandoverHistory caseManagement')
       .sort({ updatedAt: -1 })
       .lean();
     const caseIds = cases.map((item: any) => item._id);
 
-    const [invoiceTotals, expenses, retainerFinancialData, workflows, tasks, users] = await Promise.all([
+    const [invoiceTotals, expenses, workflows, tasks, users] = await Promise.all([
       caseIds.length
         ? Invoice.aggregate([
-            { $match: { caseId: { $in: caseIds }, ...ordinaryInvoiceFilter } },
+            { $match: { caseId: { $in: caseIds } } },
             {
               $group: {
                 _id: '$caseId',
@@ -324,7 +325,6 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
       caseIds.length
         ? PettyCashExpense.find({ caseId: { $in: caseIds }, chargeType: 'client' }).select('caseId amount refundAmount').lean()
         : [],
-      retainerFinancials(null, null, null, retainerId),
       caseIds.length ? Workflow.find({ caseId: { $in: caseIds } }).lean() : [],
       caseIds.length ? Task.find({ caseId: { $in: caseIds } }).lean() : [],
       caseIds.length ? User.find({}).select('name role tpaHistory').lean() : [],
@@ -334,22 +334,11 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
     const templateById = new Map(templates.map((template) => [String(template._id), template]));
     const tasksByCase = new Map<string, any[]>();
     for (const task of tasks) {
-      const key = String(task.caseId);
-      const list = tasksByCase.get(key) || [];
+      const key = String(task.caseId), list = tasksByCase.get(key) || [];
       list.push(task); tasksByCase.set(key, list);
     }
     const roleByName = buildRoleByName(users);
     const invoiceByCase = new Map(invoiceTotals.map((item: any) => [String(item._id), item]));
-    const revenueByCase = new Map<string, number>();
-    const productionByCase = new Map<string, number>();
-    const services = retainerFinancialData.statements.flatMap((p) => p.allocation.services);
-    const servicesByCase = new Map<string, any[]>();
-    for (const service of services) {
-      const key = String(service.caseId); revenueByCase.set(key, (revenueByCase.get(key) || 0) + service.allocatedRevenue);
-      productionByCase.set(key, (productionByCase.get(key) || 0) + service.ordinaryFee);
-      const work = servicesByCase.get(key) || [];
-      work.push(service); servicesByCase.set(key, work);
-    }
     const costsByCase = new Map<string, number>();
     for (const expense of expenses as any[]) {
       const caseId = String(expense.caseId);
@@ -360,43 +349,26 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
       const invoice = invoiceByCase.get(String(caseItem._id));
       const contractValue = getContractValue(caseItem);
       const totalBilled = amount(invoice?.totalBilled);
-      const totalCollected = amount(invoice?.totalCollected) + (revenueByCase.get(String(caseItem._id)) || 0);
+      const totalCollected = amount(invoice?.totalCollected);
       const directMatterCosts = amount(costsByCase.get(String(caseItem._id)));
       const grossProfit = totalCollected - directMatterCosts;
-      const work = servicesByCase.get(String(caseItem._id)) || [];
-      const contributors = new Map<string, { userId: string; name: string; earnedTpa: number }>();
-      for (const service of work) for (const member of service.contributors) {
-        const key = String(member.userId);
-        const prior = contributors.get(key);
-        contributors.set(key, { userId: key, name: member.name, earnedTpa: decimal((prior?.earnedTpa || 0) + member.earnedTpa) });
-      }
-      const staffTpa = decimal([...contributors.values()].reduce((total, member) => total + member.earnedTpa, 0));
-      const retainerRevenue = revenueByCase.get(String(caseItem._id)) || 0;
       const workflow = workflowByCase.get(String(caseItem._id));
       const template = workflow ? templateById.get(String(workflow.templateId)) : null;
-      const earnedFees = computeCaseEarnedFees({
-        caseDoc: caseItem,
-        template,
+      const earned = computeCaseEarnedFees({ caseDoc: caseItem, template,
         workflowInstance: { ...(workflow || {}), steps: normalizeEffectiveWorkflowSteps(workflow, template) },
-        tasks: tasksByCase.get(String(caseItem._id)) || [],
-        collectedAmount: amount(invoice?.totalCollected),
-        roleByName,
-      });
+        tasks: tasksByCase.get(String(caseItem._id)) || [], collectedAmount: totalCollected, roleByName });
+      const staffEarnedFees = earned.staffEarnedTotal;
       return {
         ...caseItem,
+        department: departmentOf(caseItem),
+        team: earned.team,
+        staffEarnedFees,
+        pendingStaffCount: earned.team.filter((member) => member.earnedFee == null).length,
+        netAfterStaff: roundMoney(grossProfit - (staffEarnedFees || 0)),
         contractValue,
-        ordinaryWorkValue: productionByCase.get(String(caseItem._id)) || 0,
-        retainerRevenue,
-        staffTpa,
-        servicesCount: work.length,
-        team: earnedFees.team,
-        caseStaffEarnedTotal: earnedFees.staffEarnedTotal,
-        contributors: [...contributors.values()].sort((a, b) => b.earnedTpa - a.earnedTpa || a.name.localeCompare(b.name)),
-        netContribution: decimal(retainerRevenue - directMatterCosts - staffTpa),
-        department: retainerDepartmentOf(caseItem),
         totalBilled,
         totalCollected,
-        outstanding: Math.max(0, totalBilled - amount(invoice?.totalCollected)),
+        outstanding: Math.max(0, totalBilled - totalCollected),
         directMatterCosts,
         grossProfit,
         profitStatus: grossProfit > 0 ? 'Profitable' : grossProfit < 0 ? 'Loss' : 'Break-even',
@@ -406,7 +378,6 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
       (totals, caseItem) => ({
         caseCount: totals.caseCount + 1,
         contractValue: totals.contractValue + caseItem.contractValue,
-        ordinaryWorkValue: totals.ordinaryWorkValue + caseItem.ordinaryWorkValue,
         totalBilled: totals.totalBilled + caseItem.totalBilled,
         totalCollected: totals.totalCollected + caseItem.totalCollected,
         outstanding: totals.outstanding + caseItem.outstanding,
@@ -414,29 +385,14 @@ export const listRetainerCases = async (req: AuthRequest, res: Response) => {
         grossProfit: totals.grossProfit + caseItem.grossProfit,
         profitableCases: totals.profitableCases + (caseItem.profitStatus === 'Profitable' ? 1 : 0),
         lossMakingCases: totals.lossMakingCases + (caseItem.profitStatus === 'Loss' ? 1 : 0),
+        staffEarnedFees: roundMoney(totals.staffEarnedFees + (caseItem.staffEarnedFees || 0)),
+        pendingStaffCount: totals.pendingStaffCount + caseItem.pendingStaffCount,
+        netAfterStaff: roundMoney(totals.netAfterStaff + caseItem.netAfterStaff),
       }),
-      { caseCount: 0, contractValue: 0, ordinaryWorkValue: 0, totalBilled: 0, totalCollected: 0, outstanding: 0, directMatterCosts: 0, grossProfit: 0, profitableCases: 0, lossMakingCases: 0 }
+      { caseCount: 0, contractValue: 0, totalBilled: 0, totalCollected: 0, outstanding: 0, directMatterCosts: 0, grossProfit: 0, profitableCases: 0, lossMakingCases: 0, staffEarnedFees: 0, pendingStaffCount: 0, netAfterStaff: 0 }
     );
-    const accounting = {
-      recordedMonths: retainerFinancialData.statements.length,
-      fixedFees: retainerFinancialData.billed,
-      actualReceived: retainerFinancialData.collected,
-      outstanding: retainerFinancialData.outstanding,
-      overpayment: retainerFinancialData.statements.reduce((total, p) => total + p.allocation.overpayment, 0),
-      workValue: retainerFinancialData.workValue,
-      staffTpa: retainerFinancialData.staffTpa,
-      firmUnutilisedRevenue: retainerFinancialData.unutilisedRevenue,
-      allocableRevenue: retainerFinancialData.collected - retainerFinancialData.unutilisedRevenue,
-      departments: DEPARTMENTS.map((department) => {
-        const work = services.filter((service) => service.department === department);
-        const ordinaryValue = work.reduce((total, service) => total + service.ordinaryFee, 0);
-        return { department, ordinaryValue,
-          share: retainerFinancialData.workValue ? decimal(ordinaryValue / retainerFinancialData.workValue * 100) : 0,
-          allocatedRevenue: work.reduce((total, service) => total + service.allocatedRevenue, 0) };
-      }),
-      services,
-    };
-    res.json({ cases: caseRows, summary, accounting });
+    const staffCount = new Set(caseRows.flatMap((matter) => matter.team.map((member: { name: string }) => normalizeMemberName(member.name)))).size;
+    res.json({ cases: caseRows, summary: { ...summary, staffCount } });
   } catch (error: any) {
     res.status(500).json({ message: error?.message || 'Failed to fetch retainer cases.' });
   }

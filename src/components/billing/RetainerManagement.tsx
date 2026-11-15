@@ -150,25 +150,25 @@ export default function RetainerManagement() {
         <header className="retainer-page-header">
           <div>
             <span className="retainer-page-eyebrow">Matters</span>
-            <h1>Retainer clients</h1>
-            <p>Record each retainer client’s fixed monthly fee and the matters and services handled during each month.</p>
+            <h1>Retainer portfolio</h1>
+            <p>Fixed monthly agreements, linked cases, department performance and staff earnings.</p>
           </div>
           <button type="button" className="retainer-primary-action" onClick={openCreate}><Plus /> New retainer</button>
         </header>
 
         {(error || notice) && <div className={`retainer-page-alert ${error ? 'is-error' : 'is-success'}`}>{error || notice}</div>}
 
-        <section className="retainer-overview-grid" aria-label="Retainer clients">
-          <OverviewMetric icon={<BriefcaseBusiness />} label="Retainer agreements" value={overview.active} description="Active retainer agreements" />
-          <OverviewMetric icon={<Wallet />} label="Retainer clients" value={overview.clients} description="Clients under retainer agreements" />
-          <OverviewMetric icon={<ClipboardList />} label="Matters" value={overview.cases} description="Matters linked to retainer clients" />
-          <OverviewMetric icon={<CalendarDays />} label="Fixed monthly fee" value={money(overview.monthly)} description="Total fixed monthly fees under the retainer agreements" />
+        <section className="retainer-overview-grid" aria-label="Retainer portfolio summary">
+          <OverviewMetric icon={<BriefcaseBusiness />} label="Active agreements" value={overview.active} description="Agreements currently available to cases" />
+          <OverviewMetric icon={<Wallet />} label="Retainer clients" value={overview.clients} description="Clients with retainer agreements" />
+          <OverviewMetric icon={<ClipboardList />} label="Linked cases" value={overview.cases} description="Cases following normal case workflow" />
+          <OverviewMetric icon={<CalendarDays />} label="Fixed monthly fees" value={money(overview.monthly)} description="Recurring fees across agreements" />
         </section>
 
         <section className="retainer-portfolio-card retainer-portfolio-card-full">
           <div className="retainer-portfolio-header">
             <h2>All retainers</h2>
-            <p>Select a retainer client to view the Monthly Retainer Statement.</p>
+            <p>Select any row or use Open to manage that agreement without crowding this portfolio.</p>
           </div>
           <form className="retainer-filter-bar" onSubmit={(event) => { event.preventDefault(); loadRetainers(); }}>
             <input className="retainer-page-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search agreement or client" aria-label="Search retainers" />
@@ -185,13 +185,13 @@ export default function RetainerManagement() {
 
           <div className="retainer-table-wrap">
             <table className="retainer-table">
-              <thead><tr><th>#</th><th>Retainer agreement / retainer client</th><th>Fixed monthly fee</th><th>Status</th><th>Matters</th><th>Term</th><th>Open</th><th>Actions</th></tr></thead>
+              <thead><tr><th>#</th><th>Agreement / client</th><th>Fixed monthly fee</th><th>Status</th><th>Cases</th><th>Term</th><th>Open</th><th>Actions</th></tr></thead>
               <tbody>
                 {loading ? <tr className="retainer-table-message"><td colSpan={8}>Loading retainers...</td></tr> : retainers.length === 0 ? <tr className="retainer-table-message"><td colSpan={8}>No retainers found. Create one when a client agreement is approved.</td></tr> : retainers.map((retainer, index) => (
                   <tr key={retainer._id} onClick={() => openRetainer(retainer._id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openRetainer(retainer._id); } }} tabIndex={0} aria-label={`Open ${retainer.name}`}>
                     <td className="retainer-row-number">{index + 1}</td>
                     <td><strong>{retainer.name}</strong><span>{retainer.clientName}</span><small>{retainer.retainerNo}</small></td>
-                    <td><strong>{retainer.monthlyFee > 0 ? money(retainer.monthlyFee) : 'Fixed monthly fee required'}</strong><small>Fixed monthly fee under the retainer agreement</small></td>
+                    <td><strong>{retainer.monthlyFee > 0 ? money(retainer.monthlyFee) : 'Fee not set'}</strong><small>per month</small></td>
                     <td><StatusBadge status={retainer.effectiveStatus} /></td>
                     <td><strong>{retainer.linkedCaseCount || 0}</strong><small>linked case{retainer.linkedCaseCount === 1 ? '' : 's'}</small></td>
                     <td><strong>{retainer.startDate ? new Date(retainer.startDate).toLocaleDateString() : 'Not set'}</strong><small>{retainer.endDate ? `Ends ${new Date(retainer.endDate).toLocaleDateString()}` : 'Open-ended'}</small></td>

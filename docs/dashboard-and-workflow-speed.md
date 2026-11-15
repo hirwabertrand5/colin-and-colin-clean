@@ -2,7 +2,7 @@
 
 13 November 2026. Local implementation; deployment has not been performed.
 
-Staff profitability now reads its inputs concurrently and skips unrelated financial, prospect and client reporting queries. It avoids recalculating matters with no work in the requested period. Retainer earnings read only periods containing relevant production, with indexed receipt lookups. The reporting period presets and labels come from the same constant as Firm Reports: Today, Last 7 Days, This Month, Last Quarter, Last Year, Year to Date and Custom Range.
+Staff profitability now reads its inputs concurrently and skips unrelated financial, prospect and client reporting queries. It avoids recalculating matters with no work in the requested period. The reporting period presets and labels come from the same constant as Firm Reports: Today, Last 7 Days, This Month, Last Quarter, Last Year, Year to Date and Custom Range.
 
 All role dashboards start one authenticated data stream immediately after sign-in. Sections render as they arrive instead of waiting for the slowest source. The stream reuses the existing source visibility rules and preserves finance and audit permissions. Data is account-specific and consumed for the initial view; revisits load fresh results. Staff summaries load their joined financial inputs in one database aggregate and include current assigned matter work items, replacing up to sixty separate Case Management HTTP requests. Executive dashboard reads run concurrently and share their matter-label lookup.
 
@@ -46,7 +46,6 @@ From `colin-backend`:
 npm.cmd run build
 node dist/scripts/verifyResponsePerformance.js
 node dist/scripts/verifyProfitabilityPeriods.js
-node dist/scripts/verifyRetainerAccounting.js
 node dist/scripts/verifyDeadlineAmendmentModes.js
 ```
 

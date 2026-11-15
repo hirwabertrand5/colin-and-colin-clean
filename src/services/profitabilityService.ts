@@ -1,6 +1,5 @@
 import { navigationFetch as fetch } from './navigationRequest';
 import { FirmReportRange } from './firmReportsService';
-import type { RetainerPerformance } from './retainerAccountingService';
 
 export type ProfitabilityPeriod = FirmReportRange | 'all';
 
@@ -30,7 +29,6 @@ export type ProfitabilityRow = {
 };
 
 export type ProfitabilityResponse = {
-  retainer?: RetainerPerformance;
   range: { from: string | null; to: string | null; label: string };
   currency: 'RWF';
   timeZone?: string;
@@ -49,7 +47,6 @@ export type ProfitabilityResponse = {
     totalReceivables: number;
     directMatterCosts: number;
     generalOverheads: number;
-    retainerStaffTpa?: number;
     totalFirmCosts: number;
     grossContribution: number;
     grossMargin: number | null;

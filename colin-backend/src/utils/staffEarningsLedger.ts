@@ -51,9 +51,6 @@ const paidTotal = (entries: Array<{ amount: number }> | undefined) =>
 export type StaffEarningsRowStatus = 'ready' | 'awaiting-collection' | 'awaiting-input' | 'incomplete';
 
 export type StaffEarningsRow = {
-  source?: 'retainer';
-  retainerId?: string;
-  retainerPeriodId?: string;
   rateActivityAt?: string | null;
   /** Stable row identity — caseId + key action + staff + assignment role. */
   key: string;

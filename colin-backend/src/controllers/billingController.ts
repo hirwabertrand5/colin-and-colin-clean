@@ -3,7 +3,6 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import Case from '../models/caseModel';
 import Invoice from '../models/invoiceModel';
 import PettyCashExpense from '../models/pettyCashExpenseModel';
-import { ordinaryInvoiceFilter, retainerFinancials } from '../services/retainerAccountingService';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
@@ -33,14 +32,12 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
     // Your invoice.date is stored as YYYY-MM-DD string, so string range works.
     const fromStr = toISODate(fromDate);
     const toStr = toISODate(toDate);
-    fromDate.setHours(0, 0, 0, 0);
-    toDate.setHours(23, 59, 59, 999);
 
     const [invoices, paidInvoices, matters, expenses] = await Promise.all([
-      Invoice.find({ date: { $gte: fromStr, $lte: toStr }, ...ordinaryInvoiceFilter })
+      Invoice.find({ date: { $gte: fromStr, $lte: toStr } })
         .sort({ date: 1 })
         .lean(),
-      Invoice.find({ status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate }, ...ordinaryInvoiceFilter })
+      Invoice.find({ status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } })
         .select('amount date caseId updatedAt')
         .lean(),
       Case.find({ updatedAt: { $gte: fromDate, $lte: toDate } })
@@ -51,11 +48,10 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
         .lean(),
     ]);
 
-    const retainers = await retainerFinancials(fromStr, toStr);
-    const billed = invoices.reduce((s, i) => s + (Number(i.amount) || 0), 0) + retainers.billed;
+    const billed = invoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const contractValue = matters.reduce((s, matter: any) => s + getContractValue(matter), 0);
     const progressValue = matters.reduce((s, matter: any) => s + getCollectedValueFromProgress(matter), 0);
-    const collected = paidInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0) + retainers.collected;
+    const collected = paidInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
     const directMatterCosts = expenses
       .filter((expense: any) => expense.chargeType === 'client' && Boolean(expense.caseId))
       .reduce((s, expense: any) => s + getDirectMatterCost(expense), 0);
@@ -64,10 +60,9 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
       .reduce((s, expense: any) => s + getDirectMatterCost(expense), 0);
     const grossProfit = collected - directMatterCosts;
     const grossProfitMargin = collected > 0 ? Math.round((grossProfit / collected) * 100) : 0;
-    const netProfit = grossProfit - firmOperatingExpenses - retainers.staffTpa;
+    const netProfit = grossProfit - firmOperatingExpenses;
     const netProfitMargin = collected > 0 ? Math.round((netProfit / collected) * 100) : 0;
-    const pending = await Invoice.find({ status: { $ne: 'Paid' }, date: { $lte: toStr }, ...ordinaryInvoiceFilter }).select('amount').lean();
-    const outstanding = pending.reduce((sum, i) => sum + i.amount, 0) + retainers.outstanding;
+    const outstanding = Math.max(0, contractValue - collected);
     const collectionRate = contractValue > 0 ? Math.round((collected / contractValue) * 100) : 0;
 
     // monthly trend: invoices drive billed, paid invoices drive collected
@@ -87,16 +82,6 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
       map.set(key, item);
     }
 
-    for (const p of retainers.statements) {
-      const key = p.month;
-      const item = map.get(key) || { month: key, billed: 0, collected: 0 };
-      item.billed += p.feeInRange; map.set(key, item);
-    }
-    const receipts = (await import('../models/retainerReceiptModel')).default;
-    for (const r of await receipts.find({ voidedAt: { $exists: false }, receivedOn: { $gte: fromStr, $lte: toStr } }).lean()) {
-      const key = r.receivedOn.slice(0, 7); const item = map.get(key) || { month: key, billed: 0, collected: 0 };
-      item.collected += r.amount; map.set(key, item);
-    }
     const months = Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
 
     res.json({
@@ -115,8 +100,6 @@ export const getBillingSummary = async (req: AuthRequest, res: Response) => {
       netProfit,
       netProfitMargin,
       months,
-      retainer: retainers,
-      retainerStaffTpa: retainers.staffTpa,
     });
   } catch {
     res.status(500).json({ message: 'Failed to fetch billing summary.' });

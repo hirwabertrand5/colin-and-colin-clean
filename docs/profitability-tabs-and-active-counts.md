@@ -16,7 +16,7 @@ The shared rule is used by the management dashboard, Active/Closed Matters lists
 - Browser switching between prepared staff, practice-area, client and matter tabs took **32–191 ms**, with no repeat report download. Period switching, refresh, error recovery and data invalidation passed.
 - A disposable database fixture with **105 active matters** plus completed, paused, cancelled and returned-to-intake records produced 105 across list/dashboard rules, firm/personal/staff reports, client/practice rollups and the staff summary. Pausing and reopening a matter changed the next report immediately.
 - Browser tests separately confirmed 105 on both the dashboard and Active Matters list, matching client and People & Capacity totals. Temporary and completed lists stayed separate.
-- Profitability date, payment/refund, retainer balance and staff earnings regression checks passed. Navigation request sharing, write invalidation and account-separation checks passed.
+- Profitability date, payment/refund and staff earnings regression checks passed. Navigation request sharing, write invalidation and account-separation checks passed.
 
 Reproduce from the root:
 

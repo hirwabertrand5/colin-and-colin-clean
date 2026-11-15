@@ -68,7 +68,7 @@ export async function loadEarningRows(caseIds?: string[], session: ClientSession
       { $lookup: { from: Template.collection.name, localField: 'workflowTemplateId', foreignField: '_id', as: '_earningTemplates' } },
       { $lookup: { from: Task.collection.name, localField: '_id', foreignField: 'caseId', as: '_earningTasks' } },
       { $lookup: { from: Invoice.collection.name, localField: '_id', foreignField: 'caseId',
-        pipeline: [{ $match: { status: 'Paid', retainerReceiptId: { $exists: false } } }, { $project: { amount: 1, invoiceNo: 1, paidAt: 1, updatedAt: 1 } }], as: '_earningInvoices' } },
+        pipeline: [{ $match: { status: 'Paid' } }, { $project: { amount: 1, invoiceNo: 1, paidAt: 1, updatedAt: 1 } }], as: '_earningInvoices' } },
       { $lookup: { from: User.collection.name, pipeline: [{ $project: { name: 1, role: 1, tpaHistory: 1 } }], as: '_earningUsers' } },
     ]).session(session);
     const record = records[0];
@@ -88,7 +88,7 @@ export async function loadEarningRows(caseIds?: string[], session: ClientSession
   const instances = await Workflow.find({ caseId: { $in: ids } }).session(session).lean();
   const templates = await Template.find({ _id: { $in: matters.map(m => m.workflowTemplateId).filter(Boolean) } }).session(session).lean();
   const tasks = await Task.find({ caseId: { $in: ids } }).session(session).lean();
-  const invoices = await Invoice.find({ caseId: { $in: ids }, status: 'Paid', retainerReceiptId: { $exists: false } }).session(session).lean();
+  const invoices = await Invoice.find({ caseId: { $in: ids }, status: 'Paid' }).session(session).lean();
   const users = await User.find({}).select('name role tpaHistory').session(session).lean();
   const tasksByCaseId = new Map<string, any[]>();
   for (const task of tasks) tasksByCaseId.set(String(task.caseId), [...(tasksByCaseId.get(String(task.caseId)) || []), task]);

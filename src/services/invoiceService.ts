@@ -4,7 +4,6 @@ const API_URL = import.meta.env.VITE_API_URL;
 export interface Invoice {
   _id?: string;
   caseId: string;
-  retainerReceiptId?: string;
   invoiceNo: string;
   date: string;
   amount: number;
