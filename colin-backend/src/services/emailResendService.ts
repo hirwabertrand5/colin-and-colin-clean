@@ -1,5 +1,6 @@
 ﻿import { Resend } from 'resend';
 
+import { EMAIL_LOGO_CID, emailLogoAttachment } from './emailBranding';
 export type EmailFailureCode = 'EMAIL_NOT_CONFIGURED' | 'EMAIL_SENDER_INVALID' | 'EMAIL_CREDENTIALS_INVALID' | 'EMAIL_DOMAIN_UNVERIFIED' | 'EMAIL_TEST_MODE' | 'EMAIL_RATE_LIMITED' | 'EMAIL_RECIPIENT_INVALID' | 'EMAIL_PROVIDER_UNAVAILABLE' | 'EMAIL_REJECTED';
 export type SendEmailResult = { ok: true; id: string } | { ok: false; code: EmailFailureCode; error: string; retryable: boolean };
 const failure = (code: EmailFailureCode, error: string, retryable = false): Extract<SendEmailResult, { ok: false }> => ({ ok: false, code, error, retryable });
@@ -37,7 +38,7 @@ export const sendEmailResend = async (to: string[], subject: string, html: strin
   if (!to.length || to.some(address => !validEmail(address.trim()))) return failure('EMAIL_RECIPIENT_INVALID', 'Enter a valid recipient email address before sending.');
   try {
     const resend = new Resend(String(process.env.RESEND_API_KEY).trim());
-    const response = await resend.emails.send({ from: String(process.env.EMAIL_FROM).trim(), to: to.map(address => address.trim()), subject, html, ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO.trim() } : {}) }, options);
+    const response = await resend.emails.send({ from: String(process.env.EMAIL_FROM).trim(), to: to.map(address => address.trim()), subject, html, ...(html.includes(`cid:${EMAIL_LOGO_CID}`) ? { attachments: [emailLogoAttachment()] } : {}), ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO.trim() } : {}) }, options);
     if (response.error) return classifyEmailFailure(response.error);
     if (!response.data?.id) return failure('EMAIL_PROVIDER_UNAVAILABLE', 'The email provider did not confirm the send. Please retry; the same invitation link remains available.', true);
     return { ok: true, id: response.data.id };

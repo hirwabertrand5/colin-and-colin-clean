@@ -7,7 +7,7 @@ import Prospect from '../models/prospectModel';
 import Case from '../models/caseModel';
 import AuditLog from '../models/auditLogModel';
 import { INTAKE_SERVICES, DEFAULT_NOTICE, QUESTIONNAIRES, OFFICIAL_USE_FIELDS, INTAKE_CONFIRMATION, DOCUMENT_KINDS, requiredIntakeDocuments } from '../config/digitalIntakeSchema';
-import { queueIntakeSubmissionEmails } from './intakeEmailService';
+import { queueIntakeSubmissionEmails, buildIntakeInvitationEmail, buildIntakeClarificationEmail } from './intakeEmailService';
 import EmailDelivery from '../models/emailDeliveryModel';
 import { processEmailDeliveries } from './emailDeliveryService';
 import { IntakeError, textValue, validateEmail, serviceById, validateIntakeForm } from './digitalIntakeValidation';
@@ -174,7 +174,7 @@ export const sendIntakeInvitation = async (id: unknown, rawToken: unknown, req: 
   const subject = textValue(compose.subject, 200) || 'Your secure Colin & Colin intake form';
   const message = textValue(compose.message, 5000) || link.introduction || 'Please complete our secure intake form so our team can review your enquiry.';
   if (link.emailStatus === 'Sent' && link.sentTokenVersion === link.tokenVersion) return { sent: true, message: 'This invitation has already been sent. You can still copy and share its link.' };
-  const result = await sendEmailResend([to], subject, `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#102c36"><h2>Colin & Colin Legal Solutions</h2><p>Hello ${escapeHtml(link.clientName || 'there')},</p><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(url)}">Open your secure intake form</a></p><p>Expires: ${new Date(link.expiresAt).toISOString().slice(0, 10)}. Please keep this link private.</p><p>${escapeHtml(link.notice.contact || '')}</p><p>Submitting the form does not establish an attorney–client relationship.</p></div>`, { idempotencyKey: `intake-invitation/${link._id}/${link.tokenVersion}` });
+  const result = await sendEmailResend([to], subject, buildIntakeInvitationEmail({ name: link.clientName || '', message, url, expiresAt: link.expiresAt, contact: link.notice.contact || '' }), { idempotencyKey: `intake-invitation/${link._id}/${link.tokenVersion}` });
   link.emailStatus = result.ok ? 'Sent' : 'Failed'; link.emailFailureCode = result.ok ? undefined : result.code; if (result.ok) { link.sentAt = new Date(); link.sentTokenVersion = link.tokenVersion; } await link.save();
   await audit(req, result.ok ? 'INTAKE_LINK_SENT' : 'INTAKE_EMAIL_FAILED', link);
   return result.ok ? { sent: true, providerId: result.id, to, message: `Invitation accepted by the email provider for ${to}.` } : { sent: false, code: result.code, retryable: result.retryable, message: result.error };
@@ -447,7 +447,7 @@ export const requestIntakeInformation = async (id: unknown, body: any, req: Auth
   submission.status = 'Additional Information Requested'; submission.clarifications.push({ message, requestedAt: new Date(), requestedBy: req.user!.id });
   submission.reviewHistory.push({ action: 'Additional information requested', actorName: req.user!.name, at: new Date(), note: message });
   await submission.save(); await audit(req, 'INTAKE_INFORMATION_REQUESTED', link, submission);
-  const email = await sendEmailResend([submission.form.client.email], `Additional information requested: ${submission.reference}`, `<h2>Colin & Colin Legal Solutions</h2><p>Please provide additional information for your enquiry.</p><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(url)}">Reply securely</a></p><p>This link expires in seven days.</p>`, { idempotencyKey: `intake-clarification/${submission._id}/${intakeHash(token)}` });
+  const email = await sendEmailResend([submission.form.client.email], `Additional information requested: ${submission.reference}`, buildIntakeClarificationEmail({ name: submission.form.client.name, reference: submission.reference, message, url, expiresAt: submission.clarificationExpiresAt }), { idempotencyKey: `intake-clarification/${submission._id}/${intakeHash(token)}` });
   return email.ok ? { url, sent: true, message: 'Additional-information request accepted by the email provider.' } : { url, sent: false, code: email.code, retryable: email.retryable, message: email.error };
 };
 const resolveClarification = async (token: string, session: mongoose.ClientSession | null = null) => {

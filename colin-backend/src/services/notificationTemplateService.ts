@@ -1,3 +1,4 @@
+import { brandedEmail, emailAction } from './emailBranding';
 export const escapeEmailHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 
 export const absoluteAppLink = (link?: string) => {
@@ -12,7 +13,6 @@ export const absoluteAppLink = (link?: string) => {
 
 export const buildNotificationEmail = (notification: { title: string; message: string; link?: string; severity?: string }) => {
   const url = absoluteAppLink(notification.link);
-  const title = escapeEmailHtml(notification.title);
   const message = escapeEmailHtml(notification.message).replace(/\r?\n/g, '<br>');
-  return `<!doctype html><html><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;color:#172033"><div style="max-width:600px;margin:24px auto;background:#fff;border:1px solid #e5e7eb;border-radius:8px"><div style="padding:24px;background:#172033;color:#fff;font-size:18px">Colin &amp; Colin Legal Solutions</div><div style="padding:28px"><p style="font-size:12px;color:#64748b">PLATFORM NOTIFICATION${notification.severity === 'critical' ? ' · ACTION REQUIRED' : ''}</p><h1 style="font-size:22px">${title}</h1><p style="line-height:1.7">${message}</p>${url ? `<p style="margin-top:24px"><a href="${escapeEmailHtml(url)}" style="display:inline-block;background:#172033;color:#fff;padding:12px 20px;text-decoration:none;border-radius:5px">View in platform</a></p>` : ''}<p style="margin-top:30px;font-size:12px;color:#64748b">This message contains confidential firm information. Manage email preferences in your Notification Center. Reply to this email if you need assistance.</p></div></div></body></html>`;
+  return brandedEmail({ title: notification.title, eyebrow: `PLATFORM NOTIFICATION${notification.severity === 'critical' ? ' · ACTION REQUIRED' : ''}`, preheader: notification.message, bodyHtml: `<p style="font-size:15px;line-height:1.8;color:#334155">${message}</p>${url ? emailAction('View in platform', url) : ''}`, note: 'This message contains confidential firm information. Manage email preferences in your Notification Center. Reply to this email if you need assistance.' });
 };
