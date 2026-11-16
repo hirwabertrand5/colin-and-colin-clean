@@ -30,7 +30,9 @@ import retainerRoutes from './routes/retainer';
 import digitalIntakeRoutes from './routes/digitalIntake';
 import { getLegacyUploadsDirectory, serveStoredUpload } from './services/fileStorageService';
 import { receiveEmailWebhook } from './controllers/emailDeliveryController';
+import { invalidateFinanceReadsOnWrite } from './services/financeReadCache';
 const app = express();
+app.use(invalidateFinanceReadsOnWrite);
 // Render terminates HTTPS at its proxy; keep the hop count explicit and configurable.
 app.set('trust proxy', process.env.NODE_ENV === 'production' ? Number(process.env.TRUST_PROXY_HOPS || 1) : false);
 

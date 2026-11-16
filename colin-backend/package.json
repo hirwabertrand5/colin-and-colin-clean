@@ -2,6 +2,7 @@
   "name": "colin-backend",
   "version": "1.0.0",
   "scripts": {
+    "verify:finance-workspace": "npm run build && node dist/scripts/verifyFinanceWorkspace.js",
     "verify:profitability": "npm run build && node dist/scripts/verifyProfitabilityPeriods.js",
     "verify:response-performance": "tsx src/scripts/verifyResponsePerformance.ts",
     "verify:notifications": "tsx src/scripts/verifyNotifications.ts",

@@ -9,6 +9,7 @@ export interface IInvoice extends Document {
   seqCase: number; // invoice # within the case
 
   date: string;
+  dueDate?: string;
   amount: number;
   status: 'Paid' | 'Pending';
   paidAt?: Date;
@@ -35,6 +36,7 @@ const InvoiceSchema = new Schema<IInvoice>(
     seqCase: { type: Number, required: true },
 
     date: { type: String, required: true },
+    dueDate: { type: String },
     amount: { type: Number, required: true },
     status: { type: String, enum: ['Paid', 'Pending'], default: 'Pending' },
     paidAt: { type: Date },

@@ -137,6 +137,7 @@ export type BuildStaffEarningsInput = {
   roleFilter?: string | null | undefined;
   matterIdFilter?: string | null | undefined;
   timeZone?: string | undefined;
+  inPeriodOnly?: boolean;
 };
 
 /** Render an instant with its UTC offset so the evidence is unambiguous. */
@@ -434,6 +435,7 @@ export const buildStaffEarningsRows = (input: BuildStaffEarningsInput): StaffEar
       const completionMs = completionAt ? completionAt.getTime() : Number.NaN;
       const hasTimestamp = Number.isFinite(completionMs);
       const inPeriod = hasTimestamp && completionMs >= fromMs && completionMs <= toMs;
+      if (input.inPeriodOnly && !inPeriod) continue;
 
       // Money for this action, from the shared allocation.
       const eligibleCollectedBase = actionValueByKey.get(action.key) || 0;

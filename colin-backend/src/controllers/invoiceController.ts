@@ -6,6 +6,8 @@ import { writeAudit } from '../services/auditService';
 import { storeUploadedFile } from '../services/fileStorageService';
 
 const paramValue = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+const validDay = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 
 // Get all invoices for a case
 export const getInvoicesForCase = async (req: Request, res: Response) => {
@@ -34,11 +36,15 @@ export const addInvoiceToCase = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Invalid caseId' });
     }
 
-    const { date, amount, notes } = req.body;
+    const { date, dueDate, amount, notes } = req.body;
     const invoiceAmount = Number(amount);
 
-    if (!date || !Number.isFinite(invoiceAmount) || invoiceAmount <= 0) {
+    if (!validDay(date) || !Number.isFinite(invoiceAmount) || invoiceAmount <= 0) {
       return res.status(400).json({ message: 'date and a valid amount are required' });
+    }
+
+    if (dueDate && (!validDay(dueDate) || dueDate < date)) {
+      return res.status(400).json({ message: 'Due date must be a valid date on or after the invoice date.' });
     }
 
     const invoiceFileUrl = req.file ? await storeUploadedFile(req.file) : undefined;
@@ -68,6 +74,7 @@ export const addInvoiceToCase = async (req: Request, res: Response) => {
       seqYear,
       seqCase,
       date,
+      ...(dueDate ? { dueDate } : {}),
       amount: invoiceAmount,
       status: 'Pending',
       notes,
@@ -95,6 +102,28 @@ export const addInvoiceToCase = async (req: Request, res: Response) => {
       return res.status(409).json({ message: 'Invoice number conflict. Please try creating the invoice again.' });
     }
     res.status(500).json({ message: error?.message || 'Failed to create invoice.' });
+  }
+};
+
+/** Payment terms are explicit; never invent a due date for legacy invoices. */
+export const updateInvoiceTerms = async (req: Request, res: Response) => {
+  try {
+    const id = paramValue(req.params.invoiceId);
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid invoiceId.' });
+    const invoice = await Invoice.findById(id);
+    if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
+    const dueDate = req.body.dueDate;
+    if (dueDate !== null && dueDate !== '' && (!validDay(dueDate) || dueDate < invoice.date)) {
+      return res.status(400).json({ message: 'Due date must be a valid date on or after the invoice date.' });
+    }
+    const update = { ...(dueDate ? { $set: { dueDate, ...(invoice.status === 'Paid' && !invoice.paidAt ? { paidAt: invoice.updatedAt } : {}) } }
+      : { $unset: { dueDate: 1 }, ...(invoice.status === 'Paid' && !invoice.paidAt ? { $set: { paidAt: invoice.updatedAt } } : {}) }) };
+    const saved = await Invoice.findByIdAndUpdate(id, update, { new: true });
+    await writeAudit({ caseId: String(invoice.caseId), actorName: (req as any).user?.name || 'System', actorUserId: (req as any).user?.id,
+      action: 'INVOICE_UPDATED', message: 'Updated invoice payment terms', detail: `${invoice.invoiceNo} · Due date: ${dueDate || 'not recorded'}` });
+    return res.json(saved);
+  } catch {
+    return res.status(500).json({ message: 'Unable to save payment terms.' });
   }
 };
 

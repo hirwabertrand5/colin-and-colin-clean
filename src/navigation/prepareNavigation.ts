@@ -20,7 +20,7 @@ export function navigationReads(page: PageModule, role: string): string[] {
     case 'DeadlineManagementPage': return ['/calendar/events?from=2000-01-01&to=2100-12-31&type=Deadline', '/cases'];
     case 'InvoiceManagement': return ['/invoices', '/cases'];
     case 'BillingDashboard': return ['/billing/summary', '/invoices', '/cases', ...(financeRoles.includes(role) ? ['/petty-cash/funds'] : [])];
-    case 'BillingFinancePage': return ['/reports/firm?range=ytd&basis=invoiceDate', '/cases', ...(financeRoles.includes(role) ? ['/petty-cash/funds'] : [])];
+    case 'BillingFinancePage': return []; // A focused finance read loads summaries and one page of records.
     case 'PerformanceDashboard': return ['/tasks', '/performance/me'];
     case 'UserManagement': return ['/users'];
     case 'PettyCashDashboard': return ['/petty-cash/funds/active', '/petty-cash/funds', '/cases', '/users'];
@@ -71,6 +71,11 @@ export function prepareNavigation(href: string, includeData = true) {
       ? prepareNavigationRequest(`${API.replace(/\/$/, '')}${path}`, { headers: { Authorization: `Bearer ${token}` } })
       : Promise.resolve(),
   }));
+  if (page === 'BillingFinancePage') queuedReads.push({ intent, run: async () => {
+    if (localStorage.getItem('token') !== token) return;
+    const { prepareFinanceWorkspace } = await import('../services/financeWorkspaceService');
+    await prepareFinanceWorkspace(href);
+  } });
   // Keep a global limit even when the pointer moves rapidly between menus.
   drainReads();
 }

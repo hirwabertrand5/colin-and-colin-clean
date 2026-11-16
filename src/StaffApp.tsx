@@ -315,7 +315,7 @@ function StaffApp() {
                   <Route path="/notifications" element={<NotificationCenter />} />
 
                   {/* Billing */}
-                  <Route path="/billing" element={<BillingDashboard userRole={user.role} />} />
+                  <Route path="/billing" element={isManagementDashboardRole ? <Navigate to="/billing/finance/financial-dashboard" replace /> : <BillingDashboard userRole={user.role} />} />
                   <Route path="/billing/invoices" element={<InvoiceManagement userRole={user.role} />} />
                   {isManagementDashboardRole && (
                     <>

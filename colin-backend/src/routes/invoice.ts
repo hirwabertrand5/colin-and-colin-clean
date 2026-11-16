@@ -6,6 +6,7 @@ import {
   uploadProof,
   uploadInvoiceFile,
   deleteInvoice,
+  updateInvoiceTerms,
 } from '../controllers/invoiceController';
 import { upload } from '../controllers/documentController';
 import { getRecentInvoices, listInvoices } from '../controllers/invoiceQueryController';
@@ -13,6 +14,8 @@ import { getRecentInvoices, listInvoices } from '../controllers/invoiceQueryCont
 const router = express.Router();
 
 const FINANCE_ROLES = ['managing_director', 'executive_assistant'];
+
+router.patch('/invoices/:invoiceId/terms', authenticate, authorize(FINANCE_ROLES), updateInvoiceTerms);
 
 // Case-specific
 router.get('/cases/:caseId/invoices', authenticate, getInvoicesForCase);

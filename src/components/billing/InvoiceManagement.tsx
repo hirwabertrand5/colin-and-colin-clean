@@ -107,6 +107,7 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
   const [newInvoice, setNewInvoice] = useState({
     caseId: '',
     date: '',
+    dueDate: '',
     amount: '',
     notes: '',
   });
@@ -184,12 +185,13 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
       setError('');
       await addInvoiceToCase(newInvoice.caseId, {
         date: newInvoice.date,
+        dueDate: newInvoice.dueDate || undefined,
         amount: amountNum,
         notes: newInvoice.notes || undefined,
       });
 
       setShowCreate(false);
-      setNewInvoice({ caseId: '', date: '', amount: '', notes: '' });
+      setNewInvoice({ caseId: '', date: '', dueDate: '', amount: '', notes: '' });
 
       setPage(1);
       await loadInvoices();
@@ -453,6 +455,9 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
             </div>
 
             <form onSubmit={handleCreateInvoice} className="p-6 space-y-4">
+              <label className="block text-sm font-medium text-gray-700">Due date (optional)
+                <input type="date" min={newInvoice.date} value={newInvoice.dueDate} onChange={e => setNewInvoice(p => ({ ...p, dueDate: e.target.value }))} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded" />
+              </label>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Case *</label>
                 <select
@@ -516,7 +521,7 @@ export default function InvoiceManagement({ userRole }: InvoiceManagementProps) 
                   type="button"
                   onClick={() => {
                     setShowCreate(false);
-                    setNewInvoice({ caseId: '', date: '', amount: '', notes: '' });
+                    setNewInvoice({ caseId: '', date: '', dueDate: '', amount: '', notes: '' });
                   }}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded text-gray-700 hover:bg-gray-50"
                 >

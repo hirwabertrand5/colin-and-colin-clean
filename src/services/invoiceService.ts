@@ -6,6 +6,8 @@ export interface Invoice {
   caseId: string;
   invoiceNo: string;
   date: string;
+  dueDate?: string;
+  paidAt?: string;
   amount: number;
   status: 'Paid' | 'Pending';
 
@@ -42,19 +44,20 @@ export const getInvoicesForCase = async (caseId: string): Promise<Invoice[]> => 
 
 export const addInvoiceToCase = async (
   caseId: string,
-  invoice: { date: string; amount: number; notes?: string; file?: File | null }
+  invoice: { date: string; dueDate?: string; amount: number; notes?: string; file?: File | null }
 ): Promise<Invoice> => {
   const hasFile = Boolean(invoice.file);
   const body = hasFile
     ? (() => {
         const formData = new FormData();
         formData.append('date', invoice.date);
+        if (invoice.dueDate) formData.append('dueDate', invoice.dueDate);
         formData.append('amount', String(invoice.amount));
         if (invoice.notes) formData.append('notes', invoice.notes);
         if (invoice.file) formData.append('file', invoice.file);
         return formData;
       })()
-    : JSON.stringify({ date: invoice.date, amount: invoice.amount, notes: invoice.notes });
+    : JSON.stringify({ date: invoice.date, dueDate: invoice.dueDate, amount: invoice.amount, notes: invoice.notes });
 
   const res = await fetch(`${API_URL}/cases/${caseId}/invoices`, {
     method: 'POST',
@@ -106,6 +109,13 @@ export const deleteInvoice = async (invoiceId: string): Promise<void> => {
   });
 
   if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to delete invoice'));
+};
+
+export const updateInvoiceTerms = async (invoiceId: string, dueDate: string): Promise<Invoice> => {
+  const res = await fetch(`${API_URL}/invoices/${invoiceId}/terms`, { method: 'PATCH',
+    headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ dueDate: dueDate || null }) });
+  if (!res.ok) throw new Error(await readErrorMessage(res, 'Unable to save payment terms.'));
+  return res.json();
 };
 
 export type InvoiceWithCase = Invoice & {

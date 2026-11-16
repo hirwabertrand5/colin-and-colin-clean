@@ -476,6 +476,7 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
   const [showAddInvoiceModal, setShowAddInvoiceModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState({
     date: '',
+    dueDate: '',
     amount: '',
     notes: '',
   });
@@ -1036,13 +1037,14 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
       setInvoicesError('');
       await addInvoiceToCase(caseData._id, {
         date: newInvoice.date,
+        dueDate: newInvoice.dueDate || undefined,
         amount: amountNum,
         notes: newInvoice.notes,
         file: newInvoiceFile,
       });
 
       setShowAddInvoiceModal(false);
-      setNewInvoice({ date: '', amount: '', notes: '' });
+      setNewInvoice({ date: '', dueDate: '', amount: '', notes: '' });
       setNewInvoiceFile(null);
       reloadInvoices();
     } catch (err: any) {
@@ -3101,6 +3103,9 @@ const CaseWorkspace: React.FC<CaseWorkspaceProps> = ({ userRole }) => {
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Create Invoice</h3>
 
                 <form onSubmit={handleAddInvoice} className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">Due date (optional)
+                    <input type="date" min={newInvoice.date} value={newInvoice.dueDate} onChange={e => setNewInvoice(p => ({ ...p, dueDate: e.target.value }))} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded" />
+                  </label>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>

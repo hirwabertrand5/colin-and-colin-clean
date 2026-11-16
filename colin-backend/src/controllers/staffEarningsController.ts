@@ -10,7 +10,8 @@ import WorkflowInstance from '../models/workflowInstanceModel';
 import StaffEarningsLedger from '../models/staffEarningsLedgerModel';
 
 import { AuthRequest } from '../middleware/authMiddleware';
-import { resolveOptionalReportRange } from '../utils/reportRange';
+import { resolveOptionalReportRange, reportTimeZone } from '../utils/reportRange';
+import { invoicePaymentDate } from '../utils/invoicePaymentDate';
 import { buildRoleByName, baseMemberName, TASK_TPA_SHARES } from '../utils/workflowPercentages';
 import {
   buildLedgerEntryKey,
@@ -110,6 +111,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
     const staffFilter = String(staffKey || '').trim().toLowerCase() || null;
     const roleFilter = String(role || '').trim().toLowerCase() || null;
     const matterFilter = String(matterId || '').trim() || null;
+    const focused = req.query.scope === 'finance-workspace' && String(persist || '').toLowerCase() !== 'true';
 
     // ---- Load the data the shared engine needs ----------------------------
     const matterQuery: any = {};
@@ -132,6 +134,21 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
       matterQuery.$or = slots.flatMap((field) => [{ [field]: pattern }, { [field]: basePattern }]);
     }
 
+    if (focused) {
+      // Load full calculation history only for matters that can contribute a
+      // work event in this window. Keep every timestamp fallback, carried work
+      // and legacy string dates; the shared engine decides exact attribution.
+      const window = { $gte: workRange.from, $lte: workRange.to };
+      const eventFields = ['steps.submittedAt', 'steps.doneAt', 'steps.completedAt', 'steps.reviewedAt',
+        'steps.actions.doneAt', 'steps.carriedWork.submittedAt', 'steps.carriedWork.doneAt'];
+      const [workflowIds, taskIds] = await Promise.all([
+        WorkflowInstance.distinct('caseId', { $or: eventFields.flatMap(field => [{ [field]: window }, { [field]: { $type: 'string' } }]) }),
+        Task.distinct('caseId', { $or: ['completedAt', 'updatedAt'].flatMap(field => [{ [field]: window }, { [field]: { $type: 'string' } }]) }),
+      ]);
+      const candidates = [...new Map([...workflowIds, ...taskIds].filter(Boolean).map(id => [String(id), id])).values()];
+      matterQuery._id = { $in: matterFilter ? candidates.filter(id => String(id) === matterFilter) : candidates };
+    }
+
     const [matters, users] = await Promise.all([
       Case.find(matterQuery)
         .select(
@@ -148,7 +165,9 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
 
     const [instances, templates, tasks, paidInvoices] = await Promise.all([
       matterIds.length
-        ? WorkflowInstance.find({ caseId: { $in: matterIds } }).select('caseId templateId status steps').lean()
+        ? WorkflowInstance.find({ caseId: { $in: matterIds } }).select(focused
+          ? 'caseId templateId status deletedStepKeys steps.stepKey steps.title steps.stageKey steps.stageOrder steps.stageTitle steps.stagePercentage steps.percentage steps.order steps.status steps.startAt steps.dueAt steps.completedAt steps.submittedAt steps.reviewedAt steps.doneAt steps.carriedWork steps.actions.done steps.actions.doneAt steps.tpaSnapshots steps.independentContributors steps.custom steps.archivedFromTemplate'
+          : 'caseId templateId status steps').lean()
         : Promise.resolve([]),
       templateIds.length
         ? WorkflowTemplate.find({ _id: { $in: templateIds } }).select('_id stages steps').lean()
@@ -162,7 +181,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
         : Promise.resolve([]),
       matterIds.length
         ? Invoice.find({ caseId: { $in: matterIds }, status: 'Paid' })
-            .select('invoiceNo caseId amount date updatedAt')
+            .select('invoiceNo caseId amount date updatedAt paidAt')
             .lean()
         : Promise.resolve([]),
     ]);
@@ -182,7 +201,8 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
     for (const invoice of paidInvoices as any[]) {
       const caseId = String(invoice?.caseId || '');
       if (!caseId) continue;
-      const paidAt = invoice.updatedAt ? new Date(invoice.updatedAt) : null;
+      const paymentDate = invoicePaymentDate(invoice);
+      const paidAt = paymentDate ? new Date(paymentDate) : null;
       if (collectionFromDate && collectionToDate) {
         const paidMs = paidAt ? paidAt.getTime() : Number.NaN;
         if (!Number.isFinite(paidMs) || paidMs < collectionFromDate.getTime() || paidMs > collectionToDate.getTime()) {
@@ -210,7 +230,8 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
       staffKeyFilter: staffFilter,
       roleFilter,
       matterIdFilter: matterFilter,
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
+      timeZone: reportTimeZone(),
+      inPeriodOnly: focused,
     });
 
     const rows = filterRowsToPeriod(allRows);
@@ -263,7 +284,7 @@ export const getStaffEarningsReport = async (req: AuthRequest, res: Response) =>
         basis: 'keyActionCompletion' as const,
         basisLabel:
           'Attributed to the period containing the Key Action completion timestamp (submitted → last action ticked → completed → reviewed).',
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+        timeZone: reportTimeZone(),
       },
       collection: {
         scope,
