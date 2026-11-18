@@ -2,7 +2,7 @@ import { navigationFetch as fetch } from './navigationRequest';
 const API_URL = import.meta.env.VITE_API_URL;
 const getToken = () => localStorage.getItem('token');
 
-export type FirmReportRange = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'ytd' | 'custom';
+export type FirmReportRange = 'all' | 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'ytd' | 'custom';
 export type FirmReportDateBasis = 'invoiceDate' | 'paymentDate' | 'taskDate';
 
 export type FirmReportResponse = {
@@ -16,7 +16,7 @@ export type FirmReportResponse = {
     revenueGenerated: number;
     paymentsReceived: number;
     outstandingBalance: number;
-    feesEarned: number;
+    feesEarned: number | null;
     qualityReviewStatus: string;
   } | null;
   kpis: {
@@ -47,13 +47,32 @@ export type FirmReportResponse = {
     completedTasks: number;
     totalTaskFeeCollected?: number;
     totalTaskFee: number;
-    totalFeeEarned: number;
+    totalFeeEarned: number | null;
+    keyActionsCompleted?: number;
+    contributionRecords?: number;
+    pendingFeeRecords?: number;
+    pendingTimelinessScores?: number;
+    zeroAllocationActions?: number;
+    missingMatterReferences?: number;
     pendingQualityScores: number;
     averageQualityScore: number | null;
     averageTimelinessScore: number | null;
   };
   productivityRows?: Array<{
     id: string;
+    caseId?: string;
+    keyActionKey?: string;
+    assignmentRole?: string;
+    matterReference?: string | null;
+    matterParties?: string;
+    workflowStage?: string;
+    keyActionPercent?: number;
+    allocationStatus?: string;
+    issues?: string[];
+    qualitySource?: string;
+    contractValue?: number;
+    collectedAmount?: number;
+    progressValue?: number;
     staffId?: string;
     completedAt: string | null;
     staff: string;
@@ -73,6 +92,17 @@ export type FirmReportResponse = {
     taskProgressPercent: number;
     timelinessStatus: string;
   }>;
+  productivityReconciliation?: {
+    timeZone: string;
+    activityBasis: string;
+    collectionBasis: string;
+    dashboardFeeBasis: string;
+    allTime: { keyActionsChecked: number; sectionsCompleted: number; feesEarned: number | null; pendingFeeRecords: number };
+    selectedPeriod: { keyActionsChecked: number; sectionsCompleted: number; feesEarned: number | null; pendingFeeRecords: number };
+    allTimeContributionRecords: number;
+    outsidePeriodContributionRecords: number;
+    undatedContributionRecords: number;
+  };
   team: Array<{
     id: string;
     name: string;
@@ -170,7 +200,7 @@ export const getFirmReports = async (params?: { range?: FirmReportRange | 'all';
 
 export type MyProductivityEarningsResponse = Pick<
   FirmReportResponse,
-  'range' | 'dateBasis' | 'selectedMember' | 'productivitySummary' | 'productivityRows' | 'team'
+  'range' | 'dateBasis' | 'selectedMember' | 'productivitySummary' | 'productivityRows' | 'productivityReconciliation' | 'team'
 >;
 
 export const getMyProductivityEarningsReport = async (params?: {

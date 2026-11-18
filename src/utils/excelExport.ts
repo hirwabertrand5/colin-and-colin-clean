@@ -10,6 +10,7 @@ export interface ExcelSectionDefinition {
   headers: Array<string>;
   rows: Array<Array<unknown>>;
   currencyColumns?: Array<number>;
+  currencyDecimals?: number;
   percentColumns?: Array<number>;
   centerColumns?: Array<number>;
   summaryRow?: Array<unknown>;
@@ -100,7 +101,7 @@ const styleDataRow = (row: Worksheet['row'], rowIndex: number, section: ExcelSec
     if (section.currencyColumns?.includes(colIndex)) {
       cell.alignment = { ...cell.alignment, horizontal: 'right' };
       if (typeof value === 'number') {
-        cell.numFmt = 'RWF #,##0';
+        cell.numFmt = section.currencyDecimals === 2 ? 'RWF #,##0.00' : 'RWF #,##0';
       }
     } else if (section.percentColumns?.includes(colIndex)) {
       cell.alignment = { ...cell.alignment, horizontal: 'center' };

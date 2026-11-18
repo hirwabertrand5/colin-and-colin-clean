@@ -1,0 +1,101 @@
+// Browser verification uses synthetic responses only; no production API or database.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { chromium } = require('../colin-backend/node_modules/playwright');
+const ExcelJS = require('exceljs');
+
+async function main() {
+  const { createServer } = await import('vite');
+  const server = await createServer({ server: { host: '127.0.0.1', port: 4178, strictPort: true, open: false } });
+  let browser;
+  try {
+    await server.listen();
+    browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--disable-background-networking'] });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    page.setDefaultTimeout(30000);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const user = { id: 'test-user', _id: 'test-user', name: 'Report Reviewer', email: 'reviewer@test.invalid', role: 'managing_director' };
+    await page.addInitScript(user => { localStorage.setItem('user', JSON.stringify(user)); localStorage.setItem('token', 'synthetic-test-token'); }, user);
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      id: `row-${index}`, caseId: String(index + 1).padStart(24, '0'), keyActionKey: `action-${index}`,
+      staff: 'Ada', assignmentRole: 'Initiator', role: 'associate', matter: index === 0 ? 'Unreferenced matter (fixture)' : `MAT-${index}`,
+      matterReference: index === 0 ? null : `MAT-${index}`, task: `Action ${index}`, workflowStage: 'Delivery', keyActionPercent: 5,
+      completedAt: '2026-11-10T10:00:00Z', taskFee: index < 2 ? 0 : 10000, taskFeeCollected: index < 2 ? 0 : 10000,
+      tpaPercent: 5, timelinessScore: 80, qualityScore: index === 1 ? null : 90,
+      feeEarned: index === 1 ? null : index < 2 ? 0 : 360.25, formula: 'Base × TPA × Timeliness × Quality',
+      contractValue: 200000, collectedAmount: index < 2 ? 0 : 100000, allocationStatus: index < 2 ? 'No Paid invoices linked to matter' : 'Allocated',
+      qualitySource: index === 1 ? 'Awaiting quality review' : 'Case Management quality review',
+      issues: index === 0 ? ['Matter reference missing'] : index === 1 ? ['Quality score pending'] : [],
+    }));
+    const report = {
+      range: { from: '2026-10-17', to: '2026-11-17' }, dateBasis: 'invoiceDate', selectedMember: null,
+      kpis: {}, ageingReport: [], months: [], caseTypes: [], clientProfitability: [], team: [],
+      productivityRows: rows, productivitySummary: { completedTasks: 1, keyActionsCompleted: 12, contributionRecords: 12,
+        totalTaskFeeCollected: 100000, totalTaskFee: 100000, totalFeeEarned: 3602.5, pendingFeeRecords: 1,
+        pendingQualityScores: 1, pendingTimelinessScores: 0, zeroAllocationActions: 2, missingMatterReferences: 1 },
+      productivityReconciliation: { timeZone: 'Africa/Kigali', activityBasis: 'Key Action completion date',
+        collectionBasis: 'All-time Paid invoices linked by matter ID; values reflect current collections and scores',
+        dashboardFeeBasis: 'Paid invoice payment date (paidAt; updatedAt for legacy invoices)',
+        allTime: { keyActionsChecked: 708, sectionsCompleted: 110, feesEarned: 237068, pendingFeeRecords: 3 },
+        selectedPeriod: { keyActionsChecked: 12, sectionsCompleted: 2, feesEarned: 40193.65, pendingFeeRecords: 1 },
+        allTimeContributionRecords: 20, outsidePeriodContributionRecords: 7, undatedContributionRecords: 1 },
+    };
+    await page.route('**/*', async route => {
+      if (!['fetch', 'xhr'].includes(route.request().resourceType())) return route.continue();
+      assert.equal(route.request().method(), 'GET');
+      const key = new URL(route.request().url()).pathname;
+      let body = [];
+      if (key.endsWith('/reports/firm')) body = report;
+      else if (key.endsWith('/users/staff')) body = [{ ...user, name: 'Ada' }];
+      else if (key.includes('/auth/me')) body = user;
+      else if (key.includes('/notifications/unread-count')) body = { count: 0 };
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    });
+    await page.goto('http://127.0.0.1:4178/reports');
+    await page.getByRole('button', { name: 'Productivity Report', exact: true }).click();
+    await page.getByRole('heading', { name: 'Reconcile with the dashboard' }).waitFor();
+    assert.equal(await page.getByLabel('Productivity summary').getByText('12', { exact: true }).count(), 2);
+    assert(await page.getByText('RWF 40,193.65', { exact: true }).isVisible());
+    assert.equal(await page.locator('select').filter({ has: page.locator('option[value="invoiceDate"]') }).count(), 0, 'Unrelated invoice date selector hidden');
+    await page.getByLabel('Filter productivity issues').selectOption('quality');
+    assert(await page.getByText('1 of 12 records', { exact: true }).isVisible());
+    await page.getByLabel('Filter productivity issues').selectOption('reference');
+    assert.equal(await page.getByRole('link', { name: 'Unreferenced matter (fixture)', exact: true }).getAttribute('href'), '/cases/000000000000000000000001?tab=case-management&step=action-0');
+    await page.getByLabel('Filter productivity issues').selectOption('all');
+    await page.getByLabel('Search productivity records').fill('MAT-11');
+    assert(await page.getByText('1 of 12 records', { exact: true }).isVisible());
+    await page.getByLabel('Search productivity records').fill('');
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export Active Report' }).click();
+    const download = await downloadPromise;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(await download.path());
+    const values = workbook.worksheets.flatMap(sheet => sheet.getSheetValues()).flat(2).map(value => String(value ?? ''));
+    assert(values.includes('DASHBOARD RECONCILIATION'));
+    assert(values.includes('Quality score pending'));
+    assert(values.includes('Key Action completion date'));
+    assert(values.includes('Matter ID'));
+    const feeCells = [];
+    workbook.worksheets.forEach(sheet => sheet.eachRow(row => row.eachCell(cell => { if (cell.value === 360.25) feeCells.push(cell); })));
+    assert(feeCells.some(cell => cell.numFmt === 'RWF #,##0.00'), 'Export retains fee decimals');
+    const output = path.resolve(__dirname, '../node_modules/.cache/productivity-ui');
+    fs.mkdirSync(output, { recursive: true });
+    await page.getByLabel('Productivity summary').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, 'desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('heading', { name: 'Reconcile with the dashboard' }).scrollIntoViewIfNeeded();
+    assert(await page.getByRole('heading', { name: 'Reconcile with the dashboard' }).isVisible());
+    await page.getByLabel('Filter productivity issues').selectOption('zero');
+    assert(await page.getByText('2 of 12 records', { exact: true }).isVisible());
+    await page.getByRole('heading', { name: 'Reconcile with the dashboard' }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, 'mobile.png') });
+    assert.deepEqual(errors, []);
+    console.log('PASS: desktop/mobile report, period reconciliation, pending/zero/reference filters, search, source links, Excel content and decimal precision.');
+  } finally {
+    if (browser) await browser.close();
+    await server.close();
+  }
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

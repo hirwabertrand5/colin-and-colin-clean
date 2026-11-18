@@ -46,6 +46,7 @@ const roundMoney = (value: number) => Math.round((Number(value) || 0) * 100) / 1
 const normalizeName = (value: unknown) => normalizeMemberName(value);
 
 const toScore = (value: unknown): number | null => {
+  if (value == null || String(value).trim() === '') return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 && number <= 100 ? Math.round(number * 10) / 10 : null;
 };
@@ -345,8 +346,8 @@ export const computeCaseTeamEarnedFees = ({
     // Quality: the matter-level Case Management Quality Score when entered;
     // otherwise the member's own completed-task scores (real data), else null.
     const ownQualityScores = completedMine
-      .map((task: any) => Number(task?.qualityScore))
-      .filter((n: number) => Number.isFinite(n) && n >= 0 && n <= 100);
+      .map((task: any) => toScore(task?.qualityScore))
+      .filter((n): n is number => n !== null);
     const qualityScore = matterQualityScore !== null
       ? matterQualityScore
       : ownQualityScores.length
@@ -489,7 +490,7 @@ export const normalizeEffectiveWorkflowSteps = (inst: any, template: any): any[]
     const stage = stagePercentages.get(stageKey);
     return {
       ...(typeof step?.toObject === 'function' ? step.toObject() : step),
-      percentage: parsePercentage(templateStepsByKey.get(String(step?.stepKey || ''))?.percentage) ?? 0,
+      percentage: parsePercentage(templateStepsByKey.get(String(step?.stepKey || ''))?.percentage) ?? null,
       stagePercentage: typeof stage?.percentage === 'number' ? stage.percentage : 0,
       stageTitle: String(stage?.title || step?.stageTitle || stageKey || 'Stage'),
     };

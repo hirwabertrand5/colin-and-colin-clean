@@ -34,6 +34,7 @@ export type KeyActionEarnings = {
 const roundMoney = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
 const clampPercent = (value: unknown) => Math.max(0, Math.min(100, Number(value) || 0));
 const literalPercentage = (value: unknown): number | null => {
+  if (value == null || String(value).trim() === '') return null;
   const number = typeof value === 'number' ? value : Number(String(value ?? '').trim().replace(/%$/, ''));
   return Number.isFinite(number) && number >= 0 && number <= 100 ? number : null;
 };
@@ -112,7 +113,7 @@ export const resolveCompletedKeyActions = (template: any, workflowInstance?: any
   }
   for (const step of instanceSteps) {
     const key = String(step?.stepKey || '').trim();
-    if (!key || knownKeys.has(key) || !isWorkflowStepComplete(step)) continue;
+    if (!key || deletedKeys.has(key) || knownKeys.has(key) || !isWorkflowStepComplete(step)) continue;
     result.push({ key, title: String(step?.title || key), percentage: clampPercent(literalPercentage(step?.percentage)), completedAt: step?.completedAt, source: 'workflow' });
   }
   return result;

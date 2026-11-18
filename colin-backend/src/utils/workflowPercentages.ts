@@ -331,7 +331,7 @@ export const computeCompletedPercentFromInstance = (instanceSteps: any[]): numbe
 /**
  * Productive-earned-fee formula (mirrors Firm Reports → Productivity):
  *   taskFeeCollected × (TPA / 100) × (Timeliness / 100) × (Quality / 100)
- * Returns null when any multiplier is missing (no data) or zero.
+ * Missing scores remain pending; a recorded zero score earns zero.
  */
 export const computeEarnedFee = (
   taskFeeCollected: number,
@@ -339,6 +339,7 @@ export const computeEarnedFee = (
   timelinessScore: number | null | undefined,
   qualityScore: number | null | undefined
 ): number | null => {
+  if (timelinessScore == null || qualityScore == null) return null;
   const tpa = Number(tpaPercent);
   const timeliness = Number(timelinessScore);
   const quality = Number(qualityScore);
@@ -347,9 +348,9 @@ export const computeEarnedFee = (
     !Number.isFinite(tpa) ||
     tpa <= 0 ||
     !Number.isFinite(timeliness) ||
-    timeliness <= 0 ||
+    timeliness < 0 ||
     !Number.isFinite(quality) ||
-    quality <= 0
+    quality < 0
   ) {
     return null;
   }

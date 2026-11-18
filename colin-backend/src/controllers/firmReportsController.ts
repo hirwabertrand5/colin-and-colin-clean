@@ -12,9 +12,9 @@ import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
 import { computeRange, normalizeReportBasis, resolveOptionalReportRange, isWithinReportRange } from '../utils/reportRange';
-import { computeEarnedFee, buildRoleByName, resolveMemberTpa } from '../utils/workflowPercentages';
+import { computeEarnedFee, buildRoleByName } from '../utils/workflowPercentages';
 import { caseMatchesAssigneeCanonical, identityMatches } from '../utils/caseAssignments';
-import { paidInvoiceRangeQuery } from '../utils/invoicePaymentDate';
+import { paidInvoiceRangeQuery, invoicePaymentDate } from '../utils/invoicePaymentDate';
 import { isActiveMatter, isCompletedMatter } from '../utils/matterLifecycle';
 import { loadStaffProfitabilityInputs } from '../services/staffProfitabilityInputs';
 import {
@@ -22,6 +22,7 @@ import {
   calculateCollectedKeyActionEarnings,
 } from '../utils/keyActionEarnings';
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
+import { buildProductivityReconciliation } from '../utils/productivityReport';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
@@ -192,13 +193,11 @@ const countCompletedWholeCases = (rows: any[]) => {
  * receives its own TPA calculation.  The Key Action base is always capped by
  * invoices that are actually Paid, so a billed/outstanding matter earns zero.
  *
- * The member's Earned Fee, Timeliness and Quality come from
- * computeCaseEarnedFees — the single engine behind the Case Workspace, Case
- * Management and the staff dashboards — so the firm-wide tables, People &
- * Capacity, Billing & Finance and Reports & Analytics all show exactly the same
- * figure a member sees on their own dashboard.
+ * Rates, scores and all-time fees use the shared Case Workspace engine.
+ * Rows are selected by completion date and valued using current collections
+ * and scores. Payment-period dashboard fees are calculated separately.
  */
-const buildCollectedKeyActionRows = ({
+export const buildCollectedKeyActionRows = ({
   matters,
   templatesById,
   instancesByCaseId,
@@ -215,31 +214,25 @@ const buildCollectedKeyActionRows = ({
 
   for (const matter of matters || []) {
     const caseId = String(matter?._id || '');
-    const template = templatesById.get(String(matter?.workflowTemplateId || ''));
     const caseTasks = tasksByCaseId.get(caseId) || [];
     const instance = instancesByCaseId.get(caseId);
+    const template = templatesById.get(String(instance?.templateId || matter?.workflowTemplateId || ''));
     // Legacy instances store no step percentages; normalise them from the
     // template first so both engines see the same effective workflow.
     const effectiveSteps = normalizeEffectiveWorkflowSteps(instance, template);
-    // COMPLETION-DATE FIRST: the row's Collected Key Action Base is the TRUE
-    // HISTORICAL base for this matter (all-time Paid collections, never gated
-    // by the selected period), so an action completed inside the window keeps
-    // its RWF 28,481.82 base under Yesterday, Last 7 Days, or any other
-    // period. Period scoping applies ONLY to row visibility (completion date
-    // inside the window, below) — never to the base value itself.
+    // Completion periods restrict row visibility, not the collections that
+    // fund the action. These are current all-time values, not event snapshots.
     const historicalCollected = historicalCollectedByCaseId?.get(caseId);
     const collectedAmount = historicalCollected != null ? historicalCollected : paidInvoicesByCaseId.get(caseId) || 0;
     const earnings = calculateCollectedKeyActionEarnings({
       matter,
       template,
-      workflowInstance: instance,
+      workflowInstance: { ...(instance || {}), steps: effectiveSteps },
       tasks: caseTasks,
       collectedAmount,
     });
 
-    // The dashboard engine: one authoritative earned fee per assigned member,
-    // computed from the same HISTORICAL collected base, TPA table, timeliness
-    // and quality — so the row's earned fee is its true historical value.
+    // Resolve all-time member earnings with the same engine as the dashboard.
     const matterFees = computeCaseEarnedFees({
       caseDoc: matter,
       template,
@@ -255,10 +248,7 @@ const buildCollectedKeyActionRows = ({
     // assignee.
     const team = matterFees.team;
 
-    // COMPLETION-DATE FIRST — the core user requirement. Every completed Key
-    // Action whose completion date lands inside the selected window MUST be
-    // visible, with its TRUE HISTORICAL base and earned values intact. Never
-    // drop a row or zero its base because of a payment-date window.
+    // Keep completed work visible even when it has no financial allocation.
     const completedActions = earnings.completedActions;
     const inSelectedWindow = (date: Date | null | undefined) => {
       if (!fromDate || !toDate) return true;
@@ -280,11 +270,11 @@ const buildCollectedKeyActionRows = ({
         ? template.stages.find((stage: any) => String(stage?.key || '') === stageKey)
         : null;
       return { action, completedAt, templateStep, instanceStep, workflowStage, value: actionValueByKey.get(action.key) || 0 };
-    }).filter((item: any) => inSelectedWindow(item.completedAt));
+    });
 
     for (const member of team) {
       const memberKey = baseNameFromLabel(member.name);
-      if (selectedMember && memberKey !== selectedMember) continue;
+      if (selectedMember && !identityMatches(memberKey, selectedMember)) continue;
 
       // Timeliness, Quality and TPA are the member's own figures from the shared
       // engine, so this row reads exactly like the member's dashboard row.
@@ -298,13 +288,45 @@ const buildCollectedKeyActionRows = ({
       // completion. This is the report-side counterpart to the Case Workspace
       // handover timeline.
       const ownedActions = actionMeta.filter((item: any) => (member.keyActionKeys || []).includes(item.action.key));
-      const actionValueTotal = Number(member.taskFeeCollected) || 0;
-
-      for (const item of ownedActions) {
+      const actionFees = ownedActions.map((item: any) => memberEarned == null ? null : computeEarnedFee(
+        item.value, member.actionTpaRates?.[item.action.key] ?? tpaPercent, timelinessScore, qualityScore));
+      // Allocate rounding cents across the complete history before filtering.
+      // Every period remains additive and All Time matches the shared engine.
+      if (memberEarned != null && actionFees.length) {
+        let cents = Math.round((memberEarned - actionFees.reduce((sum: number, fee: number | null) => sum + (fee || 0), 0)) * 100);
+        for (let index = actionFees.length - 1; index >= 0 && cents !== 0; index--) {
+          const fee = actionFees[index];
+          const item = ownedActions[index];
+          if (fee == null || !item || item.value <= 0) continue;
+          const adjustment = cents > 0 ? cents : -Math.min(Math.round(fee * 100), -cents);
+          actionFees[index] = roundMoney(fee + adjustment / 100);
+          cents -= adjustment;
+        }
+      }
+      for (const [actionIndex, item] of ownedActions.entries()) {
+        if (!inSelectedWindow(item.completedAt)) continue;
         const tpaPercent = member.actionTpaRates?.[item.action.key] ?? (Number(member.tpaPercent) || 0);
         const taskFeeCollected = item.value;
-        const share = actionValueTotal > 0 ? taskFeeCollected / actionValueTotal : 0;
-        const feeEarned = memberEarned == null ? null : computeEarnedFee(taskFeeCollected, tpaPercent, timelinessScore, qualityScore);
+        const feeEarned = actionFees[actionIndex];
+        const progress = earnings.keyActions.find((action: any) => action.key === item.action.key);
+        const allocationStatus = earnings.contractValue <= 0 ? 'Contract value is zero or missing'
+          : progress?.percentage == null ? 'Missing Key Action percentage'
+          : item.action.percentage === 0 ? 'Key Action allocated 0%'
+          : earnings.collectedAmount <= 0 ? 'No Paid invoices linked to matter'
+          : taskFeeCollected === 0 ? 'Allocation below currency precision' : 'Allocated';
+        const sourceReference = String(matter?.caseNo || '').trim();
+        const matterReference = /^n\/a$/i.test(sourceReference) ? '' : sourceReference;
+        const caseCompletedAt = effectiveSteps.map((step: any) => parseTaskDate(step.completedAt))
+          .filter((date: Date | null): date is Date => Boolean(date))
+          .sort((a: Date, b: Date) => b.getTime() - a.getTime())[0] || null;
+        const issues = [
+          ...(allocationStatus === 'Allocated' ? [] : [allocationStatus]),
+          ...(qualityScore == null ? ['Quality score pending'] : []),
+          ...(timelinessScore == null ? ['Timeliness score pending'] : []),
+          ...(tpaPercent <= 0 ? ['TPA rate missing'] : []),
+          ...(!matterReference ? ['Matter reference missing'] : []),
+          ...(!item.completedAt ? ['Completion date missing'] : []),
+        ];
         const fmtPct = (num: number | null) => (num == null ? '_' : `${num}%`);
         const formula = `${roundMoney(taskFeeCollected)} x ${tpaPercent}% x ${fmtPct(timelinessScore)} x ${fmtPct(qualityScore)} = ${feeEarned == null ? '_' : roundMoney(feeEarned)}`;
         const timelinessStatus =
@@ -319,6 +341,8 @@ const buildCollectedKeyActionRows = ({
         rows.push({
           id: `${caseId}:${item.action.key}:${member.key}`,
           caseId,
+          keyActionKey: item.action.key,
+          caseCompletedAt: caseCompletedAt?.toISOString() || null,
           caseCompleted: isWholeCaseCompleted(instance) && inSelectedWindow(
             effectiveSteps.map((step: any) => parseTaskDate(step.completedAt || step.reviewedAt || step.doneAt))
               .filter((date: Date | null): date is Date => Boolean(date))
@@ -327,7 +351,14 @@ const buildCollectedKeyActionRows = ({
           staff: member.name,
           assignmentRole: member.role,
           role,
-          matter: String(matter?.caseNo || matter?.parties || matter?.matterType || matter?.workflow || 'N/A'),
+          matter: matterReference || `Unreferenced matter (${caseId})`,
+          matterReference: matterReference || null,
+          matterParties: String(matter?.parties || ''),
+          allocationStatus,
+          issues,
+          qualitySource: matterFees.qualityScore != null ? 'Case Management quality review' : qualityScore != null ? 'Completed task quality scores' : 'Awaiting quality review',
+          contractValue: earnings.contractValue,
+          progressValue: progress?.progressValue || 0,
           task: item.action.title,
           taskFeeCollected,
           taskFee: taskFeeCollected,
@@ -467,7 +498,17 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     }
 
     const linkedIds = selectedMemberNameNormalized ? linkedCaseIdsByName.get(selectedMemberNameNormalized) || new Set<string>() : null;
-    const financialMatters = linkedIds ? allCases.filter(matter => linkedIds.has(String(matter._id))) : allCases;
+    if (linkedIds && selectedMemberName) {
+      const escaped = selectedMemberName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const contributorIds = await WorkflowInstance.distinct('caseId', {
+        'steps.independentContributors.name': new RegExp(`^${escaped}(\\s.+)?$`, 'i'),
+      });
+      contributorIds.forEach(id => linkedIds.add(String(id)));
+    }
+    const financialMatters = linkedIds ? allCases.filter(matter => linkedIds.has(String(matter._id))
+      || caseMatchesAssigneeCanonical(matter, selectedMemberName)
+      || (matter.assignmentHandoverHistory || []).some((entry: any) =>
+        [entry.previousAssignee, entry.nextAssignee].some(name => identityMatches(name, selectedMemberName)))) : allCases;
     const selectedMatters = financialMatters as any[];
     const selectedMatterIds = new Set(selectedMatters.map((matter) => String(matter._id)));
     const workflowTemplateById = new Map(
@@ -579,20 +620,16 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const delayedByName = new Map<string, number>();
     const riskByName = new Map<string, number>();
     const usedPercentByName = new Map<string, number[]>();
-    // Staff earnings always use the PAYMENT DATE basis (Paid invoices whose
-    // payment landed inside the period). That is exactly what the staff
-    // dashboards use, so a member's Fees Earned here equals the Fees Earned on
-    // their dashboard for the same period.
+    // Period payments fund the dashboard comparison. Completion-based report
+    // rows use the all-time collections map below.
     const paidInvoicesByCaseId = new Map<string, number>();
     for (const inv of invoicesByPaymentDate as any[]) {
       const caseId = String(inv.caseId || '');
       if (!caseId) continue;
       paidInvoicesByCaseId.set(caseId, (paidInvoicesByCaseId.get(caseId) || 0) + (Number(inv.amount) || 0));
     }
-    // COMPLETION-DATE FIRST base sourcing: TRUE HISTORICAL Paid collections
-    // per matter (all-time, never windowed), tied to the matter ID at the
-    // time each action completed. In-window rows keep their real base
-    // (RWF 28,481.82) under every period instead of falling back to 0.
+    // Current all-time Paid collections, joined by matter ID. The database
+    // does not contain a snapshot of the collected base at action completion.
     const historicalCollectedByCaseId = new Map<string, number>();
     for (const matter of selectedMatters as any[]) {
       historicalCollectedByCaseId.set(String(matter._id), 0);
@@ -607,12 +644,18 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const selectedMatterIdsForEarnings = selectedMatters.map((matter: any) => matter._id);
     const workflowInstances = staffInputs ? staffInputs[4] : selectedMatterIdsForEarnings.length
       ? await WorkflowInstance.find({ caseId: { $in: selectedMatterIdsForEarnings } })
-        .select('caseId templateId steps')
+        .select('caseId templateId status deletedStepKeys steps')
         .lean()
       : [];
     const instancesByCaseId = new Map(
       (workflowInstances as any[]).map((instance) => [String(instance.caseId || ''), instance])
     );
+    const missingTemplateIds = [...new Set((workflowInstances as any[]).map(instance => String(instance.templateId || ''))
+      .filter(id => id && !workflowTemplateById.has(id)))];
+    if (missingTemplateIds.length) {
+      const missingTemplates = await WorkflowTemplate.find({ _id: { $in: missingTemplateIds } }).select('_id stages steps').lean();
+      missingTemplates.forEach(template => workflowTemplateById.set(String(template._id), template));
+    }
     const tasksByCaseId = new Map<string, any[]>();
     for (const task of allTaskLinks as any[]) {
       const caseId = String(task?.caseId || '');
@@ -624,7 +667,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       return (instancesByCaseId.get(caseId)?.steps || []).some((step: any) => isWithinReportRange(step.completedAt, period))
         || (tasksByCaseId.get(caseId) || []).some((task: any) => isWithinReportRange(task.completedAt || task.updatedAt, period));
     }) : selectedMatters;
-    const productivityRows = buildCollectedKeyActionRows({
+    const allProductivityRows = buildCollectedKeyActionRows({
       matters: earningsMatters,
       templatesById: workflowTemplateById,
       instancesByCaseId,
@@ -632,10 +675,16 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       paidInvoicesByCaseId,
       historicalCollectedByCaseId,
       roleByName,
-      fromDate,
-      toDate,
+      fromDate: profitabilityScope ? fromDate : null,
+      toDate: profitabilityScope ? toDate : null,
       selectedMemberName,
     });
+    const productivityReport = profitabilityScope ? null : buildProductivityReconciliation({
+      matters: earningsMatters, templatesById: workflowTemplateById, instancesByCaseId, tasksByCaseId,
+      paidInvoicesByCaseId, historicalCollectedByCaseId, roleByName, selectedMemberName,
+      period, allRows: allProductivityRows,
+    });
+    const productivityRows = productivityReport?.rows || allProductivityRows;
     const earnedByName = new Map<string, number>();
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
@@ -803,25 +852,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       revenueBilled: Math.round((revenueByType.get(row.type) || 0) * 100) / 100,
     })).sort((a, b) => a.type.localeCompare(b.type));
 
-    const productivitySummary = {
-      completedTasks: countCompletedWholeCases(productivityRows),
-      totalTaskFeeCollected: Math.round(productivityRows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0) * 100) / 100,
-      totalTaskFee: Math.round(productivityRows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0) * 100) / 100,
-      totalFeeEarned: Math.round(
-        productivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0) * 100
-      ) / 100,
-      pendingQualityScores: productivityRows.filter((row) => row.qualityScore == null).length,
-      averageQualityScore: (() => {
-        const scored = productivityRows.filter((row) => row.qualityScore != null);
-        if (!scored.length) return null;
-        return Math.round((scored.reduce((sum, row) => sum + (row.qualityScore || 0), 0) / scored.length) * 10) / 10;
-      })(),
-      averageTimelinessScore: (() => {
-        const scored = productivityRows.filter((row) => row.timelinessScore != null);
-        if (!scored.length) return null;
-        return Math.round((scored.reduce((sum, row) => sum + (row.timelinessScore || 0), 0) / scored.length) * 10) / 10;
-      })(),
-    };
+    const productivitySummary = productivityReport?.summary;
 
     const monthsMap = new Map<string, { month: string; billed: number; collected: number }>();
     for (const inv of invoicesByInvoiceDate as any[]) {
@@ -1182,6 +1213,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       ageingReport,
       team,
       productivitySummary,
+      productivityReconciliation: productivityReport?.reconciliation,
       productivityRows,
       caseTypes,
       clientProfitability,
@@ -1195,45 +1227,39 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
 export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Response) => {
   try {
-    const { range, from, to, basis } = req.query as any;
-    const dateBasis = normalizeBasis(basis);
-    let fromDate: Date;
-    let toDate: Date;
-
-    if (from && to) {
-      fromDate = new Date(String(from));
-      toDate = new Date(String(to));
-      if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
-        return res.status(400).json({ message: 'Invalid from/to date.' });
-      }
-      fromDate.setHours(0, 0, 0, 0);
-      toDate.setHours(23, 59, 59, 999);
-    } else {
-      ({ from: fromDate, to: toDate } = computeRange(range));
-    }
-
-    const fromISO = iso(fromDate);
-    const toISO = iso(toDate);
+    const { range, from, to } = req.query as any;
+    const dateBasis = 'taskDate';
+    const period = resolveOptionalReportRange({ range: range || (from || to ? 'custom' : 'monthly'), from, to });
+    if (period && 'error' in period) return res.status(400).json({ message: period.error });
+    const fromISO = period?.fromISO || '0001-01-01';
+    const toISO = period?.toISO || '9999-12-31';
     const staffName = String(req.user?.name || '').trim();
     if (!staffName) return res.status(401).json({ message: 'Unauthorized.' });
 
     const user = await User.findById(req.user?.id).select('name role tpaHistory').lean();
     const role = String(user?.role || req.user?.role || '').trim();
-    const normalizedName = normalizeName(user?.name || staffName);
     const displayName = String(user?.name || staffName).trim();
-    const tpaPercent = resolveMemberTpa(user?.name || '', buildRoleByName(user ? [user] : [])).tpaPercent;
+    const escapeName = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const identities = [new RegExp(`^${escapeName(displayName)}(\\s.+)?$`, 'i')];
+    if (req.user?.email) identities.push(new RegExp(`^${escapeName(req.user.email)}$`, 'i'));
+    const independentIds = await WorkflowInstance.distinct('caseId', {
+      $or: identities.map(identity => ({ 'steps.independentContributors.name': identity })),
+    });
 
     // Personal productivity uses the same Case Workspace/Firm Reports engine:
     // all three case assignments are eligible, but only this logged-in member's
     // role row is returned.
     const memberMatters = await Case.find({
       $or: [
-        { assignedTo: displayName },
-        { 'caseAssignments.initiator': displayName },
-        { 'caseAssignments.reviewer': displayName },
-        { 'caseAssignments.signerApprover': displayName },
-        { 'assignmentHandoverHistory.previousAssignee': displayName },
-        { 'assignmentHandoverHistory.nextAssignee': displayName },
+        ...identities.flatMap(identity => [
+          { assignedTo: identity },
+          { 'caseAssignments.initiator': identity },
+          { 'caseAssignments.reviewer': identity },
+          { 'caseAssignments.signerApprover': identity },
+          { 'assignmentHandoverHistory.previousAssignee': identity },
+          { 'assignmentHandoverHistory.nextAssignee': identity },
+        ]),
+        { _id: { $in: independentIds } },
       ],
     })
       .select('_id status assignedTo caseAssignments assignmentHandoverHistory caseNo parties budget workflowProgress billingSettings caseManagement matterType workflow workflowTemplateId legalServicePath caseType caseTypeLabel')
@@ -1241,19 +1267,18 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
     const memberMatterIds = (memberMatters as any[]).map((matter) => matter._id);
     const [memberWorkflowInstances, memberTasks, paidMemberInvoices] = await Promise.all([
       memberMatterIds.length
-        ? WorkflowInstance.find({ caseId: { $in: memberMatterIds } }).select('caseId templateId steps').lean()
+        ? WorkflowInstance.find({ caseId: { $in: memberMatterIds } }).select('caseId templateId status deletedStepKeys steps').lean()
         : [],
       memberMatterIds.length
         ? Task.find({ caseId: { $in: memberMatterIds } })
           .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages tpaSnapshots')
           .lean()
         : [],
-      // Payment-date basis, matching the staff dashboard summary exactly.
-      Invoice.find({ status: 'Paid', updatedAt: { $gte: fromDate, $lte: toDate } }).select('caseId amount').lean(),
+      Invoice.find({ status: 'Paid', caseId: { $in: memberMatterIds } }).select('caseId amount paidAt updatedAt').lean(),
     ]);
     const memberTemplates = memberMatterIds.length
       ? await WorkflowTemplate.find({ _id: { $in: Array.from(new Set((memberMatters as any[])
-        .map((matter) => String(matter.workflowTemplateId || '')).filter(Boolean))) } }).select('_id stages steps').lean()
+        .map((matter) => String(matter.workflowTemplateId || '')).concat((memberWorkflowInstances as any[]).map(instance => String(instance.templateId || ''))).filter(Boolean))) } }).select('_id stages steps').lean()
       : [];
     const memberTasksByCaseId = new Map<string, any[]>();
     for (const task of memberTasks as any[]) {
@@ -1262,41 +1287,37 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
     }
     const memberPaidInvoicesByCaseId = new Map<string, number>();
     for (const invoice of paidMemberInvoices as any[]) {
+      if (!isWithinReportRange(invoicePaymentDate(invoice), period)) continue;
       const caseId = String(invoice?.caseId || '');
       if (caseId) memberPaidInvoicesByCaseId.set(caseId, (memberPaidInvoicesByCaseId.get(caseId) || 0) + (Number(invoice.amount) || 0));
     }
-    // COMPLETION-DATE FIRST: historical (all-time) Paid collections per
-    // matter, so in-window completions keep their true base values.
+    // All-time collections value the completed work independently of the
+    // payment window used for the dashboard comparison.
     const memberHistoricalCollectedByCaseId = new Map<string, number>();
     for (const matter of memberMatters as any[]) {
       memberHistoricalCollectedByCaseId.set(String(matter._id), 0);
     }
-    if (memberMatterIds.length) {
-      const memberHistoricalPaidTotals = await Invoice.aggregate([
-        { $match: { status: 'Paid', caseId: { $in: memberMatterIds } } },
-        { $group: { _id: '$caseId', total: { $sum: '$amount' } } },
-      ]);
-      for (const row of memberHistoricalPaidTotals as any[]) {
-        memberHistoricalCollectedByCaseId.set(String(row._id), Number(row.total) || 0);
-      }
+    for (const invoice of paidMemberInvoices as any[]) {
+      const key = String(invoice.caseId);
+      memberHistoricalCollectedByCaseId.set(key, (memberHistoricalCollectedByCaseId.get(key) || 0) + Math.max(0, Number(invoice.amount) || 0));
     }
-    const rows = buildCollectedKeyActionRows({
+    const roleByName = buildRoleByName(await User.find({}).select('name role tpaHistory').lean());
+    const reportInputs = {
       matters: memberMatters,
       templatesById: new Map((memberTemplates as any[]).map((template) => [String(template._id), template])),
       instancesByCaseId: new Map((memberWorkflowInstances as any[]).map((instance) => [String(instance.caseId), instance])),
       tasksByCaseId: memberTasksByCaseId,
       paidInvoicesByCaseId: memberPaidInvoicesByCaseId,
       historicalCollectedByCaseId: memberHistoricalCollectedByCaseId,
-      roleByName: buildRoleByName([user]),
-      fromDate,
-      toDate,
+      roleByName,
       selectedMemberName: displayName,
-    });
+    };
+    const allRows = buildCollectedKeyActionRows(reportInputs);
+    const report = buildProductivityReconciliation({ ...reportInputs, period, allRows });
+    const rows = report.rows;
 
-    const totalTaskFeeCollected = roundMoney(rows.reduce((sum, row) => sum + (row.taskFeeCollected || row.taskFee || 0), 0));
+    const totalTaskFeeCollected = report.summary.totalTaskFeeCollected;
     const totalFeeEarned = roundMoney(rows.reduce((sum, row) => sum + (row.feeEarned || 0), 0));
-    const qualityRows = rows.filter((row) => row.qualityScore != null);
-    const timelinessRows = rows.filter((row) => row.timelinessScore != null);
     const roleShare = roleEarningShare(role);
     const overdueTasks = await Task.countDocuments({ assignee: displayName, status: { $ne: 'Completed' } });
 
@@ -1311,22 +1332,11 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         revenueGenerated: totalTaskFeeCollected,
         paymentsReceived: totalTaskFeeCollected,
         outstandingBalance: 0,
-        feesEarned: totalFeeEarned,
+        feesEarned: report.summary.totalFeeEarned,
         qualityReviewStatus: 'Uses the case Quality Score entered through Case Management (Reviewer / Signer-Approver); missing scores render "_" until entered.',
       },
-      productivitySummary: {
-        completedTasks: countCompletedWholeCases(rows),
-        totalTaskFeeCollected,
-        totalTaskFee: totalTaskFeeCollected,
-        totalFeeEarned,
-        pendingQualityScores: rows.filter((row) => row.qualityScore == null).length,
-        averageQualityScore: qualityRows.length
-          ? Math.round((qualityRows.reduce((sum, row) => sum + (row.qualityScore || 0), 0) / qualityRows.length) * 10) / 10
-          : null,
-        averageTimelinessScore: timelinessRows.length
-          ? Math.round((timelinessRows.reduce((sum, row) => sum + (row.timelinessScore || 0), 0) / timelinessRows.length) * 10) / 10
-          : null,
-      },
+      productivityReconciliation: report.reconciliation,
+      productivitySummary: report.summary,
       productivityRows: rows,
       team: [
         {
