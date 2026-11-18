@@ -7,8 +7,8 @@ import Invoice from '../src/models/invoiceModel';
 import User from '../src/models/userModel';
 import WorkflowInstance from '../src/models/workflowInstanceModel';
 import { getStaffDashboardSummary } from '../src/controllers/dashboardController';
-import { buildCollectedKeyActionRows, getFirmReports, getMyProductivityEarningsReport } from '../src/controllers/firmReportsController';
-import { buildProductivityReconciliation, summarizeProductivity } from '../src/utils/productivityReport';
+import { buildCollectedKeyActionRows, buildProductivityReport, getFirmReports, getMyProductivityEarningsReport } from '../src/controllers/firmReportsController';
+import { summarizeProductivity } from '../src/utils/productivityReport';
 import { buildRoleByName, computeEarnedFee } from '../src/utils/workflowPercentages';
 import { getMatterQualityScore } from '../src/utils/caseEarnedFees';
 import { invoicePaymentDate } from '../src/utils/invoicePaymentDate';
@@ -61,8 +61,7 @@ async function main() {
     paidInvoicesByCaseId: collected(paid.filter(invoice => isWithinReportRange(invoicePaymentDate(invoice), period))),
     roleByName: buildRoleByName([user]), selectedMemberName: 'Ada',
   };
-  const allRows = buildCollectedKeyActionRows(inputs);
-  const report = buildProductivityReconciliation({ ...inputs, period, allRows });
+  const report = buildProductivityReport(inputs, period);
   assert.equal(report.summary.completedTasks, 1, 'One whole matter; multiple completed Key Actions');
   assert(report.summary.keyActionsCompleted > report.summary.completedTasks);
   assert.equal(report.rows.filter(row => row.matter === 'IN-WINDOW').length, 2, 'Both inclusive Kigali boundaries retained');
@@ -122,7 +121,14 @@ async function main() {
   assert.equal(report.reconciliation.selectedPeriod.keyActionsChecked, dashboard.period.keyActionsChecked);
   assert.equal(report.reconciliation.selectedPeriod.sectionsCompleted, dashboard.period.sectionsCompleted);
   assert.equal(report.reconciliation.allTime.feesEarned, dashboard.feesEarnedTotal);
-  assert.notEqual(report.summary.totalFeeEarned, dashboard.period.feesEarned, 'Completion and payment bases intentionally differ');
+  assert.equal(report.summary.totalFeeEarned, dashboard.period.feesEarned, 'Headline report earnings must match the dashboard');
+  assert.notEqual(report.summary.completedWorkFeeValue, dashboard.period.feesEarned, 'Completed-work valuation is a separate measure');
+  assert.equal(summarizeProductivity(report.earningsRows).totalFeeEarned, dashboard.period.feesEarned, 'Earnings detail adds up to the dashboard amount');
+  assert(report.earningsRows.some((row: any) => row.matter === 'EARLIER-WORK'), 'Include earlier completions funded by payments in the period');
+  assert(!report.earningsRows.some((row: any) => row.matter === 'IN-WINDOW'), 'Exclude payment bases outside the period even when the action completed inside it');
+  const allTimeReport = buildProductivityReport(inputs, null);
+  assert.equal(allTimeReport.summary.totalFeeEarned, dashboard.feesEarnedTotal, 'All-time headline reconciles too');
+  assert.equal(summarizeProductivity(allTimeReport.earningsRows).totalFeeEarned, dashboard.feesEarnedTotal);
   (User as any).findById = () => chain(user);
   (Case as any).find = (filter: any) => {
     if (filter?.$or) {
@@ -141,6 +147,8 @@ async function main() {
   const personal = await invoke(getMyProductivityEarningsReport, { range: 'custom', from: '2026-10-17', to: '2026-11-17' });
   assert.deepEqual(personal.productivitySummary, report.summary);
   assert.deepEqual(personal.productivityReconciliation, report.reconciliation);
+  assert.deepEqual(personal.productivityEarningsRows, report.earningsRows);
+  assert.equal(personal.selectedMember.feesEarned, dashboard.period.feesEarned);
   const Expense = (await import('../src/models/pettyCashExpenseModel')).default;
   const Prospect = (await import('../src/models/prospectModel')).default;
   const ClientReport = (await import('../src/models/clientReportModel')).default;
@@ -159,6 +167,8 @@ async function main() {
   assert.equal(managementStatus, 200, JSON.stringify(management));
   assert.deepEqual(management.productivitySummary, personal.productivitySummary, 'Management and personal summaries reconcile');
   assert.deepEqual(management.productivityReconciliation, personal.productivityReconciliation, 'Management and personal dashboard comparisons reconcile');
+  assert.deepEqual(management.productivityEarningsRows, personal.productivityEarningsRows);
+  assert.equal(management.selectedMember.feesEarned, dashboard.period.feesEarned);
   console.log('PASS: completed-work counts, allocation reasons, missing references/scores, zero scores, Kigali boundaries, deleted/undated actions, role deduplication, real dashboard reconciliation and personal API.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

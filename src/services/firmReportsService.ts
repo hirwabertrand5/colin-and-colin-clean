@@ -48,6 +48,9 @@ export type FirmReportResponse = {
     totalTaskFeeCollected?: number;
     totalTaskFee: number;
     totalFeeEarned: number | null;
+    completedWorkFeeValue?: number | null;
+    completedWorkCollectedBase?: number;
+    completedWorkPendingFeeRecords?: number;
     keyActionsCompleted?: number;
     contributionRecords?: number;
     pendingFeeRecords?: number;
@@ -92,6 +95,8 @@ export type FirmReportResponse = {
     taskProgressPercent: number;
     timelinessStatus: string;
   }>;
+  productivityEarningsRows?: FirmReportResponse['productivityRows'];
+  productivityEarningsSummary?: FirmReportResponse['productivitySummary'];
   productivityReconciliation?: {
     timeZone: string;
     activityBasis: string;
@@ -115,10 +120,10 @@ export type FirmReportResponse = {
     prospectsCreated?: number;
     reportsGenerated?: number;
     invoicePaymentsReceived?: number;
-    earnedFees?: number;
+    earnedFees?: number | null;
     grossFeesHandled?: number;
     firmRetainedEarnings?: number;
-    revenueAttributed?: number;
+    revenueAttributed?: number | null;
     contributionMargin?: number;
     contributionRatio?: number;
     earlyTasks?: number;
@@ -200,7 +205,7 @@ export const getFirmReports = async (params?: { range?: FirmReportRange | 'all';
 
 export type MyProductivityEarningsResponse = Pick<
   FirmReportResponse,
-  'range' | 'dateBasis' | 'selectedMember' | 'productivitySummary' | 'productivityRows' | 'productivityReconciliation' | 'team'
+  'range' | 'dateBasis' | 'selectedMember' | 'productivitySummary' | 'productivityRows' | 'productivityReconciliation' | 'productivityEarningsRows' | 'productivityEarningsSummary' | 'team'
 >;
 
 export const getMyProductivityEarningsReport = async (params?: {

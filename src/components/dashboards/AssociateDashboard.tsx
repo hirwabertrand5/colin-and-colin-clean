@@ -267,7 +267,7 @@ const safeNum = (value: unknown) => {
 const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
 const formatRwf = (value: number) => `RWF ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const formatFees = (value: number) => `RWF ${Math.round(Number.isFinite(value) ? value : 0).toLocaleString('en-US')}`;
+const formatFees = (value: number) => `RWF ${(Number.isFinite(value) ? value : 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const getMatterContractValue = (matter: CaseData) => {
   const planned = safeNum(matter.workflowProgress?.plannedValue?.amount);

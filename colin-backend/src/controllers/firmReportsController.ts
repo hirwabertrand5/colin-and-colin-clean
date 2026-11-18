@@ -11,7 +11,7 @@ import ClientReport from '../models/clientReportModel';
 import Prospect from '../models/prospectModel';
 import WorkflowTemplate from '../models/workflowTemplateModel';
 import WorkflowInstance from '../models/workflowInstanceModel';
-import { computeRange, normalizeReportBasis, resolveOptionalReportRange, isWithinReportRange } from '../utils/reportRange';
+import { computeRange, normalizeReportBasis, resolveOptionalReportRange, isWithinReportRange, ResolvedReportRange } from '../utils/reportRange';
 import { computeEarnedFee, buildRoleByName } from '../utils/workflowPercentages';
 import { caseMatchesAssigneeCanonical, identityMatches } from '../utils/caseAssignments';
 import { paidInvoiceRangeQuery, invoicePaymentDate } from '../utils/invoicePaymentDate';
@@ -208,6 +208,7 @@ export const buildCollectedKeyActionRows = ({
   fromDate,
   toDate,
   selectedMemberName,
+  caseFeesById,
 }: any) => {
   const rows: any[] = [];
   const selectedMember = selectedMemberName ? baseNameFromLabel(selectedMemberName) : '';
@@ -241,6 +242,7 @@ export const buildCollectedKeyActionRows = ({
       collectedAmount,
       roleByName,
     });
+    caseFeesById?.set(caseId, matterFees);
     const actionValueByKey = allocateCollectedValueAcrossKeyActions(earnings);
     // `team` includes former owners where a handover occurred. The shared
     // engine gives each person only the Key Actions completed during their
@@ -383,6 +385,22 @@ export const buildCollectedKeyActionRows = ({
   }
 
   return rows.sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
+};
+
+/** Primary earnings and their detail use the same payment scope as the dashboard. */
+export const buildProductivityReport = (inputs: any, period: ResolvedReportRange | null) => {
+  const historicalFeesByCaseId = new Map();
+  const periodFeesByCaseId = new Map();
+  const allRows = buildCollectedKeyActionRows({ ...inputs, fromDate: null, toDate: null, caseFeesById: historicalFeesByCaseId });
+  const paymentRows = period ? buildCollectedKeyActionRows({
+    ...inputs, fromDate: null, toDate: null,
+    historicalCollectedByCaseId: inputs.paidInvoicesByCaseId,
+    caseFeesById: periodFeesByCaseId,
+  }) : allRows;
+  return buildProductivityReconciliation({ ...inputs, period, allRows,
+    earningRows: paymentRows.filter((row: any) => !period || row.collectedAmount > 0),
+    historicalFeesByCaseId, periodFeesByCaseId,
+  });
 };
 
 const getPerformanceZone = (task: any): { zone: PerformanceZone; usedPercent: number } | null => {
@@ -667,7 +685,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       return (instancesByCaseId.get(caseId)?.steps || []).some((step: any) => isWithinReportRange(step.completedAt, period))
         || (tasksByCaseId.get(caseId) || []).some((task: any) => isWithinReportRange(task.completedAt || task.updatedAt, period));
     }) : selectedMatters;
-    const allProductivityRows = buildCollectedKeyActionRows({
+    const productivityInputs = {
       matters: earningsMatters,
       templatesById: workflowTemplateById,
       instancesByCaseId,
@@ -678,13 +696,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       fromDate: profitabilityScope ? fromDate : null,
       toDate: profitabilityScope ? toDate : null,
       selectedMemberName,
-    });
-    const productivityReport = profitabilityScope ? null : buildProductivityReconciliation({
-      matters: earningsMatters, templatesById: workflowTemplateById, instancesByCaseId, tasksByCaseId,
-      paidInvoicesByCaseId, historicalCollectedByCaseId, roleByName, selectedMemberName,
-      period, allRows: allProductivityRows,
-    });
-    const productivityRows = productivityReport?.rows || allProductivityRows;
+    };
+    const productivityReport = profitabilityScope ? null : buildProductivityReport(productivityInputs, period);
+    const productivityRows = productivityReport?.rows || buildCollectedKeyActionRows(productivityInputs);
     const earnedByName = new Map<string, number>();
     const grossHandledByName = new Map<string, number>();
     const firmRetainedByName = new Map<string, number>();
@@ -724,6 +738,9 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
         set.add(String(row.caseId));
         wholeCaseTasksByName.set(name, set);
       }
+    }
+    for (const row of productivityReport?.earningsRows || productivityRows) {
+      const name = baseNameFromLabel(row.staff);
       grossHandledByName.set(name, (grossHandledByName.get(name) || 0) + (row.taskFeeCollected || 0));
       // Missing TPA/timeliness/quality renders the earned fee as null ('_') —
       // those rows contribute nothing to staff earnings or to the firm's
@@ -1178,7 +1195,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
           selectedMatters.reduce((sum, matter: any) => sum + (paidInvoicesByCaseId.get(String(matter._id)) || 0), 0) * 100
         ) / 100,
         outstandingBalance: outstanding,
-        feesEarned: Math.round((earnedByName.get(selectedMemberNameNormalized || '') || 0) * 100) / 100,
+        feesEarned: productivityReport ? productivityReport.summary.totalFeeEarned : Math.round((earnedByName.get(selectedMemberNameNormalized || '') || 0) * 100) / 100,
         qualityReviewStatus: qualityReviewMessage,
       }
       : null;
@@ -1214,6 +1231,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       team,
       productivitySummary,
       productivityReconciliation: productivityReport?.reconciliation,
+      productivityEarningsRows: productivityReport?.earningsRows,
+      productivityEarningsSummary: productivityReport?.earningsSummary,
       productivityRows,
       caseTypes,
       clientProfitability,
@@ -1228,7 +1247,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Response) => {
   try {
     const { range, from, to } = req.query as any;
-    const dateBasis = 'taskDate';
+    const dateBasis = 'paymentDate';
     const period = resolveOptionalReportRange({ range: range || (from || to ? 'custom' : 'monthly'), from, to });
     if (period && 'error' in period) return res.status(400).json({ message: period.error });
     const fromISO = period?.fromISO || '0001-01-01';
@@ -1312,12 +1331,11 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
       roleByName,
       selectedMemberName: displayName,
     };
-    const allRows = buildCollectedKeyActionRows(reportInputs);
-    const report = buildProductivityReconciliation({ ...reportInputs, period, allRows });
+    const report = buildProductivityReport(reportInputs, period);
     const rows = report.rows;
 
     const totalTaskFeeCollected = report.summary.totalTaskFeeCollected;
-    const totalFeeEarned = roundMoney(rows.reduce((sum, row) => sum + (row.feeEarned || 0), 0));
+    const totalFeeEarned = report.summary.totalFeeEarned;
     const roleShare = roleEarningShare(role);
     const overdueTasks = await Task.countDocuments({ assignee: displayName, status: { $ne: 'Completed' } });
 
@@ -1336,6 +1354,8 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
         qualityReviewStatus: 'Uses the case Quality Score entered through Case Management (Reviewer / Signer-Approver); missing scores render "_" until entered.',
       },
       productivityReconciliation: report.reconciliation,
+      productivityEarningsRows: report.earningsRows,
+      productivityEarningsSummary: report.earningsSummary,
       productivitySummary: report.summary,
       productivityRows: rows,
       team: [
@@ -1352,7 +1372,7 @@ export const getMyProductivityEarningsReport = async (req: AuthRequest, res: Res
           revenueAttributed: totalFeeEarned,
           grossFeesHandled: totalTaskFeeCollected,
           firmRetainedEarnings: roundMoney(
-        rows
+        report.earningsRows
           .filter((row) => row.feeEarned != null)
           .reduce((sum, row) => sum + Math.max(0, (row.taskFeeCollected || row.taskFee || 0) - (row.feeEarned || 0)), 0)
       ),

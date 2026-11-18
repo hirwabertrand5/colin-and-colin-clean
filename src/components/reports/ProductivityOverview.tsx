@@ -6,19 +6,19 @@ export default function ProductivityOverview({ data }: { data: FirmReportRespons
   const summary = data.productivitySummary;
   const reconciliation = data.productivityReconciliation;
   const cards = [
+    ['Fees Earned', money(reconciliation?.selectedPeriod.feesEarned), 'Same payment-period calculation as the dashboard; includes payments for earlier completed work'],
+    ['Collected base for earnings', money(summary?.totalTaskFeeCollected), `${data.productivityEarningsSummary?.pendingFeeRecords ?? 0} earning records pending; based on payments received in the selected period`],
     ['Completed Key Actions', summary?.keyActionsCompleted ?? 0, 'Distinct actions with an attributed contribution in this period'],
-    ['Contribution records', summary?.contributionRecords ?? data.productivityRows?.length ?? 0, 'One record per Key Action, staff member and delivery role'],
+    ['Completed-work records', summary?.contributionRecords ?? data.productivityRows?.length ?? 0, 'One record per completed Key Action, staff member and delivery role'],
     ['Whole matters completed', summary?.completedTasks ?? 0, 'All Key Actions completed; matter finished in this period'],
-    ['Allocated collected base', money(summary?.totalTaskFeeCollected), 'Paid collections allocated to these actions; counted once per action'],
-    ['Fees on completed work', money(summary?.totalFeeEarned), `${summary?.pendingFeeRecords ?? 0} contribution records pending; total includes calculated fees only`],
-    ['Actions with zero base', summary?.zeroAllocationActions ?? 0, 'Review the allocation reason in the records below'],
-    ['Quality scores pending', summary?.pendingQualityScores ?? 0, 'Contribution records awaiting a recorded quality score'],
+    ['Completed actions with zero base', summary?.zeroAllocationActions ?? 0, 'Open the Completed work detail view to review allocation reasons'],
+    ['Quality scores pending', summary?.pendingQualityScores ?? 0, 'Completed-work contribution records awaiting a recorded quality score'],
     ['Missing matter references', summary?.missingMatterReferences ?? 0, 'Distinct actions; matter ID and source link remain available'],
   ];
   return <>
     <section className="bg-white border border-gray-200 rounded-lg p-6" aria-label="Productivity summary">
-      <h2 className="font-semibold text-gray-900">Completed work in the selected period</h2>
-      <p className="text-sm text-gray-600 mt-2">{data.selectedMember?.name || 'All team members'} · {data.range.from === '0001-01-01' ? 'All time' : `${data.range.from} to ${data.range.to}`} · Completion date{reconciliation ? ` · ${reconciliation.timeZone}` : ''}</p>
+      <h2 className="font-semibold text-gray-900">Productivity and earnings in the selected period</h2>
+      <p className="text-sm text-gray-600 mt-2">{data.selectedMember?.name || 'All team members'} · {data.range.from === '0001-01-01' ? 'All time' : `${data.range.from} to ${data.range.to}`}{reconciliation ? ` · ${reconciliation.timeZone}` : ''}. Earnings use payment dates; work counts use completion dates.</p>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mt-5">
         {cards.map(([label, value, detail]) => <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
           <div className="text-xs font-medium uppercase tracking-wide text-gray-600">{label}</div>
@@ -38,7 +38,7 @@ export default function ProductivityOverview({ data }: { data: FirmReportRespons
           <tr><th scope="row" className="p-3 font-medium">Fees earned</th><td className="p-3">{money(reconciliation.selectedPeriod.feesEarned)}</td><td className="p-3">{money(reconciliation.allTime.feesEarned)}</td><td className="p-3">Case Workspace earnings · {reconciliation.dashboardFeeBasis}</td></tr>
         </tbody>
       </table></div>
-      <p className="text-sm text-gray-600 mt-4">The report lists work completed in the period and values it using current all-time collections and scores. The dashboard period fee uses payments received in the period, including payments for work completed earlier. These totals measure different activity.</p>
+      <p className="text-sm text-gray-600 mt-4">Fees Earned and the default earnings detail use payments received in the selected period, including payments for earlier work. They match the dashboard for the same staff member and period. The separate Completed work view follows action completion dates and shows its valuation explicitly.</p>
       <p className="text-xs text-gray-600 mt-2">Record reconciliation: {reconciliation.allTimeContributionRecords} all-time contributions = {data.productivityRows?.length ?? 0} in this view + {reconciliation.outsidePeriodContributionRecords} outside the period{data.range.from !== '0001-01-01' ? ` + ${reconciliation.undatedContributionRecords} without a completion date` : ''}. {reconciliation.selectedPeriod.pendingFeeRecords} dashboard earning rows await scores or rates.</p>
     </section>}
     <details className="bg-white border border-gray-200 rounded-lg p-5 text-sm text-gray-600">

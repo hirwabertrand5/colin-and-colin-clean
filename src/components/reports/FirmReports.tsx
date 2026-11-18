@@ -378,6 +378,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
   const [productivitySortKey, setProductivitySortKey] = useState('');
   const [productivitySortDir, setProductivitySortDir] = useState<SortDir>('asc');
   const [productivityPage, setProductivityPage] = useState(1);
+  const [productivityView, setProductivityView] = useState<'earnings' | 'completedWork'>('earnings');
   const [productivityIssue, setProductivityIssue] = useState('all');
   const [productivitySearch, setProductivitySearch] = useState('');
   const PRODUCTIVITY_PAGE_SIZE = 10;
@@ -390,7 +391,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
     }
     setProductivityPage(1);
   };
-  const productivityRows = data?.productivityRows || [];
+  const productivityRows = (productivityView === 'earnings' ? data?.productivityEarningsRows : data?.productivityRows) || [];
   const filteredProductivityRows = productivityRows.filter(row => {
     const matchesIssue = productivityIssue === 'all'
       || (productivityIssue === 'zero' && (row.taskFeeCollected ?? row.taskFee) === 0)
@@ -425,7 +426,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
           return row?.completedAt || '';
       }
     }),
-    [data?.productivityRows, productivityIssue, productivitySearch, productivitySortKey, productivitySortDir],
+    [data?.productivityRows, data?.productivityEarningsRows, productivityView, productivityIssue, productivitySearch, productivitySortKey, productivitySortDir],
   );
   // 10 rows per page. Page resets on period/report/member changes below.
   const productivityTotalPages = Math.max(1, Math.ceil(sortedProductivityRows.length / PRODUCTIVITY_PAGE_SIZE));
@@ -551,11 +552,12 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
       ['Completed Key Actions (distinct)', String(productivitySummary?.keyActionsCompleted ?? 0)],
       ['Contribution records', String(productivitySummary?.contributionRecords ?? data.productivityRows?.length ?? 0)],
       ['Whole matters completed', String(productivitySummary?.completedTasks ?? 0)],
-      ['Collected Key Action Base', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? productivitySummary?.totalTaskFee ?? productivityRows.reduce((sum, row) => sum + ((row.taskFeeCollected ?? row.taskFee) || 0), 0))],
-      ['Fees from period completions (current collections / scores)', productivitySummary?.totalFeeEarned == null ? 'Pending' : fmtMoney(productivitySummary.totalFeeEarned)],
+      ['Collected base for payment-period earnings', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? 0)],
+      ['Fees Earned (same payment basis as dashboard)', data.productivityReconciliation?.selectedPeriod.feesEarned == null ? 'Pending' : fmtMoney(data.productivityReconciliation.selectedPeriod.feesEarned)],
+      ['Completed-work valuation (separate completion-date measure)', productivitySummary?.completedWorkFeeValue == null ? 'Pending' : fmtMoney(productivitySummary.completedWorkFeeValue)],
       ['Pending Quality Scores', String(productivitySummary?.pendingQualityScores ?? productivityRows.filter((row) => row.qualityScore == null).length)],
       ['Pending Timeliness Scores', String(productivitySummary?.pendingTimelinessScores ?? 0)],
-      ['Fee pending records', String(productivitySummary?.pendingFeeRecords ?? 0)],
+      ['Payment-period earning records pending', String(data.productivityEarningsSummary?.pendingFeeRecords ?? 0)],
       ['Zero allocation Key Actions', String(productivitySummary?.zeroAllocationActions ?? 0)],
       ['Missing matter references (distinct actions)', String(productivitySummary?.missingMatterReferences ?? 0)],
       ['Average Quality Score', productivitySummary?.averageQualityScore == null ? '—' : `${productivitySummary.averageQualityScore}%`],
@@ -670,7 +672,9 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
                   ['Selected Staff Member', data.selectedMember?.name || 'All team members'],
                   ['Selected Period', `${RANGE_LABELS[dateRange]} (${data.range.from} to ${data.range.to})`],
                   ['Work date basis', 'Key Action completion date'],
-                  ['Collected base source', data.productivityReconciliation?.collectionBasis || 'Linked Paid invoices'],
+                  ['Earnings date basis', data.productivityReconciliation?.dashboardFeeBasis || 'Paid invoice payment date'],
+                  ['Detail view', productivityView === 'earnings' ? 'Earnings (payment period)' : 'Completed work (completion period)'],
+                  ['Detail collected base source', productivityView === 'earnings' ? 'Paid invoices received in selected period, allocated through the Case Workspace earnings engine' : data.productivityReconciliation?.collectionBasis || 'Linked Paid invoices'],
                   ['Timezone', data.productivityReconciliation?.timeZone || 'Africa/Kigali'],
                   ['Detail issue filter', productivityIssue],
                   ['Detail search', productivitySearch || 'None'],
@@ -695,8 +699,8 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
                 ] : [],
               },
               {
-                title: 'Key Action Productivity Metrics',
-                headers: ['#', 'Date & Time', 'Staff', 'Matter', 'Key Action', 'Collected Key Action Base', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned', 'Matter ID', 'Assignment role', 'Section', 'Key Action %', 'Matter contract value', 'Matter Paid invoices', 'Allocation status', 'Quality source', 'Review issues'],
+                title: productivityView === 'earnings' ? 'Earnings Detail (Payment Period)' : 'Completed Work Detail (Completion Period)',
+                headers: ['#', 'Action completed', 'Staff', 'Matter', 'Key Action', 'Collected Key Action Base', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned', 'Matter ID', 'Assignment role', 'Section', 'Key Action %', 'Matter contract value', 'Matter Paid invoices', 'Allocation status', 'Quality source', 'Review issues'],
                 rows: numberedProductivityRows,
                 currencyColumns: [6, 11, 16, 17],
                 currencyDecimals: 2,
@@ -908,7 +912,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
               {loading
                 ? 'Loading…'
                 : data
-                  ? `Period: ${data.range.from === '0001-01-01' ? 'All time' : `${data.range.from} → ${data.range.to}`} (${selectedReport === 'productivity' ? 'Key Action completion date' : DATE_BASIS_LABELS[data.dateBasis]})`
+                  ? `Period: ${data.range.from === '0001-01-01' ? 'All time' : `${data.range.from} → ${data.range.to}`} (${selectedReport === 'productivity' ? 'Earnings: payment date · Work: completion date' : DATE_BASIS_LABELS[data.dateBasis]})`
                   : 'Comprehensive analytics and performance reports'}
             </p>
           </div>
@@ -1229,27 +1233,34 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
           {data && <ProductivityOverview data={data} />}
 
           <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <h2 className="font-semibold text-gray-900 mb-2">Key Action contribution records</h2>
-            <p className="text-sm text-gray-600 mb-4">Summary totals cover the full selected period. The filters below narrow the records and exported detail.</p>
+            <h2 className="font-semibold text-gray-900 mb-2">{productivityView === 'earnings' ? 'Earnings detail for the payment period' : 'Completed-work contribution records'}</h2>
+            <p className="text-sm text-gray-600 mb-4">{productivityView === 'earnings' ? 'These allocations use payments received in the selected period, just like the dashboard. Action completion dates may be outside that period.' : 'These actions were completed in the selected period. Their valuation uses current all-time collections and scores.'} Filters narrow the records and exported detail.</p>
+            {productivityView === 'completedWork' && <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4 text-sm text-gray-700" aria-label="Completed-work valuation">
+              Completed-work valuation: <strong>{data?.productivitySummary?.completedWorkFeeValue == null ? 'Pending' : fmtMoney(data.productivitySummary.completedWorkFeeValue)}</strong>. This values actions completed in the period. Fees Earned above follows payments received in the period.
+            </div>}
             <div className="flex flex-wrap gap-3 mb-4">
+              <select aria-label="Productivity detail view" value={productivityView} onChange={event => { setProductivityView(event.target.value as 'earnings' | 'completedWork'); setProductivityIssue('all'); setProductivitySearch(''); setProductivityPage(1); }} className="px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900">
+                <option value="earnings">Earnings (matches dashboard)</option><option value="completedWork">Completed work</option>
+              </select>
               <input aria-label="Search productivity records" placeholder="Search matter, Key Action or staff" value={productivitySearch} onChange={event => { setProductivitySearch(event.target.value); setProductivityPage(1); }} className="px-3 py-2 border border-gray-300 rounded text-sm text-gray-900" />
               <select aria-label="Filter productivity issues" value={productivityIssue} onChange={event => { setProductivityIssue(event.target.value); setProductivityPage(1); }} className="px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900">
                 <option value="all">All records</option><option value="zero">Zero collected base</option><option value="quality">Quality pending</option><option value="timeliness">Timeliness pending</option><option value="reference">Missing matter reference</option><option value="pending">Fee pending</option>
               </select>
               <span className="self-center text-sm text-gray-500" role="status">{sortedProductivityRows.length} of {productivityRows.length} records</span>
             </div>
+            {data && productivityView === 'earnings' && <p className="mb-4 text-sm text-gray-700" aria-label="Earnings detail total">Detail fees{productivityIssue !== 'all' || productivitySearch ? ' (filtered)' : ''}: <strong>{sortedProductivityRows.some(row => row.feeEarned != null) ? fmtMoney(sortedProductivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0)) : sortedProductivityRows.length ? 'Pending' : fmtMoney(0)}</strong></p>}
 
             {!data ? (
               <div className="text-gray-500">No data.</div>
             ) : sortedProductivityRows.length === 0 ? (
-              <div className="text-gray-500">{productivityRows.length ? 'No records match these filters.' : 'No attributed completed Key Actions in this period. Zero allocations and pending scores are included when work is recorded.'}</div>
+              <div className="text-gray-500">{productivityRows.length ? 'No records match these filters.' : productivityView === 'earnings' ? 'No completed Key Action allocations funded by payments in this period.' : 'No attributed completed Key Actions in this period. Zero allocations and pending scores are included when work is recorded.'}</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-[1400px] w-full">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
-                      <SortableHeader label="Date / Time" column="datetime" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
+                      <SortableHeader label="Action completed" column="datetime" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
                       <SortableHeader label="Staff" column="staff" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
                       <SortableHeader label="Matter" column="matter" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
                       <SortableHeader label="Key Action" column="task" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />

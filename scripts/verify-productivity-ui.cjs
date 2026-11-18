@@ -33,13 +33,18 @@ async function main() {
       range: { from: '2026-10-17', to: '2026-11-17' }, dateBasis: 'invoiceDate', selectedMember: null,
       kpis: {}, ageingReport: [], months: [], caseTypes: [], clientProfitability: [], team: [],
       productivityRows: rows, productivitySummary: { completedTasks: 1, keyActionsCompleted: 12, contributionRecords: 12,
-        totalTaskFeeCollected: 100000, totalTaskFee: 100000, totalFeeEarned: 3602.5, pendingFeeRecords: 1,
+        totalTaskFeeCollected: 100000, totalTaskFee: 100000, totalFeeEarned: 12658.51, completedWorkFeeValue: 40198.11, pendingFeeRecords: 0,
         pendingQualityScores: 1, pendingTimelinessScores: 0, zeroAllocationActions: 2, missingMatterReferences: 1 },
+      productivityEarningsRows: [
+        { ...rows[2], completedAt: '2026-10-10T10:00:00Z', feeEarned: 8000.25 },
+        { ...rows[3], feeEarned: 4658.26 },
+      ],
+      productivityEarningsSummary: { contributionRecords: 2, pendingFeeRecords: 0 },
       productivityReconciliation: { timeZone: 'Africa/Kigali', activityBasis: 'Key Action completion date',
         collectionBasis: 'All-time Paid invoices linked by matter ID; values reflect current collections and scores',
         dashboardFeeBasis: 'Paid invoice payment date (paidAt; updatedAt for legacy invoices)',
         allTime: { keyActionsChecked: 708, sectionsCompleted: 110, feesEarned: 237068, pendingFeeRecords: 3 },
-        selectedPeriod: { keyActionsChecked: 12, sectionsCompleted: 2, feesEarned: 40193.65, pendingFeeRecords: 1 },
+        selectedPeriod: { keyActionsChecked: 12, sectionsCompleted: 2, feesEarned: 12658.51, pendingFeeRecords: 1 },
         allTimeContributionRecords: 20, outsidePeriodContributionRecords: 7, undatedContributionRecords: 1 },
     };
     await page.route('**/*', async route => {
@@ -57,7 +62,20 @@ async function main() {
     await page.getByRole('button', { name: 'Productivity Report', exact: true }).click();
     await page.getByRole('heading', { name: 'Reconcile with the dashboard' }).waitFor();
     assert.equal(await page.getByLabel('Productivity summary').getByText('12', { exact: true }).count(), 2);
-    assert(await page.getByText('RWF 40,193.65', { exact: true }).isVisible());
+    assert(await page.getByLabel('Productivity summary').getByText('RWF 12,658.51', { exact: true }).isVisible(), 'Headline matches dashboard payment-period earnings');
+    assert.equal(await page.getByText('RWF 40,198.11', { exact: true }).count(), 0, 'Completed-work value is not a competing headline');
+    assert(await page.getByLabel('Earnings detail total').getByText('RWF 12,658.51', { exact: true }).isVisible());
+    assert(await page.getByText('2 of 2 records', { exact: true }).isVisible());
+    const paymentDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export Active Report' }).click();
+    const paymentWorkbook = new ExcelJS.Workbook();
+    await paymentWorkbook.xlsx.readFile(await (await paymentDownloadPromise).path());
+    const paymentValues = paymentWorkbook.worksheets.flatMap(sheet => sheet.getSheetValues()).flat(2).map(value => String(value ?? ''));
+    assert(paymentValues.includes('EARNINGS DETAIL (PAYMENT PERIOD)'));
+    assert(paymentValues.includes('RWF 12,658.51'));
+    assert(paymentValues.includes('8000.25') && paymentValues.includes('4658.26'));
+    await page.getByLabel('Productivity detail view').selectOption('completedWork');
+    assert(await page.getByLabel('Completed-work valuation').getByText('RWF 40,198.11', { exact: true }).isVisible());
     assert.equal(await page.locator('select').filter({ has: page.locator('option[value="invoiceDate"]') }).count(), 0, 'Unrelated invoice date selector hidden');
     await page.getByLabel('Filter productivity issues').selectOption('quality');
     assert(await page.getByText('1 of 12 records', { exact: true }).isVisible());
@@ -74,6 +92,7 @@ async function main() {
     await workbook.xlsx.readFile(await download.path());
     const values = workbook.worksheets.flatMap(sheet => sheet.getSheetValues()).flat(2).map(value => String(value ?? ''));
     assert(values.includes('DASHBOARD RECONCILIATION'));
+    assert(values.includes('COMPLETED WORK DETAIL (COMPLETION PERIOD)'));
     assert(values.includes('Quality score pending'));
     assert(values.includes('Key Action completion date'));
     assert(values.includes('Matter ID'));
@@ -92,7 +111,7 @@ async function main() {
     await page.getByRole('heading', { name: 'Reconcile with the dashboard' }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(output, 'mobile.png') });
     assert.deepEqual(errors, []);
-    console.log('PASS: desktop/mobile report, period reconciliation, pending/zero/reference filters, search, source links, Excel content and decimal precision.');
+    console.log('PASS: default fees and detail match the dashboard; earlier completions funded in-period are included; completed-work valuation stays separate; desktop/mobile, filters, links and both Excel views.');
   } finally {
     if (browser) await browser.close();
     await server.close();
