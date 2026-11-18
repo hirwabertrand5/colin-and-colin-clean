@@ -195,6 +195,7 @@ export const getFirmReports = async (params?: { range?: FirmReportRange | 'all';
 
   const res = await fetch(`${API_URL}/reports/firm?${qs.toString()}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
+    cache: 'no-store',
     signal,
   });
 

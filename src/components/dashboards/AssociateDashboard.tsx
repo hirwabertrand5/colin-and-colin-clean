@@ -43,6 +43,7 @@ import {
   type UrgencyColor,
 } from '../../utils/workflowDeadline';
 import { baseNameFromLabel } from '../../utils/productivity';
+import { PRODUCTIVITY_LABELS as productivityLabels } from '../../constants/productivityLabels';
 import { sortRows, toggleSortKey } from '../../utils/tableSort';
 import type { SortDir } from '../../utils/tableSort';
 import SortableHeader from '../ui/SortableHeader';
@@ -1378,7 +1379,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
       {
         // ONE consistent meaning for every period: matters whose workflow
         // completed inside the window (all completed matters for All Time).
-        label: 'Matters Completed',
+        label: productivityLabels.mattersCompleted,
         value: String(mattersCompleted),
         helper: `Matters whose workflow status is Completed${inPeriodSuffix || ' (all time)'}`,
         icon: TrendingUp,
@@ -1386,14 +1387,14 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         href: '/performance',
       },
       {
-        label: 'Key Actions Checked',
+        label: productivityLabels.keyActionsChecked,
         value: String(keyActions),
         helper: `Key Actions (workflow steps) completed${inPeriodSuffix || ' (all time)'}`,
         icon: CheckCircle2,
         tone: 'blue',
       },
       {
-        label: 'Sections Completed',
+        label: productivityLabels.sectionsCompleted,
         value: String(sections),
         helper: `Workflow Sections fully completed${inPeriodSuffix || ' (all time)'}`,
         icon: CheckSquare,
@@ -1414,7 +1415,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         tone: 'green',
       },
       {
-        label: 'Fees Earned',
+        label: productivityLabels.feesEarned,
         value: fees == null ? 'Pending' : formatFees(fees),
         icon: DollarSign,
         tone: fees && fees > 0 ? 'green' : 'amber',

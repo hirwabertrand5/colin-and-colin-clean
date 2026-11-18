@@ -47,7 +47,7 @@ async function main() {
         collectionBasis: 'All-time Paid invoices linked by matter ID; values reflect current collections and scores',
         dashboardFeeBasis: 'Paid invoice payment date (paidAt; updatedAt for legacy invoices)',
         allTime: { keyActionsChecked: 708, sectionsCompleted: 110, feesEarned: 237068, pendingFeeRecords: 3 },
-        selectedPeriod: { keyActionsChecked: 12, sectionsCompleted: 2, feesEarned: 12658.51, pendingFeeRecords: 1 },
+        selectedPeriod: { keyActionsChecked: 15, sectionsCompleted: 2, feesEarned: 12658.51, pendingFeeRecords: 1 },
         allTimeContributionRecords: 20, outsidePeriodContributionRecords: 7, undatedContributionRecords: 1 },
     };
     await page.route('**/*', async route => {
@@ -64,7 +64,7 @@ async function main() {
     await page.goto('http://127.0.0.1:4178/reports');
     await page.getByRole('button', { name: 'Productivity Report', exact: true }).click();
     await page.getByRole('heading', { name: 'Productivity', exact: true }).waitFor();
-    assert.equal(await page.locator('.fr-metrics').getByText('12', { exact: true }).count(), 1);
+    assert.equal(await page.locator('.fr-metrics').getByText('15', { exact: true }).count(), 1);
     assert(await page.locator('.fr-metrics').getByText('RWF 12,658.51', { exact: true }).isVisible(), 'Headline matches dashboard payment-period earnings');
     assert.equal(await page.getByText('RWF 40,198.11', { exact: true }).count(), 0, 'Completed-work value is not a competing headline');
     assert(await page.getByLabel('Earnings detail total').getByText('RWF 12,658.51', { exact: true }).isVisible());
@@ -73,20 +73,20 @@ async function main() {
     const expectedColumns = ['#', 'Date / Time', 'Staff', 'Matter', 'Key Action', 'Collected Key Action Base', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned', 'Allocation / Review Status'];
     for (const name of expectedColumns) assert.equal(await records.getByRole('columnheader', { name, exact: true }).count(), 1, `Retains column: ${name}`);
     const metricValues = await page.getByLabel('Work and review summary').locator('dd').allTextContents();
-    assert.deepEqual(metricValues, ['2', '12', '2', '1', '0', '0', '90%', '80%', '0'], 'Restores all summary metrics');
-    assert(await page.getByRole('heading', { name: 'Dashboard comparison', exact: true }).isVisible());
-    assert(await page.getByLabel('Contribution reconciliation').getByText('Undated', { exact: false }).isVisible());
+    assert.deepEqual(metricValues, ['12', '2', '12', '2', '1', '0', '0', '90%', '80%', '0'], 'Restores all summary metrics');
+    assert(await page.getByRole('heading', { name: 'Dashboard Summary', exact: true }).isVisible());
+    assert(await page.getByLabel('Contribution reconciliation').getByText('Missing Completion Date', { exact: false }).isVisible());
     await page.getByLabel('Calculation sources').getByText('Sources & calculation', { exact: true }).click();
-    assert(await page.getByLabel('Calculation sources').getByText('Work & matter', { exact: true }).isVisible());
+    assert(await page.getByLabel('Calculation sources').getByText('Case Management', { exact: true }).isVisible());
     const paymentDownloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Export report', exact: true }).click();
     const paymentWorkbook = new ExcelJS.Workbook();
     await paymentWorkbook.xlsx.readFile(await (await paymentDownloadPromise).path());
     const paymentValues = paymentWorkbook.worksheets.flatMap(sheet => sheet.getSheetValues()).flat(2).map(value => String(value ?? ''));
-    assert(paymentValues.includes('EARNINGS DETAIL (PAYMENT PERIOD)'));
+    assert(paymentValues.some(value => value.includes('KEY ACTION PRODUCTIVITY METRICS') && value.includes('PAYMENT DATE')));
     assert(paymentValues.includes('RWF 12,658.51'));
     assert(paymentValues.includes('8000.25') && paymentValues.includes('4658.26'));
-    await page.getByRole('group', { name: 'Productivity detail view' }).getByRole('button', { name: 'Completed work', exact: true }).click();
+    await page.getByRole('group', { name: 'Productivity detail view' }).getByRole('button', { name: 'Key Actions Completed', exact: true }).click();
     assert(await page.getByLabel('Completed-work valuation').getByText('RWF 40,198.11', { exact: true }).isVisible());
     assert.equal(await page.locator('select').filter({ has: page.locator('option[value="invoiceDate"]') }).count(), 0, 'Unrelated invoice date selector hidden');
     await page.getByLabel('Filter productivity issues').selectOption('quality');
@@ -115,7 +115,7 @@ async function main() {
     await workbook.xlsx.readFile(await download.path());
     const values = workbook.worksheets.flatMap(sheet => sheet.getSheetValues()).flat(2).map(value => String(value ?? ''));
     assert(values.includes('DASHBOARD RECONCILIATION'));
-    assert(values.includes('COMPLETED WORK DETAIL (COMPLETION PERIOD)'));
+    assert(values.some(value => value.includes('KEY ACTION PRODUCTIVITY METRICS') && value.includes('TASK COMPLETION DATE')));
     assert(values.includes('Quality score pending'));
     assert(values.includes('Key Action completion date'));
     assert(values.includes('Matter ID'));

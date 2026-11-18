@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ProductivityOverview from './ProductivityOverview';
 import ProductivityRecords from './ProductivityRecords';
 import './firmReports.css';
-import { Download, FileText, BarChart3, TrendingUp, Users, Search, ArrowUpDown } from 'lucide-react';
+import { Download, FileText, BarChart3, TrendingUp, Users, Search, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { UserRole } from '../../App';
 import { FirmReportDateBasis, FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
 import { getStaffUsers, User } from '../../services/userService';
@@ -11,6 +11,7 @@ import { downloadWorkbook } from '../../utils/excelExport';
 import SortableHeader from '../ui/SortableHeader';
 import { sortRows, SortDir } from '../../utils/tableSort';
 import { REPORT_PERIOD_LABELS } from '../../constants/reportPeriods';
+import { PRODUCTIVITY_LABELS as productivityLabels } from '../../constants/productivityLabels';
 
 type FirmReportTab =
   | 'overview'
@@ -549,17 +550,18 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
     const productivityRows = sortedProductivityRows;
     const productivitySummary = data.productivitySummary;
     const productivitySummaryRows = withRowNumbers([
-      ['Completed Key Actions (distinct)', String(productivitySummary?.keyActionsCompleted ?? 0)],
-      ['Contribution records', String(productivitySummary?.contributionRecords ?? data.productivityRows?.length ?? 0)],
-      ['Whole matters completed', String(productivitySummary?.completedTasks ?? 0)],
+      [productivityLabels.keyActionsChecked, data.productivityReconciliation?.selectedPeriod.keyActionsChecked == null ? 'Unavailable' : String(data.productivityReconciliation.selectedPeriod.keyActionsChecked)],
+      [productivityLabels.keyActionsCompleted, String(productivitySummary?.keyActionsCompleted ?? 0)],
+      [productivityLabels.keyActionRecords, String(productivitySummary?.contributionRecords ?? data.productivityRows?.length ?? 0)],
+      [productivityLabels.mattersCompleted, String(productivitySummary?.completedTasks ?? 0)],
       ['Collected base for payment-period earnings', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? 0)],
       ['Fees Earned · Payment date', data.productivityReconciliation?.selectedPeriod.feesEarned == null ? 'Pending' : fmtMoney(data.productivityReconciliation.selectedPeriod.feesEarned)],
-      ['Work valuation · Completion date', productivitySummary?.completedWorkFeeValue == null ? 'Pending' : fmtMoney(productivitySummary.completedWorkFeeValue)],
+      [`${productivityLabels.staffEarnedFees} · ${productivityLabels.taskDate}`, productivitySummary?.completedWorkFeeValue == null ? 'Pending' : fmtMoney(productivitySummary.completedWorkFeeValue)],
       ['Pending Quality Scores', String(productivitySummary?.pendingQualityScores ?? productivityRows.filter((row) => row.qualityScore == null).length)],
       ['Pending Timeliness Scores', String(productivitySummary?.pendingTimelinessScores ?? 0)],
       ['Payment-period earning records pending', String(data.productivityEarningsSummary?.pendingFeeRecords ?? 0)],
-      ['Zero allocation Key Actions', String(productivitySummary?.zeroAllocationActions ?? 0)],
-      ['Missing matter details', String(productivitySummary?.missingMatterReferences ?? 0)],
+      [productivityLabels.zeroBase, String(productivitySummary?.zeroAllocationActions ?? 0)],
+      [productivityLabels.missingReferences, String(productivitySummary?.missingMatterReferences ?? 0)],
       ['Average Quality Score', productivitySummary?.averageQualityScore == null ? '—' : `${productivitySummary.averageQualityScore}%`],
       ['Average Timeliness Score', productivitySummary?.averageTimelinessScore == null ? '—' : `${productivitySummary.averageTimelinessScore}%`],
     ]);
@@ -673,12 +675,12 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
                   ['Selected Period', `${RANGE_LABELS[dateRange]} (${data.range.from} to ${data.range.to})`],
                   ['Work date basis', 'Key Action completion date'],
                   ['Earnings date basis', data.productivityReconciliation?.dashboardFeeBasis || 'Paid invoice payment date'],
-                  ['Detail view', productivityView === 'earnings' ? 'Earnings (payment period)' : 'Completed work (completion period)'],
+                  ['Detail view', productivityView === 'earnings' ? `${productivityLabels.feesEarned} · ${productivityLabels.paymentDate}` : `${productivityLabels.keyActionsCompleted} · ${productivityLabels.taskDate}`],
                   ['Detail collected base source', productivityView === 'earnings' ? 'Paid invoices received in selected period, allocated through the Case Workspace earnings engine' : data.productivityReconciliation?.collectionBasis || 'Linked Paid invoices'],
                   ['Timezone', data.productivityReconciliation?.timeZone || 'Africa/Kigali'],
                   ['Detail issue filter', productivityIssue],
                   ['Detail search', productivitySearch || 'None'],
-                  ['Exported contribution records', String(productivityRows.length)],
+                  [`Exported ${productivityLabels.keyActionRecords}`, String(productivityRows.length)],
                 ]),
               },
               {
@@ -690,16 +692,16 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
                 title: 'Dashboard Reconciliation',
                 headers: ['Metric', 'Selected period', 'All time', 'Source'],
                 rows: data.productivityReconciliation ? [
-                  ['Key Actions checked', data.productivityReconciliation.selectedPeriod.keyActionsChecked, data.productivityReconciliation.allTime.keyActionsChecked, 'Completed steps in current assignments; completion date'],
-                  ['Sections completed', data.productivityReconciliation.selectedPeriod.sectionsCompleted, data.productivityReconciliation.allTime.sectionsCompleted, 'Every action completed; last completion date'],
-                  ['Fees earned', data.productivityReconciliation.selectedPeriod.feesEarned ?? 'Pending', data.productivityReconciliation.allTime.feesEarned ?? 'Pending', data.productivityReconciliation.dashboardFeeBasis],
-                  ['All-time contributions', data.productivityReconciliation.allTimeContributionRecords, '', 'Current collections and scores'],
-                  ['Contributions outside period', data.productivityReconciliation.outsidePeriodContributionRecords, '', 'Completion date'],
-                  ['Contributions without completion date', data.productivityReconciliation.undatedContributionRecords, '', 'Excluded from dated periods'],
+                  [productivityLabels.keyActionsChecked, data.productivityReconciliation.selectedPeriod.keyActionsChecked, data.productivityReconciliation.allTime.keyActionsChecked, productivityLabels.taskDate],
+                  [productivityLabels.sectionsCompleted, data.productivityReconciliation.selectedPeriod.sectionsCompleted, data.productivityReconciliation.allTime.sectionsCompleted, 'Final Key Action'],
+                  [productivityLabels.feesEarned, data.productivityReconciliation.selectedPeriod.feesEarned ?? 'Pending', data.productivityReconciliation.allTime.feesEarned ?? 'Pending', data.productivityReconciliation.dashboardFeeBasis],
+                  ['All-Time Key Action Records', data.productivityReconciliation.allTimeContributionRecords, '', 'All Time'],
+                  ['Key Action Records Outside Period', data.productivityReconciliation.outsidePeriodContributionRecords, '', productivityLabels.taskDate],
+                  ['Key Action Records Without Completion Date', data.productivityReconciliation.undatedContributionRecords, '', 'Excluded from dated periods'],
                 ] : [],
               },
               {
-                title: productivityView === 'earnings' ? 'Earnings Detail (Payment Period)' : 'Completed Work Detail (Completion Period)',
+                title: `${productivityLabels.metrics} · ${productivityView === 'earnings' ? productivityLabels.paymentDate : productivityLabels.taskDate}`,
                 headers: ['#', 'Action completed', 'Staff', 'Matter', 'Key Action', 'Collected Key Action Base', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned', 'Matter ID', 'Assignment role', 'Section', 'Key Action %', 'Matter contract value', 'Matter Paid invoices', 'Allocation status', 'Quality source', 'Review issues'],
                 rows: numberedProductivityRows,
                 currencyColumns: [6, 11, 16, 17],
@@ -906,7 +908,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
       <header>
         <div className="fr-page-heading">
           <div><span className="fr-eyebrow">Firm performance</span><h1>{title ?? 'Firm Reports'}</h1><p className="fr-period">{loading ? 'Loading...' : data ? data.range.from === '0001-01-01' ? 'All time' : `${data.range.from} to ${data.range.to}` : 'Reports & analytics'}</p></div>
-          <button className="fr-export" onClick={() => void exportWorkbook()} disabled={!canExportReport}><Download size={15} />Export report</button>
+          <div className="fr-header-actions"><button className="fr-refresh" aria-label="Refresh report" disabled={loading} onClick={() => setRefreshToken(value => value + 1)}><RefreshCw size={15} />Refresh</button><button className="fr-export" onClick={() => void exportWorkbook()} disabled={!canExportReport}><Download size={15} />Export report</button></div>
         </div>
         <div className="fr-filter-bar">
           <label>Reporting period<select aria-label="Reporting period" value={dateRange} onChange={event => setDateRange(event.target.value as FirmReportRange)}>{Object.entries(RANGE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { FirmReportResponse } from '../../services/firmReportsService';
 import SortableHeader from '../ui/SortableHeader';
 import { SortDir } from '../../utils/tableSort';
+import { PRODUCTIVITY_LABELS as labels } from '../../constants/productivityLabels';
 
 type Row = NonNullable<FirmReportResponse['productivityRows']>[number];
 type Props = {
@@ -21,21 +22,21 @@ export default function ProductivityRecords(props: Props) {
   const date = (value: string | null) => value ? new Date(value).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: data?.productivityReconciliation?.timeZone || 'Africa/Kigali' }) : '—';
   return <>
     <div className="fr-records-heading">
-      <div><h2>{view === 'earnings' ? 'Earnings detail' : 'Completed work'}</h2><p>{view === 'earnings' ? 'Payment date' : 'Completion date'}</p></div>
+      <div><h2>{labels.metrics}</h2><p>{view === 'earnings' ? labels.paymentDate : labels.taskDate}</p></div>
       <div className="fr-view-switch" role="group" aria-label="Productivity detail view">
-        <button aria-pressed={view === 'earnings'} onClick={() => setView('earnings')}>Earnings</button>
-        <button aria-pressed={view === 'completedWork'} onClick={() => setView('completedWork')}>Completed work</button>
+        <button aria-pressed={view === 'earnings'} onClick={() => setView('earnings')}>{labels.feesEarned}</button>
+        <button aria-pressed={view === 'completedWork'} onClick={() => setView('completedWork')}>{labels.keyActionsCompleted}</button>
       </div>
     </div>
     {view === 'completedWork' && <div className="fr-valuation" aria-label="Completed-work valuation">
-      <span>Work valuation</span><strong>{data?.productivitySummary?.completedWorkFeeValue == null ? 'Pending' : money(data.productivitySummary.completedWorkFeeValue)}</strong>
-      <span>Collected base</span><strong>{money(data?.productivitySummary?.completedWorkCollectedBase ?? 0)}</strong>
-      <span>Fees pending</span><strong>{data?.productivitySummary?.completedWorkPendingFeeRecords ?? 0}</strong><span>Current collections</span>
+      <span>{labels.staffEarnedFees}</span><strong>{data?.productivitySummary?.completedWorkFeeValue == null ? 'Pending' : money(data.productivitySummary.completedWorkFeeValue)}</strong>
+      <span>{labels.collectedBase}</span><strong>{money(data?.productivitySummary?.completedWorkCollectedBase ?? 0)}</strong>
+      <span>{labels.pendingFees}</span><strong>{data?.productivitySummary?.completedWorkPendingFeeRecords ?? 0}</strong><span>{labels.taskDate}</span>
     </div>}
     <div className="fr-records-tools">
       <input aria-label="Search productivity records" placeholder="Search matters, actions or staff" value={search} onChange={event => setSearch(event.target.value)} />
       <select aria-label="Filter productivity issues" value={issue} onChange={event => setIssue(event.target.value)}>
-        <option value="all">All records</option><option value="zero">Zero allocation</option><option value="quality">Quality pending</option><option value="timeliness">Timeliness pending</option><option value="reference">Missing matter details</option><option value="pending">Fee pending</option>
+        <option value="all">All Key Action Records</option><option value="zero">{labels.zeroBase}</option><option value="quality">{labels.pendingQuality}</option><option value="timeliness">{labels.pendingTimeliness}</option><option value="reference">{labels.missingReferences}</option><option value="pending">{labels.pendingFees}</option>
       </select>
       <span className="fr-record-count" role="status">{filteredRows.length} of {total} records</span>
       {data && view === 'earnings' && <strong className="text-sm" aria-label="Earnings detail total">{totalFee}</strong>}
@@ -49,7 +50,7 @@ export default function ProductivityRecords(props: Props) {
           <td>{row.staff}<div className="fr-secondary">{row.assignmentRole}</div></td>
           <td>{row.caseId ? <Link to={`/cases/${row.caseId}?tab=case-management&step=${encodeURIComponent(row.keyActionKey || '')}`}>{row.matter}</Link> : row.matter}{row.matterParties && row.matterParties !== row.matter && <div className="fr-secondary">{row.matterParties}</div>}</td>
           <td>{row.task}<div className="fr-secondary">{row.workflowStage} · {percent(row.keyActionPercent ?? row.taskProgressPercent)}</div></td>
-          <td className="fr-number">{money(row.taskFeeCollected ?? row.taskFee)}<div className="fr-secondary">Matter paid: {money(row.collectedAmount ?? 0)}</div></td>
+          <td className="fr-number">{money(row.taskFeeCollected ?? row.taskFee)}<div className="fr-secondary">Paid Invoices: {money(row.collectedAmount ?? 0)}</div></td>
           <td className="fr-score">{percent(row.tpaPercent)}</td>
           <td className="fr-score">{percent(row.timelinessScore)}<div className="fr-secondary">{row.timelinessStatus}</div></td>
           <td className="fr-score">{row.qualityScore == null ? <span className="fr-pending">Pending</span> : percent(row.qualityScore)}<div className="fr-secondary">{row.qualitySource}</div></td>

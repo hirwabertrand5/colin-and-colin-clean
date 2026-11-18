@@ -6,6 +6,9 @@
 .fr-export { border: 0; border-radius: 8px; padding: 11px 16px; background: #142c47; color: #fff; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; cursor: pointer; }
 .fr-export:hover { background: #203f5e; }
 .fr-export:disabled { opacity: .45; cursor: default; }
+.fr-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 9px; }
+.fr-refresh { display: inline-flex; align-items: center; gap: 7px; padding: 10px 12px; border: 1px solid var(--fr-line); border-radius: 8px; color: var(--fr-ink); font-size: 12px; cursor: pointer; }
+.fr-refresh:disabled { opacity: .45; cursor: default; }
 .fr-filter-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px; border: 1px solid var(--fr-line); background: #fff; border-radius: 12px; margin-bottom: 18px; }
 .fr-filter-bar label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; font-weight: 600; color: var(--fr-muted); }
 .fr-filter-bar select, .fr-filter-bar input { min-height: 37px; padding: 8px 11px; border: 1px solid #dbe2ea; border-radius: 7px; font-size: 12px; color: var(--fr-ink); background: #fff; min-width: 145px; }
