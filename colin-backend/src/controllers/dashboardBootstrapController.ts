@@ -53,7 +53,7 @@ export const getDashboardBootstrap = async (req: AuthRequest, res: Response) => 
     summary: read(getStaffDashboardSummary), cases: read(getAllCases), tasks: read(getAllTasks),
     events: read(getFirmEvents, { from: today, to: horizon.toISOString().slice(0, 10), type: 'all' }),
     performance: read(getMyPerformance), prospects: read(getAllProspects, { includeTerminal: 'true' }),
-    independent: read(listTasks, { limit: '200' }), audit: read(getMyAuditTrail, { limit: '10', page: '1' }),
+    independent: read(listTasks, { limit: '200' }), audit: read(getMyAuditTrail, { limit: '20', page: '1' }),
   };
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, no-transform');

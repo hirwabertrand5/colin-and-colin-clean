@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { assignAuditActor, pruneAuditActor } from '../utils/auditRetention';
 
 export type AuditAction =
   | 'USER_TPA_CHANGED'
@@ -70,6 +71,7 @@ export interface IAuditLog extends Document {
   independentTaskId?: mongoose.Types.ObjectId;
   actorUserId?: mongoose.Types.ObjectId;
   actorName: string;
+  actorKey?: string;
   action: AuditAction;
   message: string;
   detail?: string;
@@ -84,6 +86,7 @@ const AuditLogSchema = new Schema<IAuditLog>(
     independentTaskId: { type: Schema.Types.ObjectId, ref: 'IndependentTask', index: true },
     actorUserId: { type: Schema.Types.ObjectId, ref: 'User' },
     actorName: { type: String, required: true },
+    actorKey: { type: String },
     action: { type: String, required: true, index: true },
     message: { type: String, required: true },
     detail: { type: String },
@@ -98,5 +101,21 @@ AuditLogSchema.index({ independentTaskId: 1, createdAt: -1 });
 // both the filter and the sort without an in-memory sort.
 AuditLogSchema.index({ actorUserId: 1, createdAt: -1 });
 AuditLogSchema.index({ actorName: 1, createdAt: -1 });
+AuditLogSchema.index({ actorKey: 1, createdAt: -1, _id: -1 });
+
+AuditLogSchema.pre('validate', async function () {
+  await assignAuditActor(this, this.$session());
+});
+AuditLogSchema.post('save', async function (doc) {
+  await pruneAuditActor(doc.constructor as mongoose.Model<any>, doc.actorKey!, doc.$session());
+});
+AuditLogSchema.pre('insertMany', async function (docs: any[], options: any) {
+  for (const doc of docs) await assignAuditActor(doc, options?.session || null);
+});
+AuditLogSchema.post('insertMany', async function (docs: any) {
+  const actors = new Map<string, mongoose.ClientSession | null>();
+  for (const doc of docs) actors.set(doc.actorKey!, doc.$session?.() || null);
+  for (const [key, session] of actors) await pruneAuditActor(this as mongoose.Model<any>, key, session);
+});
 
 export default mongoose.model<IAuditLog>('AuditLog', AuditLogSchema);

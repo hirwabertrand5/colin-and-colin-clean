@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import AuditLog from '../models/auditLogModel';
+import { AUDIT_RETENTION_LIMIT } from '../utils/auditRetention';
 
 export const getAuditForCase = async (req: Request, res: Response) => {
   try {
@@ -16,8 +17,8 @@ export const getAuditForCase = async (req: Request, res: Response) => {
     const logs = await AuditLog.find({
       caseId: new mongoose.Types.ObjectId(caseId),
     })
-      .sort({ createdAt: -1 })
-      .limit(200);
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(AUDIT_RETENTION_LIMIT);
 
     res.json(logs);
   } catch (error) {

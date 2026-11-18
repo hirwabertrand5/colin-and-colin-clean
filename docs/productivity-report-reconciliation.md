@@ -18,11 +18,11 @@ The dashboard and report use Paid invoices received in the period (`paidAt`, wit
 | TPA | Recorded activity rate, then applicable user rate history |
 | Fees | Action base × TPA × timeliness × quality; row rounding reconciles to shared matter earnings |
 | Completed-work valuation | Valuation of actions completed in the period using all-time collections; available in the separate Completed work detail view |
-| Matter reference | Linked matter's `caseNo`; missing references display the matter ID and stay linked |
+| Matter reference | Court case number where present; transactional matters without a number display their parties and remain linked by matter ID |
 
 Bases are counted once per action. Fees add across the contributor role records. Pending fees are excluded from calculated totals and counted explicitly. A total with no calculated fees stays pending. Recorded zero scores produce a calculated zero fee; missing scores remain null. Quality scores and financial allocations are never invented to clear an exception.
 
-The default Earnings view can be changed to Completed work. Either view can be filtered for zero bases, pending quality/timeliness/fees and missing matter references. Matter links open the corresponding Key Action; billing links open its invoices. Exports contain full-period Fees Earned, the separate completed-work valuation, dashboard reconciliation, the chosen detail view and filters, source IDs, reasons and fee decimals. Work counts remain based on completion dates when switching detail views.
+The default Earnings view can be changed to Completed work. Both views retain the full table: date/time, staff and role, matter/parties, Key Action and section/percentage, collected base and matter payments, TPA, timeliness and status, quality and source, formula, fee and allocation/review status with billing links. Search, sorting, pagination, issue filters and Excel exports remain available. The overview retains work counts, pending reviews, averages, zero allocations, missing matter details, the dashboard comparison and contribution reconciliation. Source definitions are collapsed. Work counts remain based on completion dates when switching detail views.
 
 ## Verification
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import ProductivityOverview from './ProductivityOverview';
+import ProductivityRecords from './ProductivityRecords';
+import './firmReports.css';
 import { Download, FileText, BarChart3, TrendingUp, Users, Search, ArrowUpDown } from 'lucide-react';
 import { UserRole } from '../../App';
 import { FirmReportDateBasis, FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
@@ -58,8 +59,7 @@ const canAccess = (role: UserRole) =>
   role === 'managing_partner' ||
   role === 'executive_managing_partner';
 
-const fmtMoney = (n: number) =>
-  `RWF ${Math.round((Number(n) || 0) * 100) / 100}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const fmtMoney = (n: number) => `RWF ${(Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pickMoney = (...values: Array<number | undefined | null>) => values.find((value) => value !== undefined && value !== null) ?? 0;
 const withRowNumbers = (rows: Array<Array<unknown>>) => rows.map((row, index) => [index + 1, ...row]);
 const fmtPercent = (value?: number | null) => (value == null ? '—' : `${Math.round((Number(value) || 0) * 10) / 10}%`);
@@ -314,7 +314,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
     setClientProfitabilityPage((prev) => Math.min(prev, clientProfitabilityTotalPages));
   }, [clientProfitabilityTotalPages]);
 
-  const formatOptionalMoney = (value?: number | null) => (value == null || value === 0 ? 'N/A' : fmtMoney(value));
+  const formatOptionalMoney = (value?: number | null) => (value == null ? '—' : fmtMoney(value));
   const getPracticeArea = (row: ClientProfitabilityRow) => row.primaryPracticeArea || row.revenueByPracticeArea?.[0]?.type || 'Unclassified';
   const getStatusBucket = (row: ClientProfitabilityRow) =>
     row.completedMatters > 0 && row.activeMatters > 0 ? 'mixed' : row.completedMatters > 0 ? 'completed' : 'active';
@@ -553,13 +553,13 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
       ['Contribution records', String(productivitySummary?.contributionRecords ?? data.productivityRows?.length ?? 0)],
       ['Whole matters completed', String(productivitySummary?.completedTasks ?? 0)],
       ['Collected base for payment-period earnings', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? 0)],
-      ['Fees Earned (same payment basis as dashboard)', data.productivityReconciliation?.selectedPeriod.feesEarned == null ? 'Pending' : fmtMoney(data.productivityReconciliation.selectedPeriod.feesEarned)],
-      ['Completed-work valuation (separate completion-date measure)', productivitySummary?.completedWorkFeeValue == null ? 'Pending' : fmtMoney(productivitySummary.completedWorkFeeValue)],
+      ['Fees Earned · Payment date', data.productivityReconciliation?.selectedPeriod.feesEarned == null ? 'Pending' : fmtMoney(data.productivityReconciliation.selectedPeriod.feesEarned)],
+      ['Work valuation · Completion date', productivitySummary?.completedWorkFeeValue == null ? 'Pending' : fmtMoney(productivitySummary.completedWorkFeeValue)],
       ['Pending Quality Scores', String(productivitySummary?.pendingQualityScores ?? productivityRows.filter((row) => row.qualityScore == null).length)],
       ['Pending Timeliness Scores', String(productivitySummary?.pendingTimelinessScores ?? 0)],
       ['Payment-period earning records pending', String(data.productivityEarningsSummary?.pendingFeeRecords ?? 0)],
       ['Zero allocation Key Actions', String(productivitySummary?.zeroAllocationActions ?? 0)],
-      ['Missing matter references (distinct actions)', String(productivitySummary?.missingMatterReferences ?? 0)],
+      ['Missing matter details', String(productivitySummary?.missingMatterReferences ?? 0)],
       ['Average Quality Score', productivitySummary?.averageQualityScore == null ? '—' : `${productivitySummary.averageQualityScore}%`],
       ['Average Timeliness Score', productivitySummary?.averageTimelinessScore == null ? '—' : `${productivitySummary.averageTimelinessScore}%`],
     ]);
@@ -902,120 +902,21 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
   }
 
   return (
-    <div>
-      {/* Page Header */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-900 mb-1">{title ?? 'Firm Reports'}</h1>
-            <p className="text-gray-600">
-              {loading
-                ? 'Loading…'
-                : data
-                  ? `Period: ${data.range.from === '0001-01-01' ? 'All time' : `${data.range.from} → ${data.range.to}`} (${selectedReport === 'productivity' ? 'Earnings: payment date · Work: completion date' : DATE_BASIS_LABELS[data.dateBasis]})`
-                  : 'Comprehensive analytics and performance reports'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-start gap-3">
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value as FirmReportRange)}
-              className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-            >
-              {Object.entries(RANGE_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-
-            {selectedReport !== 'productivity' && <select
-              value={dateBasis}
-              onChange={(e) => setDateBasis(e.target.value as FirmReportDateBasis)}
-              className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-            >
-              {Object.entries(DATE_BASIS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>}
-
-            <select
-              value={selectedMemberId || ''}
-              onChange={(e) => setSelectedMemberId(e.target.value || undefined)}
-              className="px-4 py-2 border border-gray-300 rounded bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
-            >
-              <option value="">All team members</option>
-              {teamMembers.map((member) => (
-                <option key={member._id} value={member._id}>
-                  {member.name} ({member.role})
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={() => void exportWorkbook()}
-              disabled={!canExportReport}
-              className="inline-flex items-center px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700 disabled:opacity-60"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Export Active Report
-            </button>
-          </div>
+    <div className="firm-reports">
+      <header>
+        <div className="fr-page-heading">
+          <div><span className="fr-eyebrow">Firm performance</span><h1>{title ?? 'Firm Reports'}</h1><p className="fr-period">{loading ? 'Loading...' : data ? data.range.from === '0001-01-01' ? 'All time' : `${data.range.from} to ${data.range.to}` : 'Reports & analytics'}</p></div>
+          <button className="fr-export" onClick={() => void exportWorkbook()} disabled={!canExportReport}><Download size={15} />Export report</button>
         </div>
-
-        {/* Error */}
-        {error && (
-          <div className="mb-4 p-4 border border-red-200 bg-red-50 text-red-700 rounded">
-            {error}
-          </div>
-        )}
-
-        {dateRange === 'custom' && (
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            <label className="flex flex-col text-sm text-gray-700">
-              From
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="mt-1 px-3 py-2 border border-gray-300 rounded bg-white text-gray-900"
-              />
-            </label>
-            <label className="flex flex-col text-sm text-gray-700">
-              To
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="mt-1 px-3 py-2 border border-gray-300 rounded bg-white text-gray-900"
-              />
-            </label>
-            <div className="text-sm text-gray-500">
-              Use the custom range to compare exact date windows for the report.
-            </div>
-          </div>
-        )}
-
-        {/* Report Type Selector */}
-        <div className="flex gap-2 border-b border-gray-200 dark:border-slate-700">
-          {reportTypes.map((type) => {
-            const Icon = type.icon;
-            const active = selectedReport === type.id;
-            return (
-              <button
-                key={type.id}
-                onClick={() => setSelectedReport(type.id)}
-                className={`
-                  flex items-center px-4 py-3 border-b-2 font-medium text-sm transition-colors
-                  ${active ? 'border-gray-900 text-gray-900 dark:border-gray-100 dark:text-gray-100' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}
-                `}
-              >
-                <Icon className="w-4 h-4 mr-2" />
-                {type.label}
-              </button>
-            );
-          })}
+        <div className="fr-filter-bar">
+          <label>Reporting period<select aria-label="Reporting period" value={dateRange} onChange={event => setDateRange(event.target.value as FirmReportRange)}>{Object.entries(RANGE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Team member<select aria-label="Team member" value={selectedMemberId || ''} onChange={event => setSelectedMemberId(event.target.value || undefined)}><option value="">All team members</option>{teamMembers.map(member => <option key={member._id} value={member._id}>{member.name} ({member.role.replace(/_/g, ' ')})</option>)}</select></label>
+          {selectedReport !== 'productivity' && <label>Date basis<select aria-label="Date basis" value={dateBasis} onChange={event => setDateBasis(event.target.value as FirmReportDateBasis)}>{Object.entries(DATE_BASIS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+          {dateRange === 'custom' && <><label>From<input type="date" value={customFrom} onChange={event => setCustomFrom(event.target.value)} /></label><label>To<input type="date" min={customFrom || undefined} value={customTo} onChange={event => setCustomTo(event.target.value)} /></label></>}
         </div>
-      </div>
+        {error && <div role="alert" className="mb-4 p-4 border border-red-200 bg-red-50 text-red-700 rounded">{error}</div>}
+        <nav className="fr-tabs" aria-label="Report tabs">{reportTypes.map(type => { const Icon = type.icon; return <button key={type.id} onClick={() => setSelectedReport(type.id)} aria-current={selectedReport === type.id ? 'page' : undefined}><Icon />{type.label}</button>; })}</nav>
+      </header>
 
       {/* Loading empty state */}
       {loading && !data ? (
@@ -1232,76 +1133,12 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
         <div className="space-y-6">
           {data && <ProductivityOverview data={data} />}
 
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <h2 className="font-semibold text-gray-900 mb-2">{productivityView === 'earnings' ? 'Earnings detail for the payment period' : 'Completed-work contribution records'}</h2>
-            <p className="text-sm text-gray-600 mb-4">{productivityView === 'earnings' ? 'These allocations use payments received in the selected period, just like the dashboard. Action completion dates may be outside that period.' : 'These actions were completed in the selected period. Their valuation uses current all-time collections and scores.'} Filters narrow the records and exported detail.</p>
-            {productivityView === 'completedWork' && <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 mb-4 text-sm text-gray-700" aria-label="Completed-work valuation">
-              Completed-work valuation: <strong>{data?.productivitySummary?.completedWorkFeeValue == null ? 'Pending' : fmtMoney(data.productivitySummary.completedWorkFeeValue)}</strong>. This values actions completed in the period. Fees Earned above follows payments received in the period.
-            </div>}
-            <div className="flex flex-wrap gap-3 mb-4">
-              <select aria-label="Productivity detail view" value={productivityView} onChange={event => { setProductivityView(event.target.value as 'earnings' | 'completedWork'); setProductivityIssue('all'); setProductivitySearch(''); setProductivityPage(1); }} className="px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900">
-                <option value="earnings">Earnings (matches dashboard)</option><option value="completedWork">Completed work</option>
-              </select>
-              <input aria-label="Search productivity records" placeholder="Search matter, Key Action or staff" value={productivitySearch} onChange={event => { setProductivitySearch(event.target.value); setProductivityPage(1); }} className="px-3 py-2 border border-gray-300 rounded text-sm text-gray-900" />
-              <select aria-label="Filter productivity issues" value={productivityIssue} onChange={event => { setProductivityIssue(event.target.value); setProductivityPage(1); }} className="px-3 py-2 border border-gray-300 rounded bg-white text-sm text-gray-900">
-                <option value="all">All records</option><option value="zero">Zero collected base</option><option value="quality">Quality pending</option><option value="timeliness">Timeliness pending</option><option value="reference">Missing matter reference</option><option value="pending">Fee pending</option>
-              </select>
-              <span className="self-center text-sm text-gray-500" role="status">{sortedProductivityRows.length} of {productivityRows.length} records</span>
-            </div>
-            {data && productivityView === 'earnings' && <p className="mb-4 text-sm text-gray-700" aria-label="Earnings detail total">Detail fees{productivityIssue !== 'all' || productivitySearch ? ' (filtered)' : ''}: <strong>{sortedProductivityRows.some(row => row.feeEarned != null) ? fmtMoney(sortedProductivityRows.reduce((sum, row) => sum + (row.feeEarned || 0), 0)) : sortedProductivityRows.length ? 'Pending' : fmtMoney(0)}</strong></p>}
-
-            {!data ? (
-              <div className="text-gray-500">No data.</div>
-            ) : sortedProductivityRows.length === 0 ? (
-              <div className="text-gray-500">{productivityRows.length ? 'No records match these filters.' : productivityView === 'earnings' ? 'No completed Key Action allocations funded by payments in this period.' : 'No attributed completed Key Actions in this period. Zero allocations and pending scores are included when work is recorded.'}</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-[1400px] w-full">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
-                      <SortableHeader label="Action completed" column="datetime" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="Staff" column="staff" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="Matter" column="matter" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="Key Action" column="task" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="Collected Key Action Base" column="taskFeeCollected" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="right" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="TPA" column="tpa" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="Timeliness Score" column="timeliness" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
-                      <SortableHeader label="Quality Score" column="quality" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="center" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Formula</th>
-                      <SortableHeader label="Fee Earned" column="feeEarned" sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} align="right" className="px-4 py-3 text-xs font-medium text-gray-700 uppercase" />
-                      <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Allocation / review status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {pagedProductivityRows.map((row, index) => (
-                      <tr key={row.id || `${row.staff}-${row.completedAt}-${index}`} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm text-gray-500">{(safeProductivityPage - 1) * PRODUCTIVITY_PAGE_SIZE + index + 1}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{fmtDateTime(row.completedAt, data.productivityReconciliation?.timeZone || 'Africa/Kigali')}</td>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.staff}<div className="text-xs text-gray-500">{row.assignmentRole}</div></td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{row.caseId ? <Link to={`/cases/${row.caseId}?tab=case-management&step=${encodeURIComponent(row.keyActionKey || '')}`} className="text-blue-700 underline">{row.matter}</Link> : row.matter}<div className="text-xs text-gray-500">{row.matterParties}</div></td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{row.task}<div className="text-xs text-gray-500">{row.workflowStage} · {row.keyActionPercent ?? row.taskProgressPercent}%</div></td>
-                        <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">{fmtMoney(row.taskFeeCollected ?? row.taskFee)}<div className="text-xs font-normal text-gray-500">Matter paid: {fmtMoney(row.collectedAmount ?? 0)}</div></td>
-                        <td className="px-4 py-3 text-sm text-center text-gray-700">{fmtPercent(row.tpaPercent)}</td>
-                        <td className="px-4 py-3 text-sm text-center text-gray-700">
-                          {row.timelinessScore == null ? '—' : `${row.timelinessScore}%`}
-                          <div className="text-[11px] text-gray-500">{row.timelinessScore == null ? '—' : row.timelinessStatus}</div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-center text-gray-700">
-                          {row.qualityScore == null ? 'Pending' : `${row.qualityScore}%`}
-                          <div className="text-xs text-gray-500">{row.qualitySource}</div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-700 max-w-[360px] break-words">{row.formula}</td>
-                        <td className="px-4 py-3 text-sm text-right font-medium text-gray-900">
-                          {row.feeEarned == null ? 'Pending' : fmtMoney(row.feeEarned)}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-600">{row.issues?.length ? row.issues.join(' · ') : row.allocationStatus || 'Calculated'}{row.caseId && <div className="mt-1"><Link className="text-blue-700 underline" to={`/cases/${row.caseId}?tab=billing`}>Review matter billing</Link></div>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+          <section className="fr-records" aria-label="Productivity records">
+            <ProductivityRecords data={data} rows={pagedProductivityRows} filteredRows={sortedProductivityRows} total={productivityRows.length} startIndex={(safeProductivityPage - 1) * PRODUCTIVITY_PAGE_SIZE}
+              view={productivityView} setView={view => { setProductivityView(view); setProductivityIssue('all'); setProductivitySearch(''); setProductivityPage(1); }}
+              search={productivitySearch} setSearch={value => { setProductivitySearch(value); setProductivityPage(1); }}
+              issue={productivityIssue} setIssue={value => { setProductivityIssue(value); setProductivityPage(1); }}
+              sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} />
             {sortedProductivityRows.length > PRODUCTIVITY_PAGE_SIZE && (
               <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
                 <span>
@@ -1327,7 +1164,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
                 </div>
               </div>
             )}
-          </div>
+          </section>
         </div>
       )}
 

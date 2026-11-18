@@ -13,6 +13,7 @@ import { buildRoleByName, computeEarnedFee } from '../src/utils/workflowPercenta
 import { getMatterQualityScore } from '../src/utils/caseEarnedFees';
 import { invoicePaymentDate } from '../src/utils/invoicePaymentDate';
 import { isWithinReportRange, resolveOptionalReportRange } from '../src/utils/reportRange';
+import { matterReference } from '../src/utils/matterReference';
 
 async function main() {
   const oid = () => new mongoose.Types.ObjectId();
@@ -73,8 +74,13 @@ async function main() {
   assert.equal(report.rows.find(row => row.matter === 'UNPAID').allocationStatus, 'No Paid invoices linked to matter');
   assert.equal(report.rows.find(row => row.matter === 'MISSING-WEIGHT').allocationStatus, 'Missing Key Action percentage');
   const referenceRow = report.rows.find(row => row.caseId === String(missingReference._id));
-  assert.equal(referenceRow.matterReference, null);
-  assert(referenceRow.matter.includes(String(missingReference._id)), 'Missing reference remains traceable by matter ID');
+  assert.equal(referenceRow.matterReference, 'Fixture Client');
+  assert.equal(referenceRow.matter, 'Fixture Client', 'Transactional matters display parties');
+  assert(!referenceRow.issues.includes('Matter reference missing'));
+  for (const caseNo of ['N/A', 'NA', '', 'n/a', 'n.a.', null]) {
+    assert.equal(matterReference({ caseNo, parties: 'Transactional parties' }), 'Transactional parties');
+  }
+  assert.equal(matterReference({ caseNo: 'RC 001/2026', parties: 'Parties' }), 'RC 001/2026');
   assert.equal(report.reconciliation.undatedContributionRecords, 1);
   assert.equal(report.reconciliation.allTimeContributionRecords,
     report.rows.length + report.reconciliation.outsidePeriodContributionRecords + report.reconciliation.undatedContributionRecords);

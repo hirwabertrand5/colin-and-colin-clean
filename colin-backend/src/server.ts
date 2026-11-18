@@ -12,10 +12,13 @@ import { migrateLegacyRetainerSubscriptions } from './services/retainerService';
 import Notification from './models/notificationModel';
 import EmailDelivery from './models/emailDeliveryModel';
 import EmailWebhook from './models/emailWebhookModel';
+import AuditLog from './models/auditLogModel';
+import { enforceAuditRetention } from './utils/auditRetention';
 
 const PORT = process.env.PORT || 5000;
 
 connectDB().then(async () => {
+  await enforceAuditRetention(AuditLog, true);
   // Do not start concurrent scanners/delivery workers before their unique guards exist.
   await Promise.all([Notification.init(), EmailDelivery.init(), EmailWebhook.init()]);
   try {

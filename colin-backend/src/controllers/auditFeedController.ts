@@ -3,6 +3,7 @@ import AuditLog from '../models/auditLogModel';
 import Case from '../models/caseModel';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { resolveOptionalReportRange } from '../utils/reportRange';
+import { AUDIT_RETENTION_LIMIT } from '../utils/auditRetention';
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -27,9 +28,9 @@ const withCaseInfo = async (logs: any[]) => {
 // GET /api/audit/recent?limit=20
 export const getRecentAuditFeed = async (req: AuthRequest, res: Response) => {
   try {
-    const limit = Math.min(Number(req.query.limit) || 20, 50);
+    const limit = Math.min(Math.max(Math.floor(Number(req.query.limit) || AUDIT_RETENTION_LIMIT), 1), AUDIT_RETENTION_LIMIT);
 
-    const logs = await AuditLog.find().sort({ createdAt: -1 }).limit(limit).lean();
+    const logs = await AuditLog.find().sort({ createdAt: -1, _id: -1 }).limit(limit).lean();
 
     res.json(await withCaseInfo(logs));
   } catch {
@@ -37,28 +38,19 @@ export const getRecentAuditFeed = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// GET /api/audit/mine?limit=50&page=1&range=weekly | from=YYYY-MM-DD&to=YYYY-MM-DD
-// The signed-in user's own activity trail — every recorded action they carried
-// out, newest first, with the related matter attached. Members are matched by
-// user id, with a name fallback for older records stored before actorUserId.
-// The optional period uses the same range rules as the staff dashboard summary,
-// so the trail always describes the exact window shown on the dashboard.
-//
-// Pagination is server-side (page + limit) so a long period can be navigated in
-// full without ever silently truncating the list — the response always reports
-// the exact `total`, so the UI can never present a partial page as the complete
-// history. Sorting is applied server-side on indexed/text fields only.
+// Latest retained activity for the signed-in member, optionally filtered by
+// period. Sorting and pagination operate only on this capped twenty-row set.
 export const getMyAuditTrail = async (req: AuthRequest, res: Response) => {
   try {
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
-    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Math.floor(Number(req.query.limit) || AUDIT_RETENTION_LIMIT), 1), AUDIT_RETENTION_LIMIT);
+    const requestedPage = Math.max(Math.floor(Number(req.query.page) || 1), 1);
 
     const userId = String(req.user?.id || '').trim();
     const userName = String(req.user?.name || '').trim();
 
     const identityClauses: any[] = [];
     if (userId) identityClauses.push({ actorUserId: userId });
-    if (userName) identityClauses.push({ actorName: new RegExp(`^\\s*${escapeRegex(userName)}\\s*$`, 'i') });
+    if (userName) identityClauses.push({ actorUserId: null, actorName: new RegExp(`^\\s*${escapeRegex(userName)}\\s*$`, 'i') });
 
     if (!identityClauses.length) return res.status(401).json({ message: 'Unauthorized.' });
 
@@ -81,22 +73,22 @@ export const getMyAuditTrail = async (req: AuthRequest, res: Response) => {
     };
     const sortField = SORTABLE_FIELDS[String(req.query.sortBy || '').trim()] || 'createdAt';
 
-    const [total, logs] = await Promise.all([
-      AuditLog.countDocuments(query),
-      AuditLog.find(query)
-        .sort({ [sortField]: sortDir, createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-    ]);
-
+    const logs = await AuditLog.find(query).sort({ createdAt: -1, _id: -1 }).limit(AUDIT_RETENTION_LIMIT).lean();
+    logs.sort((a: any, b: any) => {
+      const comparison = sortField === 'createdAt' ? +new Date(a.createdAt) - +new Date(b.createdAt)
+        : String(a[sortField] || '').localeCompare(String(b[sortField] || ''));
+      return comparison * sortDir || String(b._id).localeCompare(String(a._id));
+    });
+    const total = logs.length;
     const pages = Math.max(1, Math.ceil(total / limit));
+    const page = Math.min(requestedPage, pages);
     res.json({
-      items: await withCaseInfo(logs),
+      items: await withCaseInfo(logs.slice((page - 1) * limit, page * limit)),
       total,
       page,
       pages,
       limit,
+      retentionLimit: AUDIT_RETENTION_LIMIT,
     });
   } catch {
     res.status(500).json({ message: 'Failed to fetch your activity trail.' });

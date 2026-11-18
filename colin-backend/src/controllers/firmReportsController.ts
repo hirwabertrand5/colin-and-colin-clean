@@ -23,6 +23,7 @@ import {
 } from '../utils/keyActionEarnings';
 import { computeCaseEarnedFees, normalizeEffectiveWorkflowSteps } from '../utils/caseEarnedFees';
 import { buildProductivityReconciliation } from '../utils/productivityReport';
+import { matterReference as displayMatterReference } from '../utils/matterReference';
 import {
   getCollectedValueFromProgress,
   getDirectMatterCost,
@@ -316,8 +317,7 @@ export const buildCollectedKeyActionRows = ({
           : item.action.percentage === 0 ? 'Key Action allocated 0%'
           : earnings.collectedAmount <= 0 ? 'No Paid invoices linked to matter'
           : taskFeeCollected === 0 ? 'Allocation below currency precision' : 'Allocated';
-        const sourceReference = String(matter?.caseNo || '').trim();
-        const matterReference = /^n\/a$/i.test(sourceReference) ? '' : sourceReference;
+        const matterReference = displayMatterReference(matter);
         const caseCompletedAt = effectiveSteps.map((step: any) => parseTaskDate(step.completedAt))
           .filter((date: Date | null): date is Date => Boolean(date))
           .sort((a: Date, b: Date) => b.getTime() - a.getTime())[0] || null;
@@ -353,7 +353,7 @@ export const buildCollectedKeyActionRows = ({
           staff: member.name,
           assignmentRole: member.role,
           role,
-          matter: matterReference || `Unreferenced matter (${caseId})`,
+          matter: matterReference,
           matterReference: matterReference || null,
           matterParties: String(matter?.parties || ''),
           allocationStatus,
@@ -458,7 +458,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
 
     const [invoicesByInvoiceDate, invoicesByPaymentDate, tasksCompleted, allTaskLinks, users, prospectsByCreator, reportsByGenerator] = await Promise.all([
       staffInputs ? [] : Invoice.find(invoicesByInvoiceDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
-      staffInputs ? [] : Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt').lean(),
+      staffInputs ? [] : Invoice.find(invoicesByPaymentDateQuery).select('amount status date caseId proofUrl createdAt updatedAt paidAt').lean(),
       staffInputs ? staffInputs[1].filter((task: any) => task.status === 'Completed' && isWithinReportRange(task.completedAt, period)) : Task.find(tasksByDateQuery).select('assignee supervisor title description workflowStageKey workflowStepKey completedAt updatedAt dueDate caseId createdAt startDate checklist qualityScore tpaSnapshots').lean(),
       staffInputs ? staffInputs[1] : Task.find()
         .select('caseId assignee supervisor title description workflowStepKey workflowStageKey completedAt updatedAt dueDate createdAt startDate checklist qualityScore status taskStages tpaSnapshots')
@@ -881,7 +881,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     }
     for (const inv of invoicesByPaymentDate as any[]) {
       if (selectedMemberNameNormalized && !selectedMatterIds.has(String(inv.caseId || ''))) continue;
-      const dt = inv.updatedAt ? new Date(inv.updatedAt) : toDate;
+      const dt = invoicePaymentDate(inv) ? new Date(invoicePaymentDate(inv)) : toDate;
       const key = monthKey(dt);
       const item = monthsMap.get(key) || { month: key, billed: 0, collected: 0 };
       item.collected += Number(inv.amount) || 0;
@@ -892,7 +892,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
     const expensesInRange = await PettyCashExpense.find({
       date: { $gte: fromISO, $lte: toISO },
     })
-      .select('amount refundAmount category chargeType title date caseNoSnapshot partiesSnapshot')
+      .select('amount refundAmount category chargeType title date caseId caseNoSnapshot partiesSnapshot')
       .lean();
 
     const clientRelatedExpenses = (expensesInRange as any[])
@@ -966,8 +966,8 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       const detail = {
         id: caseId,
         recordType: 'Matter',
-        recordLabel: String(matter.caseNo || matter.parties || 'Matter'),
-        matterNo: String(matter.caseNo || ''),
+        recordLabel: displayMatterReference(matter),
+        matterNo: displayMatterReference(matter),
         status: String(matter.status || 'Open'),
         practiceArea: selectedPathLabel(matter, workflowTemplateMatterTypeById),
         contractValue: roundMoney(getContractValue(matter)),
@@ -1102,7 +1102,7 @@ export const getFirmReports = async (req: AuthRequest, res: Response) => {
       financials.collected += amount;
       matterFinancialsByCaseId.set(caseId, financials);
       const invoiceDate = inv.date ? new Date(`${String(inv.date).slice(0, 10)}T00:00:00.000Z`) : null;
-      const paymentDate = inv.updatedAt ? new Date(inv.updatedAt) : null;
+      const paymentDate = invoicePaymentDate(inv) ? new Date(invoicePaymentDate(inv)) : null;
       if (invoiceDate && paymentDate && Number.isFinite(invoiceDate.getTime()) && Number.isFinite(paymentDate.getTime())) {
         const diffDays = Math.max(0, (paymentDate.getTime() - invoiceDate.getTime()) / (1000 * 60 * 60 * 24));
         current.collectionDaysTotal += diffDays;

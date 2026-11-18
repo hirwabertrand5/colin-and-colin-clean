@@ -50,8 +50,8 @@ import './AssociateDashboard.css';
 
 /** Every table on this dashboard lists 10 rows per page, like the report tables. */
 const PAGE_SIZE = 10;
-/** The My Activity Trail also lists 10 rows per page. */
-const AUDIT_PAGE_SIZE = PAGE_SIZE;
+/** Activity retention is capped at twenty entries per member. */
+const AUDIT_PAGE_SIZE = 20;
 
 type Tone = 'slate' | 'green' | 'amber' | 'red' | 'blue' | 'purple';
 type FinancialScope = 'own' | 'matter' | 'portfolio' | 'client';
@@ -2021,7 +2021,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
         <div className="lg:col-span-3 bg-white border border-gray-200 rounded-lg p-5">
           <SectionHeader
             title="My Activity Trail"
-            description={`Every action recorded against your account${me?.name ? ` (${me.name.trim()})` : ''}, newest first, with the exact time it was performed.`}
+            description="Your latest 20 recorded actions."
           />
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
             <span>
@@ -2032,8 +2032,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                   : auditTotal > 0
                     ? `${auditTotal} recorded action${auditTotal === 1 ? '' : 's'}${hasWindow && period ? ` in ${period.label}` : ' on your account'}${auditLoading ? ' · refreshing…' : ''}.`
                     : hasWindow && period
-                      ? `No activity was recorded on your account in ${period.label}.`
-                      : 'No activity has been recorded on your account yet. Actions you take on matters appear here with their exact timestamp.'}
+                      ? 'No retained activity in this period.'
+                      : 'No recent activity.'}
             </span>
             <span className="rounded-full bg-gray-100 px-3 py-1 font-medium text-gray-600">
               {hasWindow && period ? `Filtered: ${period.from} → ${period.to}` : 'All time'} · newest first
@@ -2066,7 +2066,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
                 ) : auditItems.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
-                      {hasWindow && period ? `No activity was recorded on your account in ${period.label}.` : 'No activity has been recorded on your account yet. Actions you take on matters appear here with their exact timestamp.'}
+                      {hasWindow && period ? 'No retained activity in this period.' : 'No recent activity.'}
                     </td>
                   </tr>
                 ) : (

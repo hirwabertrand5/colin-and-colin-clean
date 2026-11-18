@@ -31,7 +31,7 @@ export type AuditFeedItem = {
   case?: { _id: string; caseNo: string; parties: string } | null;
 };
 
-/** Server-paginated activity trail so a long period is never silently truncated. */
+/** Pages from the latest twenty retained audit entries. */
 export type AuditTrailPage = {
   items: AuditFeedItem[];
   total: number;
@@ -51,9 +51,7 @@ export const getRecentAuditFeed = async (limit = 10): Promise<AuditFeedItem[]> =
 /**
  * The signed-in member's own activity trail (staff dashboards), newest first.
  *
- * Server-side paginated (page + limit) and sharing the same reporting-period
- * windows as the staff dashboard summary, so the trail always describes the
- * exact window shown on the dashboard and can be navigated in full.
+ * Capped at twenty retained entries, with optional period filtering.
  */
 export const getMyAuditTrail = async (params?: {
   limit?: number;
@@ -67,7 +65,7 @@ export const getMyAuditTrail = async (params?: {
   sortDir?: 'asc' | 'desc';
 }): Promise<AuditTrailPage> => {
   const qs = new URLSearchParams();
-  qs.set('limit', String(params?.limit ?? 100));
+  qs.set('limit', String(Math.min(20, Math.max(1, params?.limit ?? 20))));
   qs.set('page', String(params?.page ?? 1));
   if (params?.range) qs.set('range', params.range);
   if (params?.from) qs.set('from', params.from);

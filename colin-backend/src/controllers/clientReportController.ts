@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import Case from '../models/caseModel';
 import Task from '../models/taskModel';
 import AuditLog from '../models/auditLogModel';
+import { AUDIT_RETENTION_LIMIT } from '../utils/auditRetention';
 import Event from '../models/eventModel';
 import Document from '../models/documentModel';
 
@@ -351,7 +352,8 @@ export const generateReportForCase = async (req: AuthRequest, res: Response) => 
         caseId: new mongoose.Types.ObjectId(caseId),
         createdAt: { $gte: periodStart, $lte: periodEnd },
       })
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(AUDIT_RETENTION_LIMIT)
         .lean(),
 
       Event.find({
