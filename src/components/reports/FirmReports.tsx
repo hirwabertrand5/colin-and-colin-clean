@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import ProductivityOverview from './ProductivityOverview';
-import ProductivityRecords from './ProductivityRecords';
+import ProductivityReportContent from './ProductivityReportContent';
 import './firmReports.css';
 import { Download, FileText, BarChart3, TrendingUp, Users, Search, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { UserRole } from '../../App';
 import { FirmReportDateBasis, FirmReportRange, FirmReportResponse, getFirmReports } from '../../services/firmReportsService';
 import { getStaffUsers, User } from '../../services/userService';
 import usePageTitle from '../../hooks/usePageTitle';
+import useProductivityReport from '../../hooks/useProductivityReport';
+import { buildProductivityExport, exportProductivityReport } from '../../utils/productivityReportExport';
 import { downloadWorkbook } from '../../utils/excelExport';
 import SortableHeader from '../ui/SortableHeader';
 import { sortRows, SortDir } from '../../utils/tableSort';
 import { REPORT_PERIOD_LABELS } from '../../constants/reportPeriods';
-import { PRODUCTIVITY_LABELS as productivityLabels } from '../../constants/productivityLabels';
 
 type FirmReportTab =
   | 'overview'
@@ -376,66 +376,17 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
     [orderedTeam, teamSortKey, teamSortDir],
   );
 
-  const [productivitySortKey, setProductivitySortKey] = useState('');
-  const [productivitySortDir, setProductivitySortDir] = useState<SortDir>('asc');
-  const [productivityPage, setProductivityPage] = useState(1);
-  const [productivityView, setProductivityView] = useState<'earnings' | 'completedWork'>('earnings');
-  const [productivityIssue, setProductivityIssue] = useState('all');
-  const [productivitySearch, setProductivitySearch] = useState('');
-  const PRODUCTIVITY_PAGE_SIZE = 10;
-  const handleProductivitySort = (column: string) => {
-    if (productivitySortKey === column) {
-      setProductivitySortDir(productivitySortDir === 'asc' ? 'desc' : 'asc');
-    } else {
-      setProductivitySortKey(column);
-      setProductivitySortDir('asc');
-    }
-    setProductivityPage(1);
-  };
-  const productivityRows = (productivityView === 'earnings' ? data?.productivityEarningsRows : data?.productivityRows) || [];
-  const filteredProductivityRows = productivityRows.filter(row => {
-    const matchesIssue = productivityIssue === 'all'
-      || (productivityIssue === 'zero' && (row.taskFeeCollected ?? row.taskFee) === 0)
-      || (productivityIssue === 'quality' && row.qualityScore == null)
-      || (productivityIssue === 'timeliness' && row.timelinessScore == null)
-      || (productivityIssue === 'reference' && !row.matterReference)
-      || (productivityIssue === 'pending' && row.feeEarned == null);
-    return matchesIssue && [row.staff, row.matter, row.task, row.caseId, row.matterParties].join(' ').toLowerCase().includes(productivitySearch.toLowerCase().trim());
+  const productivityReport = useProductivityReport(data);
+  const {
+    productivitySortKey, productivitySortDir, productivityView,
+    productivityIssue, productivitySearch, setProductivityPage, sortedProductivityRows,
+  } = productivityReport;
+
+  const productivityExportOptions = () => ({
+    data: data!, rows: sortedProductivityRows, view: productivityView,
+    periodLabel: RANGE_LABELS[dateRange], issue: productivityIssue, search: productivitySearch,
+    sortKey: productivitySortKey, sortDir: productivitySortDir,
   });
-  const sortedProductivityRows = useMemo(
-    () => sortRows(filteredProductivityRows, productivitySortKey, productivitySortDir, (row: any) => {
-      switch (productivitySortKey) {
-        case 'datetime':
-          return row?.completedAt || '';
-        case 'staff':
-          return row?.staff || '';
-        case 'matter':
-          return row?.matter || '';
-        case 'task':
-          return row?.task || row?.taskTitle || '';
-        case 'taskFeeCollected':
-          return Number(row?.taskFeeCollected ?? row?.taskFee ?? 0);
-        case 'tpa':
-          return Number(row?.tpaPercent ?? 0);
-        case 'timeliness':
-          return row?.timelinessScore == null ? -1 : Number(row.timelinessScore);
-        case 'quality':
-          return row?.qualityScore == null ? -1 : Number(row.qualityScore);
-        case 'feeEarned':
-          return row?.feeEarned == null ? -1 : Number(row.feeEarned);
-        default:
-          return row?.completedAt || '';
-      }
-    }),
-    [data?.productivityRows, data?.productivityEarningsRows, productivityView, productivityIssue, productivitySearch, productivitySortKey, productivitySortDir],
-  );
-  // 10 rows per page. Page resets on period/report/member changes below.
-  const productivityTotalPages = Math.max(1, Math.ceil(sortedProductivityRows.length / PRODUCTIVITY_PAGE_SIZE));
-  const safeProductivityPage = Math.min(Math.max(1, productivityPage), productivityTotalPages);
-  const pagedProductivityRows = sortedProductivityRows.slice(
-    (safeProductivityPage - 1) * PRODUCTIVITY_PAGE_SIZE,
-    safeProductivityPage * PRODUCTIVITY_PAGE_SIZE
-  );
 
   const [caseSortKey, setCaseSortKey] = useState('');
   const [caseSortDir, setCaseSortDir] = useState<SortDir>('asc');
@@ -546,25 +497,6 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
         return (b.activeCases || 0) - (a.activeCases || 0);
       });
 
-    // Export every matching row in the same order as the table, across pages.
-    const productivityRows = sortedProductivityRows;
-    const productivitySummary = data.productivitySummary;
-    const productivitySummaryRows = withRowNumbers([
-      [productivityLabels.keyActionsChecked, data.productivityReconciliation?.selectedPeriod.keyActionsChecked == null ? 'Unavailable' : String(data.productivityReconciliation.selectedPeriod.keyActionsChecked)],
-      [productivityLabels.keyActionsCompleted, String(productivitySummary?.keyActionsCompleted ?? 0)],
-      [productivityLabels.keyActionRecords, String(productivitySummary?.contributionRecords ?? data.productivityRows?.length ?? 0)],
-      [productivityLabels.mattersCompleted, String(productivitySummary?.completedTasks ?? 0)],
-      ['Collected base for payment-period earnings', fmtMoney(productivitySummary?.totalTaskFeeCollected ?? 0)],
-      ['Fees Earned · Payment date', data.productivityReconciliation?.selectedPeriod.feesEarned == null ? 'Pending' : fmtMoney(data.productivityReconciliation.selectedPeriod.feesEarned)],
-      [`${productivityLabels.staffEarnedFees} · ${productivityLabels.taskDate}`, productivitySummary?.completedWorkFeeValue == null ? 'Pending' : fmtMoney(productivitySummary.completedWorkFeeValue)],
-      ['Pending Quality Scores', String(productivitySummary?.pendingQualityScores ?? productivityRows.filter((row) => row.qualityScore == null).length)],
-      ['Pending Timeliness Scores', String(productivitySummary?.pendingTimelinessScores ?? 0)],
-      ['Payment-period earning records pending', String(data.productivityEarningsSummary?.pendingFeeRecords ?? 0)],
-      [productivityLabels.zeroBase, String(productivitySummary?.zeroAllocationActions ?? 0)],
-      [productivityLabels.missingReferences, String(productivitySummary?.missingMatterReferences ?? 0)],
-      ['Average Quality Score', productivitySummary?.averageQualityScore == null ? '—' : `${productivitySummary.averageQualityScore}%`],
-      ['Average Timeliness Score', productivitySummary?.averageTimelinessScore == null ? '—' : `${productivitySummary.averageTimelinessScore}%`],
-    ]);
     const numberedOverviewTeamRows = withRowNumbers(
       orderedTeamRows.map((member) => [
         member.name,
@@ -576,29 +508,6 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
         pickMoney(member.revenueAttributed, member.earnedFees),
         member.grossFeesHandled || 0,
         member.firmRetainedEarnings || 0,
-      ])
-    );
-    const numberedProductivityRows = withRowNumbers(
-      productivityRows.map((row) => [
-        fmtDateTime(row.completedAt, data.productivityReconciliation?.timeZone || 'Africa/Kigali'),
-        row.staff,
-        row.matter,
-        row.task,
-        (row.taskFeeCollected ?? row.taskFee) || 0,
-        `${row.tpaPercent || 0}%`,
-        row.timelinessScore == null ? '—' : `${row.timelinessScore}%`,
-        row.qualityScore == null ? '—' : `${row.qualityScore}%`,
-        row.formula,
-        row.feeEarned == null ? '—' : row.feeEarned,
-        row.caseId || '',
-        row.assignmentRole || '',
-        row.workflowStage || '',
-        row.keyActionPercent ?? '',
-        row.contractValue ?? '',
-        row.collectedAmount ?? '',
-        row.allocationStatus || '',
-        row.qualitySource || '',
-        row.issues?.join('; ') || '',
       ])
     );
     const numberedCaseTypes = withRowNumbers(
@@ -664,53 +573,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
             ],
           };
         case 'productivity':
-          return {
-            title: 'Productivity Report',
-            sections: [
-              {
-                title: 'Selected Filters',
-                headers: ['#', 'Filter', 'Value'],
-                rows: withRowNumbers([
-                  ['Selected Staff Member', data.selectedMember?.name || 'All team members'],
-                  ['Selected Period', `${RANGE_LABELS[dateRange]} (${data.range.from} to ${data.range.to})`],
-                  ['Work date basis', 'Key Action completion date'],
-                  ['Earnings date basis', data.productivityReconciliation?.dashboardFeeBasis || 'Paid invoice payment date'],
-                  ['Detail view', productivityView === 'earnings' ? `${productivityLabels.feesEarned} · ${productivityLabels.paymentDate}` : `${productivityLabels.keyActionsCompleted} · ${productivityLabels.taskDate}`],
-                  ['Detail collected base source', productivityView === 'earnings' ? 'Paid invoices received in selected period, allocated through the Case Workspace earnings engine' : data.productivityReconciliation?.collectionBasis || 'Linked Paid invoices'],
-                  ['Timezone', data.productivityReconciliation?.timeZone || 'Africa/Kigali'],
-                  ['Detail issue filter', productivityIssue],
-                  ['Detail search', productivitySearch || 'None'],
-                  [`Exported ${productivityLabels.keyActionRecords}`, String(productivityRows.length)],
-                ]),
-              },
-              {
-                title: 'Productivity Summary',
-                headers: ['#', 'Metric', 'Value'],
-                rows: productivitySummaryRows,
-              },
-              {
-                title: 'Dashboard Reconciliation',
-                headers: ['Metric', 'Selected period', 'All time', 'Source'],
-                rows: data.productivityReconciliation ? [
-                  [productivityLabels.keyActionsChecked, data.productivityReconciliation.selectedPeriod.keyActionsChecked, data.productivityReconciliation.allTime.keyActionsChecked, productivityLabels.taskDate],
-                  [productivityLabels.sectionsCompleted, data.productivityReconciliation.selectedPeriod.sectionsCompleted, data.productivityReconciliation.allTime.sectionsCompleted, 'Final Key Action'],
-                  [productivityLabels.feesEarned, data.productivityReconciliation.selectedPeriod.feesEarned ?? 'Pending', data.productivityReconciliation.allTime.feesEarned ?? 'Pending', data.productivityReconciliation.dashboardFeeBasis],
-                  ['All-Time Key Action Records', data.productivityReconciliation.allTimeContributionRecords, '', 'All Time'],
-                  ['Key Action Records Outside Period', data.productivityReconciliation.outsidePeriodContributionRecords, '', productivityLabels.taskDate],
-                  ['Key Action Records Without Completion Date', data.productivityReconciliation.undatedContributionRecords, '', 'Excluded from dated periods'],
-                ] : [],
-              },
-              {
-                title: `${productivityLabels.metrics} · ${productivityView === 'earnings' ? productivityLabels.paymentDate : productivityLabels.taskDate}`,
-                headers: ['#', 'Action completed', 'Staff', 'Matter', 'Key Action', 'Collected Key Action Base', 'TPA', 'Timeliness Score', 'Quality Score', 'Formula', 'Fee Earned', 'Matter ID', 'Assignment role', 'Section', 'Key Action %', 'Matter contract value', 'Matter Paid invoices', 'Allocation status', 'Quality source', 'Review issues'],
-                rows: numberedProductivityRows,
-                currencyColumns: [6, 11, 16, 17],
-                currencyDecimals: 2,
-                percentColumns: [7, 8, 9],
-                centerColumns: [2, 6, 7, 8, 9, 11],
-              },
-            ],
-          };
+          return buildProductivityExport(productivityExportOptions());
         case 'cases':
           return {
             title: 'Case Analytics',
@@ -908,7 +771,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
       <header>
         <div className="fr-page-heading">
           <div><span className="fr-eyebrow">Firm performance</span><h1>{title ?? 'Firm Reports'}</h1><p className="fr-period">{loading ? 'Loading...' : data ? data.range.from === '0001-01-01' ? 'All time' : `${data.range.from} to ${data.range.to}` : 'Reports & analytics'}</p></div>
-          <div className="fr-header-actions"><button className="fr-refresh" aria-label="Refresh report" disabled={loading} onClick={() => setRefreshToken(value => value + 1)}><RefreshCw size={15} />Refresh</button><button className="fr-export" onClick={() => void exportWorkbook()} disabled={!canExportReport}><Download size={15} />Export report</button></div>
+          <div className="fr-header-actions">{selectedReport === 'productivity' && <button className="fr-refresh" disabled={!canExportReport} onClick={() => void exportProductivityReport('pdf', productivityExportOptions()).catch(error => setError(error?.message || 'Failed to export PDF.'))}><FileText size={15} />PDF</button>}<button className="fr-refresh" aria-label="Refresh report" disabled={loading} onClick={() => setRefreshToken(value => value + 1)}><RefreshCw size={15} />Refresh</button><button className="fr-export" onClick={() => void exportWorkbook()} disabled={!canExportReport}><Download size={15} />Export report</button></div>
         </div>
         <div className="fr-filter-bar">
           <label>Reporting period<select aria-label="Reporting period" value={dateRange} onChange={event => setDateRange(event.target.value as FirmReportRange)}>{Object.entries(RANGE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -1131,44 +994,7 @@ export default function FirmReports({ userRole, title, tabs, defaultTab }: FirmR
         </div>
       )}
 
-      {selectedReport === 'productivity' && (
-        <div className="space-y-6">
-          {data && <ProductivityOverview data={data} />}
-
-          <section className="fr-records" aria-label="Productivity records">
-            <ProductivityRecords data={data} rows={pagedProductivityRows} filteredRows={sortedProductivityRows} total={productivityRows.length} startIndex={(safeProductivityPage - 1) * PRODUCTIVITY_PAGE_SIZE}
-              view={productivityView} setView={view => { setProductivityView(view); setProductivityIssue('all'); setProductivitySearch(''); setProductivityPage(1); }}
-              search={productivitySearch} setSearch={value => { setProductivitySearch(value); setProductivityPage(1); }}
-              issue={productivityIssue} setIssue={value => { setProductivityIssue(value); setProductivityPage(1); }}
-              sortKey={productivitySortKey} sortDir={productivitySortDir} onSort={handleProductivitySort} />
-            {sortedProductivityRows.length > PRODUCTIVITY_PAGE_SIZE && (
-              <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
-                <span>
-                  Page {safeProductivityPage} of {productivityTotalPages} • {sortedProductivityRows.length} contribution records
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setProductivityPage((p) => Math.max(1, p - 1))}
-                    disabled={safeProductivityPage <= 1}
-                    className="rounded border border-gray-300 px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Previous
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setProductivityPage((p) => Math.min(productivityTotalPages, p + 1))}
-                    disabled={safeProductivityPage >= productivityTotalPages}
-                    className="rounded border border-gray-300 px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            )}
-          </section>
-        </div>
-      )}
+      {selectedReport === 'productivity' && <ProductivityReportContent data={data} report={productivityReport} />}
 
       {selectedReport === 'cases' && (
         <div className="space-y-6">

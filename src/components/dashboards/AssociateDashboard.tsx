@@ -47,6 +47,8 @@ import { PRODUCTIVITY_LABELS as productivityLabels } from '../../constants/produ
 import { sortRows, toggleSortKey } from '../../utils/tableSort';
 import type { SortDir } from '../../utils/tableSort';
 import SortableHeader from '../ui/SortableHeader';
+import MyProductivityReport from '../reports/MyProductivityReport';
+import { REPORT_PERIOD_OPTIONS } from '../../constants/reportPeriods';
 import './AssociateDashboard.css';
 
 /** Every table on this dashboard lists 10 rows per page, like the report tables. */
@@ -525,6 +527,8 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   const [feePage, setFeePage] = useState(1);
   const [feeSortKey, setFeeSortKey] = useState('');
   const [feeSortDir, setFeeSortDir] = useState<SortDir>('asc');
+  const [financialTab, setFinancialTab] = useState<'contribution' | 'productivity'>('contribution');
+  const [productivityRefreshRevision, setProductivityRefreshRevision] = useState(0);
 
   // My Activity Trail — sorting + pagination.
   const [auditPage, setAuditPage] = useState(1);
@@ -682,6 +686,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
   }, [auditPage, auditSortKey, auditSortDir]);
 
   const refreshSummary = async () => {
+    setProductivityRefreshRevision(value => value + 1);
     await Promise.all([fetchSummaryForPeriod(), fetchAuditForPeriod()]);
   };
 
@@ -1447,19 +1452,13 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           <label className="flex flex-col text-sm text-gray-700">
             Reporting period
             <select
+              aria-label="Reporting period"
               value={periodRange}
               onChange={(event) => handlePeriodChange(event.target.value as 'all' | StaffDashboardPeriodRange)}
               className="mt-1 rounded border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
               <option value="all">All time</option>
-              <option value="daily">Last Day</option>
-              <option value="weekly">Last Week</option>
-              <option value="this_month">This Month</option>
-              <option value="monthly">Last Month</option>
-              <option value="quarterly">Last Quarter</option>
-              <option value="yearly">Last Year</option>
-              <option value="ytd">Year to Date</option>
-              <option value="custom">Custom Range</option>
+              {REPORT_PERIOD_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
 
@@ -1862,11 +1861,37 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
           <SectionHeader
             title={profile.labels.earnings}
             description={
-              hasWindow && period
+              financialTab === 'productivity'
+                ? 'Your productivity and earnings for the applied reporting period, using the same calculations as Firm Reports.'
+                : hasWindow && period
                 ? `Your Earned Fees for ${period.from} → ${period.to}, computed from the payments received in that window and reconciled with Firm Reports (Payment Date).`
                 : "Your row from each assigned matter's Case Workspace Earned Fees table. Totals match the Earned fee column of those tables."
             }
           />
+          <div role="tablist" aria-label="My Financial Contribution" className="mb-5 flex flex-wrap gap-2 border-b border-gray-200 pb-3">
+            {([
+              ['contribution', 'Financial Contribution'],
+              ['productivity', 'Productivity Report'],
+            ] as const).map(([tab, label]) => <button
+              key={tab} type="button" role="tab" id={`staff-financial-tab-${tab}`}
+              aria-selected={financialTab === tab} aria-controls={`staff-financial-panel-${tab}`}
+              tabIndex={financialTab === tab ? 0 : -1}
+              onClick={() => setFinancialTab(tab)}
+              onKeyDown={event => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                const next = event.key === 'Home' ? 'contribution' : event.key === 'End' ? 'productivity' : tab === 'contribution' ? 'productivity' : 'contribution';
+                setFinancialTab(next);
+                document.getElementById(`staff-financial-tab-${next}`)?.focus();
+              }}
+              className={`rounded px-4 py-2 text-sm font-medium ${financialTab === tab ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-50'}`}
+            >{label}</button>)}
+          </div>
+          {financialTab === 'productivity' ? (
+            <div role="tabpanel" id="staff-financial-panel-productivity" aria-labelledby="staff-financial-tab-productivity">
+              <MyProductivityReport params={periodRequest.params} refreshRevision={productivityRefreshRevision} />
+            </div>
+          ) : <div role="tabpanel" id="staff-financial-panel-contribution" aria-labelledby="staff-financial-tab-contribution">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
               hasWindow && period
@@ -2016,6 +2041,7 @@ export default function AssociateDashboard({ userRole }: { userRole?: UserRole }
             )}
 
           </div>
+          </div>}
         </div>
 
         {/* Activity trail — every action recorded against the signed-in member's account. */}

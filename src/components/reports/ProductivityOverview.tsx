@@ -1,10 +1,10 @@
-import { FirmReportResponse } from '../../services/firmReportsService';
+import type { MyProductivityEarningsResponse } from '../../services/firmReportsService';
 import { PRODUCTIVITY_LABELS as labels } from '../../constants/productivityLabels';
 
 const money = (value: number | null | undefined) => value == null ? 'Pending' : `RWF ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const percent = (value: number | null | undefined) => value == null ? 'Pending' : `${value}%`;
 
-export default function ProductivityOverview({ data }: { data: FirmReportResponse }) {
+export default function ProductivityOverview({ data }: { data: MyProductivityEarningsResponse }) {
   const summary = data.productivitySummary;
   const comparison = data.productivityReconciliation;
   const unavailable = 'Unavailable';

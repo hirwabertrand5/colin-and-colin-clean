@@ -210,11 +210,11 @@ export type MyProductivityEarningsResponse = Pick<
 >;
 
 export const getMyProductivityEarningsReport = async (params?: {
-  range?: FirmReportRange;
+  range?: FirmReportRange | 'this_month';
   from?: string;
   to?: string;
   basis?: FirmReportDateBasis;
-}): Promise<MyProductivityEarningsResponse> => {
+}, signal?: AbortSignal): Promise<MyProductivityEarningsResponse> => {
   const qs = new URLSearchParams();
   if (params?.range) qs.set('range', params.range);
   if (params?.from) qs.set('from', params.from);
@@ -223,6 +223,8 @@ export const getMyProductivityEarningsReport = async (params?: {
 
   const res = await fetch(`${API_URL}/reports/my-productivity?${qs.toString()}`, {
     headers: { Authorization: `Bearer ${getToken()}` },
+    cache: 'no-store',
+    signal,
   });
 
   const data = await res.json().catch(() => ({}));

@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom';
-import { FirmReportResponse } from '../../services/firmReportsService';
+import type { MyProductivityEarningsResponse } from '../../services/firmReportsService';
 import SortableHeader from '../ui/SortableHeader';
 import { SortDir } from '../../utils/tableSort';
 import { PRODUCTIVITY_LABELS as labels } from '../../constants/productivityLabels';
 
-type Row = NonNullable<FirmReportResponse['productivityRows']>[number];
+type Row = NonNullable<MyProductivityEarningsResponse['productivityRows']>[number];
 type Props = {
-  rows: Row[]; filteredRows: Row[]; total: number; data: FirmReportResponse | null; startIndex: number;
+  rows: Row[]; filteredRows: Row[]; total: number; data: MyProductivityEarningsResponse | null; startIndex: number;
   view: 'earnings' | 'completedWork'; setView: (view: 'earnings' | 'completedWork') => void;
   search: string; setSearch: (search: string) => void; issue: string; setIssue: (issue: string) => void;
   sortKey: string; sortDir: SortDir; onSort: (key: string) => void;
